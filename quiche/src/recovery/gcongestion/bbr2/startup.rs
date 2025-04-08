@@ -125,7 +125,7 @@ impl Startup {
         params: &Params,
     ) -> Mode {
         self.leave(now, congestion_event);
-        let mut next_mode = Mode::drain(self.model);
+        let mut next_mode = Mode::drain(self.model, now);
         next_mode.enter(now, congestion_event, params);
         next_mode
     }

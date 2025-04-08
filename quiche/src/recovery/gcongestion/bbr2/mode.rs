@@ -87,10 +87,8 @@ pub(super) struct Cycle {
     pub(super) last_cycle_stopped_risky_probe: bool,
 }
 
-impl Default for Cycle {
-    fn default() -> Self {
-        let now = Instant::now();
-
+impl Cycle {
+    fn new(now: Instant) -> Self {
         Cycle {
             start_time: now,
             phase_start_time: now,
@@ -160,10 +158,10 @@ impl Mode {
         Mode::Startup(Startup { model })
     }
 
-    pub(super) fn drain(model: BBRv2NetworkModel) -> Self {
+    pub(super) fn drain(model: BBRv2NetworkModel, now: Instant) -> Self {
         Mode::Drain(Drain {
             model,
-            cycle: Default::default(),
+            cycle: Cycle::new(now),
         })
     }
 
