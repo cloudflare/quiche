@@ -83,7 +83,7 @@ pub struct Congestion {
 }
 
 impl Congestion {
-    pub(crate) fn from_config(recovery_config: &RecoveryConfig) -> Self {
+    pub(crate) fn from_config(recovery_config: &RecoveryConfig, now: Instant) -> Self {
         let initial_congestion_window = recovery_config.max_send_udp_payload_size *
             recovery_config.initial_congestion_window_packets;
 
@@ -132,7 +132,7 @@ impl Congestion {
             bbr2_state: bbr2::State::new(),
         };
 
-        (cc.cc_ops.on_init)(&mut cc);
+        (cc.cc_ops.on_init)(&mut cc, now);
 
         cc
     }
@@ -249,7 +249,7 @@ impl Congestion {
 }
 
 pub(crate) struct CongestionControlOps {
-    pub on_init: fn(r: &mut Congestion),
+    pub on_init: fn(r: &mut Congestion, now: Instant),
 
     pub on_packet_sent: fn(
         r: &mut Congestion,

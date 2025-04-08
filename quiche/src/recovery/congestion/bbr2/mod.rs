@@ -544,8 +544,8 @@ fn bbr2_exit_recovery(r: &mut Congestion) {
 
 // Congestion Control Hooks.
 //
-fn on_init(r: &mut Congestion) {
-    init::bbr2_init(r);
+fn on_init(r: &mut Congestion, now: Instant) {
+    init::bbr2_init(r, now);
 }
 
 fn on_packet_sent(

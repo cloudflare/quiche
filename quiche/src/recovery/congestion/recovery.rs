@@ -335,6 +335,8 @@ pub struct LegacyRecovery {
 
 impl LegacyRecovery {
     pub fn new_with_config(recovery_config: &RecoveryConfig) -> Self {
+        let now = Instant::now();
+
         Self {
             epochs: Default::default(),
 
@@ -363,7 +365,7 @@ impl LegacyRecovery {
 
             outstanding_non_ack_eliciting: 0,
 
-            congestion: Congestion::from_config(recovery_config),
+            congestion: Congestion::from_config(recovery_config, now),
 
             newly_acked: Vec::new(),
         }
