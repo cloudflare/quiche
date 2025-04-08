@@ -1396,7 +1396,7 @@ mod bandwidth_sampler_tests {
                 );
             } else {
                 // Needs further investigation: when using overestimate_avoidance,
-                // sample.bandwidth increases1 packet earlier than expected.
+                // sample.bandwidth increases 1 packet earlier than expected.
                 assert_eq!(sample.bandwidth, expected_bandwidth, "{i}");
             }
             test_sender.send_packet(i + 20, REGULAR_PACKET_SIZE, true);
