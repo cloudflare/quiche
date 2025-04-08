@@ -56,10 +56,8 @@ pub struct Rate {
     rate_sample: RateSample,
 }
 
-impl Default for Rate {
-    fn default() -> Self {
-        let now = Instant::now();
-
+impl Rate {
+    pub fn new(now: Instant) -> Self {
         Rate {
             delivered: 0,
 
@@ -76,9 +74,7 @@ impl Default for Rate {
             rate_sample: RateSample::default(),
         }
     }
-}
 
-impl Rate {
     pub fn on_packet_sent(
         &mut self, pkt: &mut Sent, bytes_in_flight: usize, bytes_lost: u64,
     ) {

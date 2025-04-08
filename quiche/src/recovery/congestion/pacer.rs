@@ -76,7 +76,7 @@ pub struct Pacer {
 
 impl Pacer {
     pub fn new(
-        enabled: bool, capacity: usize, rate: u64, max_datagram_size: usize,
+        now: Instant, enabled: bool, capacity: usize, rate: u64, max_datagram_size: usize,
         max_pacing_rate: Option<u64>,
     ) -> Self {
         // Round capacity to MSS.
@@ -96,9 +96,10 @@ impl Pacer {
 
             rate: pacing_rate,
 
-            last_update: Instant::now(),
+            last_update: now,
 
-            next_time: Instant::now(),
+            // TODO
+            next_time: now + Duration::from_nanos(1),
 
             max_datagram_size,
 
@@ -217,9 +218,9 @@ mod tests {
         let max_burst = datagram_size * 10;
         let pacing_rate = 100_000;
 
-        let mut p = Pacer::new(true, max_burst, pacing_rate, datagram_size, None);
-
         let now = Instant::now();
+
+        let mut p = Pacer::new(now, true, max_burst, pacing_rate, datagram_size, None);
 
         // Send 6000 (half of max_burst) -> no timestamp change yet.
         p.send(6000, now);
@@ -250,9 +251,9 @@ mod tests {
         let max_burst = datagram_size * 10;
         let pacing_rate = 100_000;
 
-        let mut p = Pacer::new(true, max_burst, pacing_rate, datagram_size, None);
-
         let now = Instant::now();
+
+        let mut p = Pacer::new(now, true, max_burst, pacing_rate, datagram_size, None);
 
         // Send 6000 (half of max_burst) -> no timestamp change yet.
         p.send(6000, now);
@@ -275,16 +276,17 @@ mod tests {
         let pacing_rate = 100_000;
         let max_pacing_rate = 50_000;
 
+        let now = Instant::now();
+
         // Use the max_pacing_rate.
         let mut p = Pacer::new(
+            now,
             true,
             max_burst,
             pacing_rate,
             datagram_size,
             Some(max_pacing_rate),
         );
-
-        let now = Instant::now();
 
         // Send 6000 (half of max_burst) -> no timestamp change yet.
         p.send(6000, now);
