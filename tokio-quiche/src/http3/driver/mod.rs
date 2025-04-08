@@ -650,6 +650,11 @@ impl<H: DriverHooks> H3Driver<H> {
 
             OutboundFrame::Body(body, fin) => {
                 let len = body.as_ref().len();
+                if len == 0 && !*fin {
+                    // quiche doesn't allow sending an empty body when the fin
+                    // flag is not set
+                    return Ok(());
+                }
                 if *fin {
                     // If this is the last body frame, close the receiver in the
                     // stream map to signal that we shouldn't
