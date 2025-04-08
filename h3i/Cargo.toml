@@ -27,6 +27,6 @@ quiche = { workspace = true, features = ["internal", "qlog"] }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_with = { workspace = true }
+serde_with = { workspace = true, features = ["macros", "std"] }
 smallvec = { workspace = true }
 url = { workspace = true }
