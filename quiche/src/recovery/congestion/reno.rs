@@ -51,7 +51,7 @@ pub(crate) static RENO: CongestionControlOps = CongestionControlOps {
     debug_fmt,
 };
 
-pub fn on_init(_r: &mut Congestion) {}
+pub fn on_init(_r: &mut Congestion, _now: Instant) {}
 
 pub fn on_packet_sent(
     _r: &mut Congestion, _sent_bytes: usize, _bytes_in_flight: usize,

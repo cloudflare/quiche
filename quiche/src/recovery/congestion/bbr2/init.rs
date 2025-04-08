@@ -34,9 +34,7 @@ use std::time::Instant;
 //
 
 // 4.2.1.  Initialization
-pub fn bbr2_init(r: &mut Congestion) {
-    let now = Instant::now();
-
+pub fn bbr2_init(r: &mut Congestion, now: Instant) {
     let bbr = &mut r.bbr2_state;
     bbr.min_rtt = INITIAL_RTT;
     bbr.min_rtt_stamp = now;
