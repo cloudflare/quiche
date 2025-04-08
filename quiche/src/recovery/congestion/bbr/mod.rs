@@ -186,9 +186,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new() -> Self {
-        let now = Instant::now();
-
+    pub fn new(now: Instant) -> Self {
         State {
             state: BBRStateMachine::Startup,
 

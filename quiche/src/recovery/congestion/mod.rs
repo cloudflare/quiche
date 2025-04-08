@@ -113,11 +113,12 @@ impl Congestion {
 
             send_quantum: initial_congestion_window,
 
-            delivery_rate: delivery_rate::Rate::default(),
+            delivery_rate: delivery_rate::Rate::new(now),
 
             hystart: hystart::Hystart::new(recovery_config.hystart),
 
             pacer: pacer::Pacer::new(
+                now,
                 recovery_config.pacing,
                 initial_congestion_window,
                 0,
@@ -127,9 +128,9 @@ impl Congestion {
 
             prr: prr::PRR::default(),
 
-            bbr_state: bbr::State::new(),
+            bbr_state: bbr::State::new(now),
 
-            bbr2_state: bbr2::State::new(),
+            bbr2_state: bbr2::State::new(now),
         };
 
         (cc.cc_ops.on_init)(&mut cc, now);

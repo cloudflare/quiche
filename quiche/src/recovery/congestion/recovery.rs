@@ -830,7 +830,10 @@ impl RecoveryOps for LegacyRecovery {
                 self.congestion.initial_congestion_window_packets;
         }
 
+        // TODO
+        let now = Instant::now();
         self.congestion.pacer = pacer::Pacer::new(
+            now,
             self.congestion.pacer.enabled(),
             self.cwnd(),
             0,
