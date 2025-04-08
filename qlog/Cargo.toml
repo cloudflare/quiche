@@ -1,6 +1,6 @@
 [package]
 name = "qlog"
-version = "0.15.1"
+version = "0.15.2"
 authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
 description = "qlog data model for QUIC and HTTP/3"
 edition = { workspace = true }
