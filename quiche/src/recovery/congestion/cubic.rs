@@ -425,11 +425,15 @@ mod tests {
     use crate::recovery::RecoveryOps;
 
     fn test_sender() -> TestSender {
-        TestSender::new(CongestionControlAlgorithm::CUBIC, false)
+        let mut sender = TestSender::new(CongestionControlAlgorithm::CUBIC, false);
+        sender.advance_time(Duration::from_millis(10));
+        sender
     }
 
     fn hystart_test_sender() -> TestSender {
-        TestSender::new(CongestionControlAlgorithm::CUBIC, true)
+        let mut sender = TestSender::new(CongestionControlAlgorithm::CUBIC, true);
+        sender.advance_time(Duration::from_millis(10));
+        sender
     }
 
     #[test]

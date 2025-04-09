@@ -162,7 +162,9 @@ mod tests {
     use std::time::Duration;
 
     fn test_sender() -> TestSender {
-        TestSender::new(CongestionControlAlgorithm::Reno, false)
+        let mut sender = TestSender::new(CongestionControlAlgorithm::Reno, false);
+        sender.advance_time(Duration::from_millis(10));
+        sender
     }
 
     #[test]
