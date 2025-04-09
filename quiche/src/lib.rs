@@ -4882,7 +4882,7 @@ impl Connection {
         Ok((pkt_type, written))
     }
 
-    /// Get the desired send time for the next packet
+    /// Returns the desired send time for the next packet.
     #[inline]
     pub fn get_next_release_time(&self) -> Option<ReleaseDecision> {
         Some(
@@ -4894,20 +4894,27 @@ impl Connection {
         )
     }
 
-    /// Get the desired send time for the next packet
+    /// Returns whether gcongestion is enabled.
     #[inline]
     pub fn gcongestion_enabled(&self) -> Option<bool> {
         Some(self.paths.get_active().ok()?.recovery.gcongestion_enabled())
     }
 
-    /// The maximum pacing into the future, equals 1/8 of the smoothed rtt, but
-    /// not greater than 5ms
+    /// Returns the maximum pacing into the future.
+    ///
+    /// Equals 1/8 of the smoothed RTT, but not greater than 5ms.
     pub fn max_release_into_future(&self) -> time::Duration {
         self.paths
             .get_active()
             .map(|p| p.recovery.rtt().mul_f64(0.125))
             .unwrap_or(time::Duration::from_millis(1))
             .min(Duration::from_millis(5))
+    }
+
+    /// Returns whether pacing is enabled.
+    #[inline]
+    pub fn pacing_enabled(&self) -> bool {
+        self.recovery_config.pacing
     }
 
     /// Returns the size of the send quantum, in bytes.
