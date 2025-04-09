@@ -53,7 +53,7 @@ ipnetwork = { workspace = true }
 log = { workspace = true }
 octets = { version = "0.3.0" }
 pin-project = { workspace = true }
-quiche = { version = "0.23.6", features = ["boringssl-boring-crate", "qlog"] }
+quiche = { version = "0.23.7", features = ["boringssl-boring-crate", "qlog"] }
 quiche-mallard = { version = "0.21", features = [
   "boringssl-boring-crate",
   "qlog",

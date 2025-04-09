@@ -313,7 +313,7 @@ where
         let initial_release_decision = if gcongestion_enabled {
             let initial_release_decision = qconn
                 .get_next_release_time()
-                .filter(|_| self.cfg.pacing_offload);
+                .filter(|_| self.pacing_enabled(qconn));
 
             if let Some(future_release_time) =
                 initial_release_decision.as_ref().and_then(|v| v.time(now))
@@ -418,11 +418,13 @@ where
 
         let tx_time = if gcongestion_enabled {
             initial_release_decision
-                .filter(|_| self.cfg.pacing_offload)
+                .filter(|_| self.pacing_enabled(qconn))
                 // Return the time from the release decision if release_decision.time > now, else None.
                 .and_then(|v| v.time(now))
         } else {
-            send_info.filter(|_| self.cfg.pacing_offload).map(|v| v.at)
+            send_info
+                .filter(|_| self.pacing_enabled(qconn))
+                .map(|v| v.at)
         };
 
         self.write_state.conn_established = qconn.is_established();
@@ -448,6 +450,16 @@ where
         }
 
         buffer_write_outcome
+    }
+
+    #[cfg(not(feature = "gcongestion"))]
+    fn pacing_enabled(&self, qconn: &QuicheConnection) -> bool {
+        self.cfg.pacing_offload && qconn.pacing_enabled()
+    }
+
+    #[cfg(feature = "gcongestion")]
+    fn pacing_enabled(&self, _qconn: &QuicheConnection) -> bool {
+        self.cfg.pacing_offload
     }
 
     fn write_packet_to_buffer(
