@@ -163,10 +163,6 @@ fn make_quiche_config(
     config.set_cc_algorithm_name(quic_settings.cc_algorithm.as_str())?;
     config.enable_hystart(quic_settings.enable_hystart);
     config.enable_pacing(quic_settings.enable_pacing);
-    config.verify_peer(quic_settings.verify_peer);
-    config.set_max_connection_window(quic_settings.max_connection_window);
-    config.set_max_stream_window(quic_settings.max_stream_window);
-    config.grease(quic_settings.grease);
 
     if should_log_keys {
         config.log_keys();
