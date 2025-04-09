@@ -490,30 +490,18 @@ where
                 Ok(0)
             },
             Err(e) => {
-                if let Some(local_error) = qconn.local_error() {
-                    self.audit_log_stats
-                        .set_sent_conn_close_transport_error_code(
-                            local_error.error_code as i64,
-                        );
-                    log::error!(
-                        "quiche::send failed and connection closed with error_code: {}",
-                        local_error.error_code
-                    );
+                let error_code = if let Some(local_error) = qconn.local_error() {
+                    local_error.error_code
                 } else {
                     let internal_error_code =
                         quiche::WireErrorCode::InternalError as u64;
-
-                    self.audit_log_stats
-                        .set_sent_conn_close_transport_error_code(
-                            internal_error_code as i64,
-                        );
-
                     let _ = qconn.close(false, internal_error_code, &[]);
-                    log::error!(
-                        "quiche::send failed, closing connection with INTERNAL_ERROR: {}",
-                        internal_error_code
-                    );
-                }
+
+                    internal_error_code
+                };
+
+                self.audit_log_stats
+                    .set_sent_conn_close_transport_error_code(error_code as i64);
 
                 Err(Box::new(e))
             },
