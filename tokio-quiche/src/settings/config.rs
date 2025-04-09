@@ -87,15 +87,16 @@ impl Config {
             ..
         } = socket_capabilities;
 
+        #[cfg(feature = "gcongestion")]
+        let pacing_offload = quic_settings.enable_pacing && pacing_offload;
+
         Ok(Config {
             quiche_config: make_quiche_config(params, keylog_file.is_some())?,
             disable_client_ip_validation: quic_settings
                 .disable_client_ip_validation,
             qlog_dir: quic_settings.qlog_dir.clone(),
             has_gso,
-            // Only enable pacing if it is explicitly enabled in the configuration
-            // and offload is supported.
-            pacing_offload: quic_settings.enable_pacing && pacing_offload,
+            pacing_offload,
             enable_expensive_packet_count_metrics: quic_settings
                 .enable_expensive_packet_count_metrics,
             keylog_file,
