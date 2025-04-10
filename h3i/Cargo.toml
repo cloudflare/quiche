@@ -15,6 +15,9 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [features]
+default = ["sync"]
+
+sync = ["dep:quiche"]
 async = ["dep:tokio-quiche", "dep:async-trait", "dep:buffer-pool", "dep:tokio"]
 
 [dependencies]
@@ -26,7 +29,8 @@ mio = { workspace = true, features = ["net", "os-poll"] }
 multimap = "0.10"
 octets = { version = "0.3.0" }
 qlog = { version = "0.15" }
-quiche = { workspace = true, features = ["internal", "qlog"] }
+# TODO: this should be optional and gated to a `sync` feature
+quiche = { version = "0.23", features = ["internal", "qlog"], optional = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
