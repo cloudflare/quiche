@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/quiche.svg)](https://crates.io/crates/quiche)
 [![docs.rs](https://docs.rs/quiche/badge.svg)](https://docs.rs/quiche)
 [![license](https://img.shields.io/github/license/cloudflare/quiche.svg)](https://opensource.org/licenses/BSD-2-Clause)
-![build](https://img.shields.io/github/actions/workflow/status/cloudflare/quiche/stable.yml?branch=master)
+[![build](https://img.shields.io/github/actions/workflow/status/cloudflare/quiche/stable.yml?branch=master)](https://github.com/cloudflare/quiche/actions)
 
 [quiche] is an implementation of the QUIC transport protocol and HTTP/3 as
 specified by the [IETF]. It provides a low level API for processing QUIC packets
