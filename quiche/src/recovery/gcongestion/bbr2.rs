@@ -185,6 +185,7 @@ const PARAMS: Params = Params {
 
     max_startup_queue_rounds: 0,
 
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/common/quiche_protocol_flags_list.h#L151-L153
     startup_full_loss_count: 8,
 
     drain_cwnd_gain: 2.0,
@@ -192,8 +193,10 @@ const PARAMS: Params = Params {
     // The startup_pacing_gain is 2.773
     drain_pacing_gain: 1.0 / 2.773,
 
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L119-L120
     probe_bw_probe_max_rounds: 63,
 
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L122-L124
     enable_reno_coexistence: true,
 
     probe_bw_probe_reno_gain: 1.0,
