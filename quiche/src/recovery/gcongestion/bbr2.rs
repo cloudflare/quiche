@@ -183,7 +183,8 @@ const PARAMS: Params = Params {
 
     drain_cwnd_gain: 2.0,
 
-    drain_pacing_gain: 1.0 / 2.885,
+    // The startup_pacing_gain is 2.773
+    drain_pacing_gain: 1.0 / 2.773,
 
     probe_bw_probe_max_rounds: 63,
 
