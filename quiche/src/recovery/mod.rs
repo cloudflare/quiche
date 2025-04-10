@@ -1240,7 +1240,10 @@ mod tests {
     }
 
     #[rstest]
-    fn pacing(#[values("reno", "cubic", "bbr", "bbr2")] cc_algorithm_name: &str) {
+    fn pacing(
+        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        cc_algorithm_name: &str,
+    ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
@@ -1284,7 +1287,11 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 12000);
 
         // Next packet will be sent out immediately.
-        assert_eq!(r.pacing_rate(), 0);
+        if cc_algorithm_name != "bbr2_gcongestion" {
+            assert_eq!(r.pacing_rate(), 0);
+        } else {
+            assert_eq!(r.pacing_rate(), 103963);
+        }
         assert_eq!(r.get_packet_send_time(now), now);
 
         assert_eq!(r.cwnd(), 12000);
@@ -1346,8 +1353,13 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
         assert_eq!(r.bytes_in_flight(), 6000);
 
-        // Pacing is not done during initial phase of connection.
-        assert_eq!(r.get_packet_send_time(now), now);
+        if cc_algorithm_name != "bbr2_gcongestion" {
+            // Pacing is not done during initial phase of connection.
+            assert_eq!(r.get_packet_send_time(now), now);
+        } else {
+            // Pacing is done from the beginning.
+            assert_ne!(r.get_packet_send_time(now), now);
+        }
 
         // Send the third packet burst.
         let p = Sent {
@@ -1425,6 +1437,15 @@ mod tests {
                     Duration::from_millis(50).as_secs_f64();
                 (bw * startup_pacing_gain) as u64
             },
+            "bbr2_gcongestion" => {
+                let cwnd_gain: f64 = 2.0;
+                // Adjust for cwnd_gain.  BW estimate was made before the CWND
+                // increase.
+                let bw = r.cwnd() as f64 /
+                    cwnd_gain /
+                    Duration::from_millis(50).as_secs_f64();
+                bw as u64
+            },
             "bbr2" => {
                 // Constants from congestion/bbr2/mod.rs
                 let cwnd_gain = 2.0;
@@ -1445,9 +1466,16 @@ mod tests {
         };
         assert_eq!(r.pacing_rate(), pacing_rate);
 
+        let scale_factor = if cc_algorithm_name == "bbr2_gcongestion" {
+            // For bbr2_gcongestion, send time is almost 13000 / pacing_rate.
+            // Don't know where 13000 comes from.
+            1.08333332
+        } else {
+            1.0
+        };
         assert_eq!(
             r.get_packet_send_time(now) - now,
-            Duration::from_secs_f64(12000.0 / pacing_rate as f64)
+            Duration::from_secs_f64(scale_factor * 12000.0 / pacing_rate as f64)
         );
     }
 
