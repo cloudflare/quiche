@@ -14089,7 +14089,11 @@ mod tests {
             if cc_algorithm_name == "cubic" {
                 Ok(12000)
             } else {
-                Ok(12299)
+                if cfg!(feature = "openssl") {
+                    Ok(12345)
+                } else {
+                    Ok(12299)
+                }
             }
         );
 
@@ -14164,7 +14168,11 @@ mod tests {
             if cc_algorithm_name == "cubic" {
                 Ok(12000)
             } else {
-                Ok(12299)
+                if cfg!(feature = "openssl") {
+                    Ok(12345)
+                } else {
+                    Ok(12299)
+                }
             }
         );
 
@@ -16069,7 +16077,11 @@ mod tests {
             if cc_algorithm_name == "cubic" {
                 12000
             } else {
-                13421
+                if cfg!(feature = "openssl") {
+                    13437
+                } else {
+                    13421
+                }
             },
         );
     }
@@ -16131,7 +16143,11 @@ mod tests {
             if cc_algorithm_name == "cubic" {
                 12000
             } else {
-                13873
+                if cfg!(feature = "openssl") {
+                    13959
+                } else {
+                    13873
+                }
             }
         );
 
@@ -16142,7 +16158,11 @@ mod tests {
             if cc_algorithm_name == "cubic" {
                 Ok(2000)
             } else {
-                Ok(3873)
+                if cfg!(feature = "openssl") {
+                    Ok(3959)
+                } else {
+                    Ok(3873)
+                }
             }
         );
 
@@ -17899,7 +17919,13 @@ mod tests {
         let mut recv_buf = [0; DATA_BYTES];
         let send1_bytes = pipe.server.stream_send(1, &buf, true).unwrap();
         assert_eq!(send1_bytes, match cc_algorithm_name {
+            #[cfg(feature = "openssl")]
+            "bbr2" => 14041,
+            #[cfg(not(feature = "openssl"))]
             "bbr2" => 13955,
+            #[cfg(feature = "openssl")]
+            "bbr2_gcongestion" => 13966,
+            #[cfg(not(feature = "openssl"))]
             "bbr2_gcongestion" => 13880,
             _ => 12000,
         });
