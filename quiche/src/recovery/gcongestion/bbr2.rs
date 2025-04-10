@@ -168,17 +168,36 @@ struct Params {
     bw_lo_mode: BwLoMode,
 }
 
-// BBRv3 slides:
-// https://datatracker.ietf.org/meeting/117/materials/slides-117-ccwg-bbrv3-algorithm-bug-fixes-and-public-internet-deployment
 const PARAMS: Params = Params {
     // Experiment
-    // - controls: more aggressively capture a share of the bdp
+    // - function: how aggressively to capture a share of the bandwidth at startup
+    // - modify: bbrv3 reduced to 2.0 from 2.89. We should experiment with higher value to confirm
+    //   the value is not too conservative.
+    // - risk: other flows need to yield bandwidth; which takes time. Probing too quickly could
+    //   lead to packet loss and increased congestion.
+    //
+    // Note: based on the spec, this should match drain_cwnd_gain
     startup_cwnd_gain: 2.0,
 
     // Experiment
+    // - function: how aggressively to capture a share of the bandwidth at startup
+    // - modify: bbrv3 reduced to 2.77 from 2.89. We should experiment with higher value to confirm
+    //   the value is not too conservative.
+    // - risk: other flows need to yield bandwidth; which takes time. Probing too quickly could
+    //   lead to packet loss and increased congestion.
     startup_pacing_gain: 2.773,
 
     // Experiment
+    // - function: the threshold is used to determining when to exit startup and probing_up modes.
+    //   Its also used to determine the low bw estimates on congestion event. The current value
+    //   matches the spec and implementation.
+    // - modify: not recommended for initial experimentation since the value is tightly coupled
+    //   across multiple BBR calculation.
+    // - risk: increasing this value would result in being less responsive to congestion and
+    //   maintaining a higher inflight which continue to result in more loss and network
+    //   degradation. Note: network degradation matters most when the network is congested.
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L85
     full_bw_threshold: 1.25,
 
     startup_full_bw_rounds: 3,
@@ -191,9 +210,20 @@ const PARAMS: Params = Params {
     // Experiment
     drain_cwnd_gain: 2.0,
 
-    // The startup_pacing_gain is 2.773
-    drain_pacing_gain: 1.0 / 2.773,
+    // Experiment TODO: elaborate.. this seems complex
+    //
+    // - Based on the spec this value should match 1/BBRStartupCwndGain. However, google quiche
+    //   implementation details vary.
+    //
+    // The spec defines this is as 1/BBRStartupCwndGain but since BBRv3 reduced startup_cwnd_gain,
+    // we should experiment with values as high as `1/2`.
+    //
+    // Original value taken from:
+    // https://github.com/google/quiche/blob/7aec9bcbc0d32f18674e3eab8ecb27c0de1c6df1/quiche/quic/core/congestion_control/bbr2_misc.h#L111
+    drain_pacing_gain: 1.0 / 2.885,
 
+    // Related to reno coexistence
+    //
     // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L119-L120
     probe_bw_probe_max_rounds: 63,
 
@@ -206,11 +236,37 @@ const PARAMS: Params = Params {
 
     probe_bw_full_loss_count: 2,
 
+    // Experiment
+    //
+    // Also see `probe_bw_probe_down_pacing_gain`.
+    //
+    // - function: used to accelerate the sending rate in order to probe for higher capacity.
+    // - modify: not recommended for initial experiments. we could experiment with higher values.
+    // - risk: the up operation runs periodically to probe for higher capacity. A higher value
+    //   here would result in slowing increasing congestion. Over a long time this could impact
+    //   correctness of the BBR network model and render algorithm assumptions invalid.
+    //
+    // https://github.com/google/quiche/blob/cfe837e3581c47701a2697659f51b098f70fc77c/quiche/quic/core/congestion_control/bbr2_misc.h#L141
     probe_bw_probe_up_pacing_gain: 1.25,
 
-    // Experiment: use the value 0.91
+    // Experiment
+    //
+    // Also see `probe_bw_probe_up_pacing_gain`.
+    //
+    // - function: used to deaccelerate the sending rate in order to achieve fairness. the google
+    //   quiche use a value 0.91.
+    // - modify: not recommended for initial experiments. we could experiment with higher values. A
+    //   change to 0.91 seems too small to be
+    //   easily measured and higher values seem too risky without extensive testing.
+    // - risk: the drain operation runs periodically to counter the probe up phase. A higher value
+    //   here would result in slowing increasing congestion. Over a long time this could impact
+    //   correctness of the BBR network model and render algorithm assumptions invalid.
     //
     // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L142
+    //
+    // https://datatracker.ietf.org/doc/html/draft-cardwell-iccrg-bbr-congestion-control-02#name-probebw_down
+    // > The pacing_gain value of 0.9 is derived based on the ProbeBW_UP pacing gain of 1.25, as the
+    // > minimum pacing_gain value that allows bandwidth-based convergence to approximate fairness.
     probe_bw_probe_down_pacing_gain: 0.9, // BBRv3
 
     probe_bw_default_pacing_gain: 1.0,
@@ -219,6 +275,11 @@ const PARAMS: Params = Params {
 
     probe_up_ignore_inflight_hi: false,
 
+    // Experiment TODO
+    //
+    // google quiche seems to configure this value. Is setting this to `0` (disabling) this
+    // appropriate?
+    // https://github.com/search?q=repo%3Agoogle%2Fquiche%20max_probe_up_queue_rounds&type=code
     max_probe_up_queue_rounds: 2,
 
     probe_rtt_inflight_target_bdp_fraction: 0.5,
@@ -233,10 +294,16 @@ const PARAMS: Params = Params {
 
     inflight_hi_headroom: 0.15,
 
-    // Tolerate a loss of 2%
+    // Experiment
+    // - function: controls when loss is "sufficiently" high to stop probing. Both the spec and
+    //   google quiche impl use a value of 2%.
+    // - modify: we should increase this value up to 2%.
+    // - risk: a higher loss threshold would result in more packet loss and network degradation.
+    //   Note: network degradation matters most when the network is already congested.
     //
     // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/common/quiche_protocol_flags_list.h#L146-L149
-    loss_threshold: 0.02,
+    // https://datatracker.ietf.org/doc/html/draft-cardwell-iccrg-bbr-congestion-control-02#section-2.8
+    loss_threshold: 0.015,
 
     beta: 0.3,
 
