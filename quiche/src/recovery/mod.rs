@@ -1250,46 +1250,51 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
 
-        // send out first packet (a full initcwnd).
-        let p = Sent {
-            pkt_num: 0,
-            frames: smallvec![],
-            time_sent: now,
-            time_acked: None,
-            time_lost: None,
-            size: 12000,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: now,
-            first_sent_time: now,
-            is_app_limited: false,
-            tx_in_flight: 0,
-            lost: 0,
-            has_data: false,
-            pmtud: false,
-        };
+        // send out first packet burst (a full initcwnd).
+        for i in 0..10 {
+            let p = Sent {
+                pkt_num: i,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1200,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: true,
+                pmtud: false,
+            };
 
-        r.on_packet_sent(
-            p,
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-            now,
-            "",
-        );
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
 
-        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 10);
         assert_eq!(r.bytes_in_flight(), 12000);
 
-        // First packet will be sent out immediately.
+        // Next packet will be sent out immediately.
         assert_eq!(r.pacing_rate(), 0);
         assert_eq!(r.get_packet_send_time(now), now);
+
+        assert_eq!(r.cwnd(), 12000);
+        assert_eq!(r.cwnd_available(), 0);
 
         // Wait 50ms for ACK.
         now += Duration::from_millis(50);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(0..1);
+        acked.insert(0..10);
 
         assert_eq!(
             r.on_ack_received(
@@ -1307,16 +1312,12 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.rtt(), Duration::from_millis(50));
 
-        assert_eq!(r.cwnd(), match cc_algorithm_name {
-            "bbr" => 24000,
-            "bbr2" => 24000,
-            // cubic and reno: 1 MSS increased.
-            _ => 12000 + 1200,
-        });
+        // 10 MSS increased due to acks.
+        assert_eq!(r.cwnd(), 12000 + 1200 * 10);
 
-        // Send out second packet.
+        // Send the second packet burst.
         let p = Sent {
-            pkt_num: 1,
+            pkt_num: 10,
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -1330,7 +1331,7 @@ mod tests {
             is_app_limited: false,
             tx_in_flight: 0,
             lost: 0,
-            has_data: false,
+            has_data: true,
             pmtud: false,
         };
 
@@ -1348,9 +1349,9 @@ mod tests {
         // Pacing is not done during initial phase of connection.
         assert_eq!(r.get_packet_send_time(now), now);
 
-        // Send the third packet out.
+        // Send the third packet burst.
         let p = Sent {
-            pkt_num: 2,
+            pkt_num: 11,
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -1364,7 +1365,7 @@ mod tests {
             is_app_limited: false,
             tx_in_flight: 0,
             lost: 0,
-            has_data: false,
+            has_data: true,
             pmtud: false,
         };
 
@@ -1379,9 +1380,9 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 12000);
 
-        // Send the third packet out.
+        // Send the fourth packet burst.
         let p = Sent {
-            pkt_num: 3,
+            pkt_num: 12,
             frames: smallvec![],
             time_sent: now,
             time_acked: None,
@@ -1395,7 +1396,7 @@ mod tests {
             is_app_limited: false,
             tx_in_flight: 0,
             lost: 0,
-            has_data: false,
+            has_data: true,
             pmtud: false,
         };
 
@@ -1445,8 +1446,8 @@ mod tests {
         assert_eq!(r.pacing_rate(), pacing_rate);
 
         assert_eq!(
-            r.get_packet_send_time(now),
-            now + Duration::from_secs_f64(12000.0 / pacing_rate as f64)
+            r.get_packet_send_time(now) - now,
+            Duration::from_secs_f64(12000.0 / pacing_rate as f64)
         );
     }
 
