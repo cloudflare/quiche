@@ -259,16 +259,19 @@ impl Recovery {
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
-    Reno            = 0,
+    Reno             = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC           = 1,
+    CUBIC            = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR             = 2,
+    BBR              = 2,
     /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2            = 3,
+    BBR2             = 3,
     /// BBRv2 congestion control algorithm implementation from gcongestion
     /// branch. `bbr2_gcongestion` in a string form.
-    Bbr2Gcongestion = 4,
+    Bbr2Gcongestion  = 4,
+    /// Cubic congestion control algorithm implementation from gcongestion
+    /// branch. `cubic_gcongestion` in a string form.
+    CubicGcongestion = 5,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -284,6 +287,8 @@ impl FromStr for CongestionControlAlgorithm {
             "bbr" => Ok(CongestionControlAlgorithm::BBR),
             "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
             "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
+            "cubic_gcongestion" =>
+                Ok(CongestionControlAlgorithm::CubicGcongestion),
 
             _ => Err(crate::Error::CongestionControl),
         }

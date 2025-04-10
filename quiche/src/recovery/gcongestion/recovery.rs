@@ -208,6 +208,7 @@ impl RecoveryEpoch {
                             newly_acked.push(Acked {
                                 pkt_num: *pkt_num,
                                 time_sent,
+                                size: sent_bytes,
                             });
 
                             self.acked_frames.extend(frames);
@@ -380,6 +381,11 @@ impl GRecovery {
     pub fn new(recovery_config: &RecoveryConfig) -> Option<Self> {
         let cc = match recovery_config.cc_algorithm {
             CongestionControlAlgorithm::Bbr2Gcongestion => Congestion::bbrv2(
+                INITIAL_WINDOW_PACKETS,
+                MAX_WINDOW_PACKETS,
+                recovery_config.max_send_udp_payload_size,
+            ),
+            CongestionControlAlgorithm::CubicGcongestion => Congestion::cubic(
                 INITIAL_WINDOW_PACKETS,
                 MAX_WINDOW_PACKETS,
                 recovery_config.max_send_udp_payload_size,

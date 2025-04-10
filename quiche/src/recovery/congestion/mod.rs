@@ -297,6 +297,10 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
                 debug_panic!("legacy implementation, not gcongestion");
                 &bbr2::BBR2
             },
+            CongestionControlAlgorithm::CubicGcongestion => {
+                debug_panic!("legacy implementation, not gcongestion");
+                &cubic::CUBIC
+            },
         }
     }
 }
