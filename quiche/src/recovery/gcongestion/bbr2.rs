@@ -168,15 +168,11 @@ struct Params {
     bw_lo_mode: BwLoMode,
 }
 
+// BBRv3 slides:
+// https://datatracker.ietf.org/meeting/117/materials/slides-117-ccwg-bbrv3-algorithm-bug-fixes-and-public-internet-deployment
 const PARAMS: Params = Params {
-    // Experiment: set startup_cwnd_gain and drain_cwnd_gain to 2.885!!
-    //
-    // That seems too agressive and might need to understand what experiment `kBBQ2` is:
-    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_sender.cc#L139-L140
     startup_cwnd_gain: 2.0,
 
-    // Experiment: change the startup_pacing gain to 2.885
-    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L81
     startup_pacing_gain: 2.773,
 
     full_bw_threshold: 1.25,
@@ -207,6 +203,9 @@ const PARAMS: Params = Params {
 
     probe_bw_probe_up_pacing_gain: 1.25,
 
+    // Experiment: use the value 0.91
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L142
     probe_bw_probe_down_pacing_gain: 0.9, // BBRv3
 
     probe_bw_default_pacing_gain: 1.0,
