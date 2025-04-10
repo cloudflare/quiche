@@ -354,6 +354,17 @@ const PARAMS: Params = Params {
 
     overestimate_avoidance: true,
 
+    // Experiment
+    //
+    // Requires more investigation to fully understand behavior, but it's worth experimenting since
+    // there is known set of options.
+    //
+    // - function: Controls bandwidth_lo reduction on congestion event. Clearing bandwidth_lo when
+    //   entering probe_down mode (Default mode). Determining if pacing rate should change on
+    //   congestion event (Default mode).
+    // - modify: we should try different modes and compare behavior.
+    // - risk: the risk is unclear with using different options. The `Default` mode enables some
+    //   new code paths which could merit a closer look.
     bw_lo_mode: BwLoMode::InflightReduction,
 };
 
