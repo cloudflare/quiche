@@ -33,8 +33,9 @@ use std::time::Duration;
 #[serde_as]
 #[settings]
 pub struct QuicSettings {
-    /// Configures the list of supported application protocols. Defaults to
-    /// `[b"h3"]`.
+    /// Configures the list of supported application protocols.
+    ///
+    /// Defaults to `[b"h3"]`.
     #[serde(skip, default = "QuicSettings::default_alpn")]
     pub alpn: Vec<Vec<u8>>,
 
@@ -45,39 +46,50 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_enable_dgram")]
     pub enable_dgram: bool,
 
-    /// Max queue length for received DATAGRAM frames. Defaults to `2^16`.
+    /// Max queue length for received DATAGRAM frames.
+    ///
+    /// Defaults to `2^16`.
     #[serde(default = "QuicSettings::default_dgram_max_queue_len")]
     pub dgram_recv_max_queue_len: usize,
 
-    /// Max queue length for sending DATAGRAM frames. Defaults to `2^16`.
+    /// Max queue length for sending DATAGRAM frames.
+    ///
+    /// Defaults to `2^16`.
     #[serde(default = "QuicSettings::default_dgram_max_queue_len")]
     pub dgram_send_max_queue_len: usize,
 
-    /// Sets the `initial_max_data` transport parameter. Defaults to 10 MB.
+    /// Sets the `initial_max_data` transport parameter.
+    ///
+    /// Defaults to 10 MB.
     #[serde(default = "QuicSettings::default_initial_max_data")]
     pub initial_max_data: u64,
 
     /// Sets the `initial_max_stream_data_bidi_local` transport parameter.
+    ///
     /// Defaults to 1 MB.
     #[serde(default = "QuicSettings::default_initial_max_stream_data")]
     pub initial_max_stream_data_bidi_local: u64,
 
     /// Sets the `initial_max_stream_data_bidi_remote` transport parameter.
+    ///
     /// Defaults to 1 MB.
     #[serde(default = "QuicSettings::default_initial_max_stream_data")]
     pub initial_max_stream_data_bidi_remote: u64,
 
     /// Sets the `initial_max_stream_data_uni` transport parameter.
+    ///
     /// Defaults to 1 MB.
     #[serde(default = "QuicSettings::default_initial_max_stream_data")]
     pub initial_max_stream_data_uni: u64,
 
     /// Sets the `initial_max_streams_bidi` transport parameter.
+    ///
     /// Defaults to `100`.
     #[serde(default = "QuicSettings::default_initial_max_streams")]
     pub initial_max_streams_bidi: u64,
 
     /// Sets the `initial_max_streams_uni` transport parameter.
+    ///
     /// Defaults to `100`.
     #[serde(default = "QuicSettings::default_initial_max_streams")]
     pub initial_max_streams_uni: u64,
@@ -95,15 +107,21 @@ pub struct QuicSettings {
     pub max_idle_timeout: Option<Duration>,
 
     /// Configures whether the local endpoint supports active connection
-    /// migration. Defaults to `true` (meaning disabled).
+    /// migration.
+    ///
+    /// Defaults to `true` (meaning disabled).
     #[serde(default = "QuicSettings::default_disable_active_migration")]
     pub disable_active_migration: bool,
 
-    /// Sets the maximum incoming UDP payload size. Defaults to 1350 bytes.
+    /// Sets the maximum incoming UDP payload size.
+    ///
+    /// Defaults to 1350 bytes.
     #[serde(default = "QuicSettings::default_max_recv_udp_payload_size")]
     pub max_recv_udp_payload_size: usize,
 
-    /// Sets the maximum outgoing UDP payload size. Defaults to 1350 bytes.
+    /// Sets the maximum outgoing UDP payload size.
+    ///
+    /// Defaults to 1350 bytes.
     #[serde(default = "QuicSettings::default_max_send_udp_payload_size")]
     pub max_send_udp_payload_size: usize,
 
@@ -125,12 +143,14 @@ pub struct QuicSettings {
     ///
     /// For available values, see
     /// [`CongestionControlAlgorithm`](quiche::CongestionControlAlgorithm).
+    ///
     /// Defaults to `cubic`.
     #[serde(default = "QuicSettings::default_cc_algorithm")]
     pub cc_algorithm: String,
 
-    /// Whether to use HyStart++ (only with `cubic` and `reno` CC). Defaults to
-    /// `true`.
+    /// Whether to use HyStart++ (only with `cubic` and `reno` CC).
+    ///
+    /// Defaults to `true`.
     #[serde(default = "QuicSettings::default_enable_hystart")]
     pub enable_hystart: bool,
 
@@ -150,7 +170,9 @@ pub struct QuicSettings {
     pub enable_expensive_packet_count_metrics: bool,
 
     /// Forwards [`quiche`] logs into the logging system currently used by
-    /// [`foundations`]. Defaults to `false`.
+    /// [`foundations`].
+    ///
+    /// Defaults to `false`.
     ///
     /// # Warning
     /// This should **only be used for local debugging**. `quiche` can emit lots
@@ -159,7 +181,9 @@ pub struct QuicSettings {
     /// logging pipeline.
     pub capture_quiche_logs: bool,
 
-    /// A timeout for the QUIC handshake, in milliseconds. Disabled by default.
+    /// A timeout for the QUIC handshake, in milliseconds.
+    ///
+    /// Disabled by default.
     #[serde(rename = "handshake_timeout_ms")]
     #[serde_as(as = "Option<DurationMilliSeconds>")]
     pub handshake_timeout: Option<Duration>,

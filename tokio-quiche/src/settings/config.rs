@@ -128,6 +128,7 @@ fn make_quiche_config(
     };
 
     let quic_settings = &params.settings;
+
     let alpns: Vec<&[u8]> =
         quic_settings.alpn.iter().map(Vec::as_slice).collect();
     config.set_application_protos(&alpns).unwrap();
