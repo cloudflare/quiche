@@ -83,11 +83,13 @@ pub use self::client::ClientH3Driver;
 pub use self::client::ClientH3Event;
 pub use self::client::ClientRequestSender;
 pub use self::client::NewClientRequest;
+pub use self::server::FinishStreamDirection;
 pub use self::server::ServerEventStream;
 pub use self::server::ServerH3Command;
 pub use self::server::ServerH3Controller;
 pub use self::server::ServerH3Driver;
 pub use self::server::ServerH3Event;
+pub use self::server::StreamCommand;
 
 // The default priority for HTTP/3 responses if the application didn't provide
 // one.
@@ -119,6 +121,9 @@ type InboundFrameSender = PollSender<InboundFrame>;
 /// Used by a local task to receive [`InboundFrame`]s (data) on the stream or
 /// flow associated with this channel.
 pub type InboundFrameStream = mpsc::Receiver<InboundFrame>;
+
+/// Number of [H3Command]s to execute per iteration of the event loop.
+const COMMANDS_PER_ITERATION: u8 = 10;
 
 /// The error type used internally in [H3Driver].
 ///
@@ -483,8 +488,9 @@ impl<H: DriverHooks> H3Driver<H> {
 
                     permit.send(InboundFrame::Body(body, false));
                 },
-                Err(h3::Error::Done) =>
-                    break StreamStatus::Done { close: false },
+                Err(h3::Error::Done) => {
+                    break StreamStatus::Done { close: false }
+                },
                 Err(_) => break StreamStatus::Done { close: true },
             }
         };
@@ -554,12 +560,15 @@ impl<H: DriverHooks> H3Driver<H> {
 
         match event {
             // Requests/responses are exclusively handled by hooks.
-            h3::Event::Headers { list, more_frames } =>
-                H::headers_received(self, qconn, InboundHeaders {
+            h3::Event::Headers { list, more_frames } => H::headers_received(
+                self,
+                qconn,
+                InboundHeaders {
                     stream_id,
                     headers: list,
                     has_body: more_frames,
-                }),
+                },
+            ),
 
             h3::Event::Data => self.process_h3_data(qconn, stream_id),
             h3::Event::Finished => self.process_h3_fin(qconn, stream_id),
@@ -776,8 +785,9 @@ impl<H: DriverHooks> H3Driver<H> {
                 },
                 Ok(_) => unreachable!("Flows can't send frame of other types"),
                 Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) =>
-                    return Err(H3ConnectionError::ControllerWentAway),
+                Err(TryRecvError::Disconnected) => {
+                    return Err(H3ConnectionError::ControllerWentAway)
+                },
             }
 
             frame = self.dgram_recv.try_recv();
@@ -1010,8 +1020,9 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
     fn process_reads(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()> {
         loop {
             match self.conn_mut()?.poll(qconn) {
-                Ok((stream_id, event)) =>
-                    self.process_read_event(qconn, stream_id, event)?,
+                Ok((stream_id, event)) => {
+                    self.process_read_event(qconn, stream_id, event)?
+                },
                 Err(h3::Error::Done) => break,
                 Err(err) => {
                     // Don't bubble error up, instead keep the worker loop going
@@ -1097,8 +1108,14 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
         // Make sure controller is not starved, but also not prioritized in the
         // biased select. So poll it last, however also perform a try_recv
         // each iteration.
-        if let Ok(cmd) = self.cmd_recv.try_recv() {
+        let mut commands_executed = 0;
+        while let Ok(cmd) = self.cmd_recv.try_recv() {
+            if commands_executed > COMMANDS_PER_ITERATION {
+                break;
+            }
+
             H::conn_command(self, qconn, cmd)?;
+            commands_executed += 1;
         }
 
         Ok(())
@@ -1188,8 +1205,12 @@ impl<H: DriverHooks> H3Controller<H> {
             .expect("No event receiver on H3Controller")
     }
 
-    /// Creates a [`QuicCommand`] sender for the paired [H3Driver].
-    pub fn cmd_sender(&self) -> RequestSender<H::Command, QuicCommand> {
+    /// Creates a command sender for the paired [H3Driver].
+    // !!! TODO !!! - do we actually need this? Can we leave it as a QuicCommand
+    // and somehow allow others to make changes?
+    pub fn cmd_sender<T: Into<H::Command>>(
+        &self,
+    ) -> RequestSender<H::Command, T> {
         RequestSender {
             sender: self.cmd_sender.clone(),
             _r: Default::default(),

@@ -76,6 +76,27 @@ impl From<H3Event> for ServerH3Event {
 #[derive(Debug)]
 pub enum ServerH3Command {
     Core(H3Command),
+    Stream { stream_id: u64, cmd: StreamCommand },
+}
+
+#[derive(Debug)]
+pub enum StreamCommand {
+    FinishStream(FinishStreamDirection),
+}
+
+#[derive(Debug)]
+pub enum FinishStreamDirection {
+    /// Send a STOP_SENDING frame, indicating that the application is going to
+    /// stop reading data.
+    Read { error_code: u64 },
+    /// Send a RESET_STREAM frame, indicating the application is going to stop
+    /// writing data.
+    Write { error_code: u64 },
+    /// Send both STOP_SENDING and RESET_STREAM frames.
+    Both {
+        read_error_code: u64,
+        write_error_code: u64,
+    },
 }
 
 impl From<H3Command> for ServerH3Command {
@@ -220,8 +241,27 @@ impl DriverHooks for ServerHooks {
         driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         cmd: Self::Command,
     ) -> H3ConnectionResult<()> {
-        let ServerH3Command::Core(cmd) = cmd;
-        driver.handle_core_command(qconn, cmd)
+        match cmd {
+            ServerH3Command::Core(cmd) => driver.handle_core_command(qconn, cmd),
+            ServerH3Command::Stream {
+                stream_id,
+                cmd: StreamCommand::FinishStream(direction),
+            } => match direction {
+                FinishStreamDirection::Read { error_code } =>
+                    driver.finish_stream(qconn, stream_id, Some(error_code), None),
+                FinishStreamDirection::Write { error_code } =>
+                    driver.finish_stream(qconn, stream_id, None, Some(error_code)),
+                FinishStreamDirection::Both {
+                    read_error_code,
+                    write_error_code,
+                } => driver.finish_stream(
+                    qconn,
+                    stream_id,
+                    Some(read_error_code),
+                    Some(write_error_code),
+                ),
+            },
+        }
     }
 
     fn has_wait_action(driver: &mut H3Driver<Self>) -> bool {
