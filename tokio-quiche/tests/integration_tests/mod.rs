@@ -91,13 +91,12 @@ async fn e2e() {
 
 #[tokio::test]
 async fn e2e_client_ip_validation_disabled() {
-    let quic_settings = QuicSettings {
-        max_recv_udp_payload_size: 1400,
-        max_send_udp_payload_size: 1400,
-        max_idle_timeout: Some(Duration::from_secs(5)),
-        disable_client_ip_validation: true,
-        ..Default::default()
-    };
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.max_recv_udp_payload_size = 1400;
+    quic_settings.max_send_udp_payload_size = 1400;
+    quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
+    quic_settings.disable_client_ip_validation = true;
+
     let hook = TestConnectionHook::new();
 
     let url = start_server_with_settings(
@@ -121,10 +120,9 @@ async fn e2e_client_ip_validation_disabled() {
 
 #[with_test_telemetry(tokio::test)]
 async fn quiche_logs_forwarded_server_side(cx: TestTelemetryContext) {
-    let quic_settings = QuicSettings {
-        capture_quiche_logs: true,
-        ..QuicSettings::default()
-    };
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.capture_quiche_logs = true;
+
     let hook = TestConnectionHook::new();
 
     let url = start_server_with_settings(

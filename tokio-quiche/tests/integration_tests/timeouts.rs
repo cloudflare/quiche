@@ -98,15 +98,12 @@ async fn test_handshake_duration_ioworker() {
         was_called: Arc::new(AtomicBool::new(false)),
     });
 
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
+    quic_settings.handshake_timeout = Some(HANDSHAKE_TIMEOUT);
+
     let url = start_server_with_settings(
-        QuicSettings {
-            // Since this is longer than the handshake timeout, if the connection
-            // fails we know that it's from the handshake timing out
-            // rather than Quiche's idle timeout.
-            max_idle_timeout: Some(Duration::from_secs(5)),
-            handshake_timeout: Some(HANDSHAKE_TIMEOUT),
-            ..Default::default()
-        },
+        quic_settings,
         Http3Settings {
             post_accept_timeout: Some(HANDSHAKE_TIMEOUT),
             ..Default::default()
@@ -137,11 +134,11 @@ async fn test_handshake_timeout_with_one_client_flight() {
     let hook = TestConnectionHook::new();
 
     const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(1);
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.handshake_timeout = Some(HANDSHAKE_TIMEOUT);
+
     let url = start_server_with_settings(
-        QuicSettings {
-            handshake_timeout: Some(HANDSHAKE_TIMEOUT),
-            ..Default::default()
-        },
+        quic_settings,
         Http3Settings::default(),
         hook.clone(),
         handle_connection,
@@ -232,14 +229,14 @@ async fn test_post_accept_timeout() {
     let request_counter = Arc::new(AtomicUsize::new(0));
     let clone = Arc::clone(&request_counter);
 
+    let mut quic_settings = QuicSettings::default();
+    // Since this is longer than the H3Driver's post-accept timeout, if
+    // the connection fails we know that it's from the
+    // post-accept timeout rather than Quiche's idle timeout.
+    quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
+
     let url = start_server_with_settings(
-        QuicSettings {
-            // Since this is longer than the H3Driver's post-accept timeout, if
-            // the connection fails we know that it's from the
-            // post-accept timeout rather than Quiche's idle timeout.
-            max_idle_timeout: Some(Duration::from_secs(5)),
-            ..Default::default()
-        },
+        quic_settings,
         Http3Settings {
             post_accept_timeout: Some(POST_ACCEPT_TIMEOUT),
             ..Default::default()
@@ -292,14 +289,14 @@ async fn test_post_accept_timeout_is_reset() {
     let request_counter = Arc::new(AtomicUsize::new(0));
     let clone = Arc::clone(&request_counter);
 
+    let mut quic_settings = QuicSettings::default();
+    // Since this is longer than the H3Driver's post-accept timeout, if
+    // the connection fails we know that it's from the
+    // post-accept timeout rather than Quiche's idle timeout.
+    quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
+
     let url = start_server_with_settings(
-        QuicSettings {
-            // Since this is longer than the H3Driver's post-accept timeout, if
-            // the connection fails we know that it's from the
-            // post-accept timeout rather than Quiche's idle timeout.
-            max_idle_timeout: Some(Duration::from_secs(5)),
-            ..Default::default()
-        },
+        quic_settings,
         Http3Settings {
             post_accept_timeout: Some(POST_ACCEPT_TIMEOUT),
             ..Default::default()

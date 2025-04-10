@@ -32,6 +32,7 @@ use std::time::Duration;
 /// QUIC configuration parameters.
 #[serde_as]
 #[settings]
+#[non_exhaustive]
 pub struct QuicSettings {
     /// Configures the list of supported application protocols.
     ///
@@ -113,6 +114,12 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_disable_active_migration")]
     pub disable_active_migration: bool,
 
+    /// Sets the `active_connection_id_limit` transport parameter.
+    ///
+    /// Defaults to 2. Note that values less than 2 will be ignored.
+    #[serde(default = "QuicSettings::default_active_connection_id_limit")]
+    pub active_connection_id_limit: u64,
+
     /// Sets the maximum incoming UDP payload size.
     ///
     /// Defaults to 1350 bytes.
@@ -148,6 +155,17 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_cc_algorithm")]
     pub cc_algorithm: String,
 
+    /// The default initial congestion window size in terms of packet count.
+    ///
+    /// Defaults to 10.
+    #[serde(default = "QuicSettings::default_initial_congestion_window_packets")]
+    pub initial_congestion_window_packets: usize,
+
+    /// Configures whether to do path MTU discovery.
+    ///
+    /// Defaults to `false`.
+    pub discover_path_mtu: bool,
+
     /// Whether to use HyStart++ (only with `cubic` and `reno` CC).
     ///
     /// Defaults to `true`.
@@ -159,6 +177,11 @@ pub struct QuicSettings {
     /// Note: this also requires pacing-compatible
     /// [`SocketCapabilities`](crate::socket::SocketCapabilities).
     pub enable_pacing: bool,
+
+    /// Sets the max value for pacing rate.
+    ///
+    /// By default, there is no limit.
+    pub max_pacing_rate: Option<u64>,
 
     /// Optionally enables expensive versions of the
     /// `accepted_initial_quic_packet_count`
@@ -194,6 +217,83 @@ pub struct QuicSettings {
     /// Defaults to 1024 connections.
     #[serde(default = "QuicSettings::default_listen_backlog")]
     pub listen_backlog: usize,
+
+    /// Whether or not to verify the peer's certificate.
+    ///
+    /// Defaults to `false`, meaning no peer verification is performed. Note
+    /// that clients should usually set this value to `true` - see
+    /// [`verify_peer()`] for more.
+    ///
+    /// [`verify_peer()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.verify_peer
+    pub verify_peer: bool,
+
+    /// The maximum size of the receiver connection flow control window.
+    ///
+    /// Defaults to 24MB.
+    #[serde(default = "QuicSettings::default_max_connection_window")]
+    pub max_connection_window: u64,
+
+    /// The maximum size of the receiveer stream flow control window.
+    ///
+    /// Defaults to 16MB.
+    #[serde(default = "QuicSettings::default_max_stream_window")]
+    pub max_stream_window: u64,
+
+    /// Configures whether to send GREASE values.
+    ///
+    /// Defaults to true.
+    #[serde(default = "QuicSettings::default_grease")]
+    pub grease: bool,
+
+    /// Sets the anti-amplification limit factor.
+    ///
+    /// Defaults to 3.
+    #[serde(default = "QuicSettings::default_amplification_factor")]
+    pub max_amplification_factor: usize,
+
+    /// Sets the `ack_delay_exponent` transport parameter.
+    ///
+    /// Defaults to 3.
+    #[serde(default = "QuicSettings::default_ack_delay_exponent")]
+    pub ack_delay_exponent: u64,
+
+    /// Sets the `max_ack_delay` transport parameter.
+    ///
+    /// Defaults to 25.
+    #[serde(default = "QuicSettings::default_max_ack_delay")]
+    pub max_ack_delay: u64,
+
+    /// Configures the max number of queued received PATH_CHALLENGE frames.
+    ///
+    /// Defaults to 3.
+    #[serde(default = "QuicSettings::default_max_path_challenge_recv_queue_len")]
+    pub max_path_challenge_recv_queue_len: usize,
+
+    /// Sets the initial stateless reset token.
+    ///
+    /// Note that this applies only to server-side connections - on client-side
+    /// connections, this is a no-op.
+    ///
+    /// Defaults to `None`.
+    pub stateless_reset_token: Option<u128>,
+
+    /// Sets whether the QUIC connection should avoid reusing DCIDs over
+    /// different paths.
+    ///
+    /// Defaults to `false`. See [`set_disable_dcid_reuse()`] for more.
+    ///
+    /// [`set_disable_dcid_reuse()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.disable_dcid_reuse
+    pub disable_dcid_reuse: bool,
+
+    /// Specifies the number of bytes used to track unknown transport
+    /// parameters.
+    ///
+    /// Defaults to `None`, e.g., unknown transport parameters will not be
+    /// tracked. See [`enable_track_unknown_transport_parameters()`] for
+    /// more.
+    ///
+    /// [`enable_track_unknown_transport_parameters()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.enable_track_unknown_transport_parameters
+    pub track_unknown_transport_parameters: Option<usize>,
 }
 
 impl QuicSettings {
@@ -256,6 +356,11 @@ impl QuicSettings {
     }
 
     #[inline]
+    fn default_initial_congestion_window_packets() -> usize {
+        10
+    }
+
+    #[inline]
     fn default_enable_hystart() -> bool {
         true
     }
@@ -267,6 +372,46 @@ impl QuicSettings {
         // This means this backlog size limits the queueing latency to
         // ~15s.
         1024
+    }
+
+    #[inline]
+    fn default_max_connection_window() -> u64 {
+        24 * 1024 * 1024
+    }
+
+    #[inline]
+    fn default_max_stream_window() -> u64 {
+        16 * 1024 * 1024
+    }
+
+    #[inline]
+    fn default_grease() -> bool {
+        true
+    }
+
+    #[inline]
+    fn default_amplification_factor() -> usize {
+        3
+    }
+
+    #[inline]
+    fn default_ack_delay_exponent() -> u64 {
+        3
+    }
+
+    #[inline]
+    fn default_max_ack_delay() -> u64 {
+        25
+    }
+
+    #[inline]
+    fn default_active_connection_id_limit() -> u64 {
+        2
+    }
+
+    #[inline]
+    fn default_max_path_challenge_recv_queue_len() -> usize {
+        3
     }
 }
 
