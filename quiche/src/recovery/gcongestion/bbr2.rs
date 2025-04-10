@@ -217,16 +217,25 @@ const PARAMS: Params = Params {
     // Note: based on the spec, this should match startup_cwnd_gain
     drain_cwnd_gain: 2.0,
 
-    // Experiment TODO: elaborate.. this seems complex
+    // Experiment TODO
     //
-    // - Based on the spec this value should match 1/BBRStartupCwndGain. However, google quiche
-    //   implementation details vary.
+    // Needs more investigation.
     //
-    // The spec defines this is as 1/BBRStartupCwndGain but since BBRv3 reduced startup_cwnd_gain,
-    // we should experiment with values as high as `1/2`.
+    // https://datatracker.ietf.org/doc/html/draft-cardwell-iccrg-bbr-congestion-control-02#name-drain
+    // The spec defines this is as 1/BBRStartupCwndGain, which means this should be 1/2. However...
     //
-    // Original value taken from:
     // https://github.com/google/quiche/blob/7aec9bcbc0d32f18674e3eab8ecb27c0de1c6df1/quiche/quic/core/congestion_control/bbr2_misc.h#L111
+    // The current value is based on google quiche impl.
+    //
+    // ```
+    // # not the startup_cwnd_gain is 2 and break with the spec calculation.
+    // float startup_cwnd_gain = 2.0;
+    // float drain_pacing_gain = 1.0 / 2.885;
+    // ```
+    //
+    // Notably, BBRv3 also makes changes to a few related parameters.
+    //
+    // [BBRv3]: https://datatracker.ietf.org/meeting/117/materials/slides-117-ccwg-bbrv3-algorithm-bug-fixes-and-public-internet-deployment
     drain_pacing_gain: 1.0 / 2.885,
 
     // Related to reno coexistence
