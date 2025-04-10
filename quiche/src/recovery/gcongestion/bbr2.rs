@@ -218,8 +218,10 @@ const PARAMS: Params = Params {
 
     probe_rtt_inflight_target_bdp_fraction: 0.5,
 
+    // The default period for entering PROBE_RTT. 10s
     probe_rtt_period: Duration::from_millis(10000),
 
+    // The default time to spend in PROBE_RTT mode
     probe_rtt_duration: Duration::from_millis(200),
 
     initial_max_ack_height_filter_window: 10,
