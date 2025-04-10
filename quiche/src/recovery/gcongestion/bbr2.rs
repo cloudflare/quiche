@@ -204,10 +204,17 @@ const PARAMS: Params = Params {
 
     max_startup_queue_rounds: 0,
 
+    // Experiment TODO
+    //
+    // [BBRv3] updates this to 6, however the google quiche impl still uses the value of 8.
+    //
     // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/common/quiche_protocol_flags_list.h#L151-L153
+    // [BBRv3]: https://datatracker.ietf.org/meeting/117/materials/slides-117-ccwg-bbrv3-algorithm-bug-fixes-and-public-internet-deployment
     startup_full_loss_count: 8,
 
     // Experiment
+    //
+    // Note: based on the spec, this should match startup_cwnd_gain
     drain_cwnd_gain: 2.0,
 
     // Experiment TODO: elaborate.. this seems complex
@@ -271,6 +278,12 @@ const PARAMS: Params = Params {
 
     probe_bw_default_pacing_gain: 1.0,
 
+    // Experiment TODO
+    //
+    // BBRv3 recommends 2.25 but google quiche is still usinge a value of 2.0.
+    //
+    // https://github.com/google/quiche/blob/cfe837e3581c47701a2697659f51b098f70fc77c/quiche/quic/core/congestion_control/bbr2_misc.h#L145
+    // [BBRv3]: https://datatracker.ietf.org/meeting/117/materials/slides-117-ccwg-bbrv3-algorithm-bug-fixes-and-public-internet-deployment
     probe_bw_cwnd_gain: 2.25, // BBRv3
 
     probe_up_ignore_inflight_hi: false,
