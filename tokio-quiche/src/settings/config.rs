@@ -162,9 +162,40 @@ fn make_quiche_config(
     config.set_initial_max_streams_bidi(quic_settings.initial_max_streams_bidi);
     config.set_initial_max_streams_uni(quic_settings.initial_max_streams_uni);
     config.set_disable_active_migration(quic_settings.disable_active_migration);
+    config
+        .set_active_connection_id_limit(quic_settings.active_connection_id_limit);
     config.set_cc_algorithm_name(quic_settings.cc_algorithm.as_str())?;
+    config.set_initial_congestion_window_packets(
+        quic_settings.initial_congestion_window_packets,
+    );
+    config.discover_pmtu(quic_settings.discover_path_mtu);
     config.enable_hystart(quic_settings.enable_hystart);
+
     config.enable_pacing(quic_settings.enable_pacing);
+    if let Some(max_pacing_rate) = quic_settings.max_pacing_rate {
+        config.set_max_pacing_rate(max_pacing_rate);
+    }
+
+    config.verify_peer(quic_settings.verify_peer);
+    config.set_max_connection_window(quic_settings.max_connection_window);
+    config.set_max_stream_window(quic_settings.max_stream_window);
+    config.grease(quic_settings.grease);
+    config.set_max_amplification_factor(quic_settings.max_amplification_factor);
+    config.set_ack_delay_exponent(quic_settings.ack_delay_exponent);
+    config.set_max_ack_delay(quic_settings.max_ack_delay);
+    config.set_path_challenge_recv_max_queue_len(
+        quic_settings.max_path_challenge_recv_queue_len,
+    );
+    config.set_stateless_reset_token(quic_settings.stateless_reset_token);
+    config.set_disable_dcid_reuse(quic_settings.disable_dcid_reuse);
+
+    if let Some(track_unknown_transport_params) =
+        quic_settings.track_unknown_transport_parameters
+    {
+        config.enable_track_unknown_transport_parameters(
+            track_unknown_transport_params,
+        );
+    }
 
     if should_log_keys {
         config.log_keys();

@@ -201,17 +201,15 @@ pub async fn handle_forwarded_headers_frame(
 }
 
 pub fn start_server() -> (String, Arc<TestConnectionHook>) {
-    let quic = QuicSettings {
-        max_recv_udp_payload_size: 1400,
-        max_send_udp_payload_size: 1400,
-        ..Default::default()
-    };
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.max_send_udp_payload_size = 1400;
+    quic_settings.max_recv_udp_payload_size = 1400;
 
     let hook = TestConnectionHook::new();
 
     (
         start_server_with_settings(
-            quic,
+            quic_settings,
             Http3Settings::default(),
             hook.clone(),
             handle_connection,

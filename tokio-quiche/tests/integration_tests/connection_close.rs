@@ -147,11 +147,12 @@ async fn test_no_connection_close_frame_on_idle_timeout() -> QuicResult<()> {
     const IDLE_TIMEOUT: Duration = Duration::from_secs(1);
 
     let hook = TestConnectionHook::new();
+
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.max_idle_timeout = Some(IDLE_TIMEOUT);
+
     let url = start_server_with_settings(
-        QuicSettings {
-            max_idle_timeout: Some(IDLE_TIMEOUT),
-            ..Default::default()
-        },
+        quic_settings,
         Http3Settings::default(),
         hook,
         handle_connection,
