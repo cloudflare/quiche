@@ -168,25 +168,36 @@ struct Params {
     bw_lo_mode: BwLoMode,
 }
 
+// BBRv3 slides:
+// https://datatracker.ietf.org/meeting/117/materials/slides-117-ccwg-bbrv3-algorithm-bug-fixes-and-public-internet-deployment
 const PARAMS: Params = Params {
+    // Experiment
+    // - controls: more aggressively capture a share of the bdp
     startup_cwnd_gain: 2.0,
 
+    // Experiment
     startup_pacing_gain: 2.773,
 
+    // Experiment
     full_bw_threshold: 1.25,
 
     startup_full_bw_rounds: 3,
 
     max_startup_queue_rounds: 0,
 
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/common/quiche_protocol_flags_list.h#L151-L153
     startup_full_loss_count: 8,
 
+    // Experiment
     drain_cwnd_gain: 2.0,
 
-    drain_pacing_gain: 1.0 / 2.885,
+    // The startup_pacing_gain is 2.773
+    drain_pacing_gain: 1.0 / 2.773,
 
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L119-L120
     probe_bw_probe_max_rounds: 63,
 
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L122-L124
     enable_reno_coexistence: true,
 
     probe_bw_probe_reno_gain: 1.0,
@@ -197,6 +208,9 @@ const PARAMS: Params = Params {
 
     probe_bw_probe_up_pacing_gain: 1.25,
 
+    // Experiment: use the value 0.91
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L142
     probe_bw_probe_down_pacing_gain: 0.9, // BBRv3
 
     probe_bw_default_pacing_gain: 1.0,
@@ -209,15 +223,20 @@ const PARAMS: Params = Params {
 
     probe_rtt_inflight_target_bdp_fraction: 0.5,
 
+    // The default period for entering PROBE_RTT. 10s
     probe_rtt_period: Duration::from_millis(10000),
 
+    // The default time to spend in PROBE_RTT mode
     probe_rtt_duration: Duration::from_millis(200),
 
     initial_max_ack_height_filter_window: 10,
 
     inflight_hi_headroom: 0.15,
 
-    loss_threshold: 0.015,
+    // Tolerate a loss of 2%
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/common/quiche_protocol_flags_list.h#L146-L149
+    loss_threshold: 0.02,
 
     beta: 0.3,
 
@@ -229,8 +248,19 @@ const PARAMS: Params = Params {
 
     startup_loss_exit_use_max_delivered_for_inflight_hi: true,
 
+    // Experiment
+    // this is set to false by default in google quiche
+    //
+    // https://github.com/google/quiche/blob/7aec9bcbc0d32f18674e3eab8ecb27c0de1c6df1/quiche/quic/core/congestion_control/bbr2_misc.h#L209
     use_bytes_delivered_for_inflight_hi: true,
 
+    // Experiment
+    // This is set to false by default in google quiche
+    //
+    // https://github.com/google/quiche/blob/7aec9bcbc0d32f18674e3eab8ecb27c0de1c6df1/quiche/quic/core/congestion_control/bbr2_misc.h#L226
+    //
+    // Potentially also missing some checks in startup:
+    // https://github.com/google/quiche/blob/7aec9bcbc0d32f18674e3eab8ecb27c0de1c6df1/quiche/quic/core/congestion_control/bbr2_startup.cc#L73
     decrease_startup_pacing_at_end_of_round: true,
 
     overestimate_avoidance: true,
