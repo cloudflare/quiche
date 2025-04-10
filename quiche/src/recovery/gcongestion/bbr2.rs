@@ -226,7 +226,10 @@ const PARAMS: Params = Params {
 
     inflight_hi_headroom: 0.15,
 
-    loss_threshold: 0.015,
+    // Tolerate a loss of 2%
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/common/quiche_protocol_flags_list.h#L146-L149
+    loss_threshold: 0.02,
 
     beta: 0.3,
 
