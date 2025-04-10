@@ -27,6 +27,7 @@
 pub mod bandwidth;
 mod bbr;
 mod bbr2;
+mod cubic;
 pub mod pacer;
 mod recovery;
 
@@ -49,12 +50,14 @@ pub struct Lost {
 pub struct Acked {
     pub(super) pkt_num: u64,
     pub(super) time_sent: Instant,
+    pub(super) size: usize,
 }
 
 #[enum_dispatch::enum_dispatch(CongestionControl)]
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum Congestion {
+    Cubic(cubic::Cubic),
     BBRv2(bbr2::BBRv2),
 }
 
@@ -63,11 +66,23 @@ impl Congestion {
         initial_tcp_congestion_window: usize, max_congestion_window: usize,
         max_segment_size: usize,
     ) -> Self {
-        Congestion::BBRv2(bbr2::BBRv2::new(
+        Congestion::from(bbr2::BBRv2::new(
             initial_tcp_congestion_window,
             max_congestion_window,
             max_segment_size,
             INITIAL_RTT,
+        ))
+    }
+
+    pub(super) fn cubic(
+        initial_tcp_congestion_window: usize, max_congestion_window: usize,
+        max_segment_size: usize,
+    ) -> Self {
+        Congestion::from(cubic::Cubic::new(
+            initial_tcp_congestion_window,
+            max_congestion_window,
+            max_segment_size,
+            false,
         ))
     }
 }

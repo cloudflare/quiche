@@ -259,16 +259,19 @@ impl Recovery {
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
-    Reno            = 0,
+    Reno             = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC           = 1,
+    CUBIC            = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR             = 2,
+    BBR              = 2,
     /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2            = 3,
+    BBR2             = 3,
     /// BBRv2 congestion control algorithm implementation from gcongestion
     /// branch. `bbr2_gcongestion` in a string form.
-    Bbr2Gcongestion = 4,
+    Bbr2Gcongestion  = 4,
+    /// Cubic congestion control algorithm implementation from gcongestion
+    /// branch. `cubic_gcongestion` in a string form.
+    CubicGcongestion = 5,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -284,6 +287,8 @@ impl FromStr for CongestionControlAlgorithm {
             "bbr" => Ok(CongestionControlAlgorithm::BBR),
             "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
             "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
+            "cubic_gcongestion" =>
+                Ok(CongestionControlAlgorithm::CubicGcongestion),
 
             _ => Err(crate::Error::CongestionControl),
         }
@@ -588,6 +593,11 @@ mod tests {
             CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
         assert!(recovery_for_alg(algo).gcongestion_enabled());
+
+        let algo =
+            CongestionControlAlgorithm::from_str("cubic_gcongestion").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::CubicGcongestion);
+        assert!(recovery_for_alg(algo).gcongestion_enabled());
     }
 
     #[test]
@@ -600,7 +610,14 @@ mod tests {
 
     #[rstest]
     fn loss_on_pto(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values(
+            "reno",
+            "cubic",
+            "bbr",
+            "bbr2",
+            "bbr2_gcongestion",
+            "cubic_gcongestion"
+        )]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -859,7 +876,14 @@ mod tests {
 
     #[rstest]
     fn loss_on_timer(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values(
+            "reno",
+            "cubic",
+            "bbr",
+            "bbr2",
+            "bbr2_gcongestion",
+            "cubic_gcongestion"
+        )]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -1037,7 +1061,14 @@ mod tests {
 
     #[rstest]
     fn loss_on_reordering(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values(
+            "reno",
+            "cubic",
+            "bbr",
+            "bbr2",
+            "bbr2_gcongestion",
+            "cubic_gcongestion"
+        )]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -1227,7 +1258,14 @@ mod tests {
 
     #[rstest]
     fn pacing(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values(
+            "reno",
+            "cubic",
+            "bbr",
+            "bbr2",
+            "bbr2_gcongestion",
+            "cubic_gcongestion"
+        )]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -1273,10 +1311,12 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 12000);
 
         // Next packet will be sent out immediately.
-        if cc_algorithm_name != "bbr2_gcongestion" {
-            assert_eq!(r.pacing_rate(), 0);
-        } else {
+        if cc_algorithm_name == "bbr2_gcongestion" {
             assert_eq!(r.pacing_rate(), 103963);
+        } else if cc_algorithm_name == "cubic_gcongestion" {
+            assert_eq!(r.pacing_rate(), 72072);
+        } else {
+            assert_eq!(r.pacing_rate(), 0);
         }
         assert_eq!(r.get_packet_send_time(now), now);
 
@@ -1444,6 +1484,12 @@ mod tests {
                     Duration::from_millis(50).as_secs_f64();
                 (bw * startup_pacing_gain * (1.0 - pacing_margin_percent)) as u64
             },
+            "cubic_gcongestion" => {
+                let gcongestion_pacing_multipler = 2.0;
+                let bw =
+                    r.cwnd() as f64 / Duration::from_millis(50).as_secs_f64();
+                (bw * gcongestion_pacing_multipler) as u64
+            },
             _ => {
                 let bw =
                     r.cwnd() as f64 / Duration::from_millis(50).as_secs_f64();
@@ -1456,6 +1502,9 @@ mod tests {
             // For bbr2_gcongestion, send time is almost 13000 / pacing_rate.
             // Don't know where 13000 comes from.
             1.08333332
+        } else if cc_algorithm_name == "cubic_gcongestion" {
+            // For cubic_gcongestion, send time is "now".
+            0.0
         } else {
             1.0
         };
@@ -1467,7 +1516,14 @@ mod tests {
 
     #[rstest]
     fn pmtud_loss_on_timer(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values(
+            "reno",
+            "cubic",
+            "bbr",
+            "bbr2",
+            "bbr2_gcongestion",
+            "cubic_gcongestion"
+        )]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
