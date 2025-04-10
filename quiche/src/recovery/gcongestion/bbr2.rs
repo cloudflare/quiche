@@ -349,8 +349,8 @@ impl BBRv2 {
                 PARAMS.overestimate_avoidance,
             )),
             cwnd,
-            pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) *
-                2.885,
+            pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt)
+                * 2.885,
             cwnd_limits: Limits {
                 lo: initial_congestion_window * max_segment_size,
                 hi: max_congestion_window * max_segment_size,
@@ -396,15 +396,15 @@ impl BBRv2 {
             return;
         }
 
-        if PARAMS.decrease_startup_pacing_at_end_of_round &&
-            self.mode.pacing_gain() < PARAMS.startup_pacing_gain
+        if PARAMS.decrease_startup_pacing_at_end_of_round
+            && self.mode.pacing_gain() < PARAMS.startup_pacing_gain
         {
             self.pacing_rate = target_rate;
             return;
         }
 
-        if PARAMS.bw_lo_mode != BwLoMode::Default &&
-            self.mode.loss_events_in_round() > 0
+        if PARAMS.bw_lo_mode != BwLoMode::Default
+            && self.mode.loss_events_in_round() > 0
         {
             self.pacing_rate = target_rate;
             return;
@@ -492,8 +492,8 @@ impl CongestionControl for BBRv2 {
 
         // Number of mode changes allowed for this congestion event.
         let mut mode_changes_allowed = MAX_MODE_CHANGES_PER_CONGESTION_EVENT;
-        while mode_changes_allowed > 0 &&
-            self.mode.do_on_congestion_event(
+        while mode_changes_allowed > 0
+            && self.mode.do_on_congestion_event(
                 prior_in_flight,
                 event_time,
                 acked_packets,
@@ -516,8 +516,8 @@ impl CongestionControl for BBRv2 {
         if !self.last_sample_is_app_limited {
             self.has_non_app_limited_sample = true;
         }
-        if congestion_event.bytes_in_flight == 0 &&
-            PARAMS.avoid_unnecessary_probe_rtt
+        if congestion_event.bytes_in_flight == 0
+            && PARAMS.avoid_unnecessary_probe_rtt
         {
             self.on_enter_quiescence(event_time);
         }
