@@ -7191,4 +7191,6 @@ pub mod frame;
 mod frame;
 #[doc(hidden)]
 pub mod qpack;
+#[cfg(feature = "internal")]
+pub use qpack::LITERAL;
 mod stream;
