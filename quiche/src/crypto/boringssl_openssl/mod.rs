@@ -30,34 +30,11 @@ use libc::c_void;
 use crate::Error;
 use crate::Result;
 
-use crate::packet;
-
 // All the AEAD algorithms we support use 96-bit nonces.
 pub const MAX_NONCE_LEN: usize = 12;
 
 // Length of header protection mask.
 pub const HP_MASK_LEN: usize = 5;
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Level {
-    Initial   = 0,
-    ZeroRTT   = 1,
-    Handshake = 2,
-    OneRTT    = 3,
-}
-
-impl Level {
-    pub fn from_epoch(e: packet::Epoch) -> Level {
-        match e {
-            packet::Epoch::Initial => Level::Initial,
-
-            packet::Epoch::Handshake => Level::Handshake,
-
-            packet::Epoch::Application => Level::OneRTT,
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Algorithm {
