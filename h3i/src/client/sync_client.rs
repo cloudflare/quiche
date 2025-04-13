@@ -504,24 +504,6 @@ pub fn generate_cid_and_reset_token() -> (quiche::ConnectionId<'static>, u128) {
     (scid, reset_token)
 }
 
-/// Makes a buffered writer for a qlog.
-pub fn make_qlog_writer(
-    dir: &std::ffi::OsStr, role: &str, id: &str,
-) -> std::io::BufWriter<std::fs::File> {
-    let mut path = std::path::PathBuf::from(dir);
-    let filename = format!("{role}-{id}.sqlog");
-    path.push(filename);
-
-    match std::fs::File::create(&path) {
-        Ok(f) => std::io::BufWriter::new(f),
-
-        Err(e) => panic!(
-            "Error creating qlog file attempted path was {:?}: {}",
-            path, e
-        ),
-    }
-}
-
 fn handle_actions<'a, I>(
     iter: &mut I, conn: &mut quiche::Connection, waiting_for: &mut WaitingFor,
     stream_parsers: &mut StreamParserMap,
