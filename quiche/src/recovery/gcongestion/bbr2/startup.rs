@@ -30,6 +30,8 @@
 
 use std::time::Instant;
 
+use crate::recovery::gcongestion::bbr2::Params;
+
 use super::mode::Mode;
 use super::mode::ModeImpl;
 use super::network_model::BBRv2NetworkModel;
@@ -37,7 +39,6 @@ use super::Acked;
 use super::BBRv2CongestionEvent;
 use super::Limits;
 use super::Lost;
-use super::PARAMS;
 
 #[derive(Debug)]
 pub(super) struct Startup {
@@ -53,10 +54,10 @@ impl ModeImpl for Startup {
         mut self, _prior_in_flight: usize, event_time: std::time::Instant,
         _acked_packets: &[Acked], _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
-        _target_bytes_inflight: usize,
+        _target_bytes_inflight: usize, params: &Params,
     ) -> Mode {
         if self.model.full_bandwidth_reached() {
-            return self.into_drain(event_time, Some(congestion_event));
+            return self.into_drain(event_time, Some(congestion_event), params);
         }
 
         if !congestion_event.end_of_round_trip {
@@ -64,14 +65,14 @@ impl ModeImpl for Startup {
         }
 
         let has_bandwidth_growth =
-            self.model.has_bandwidth_growth(congestion_event);
+            self.model.has_bandwidth_growth(congestion_event, params);
 
         #[allow(clippy::absurd_extreme_comparisons)]
-        if PARAMS.max_startup_queue_rounds > 0 && !has_bandwidth_growth {
+        if params.max_startup_queue_rounds > 0 && !has_bandwidth_growth {
             // 1.75 is less than the 2x CWND gain, but substantially more than
             // 1.25x, the minimum bandwidth increase expected during
             // STARTUP.
-            self.model.check_persistent_queue(1.75);
+            self.model.check_persistent_queue(1.75, params);
         }
         // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not exit
         // upon excessive losses, if enough bandwidth growth is observed or if the
@@ -79,17 +80,17 @@ impl ModeImpl for Startup {
         if !congestion_event.last_packet_send_state.is_app_limited &&
             !has_bandwidth_growth
         {
-            self.check_excessive_losses(congestion_event);
+            self.check_excessive_losses(congestion_event, params);
         }
 
         if self.model.full_bandwidth_reached() {
-            self.into_drain(event_time, Some(congestion_event))
+            self.into_drain(event_time, Some(congestion_event), params)
         } else {
             Mode::Startup(self)
         }
     }
 
-    fn get_cwnd_limits(&self) -> Limits<usize> {
+    fn get_cwnd_limits(&self, _params: &Params) -> Limits<usize> {
         Limits {
             lo: 0,
             hi: self.model.inflight_lo(),
@@ -97,14 +98,14 @@ impl ModeImpl for Startup {
     }
 
     fn on_exit_quiescence(
-        self, _now: Instant, _quiescence_start_time: Instant,
+        self, _now: Instant, _quiescence_start_time: Instant, _params: &Params,
     ) -> Mode {
         Mode::Startup(self)
     }
 
     fn enter(
         &mut self, _now: Instant,
-        _congestion_event: Option<&BBRv2CongestionEvent>,
+        _congestion_event: Option<&BBRv2CongestionEvent>, _params: &Params,
     ) {
         unreachable!("Enter should never be called for startup")
     }
@@ -121,15 +122,16 @@ impl ModeImpl for Startup {
 impl Startup {
     fn into_drain(
         mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>,
+        params: &Params,
     ) -> Mode {
         self.leave(now, congestion_event);
         let mut next_mode = Mode::drain(self.model);
-        next_mode.enter(now, congestion_event);
+        next_mode.enter(now, congestion_event, params);
         next_mode
     }
 
     fn check_excessive_losses(
-        &mut self, congestion_event: &mut BBRv2CongestionEvent,
+        &mut self, congestion_event: &mut BBRv2CongestionEvent, params: &Params,
     ) {
         if self.model.full_bandwidth_reached() {
             return;
@@ -138,11 +140,12 @@ impl Startup {
         // At the end of a round trip. Check if loss is too high in this round.
         if self.model.is_inflight_too_high(
             congestion_event,
-            PARAMS.startup_full_loss_count,
+            params.startup_full_loss_count,
+            params,
         ) {
             let mut new_inflight_hi = self.model.bdp0();
 
-            if PARAMS.startup_loss_exit_use_max_delivered_for_inflight_hi {
+            if params.startup_loss_exit_use_max_delivered_for_inflight_hi {
                 new_inflight_hi = new_inflight_hi
                     .max(self.model.max_bytes_delivered_in_round());
             }

@@ -52,7 +52,7 @@ use super::RttStats;
 
 const MAX_MODE_CHANGES_PER_CONGESTION_EVENT: usize = 4;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 #[allow(dead_code)]
 enum BwLoMode {
     Default,
@@ -61,6 +61,7 @@ enum BwLoMode {
     CwndReduction,
 }
 
+#[derive(Debug)]
 struct Params {
     // STARTUP parameters.
     /// The gain for CWND in startup.
@@ -168,7 +169,7 @@ struct Params {
     bw_lo_mode: BwLoMode,
 }
 
-const PARAMS: Params = Params {
+const DEFAULT_PARAMS: Params = Params {
     startup_cwnd_gain: 2.0,
 
     startup_pacing_gain: 2.773,
@@ -278,6 +279,7 @@ pub(crate) struct BBRv2 {
     last_sample_is_app_limited: bool,
     has_non_app_limited_sample: bool,
     last_quiescence_start: Option<Instant>,
+    params: Params,
 }
 
 struct BBRv2CongestionEvent {
@@ -342,12 +344,10 @@ impl BBRv2 {
         max_segment_size: usize, smoothed_rtt: Duration,
     ) -> Self {
         let cwnd = initial_congestion_window * max_segment_size;
+        let params = DEFAULT_PARAMS;
+
         BBRv2 {
-            mode: Mode::startup(BBRv2NetworkModel::new(
-                PARAMS.startup_cwnd_gain,
-                PARAMS.startup_pacing_gain,
-                PARAMS.overestimate_avoidance,
-            )),
+            mode: Mode::startup(BBRv2NetworkModel::new(&params)),
             cwnd,
             pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) *
                 2.885,
@@ -360,12 +360,17 @@ impl BBRv2 {
             has_non_app_limited_sample: false,
             last_quiescence_start: None,
             mss: max_segment_size,
+            params,
         }
     }
 
     fn on_exit_quiescence(&mut self, now: Instant) {
         if let Some(last_quiescence_start) = self.last_quiescence_start.take() {
-            self.mode.do_on_exit_quiescence(now, last_quiescence_start)
+            self.mode.do_on_exit_quiescence(
+                now,
+                last_quiescence_start,
+                &self.params,
+            )
         }
     }
 
@@ -396,14 +401,14 @@ impl BBRv2 {
             return;
         }
 
-        if PARAMS.decrease_startup_pacing_at_end_of_round &&
-            self.mode.pacing_gain() < PARAMS.startup_pacing_gain
+        if self.params.decrease_startup_pacing_at_end_of_round &&
+            self.mode.pacing_gain() < self.params.startup_pacing_gain
         {
             self.pacing_rate = target_rate;
             return;
         }
 
-        if PARAMS.bw_lo_mode != BwLoMode::Default &&
+        if self.params.bw_lo_mode != BwLoMode::Default &&
             self.mode.loss_events_in_round() > 0
         {
             self.pacing_rate = target_rate;
@@ -426,7 +431,10 @@ impl BBRv2 {
             self.cwnd = prior_cwnd + bytes_acked;
         }
 
-        self.cwnd = self.mode.get_cwnd_limits().apply_limits(self.cwnd);
+        self.cwnd = self
+            .mode
+            .get_cwnd_limits(&self.params)
+            .apply_limits(self.cwnd);
         self.cwnd = self.cwnd_limits.apply_limits(self.cwnd);
     }
 
@@ -458,7 +466,7 @@ impl CongestionControl for BBRv2 {
         packet_number: u64, bytes: usize, is_retransmissible: bool,
         rtt_stats: &RttStats,
     ) {
-        if bytes_in_flight == 0 && PARAMS.avoid_unnecessary_probe_rtt {
+        if bytes_in_flight == 0 && self.params.avoid_unnecessary_probe_rtt {
             self.on_exit_quiescence(sent_time);
         }
 
@@ -488,6 +496,7 @@ impl CongestionControl for BBRv2 {
             acked_packets,
             lost_packets,
             &mut congestion_event,
+            &self.params,
         );
 
         // Number of mode changes allowed for this congestion event.
@@ -500,6 +509,7 @@ impl CongestionControl for BBRv2 {
                 lost_packets,
                 &mut congestion_event,
                 self.target_bytes_inflight(),
+                &self.params,
             )
         {
             mode_changes_allowed -= 1;
@@ -517,7 +527,7 @@ impl CongestionControl for BBRv2 {
             self.has_non_app_limited_sample = true;
         }
         if congestion_event.bytes_in_flight == 0 &&
-            PARAMS.avoid_unnecessary_probe_rtt
+            self.params.avoid_unnecessary_probe_rtt
         {
             self.on_enter_quiescence(event_time);
         }

@@ -34,6 +34,7 @@ use std::ops::DerefMut;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Lost;
 
 use super::drain::Drain;
@@ -44,7 +45,6 @@ use super::startup::Startup;
 use super::Acked;
 use super::BBRv2CongestionEvent;
 use super::Limits;
-use super::PARAMS;
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) enum CyclePhase {
@@ -57,11 +57,11 @@ pub(super) enum CyclePhase {
 }
 
 impl CyclePhase {
-    pub(super) fn gain(&self) -> f32 {
+    pub(super) fn gain(&self, params: &Params) -> f32 {
         match self {
-            CyclePhase::Up => PARAMS.probe_bw_probe_up_pacing_gain,
-            CyclePhase::Down => PARAMS.probe_bw_probe_down_pacing_gain,
-            _ => PARAMS.probe_bw_default_pacing_gain,
+            CyclePhase::Up => params.probe_bw_probe_up_pacing_gain,
+            CyclePhase::Down => params.probe_bw_probe_down_pacing_gain,
+            _ => params.probe_bw_default_pacing_gain,
         }
     }
 }
@@ -115,6 +115,7 @@ impl Default for Cycle {
 pub(super) trait ModeImpl: Debug {
     fn enter(
         &mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>,
+        params: &Params,
     );
 
     fn leave(
@@ -123,17 +124,18 @@ pub(super) trait ModeImpl: Debug {
 
     fn is_probing_for_bandwidth(&self) -> bool;
 
+    #[allow(clippy::too_many_arguments)]
     fn on_congestion_event(
         self, prior_in_flight: usize, event_time: Instant,
         acked_packets: &[Acked], lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
-        target_bytes_inflight: usize,
+        target_bytes_inflight: usize, params: &Params,
     ) -> Mode;
 
-    fn get_cwnd_limits(&self) -> Limits<usize>;
+    fn get_cwnd_limits(&self, params: &Params) -> Limits<usize>;
 
     fn on_exit_quiescence(
-        self, now: Instant, quiescence_start_time: Instant,
+        self, now: Instant, quiescence_start_time: Instant, params: &Params,
     ) -> Mode;
 }
 
@@ -173,11 +175,12 @@ impl Mode {
         Mode::ProbeRTT(ProbeRTT::new(model, cycle))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn do_on_congestion_event(
         &mut self, prior_in_flight: usize, event_time: Instant,
         acked_packets: &[Acked], lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
-        target_bytes_inflight: usize,
+        target_bytes_inflight: usize, params: &Params,
     ) -> bool {
         let mode_before = std::mem::discriminant(self);
 
@@ -188,6 +191,7 @@ impl Mode {
             lost_packets,
             congestion_event,
             target_bytes_inflight,
+            params,
         );
 
         let mode_after = std::mem::discriminant(self);
@@ -196,10 +200,13 @@ impl Mode {
     }
 
     pub(super) fn do_on_exit_quiescence(
-        &mut self, now: Instant, quiescence_start_time: Instant,
+        &mut self, now: Instant, quiescence_start_time: Instant, params: &Params,
     ) {
-        *self =
-            std::mem::take(self).on_exit_quiescence(now, quiescence_start_time)
+        *self = std::mem::take(self).on_exit_quiescence(
+            now,
+            quiescence_start_time,
+            params,
+        )
     }
 }
 
@@ -233,7 +240,9 @@ impl DerefMut for Mode {
 pub(super) struct Placeholder {}
 
 impl ModeImpl for Placeholder {
-    fn enter(&mut self, _: Instant, _: Option<&BBRv2CongestionEvent>) {
+    fn enter(
+        &mut self, _: Instant, _: Option<&BBRv2CongestionEvent>, _params: &Params,
+    ) {
         unreachable!()
     }
 
@@ -247,16 +256,18 @@ impl ModeImpl for Placeholder {
 
     fn on_congestion_event(
         self, _: usize, _: Instant, _: &[Acked], _: &[Lost],
-        _: &mut BBRv2CongestionEvent, _: usize,
+        _: &mut BBRv2CongestionEvent, _: usize, _params: &Params,
     ) -> Mode {
         unreachable!()
     }
 
-    fn get_cwnd_limits(&self) -> Limits<usize> {
+    fn get_cwnd_limits(&self, _params: &Params) -> Limits<usize> {
         unreachable!()
     }
 
-    fn on_exit_quiescence(self, _: Instant, _: Instant) -> Mode {
+    fn on_exit_quiescence(
+        self, _: Instant, _: Instant, _params: &Params,
+    ) -> Mode {
         unreachable!()
     }
 }

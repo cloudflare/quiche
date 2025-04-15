@@ -30,6 +30,7 @@
 
 use std::time::Instant;
 
+use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Acked;
 use crate::recovery::gcongestion::Lost;
 
@@ -39,7 +40,6 @@ use super::mode::ModeImpl;
 use super::network_model::BBRv2NetworkModel;
 use super::BBRv2CongestionEvent;
 use super::Limits;
-use super::PARAMS;
 
 #[derive(Debug)]
 pub(super) struct Drain {
@@ -56,22 +56,26 @@ impl ModeImpl for Drain {
         mut self, _prior_in_flight: usize, event_time: Instant,
         _acked_packets: &[Acked], _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
-        _target_bytes_inflight: usize,
+        _target_bytes_inflight: usize, params: &Params,
     ) -> Mode {
-        self.model.set_pacing_gain(PARAMS.drain_pacing_gain);
+        self.model.set_pacing_gain(params.drain_pacing_gain);
         // Only STARTUP can transition to DRAIN, both of them use the same cwnd
         // gain.
-        self.model.set_cwnd_gain(PARAMS.drain_cwnd_gain);
+        self.model.set_cwnd_gain(params.drain_cwnd_gain);
 
         let drain_target = self.drain_target();
         if congestion_event.bytes_in_flight <= drain_target {
-            return self.into_probe_bw(event_time, Some(congestion_event));
+            return self.into_probe_bw(
+                event_time,
+                Some(congestion_event),
+                params,
+            );
         }
 
         Mode::Drain(self)
     }
 
-    fn get_cwnd_limits(&self) -> Limits<usize> {
+    fn get_cwnd_limits(&self, _params: &Params) -> Limits<usize> {
         Limits {
             lo: 0,
             hi: self.model.inflight_lo(),
@@ -79,12 +83,15 @@ impl ModeImpl for Drain {
     }
 
     fn on_exit_quiescence(
-        self, _now: Instant, _quiescence_start_time: Instant,
+        self, _now: Instant, _quiescence_start_time: Instant, _params: &Params,
     ) -> Mode {
         Mode::Drain(self)
     }
 
-    fn enter(&mut self, _: Instant, _: Option<&BBRv2CongestionEvent>) {}
+    fn enter(
+        &mut self, _: Instant, _: Option<&BBRv2CongestionEvent>, _params: &Params,
+    ) {
+    }
 
     fn leave(&mut self, _: Instant, _: Option<&BBRv2CongestionEvent>) {}
 }
@@ -92,10 +99,11 @@ impl ModeImpl for Drain {
 impl Drain {
     fn into_probe_bw(
         mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>,
+        params: &Params,
     ) -> Mode {
         self.leave(now, congestion_event);
         let mut next_mode = Mode::probe_bw(self.model, self.cycle);
-        next_mode.enter(now, congestion_event);
+        next_mode.enter(now, congestion_event, params);
         next_mode
     }
 
