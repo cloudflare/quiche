@@ -191,17 +191,18 @@ where
 
                 let can_release = match self.write_state.next_release_time {
                     None => true,
-                    Some(next_release) =>
+                    Some(next_release) => {
                         next_release
                             .checked_duration_since(now)
-                            .unwrap_or_default() <
-                            RELEASE_TIMER_THRESHOLD,
+                            .unwrap_or_default()
+                            < RELEASE_TIMER_THRESHOLD
+                    },
                 };
 
                 self.write_state.has_pending_data &= can_release;
 
-                while self.write_state.has_pending_data &&
-                    packets_sent < CHECK_INCOMING_QUEUE_RATIO
+                while self.write_state.has_pending_data
+                    && packets_sent < CHECK_INCOMING_QUEUE_RATIO
                 {
                     self.gather_data_from_quiche_conn(qconn, ctx.buffer())?;
 
@@ -240,9 +241,13 @@ where
 
             let incoming_recv = &mut ctx.incoming_pkt_receiver;
             let application = &mut ctx.application;
+
+            println!("\nentering select");
             select! {
                 biased;
                 () = &mut sleep => {
+                    println!("sleep");
+
                     // It's very important that we keep the timeout arm at the top of this loop so
                     // that we poll it every time we need to. Since this is a biased `select!`, if
                     // we put this behind another arm, we could theoretically starve the sleep arm
@@ -255,11 +260,17 @@ where
                     current_deadline = None;
                     sleep.as_mut().reset((now + DEFAULT_SLEEP).into());
                 }
-                Some(pkt) = incoming_recv.recv() => ctx.in_pkt = Some(pkt),
+                pkt = incoming_recv.recv() => {
+                    println!("in_pkt");
+                    ctx.in_pkt = Some(pkt.unwrap());
+                },
                 // TODO(erittenhouse): would be nice to decouple wait_for_data from the
                 // application, but wait_for_quiche relies on IOW methods, so we can't write a
                 // default implementation for ConnectionStage
-                status = self.wait_for_data_or_handshake(qconn, application) => status?,
+                status = self.wait_for_data_or_handshake(qconn, application) => {
+                    println!("wait_for_data_or_handshake");
+                    status?
+                }
             };
 
             if let ControlFlow::Break(reason) = self.conn_stage.post_wait(qconn) {
@@ -379,9 +390,9 @@ where
             // If segment_size is known, update the maximum of
             // GSO sender buffer size to the multiple of
             // segment_size.
-            let buffer_is_full = self.write_state.num_pkts ==
-                UDP_MAX_SEGMENT_COUNT ||
-                self.write_state.bytes_written >= max_send_size;
+            let buffer_is_full = self.write_state.num_pkts
+                == UDP_MAX_SEGMENT_COUNT
+                || self.write_state.bytes_written >= max_send_size;
 
             if buffer_is_full {
                 break outcome;
@@ -394,7 +405,9 @@ where
             match segment_size {
                 Some(size)
                     if packet_size != size || packet_size < GSO_THRESHOLD =>
-                    break outcome,
+                {
+                    break outcome
+                },
                 None => segment_size = Some(packet_size),
                 _ => (),
             }
@@ -405,11 +418,10 @@ where
                 if let Some(initial_release_decision) = initial_release_decision {
                     match qconn.get_next_release_time() {
                         Some(release)
-                            if release.can_burst() ||
-                                release.time_eq(
-                                    &initial_release_decision,
-                                    now,
-                                ) => {},
+                            if release.can_burst()
+                                || release
+                                    .time_eq(&initial_release_decision, now) => {
+                        },
                         _ => break outcome,
                     }
                 }
@@ -547,12 +559,13 @@ where
             self.measure_complete_handshake_time();
 
             match send_res {
-                Ok(n) =>
+                Ok(n) => {
                     if n < self.write_state.bytes_written {
                         self.metrics
                             .write_errors(labels::QuicWriteError::Partial)
                             .inc();
-                    },
+                    }
+                },
                 Err(_) => {
                     self.metrics.write_errors(labels::QuicWriteError::Err).inc();
                 },
@@ -605,9 +618,13 @@ where
     async fn wait_for_quiche<App: ApplicationOverQuic>(
         &mut self, qconn: &mut QuicheConnection, app: &mut App,
     ) -> QuicResult<()> {
-        let populate_send_buf = std::future::poll_fn(|_| {
+        println!("entered wait_for_quiche");
+        let populate_send_buf = std::future::poll_fn(|cx| {
+            println!("polling wait_for_quiche fut");
             match self.gather_data_from_quiche_conn(qconn, app.buffer()) {
                 Ok(bytes_written) => {
+                    println!("bytes: {bytes_written}");
+
                     // We need to avoid consecutive calls to gather(), which write
                     // data to the buffer, without a flush().
                     // If we don't avoid those consecutive calls, we end
@@ -625,11 +642,14 @@ where
         })
         .await;
 
+        println!("done with poll_fn");
+
         if populate_send_buf.is_err() {
             return Err(Box::new(quiche::Error::TlsFail));
         }
 
         self.flush_buffer_to_socket(app.buffer()).await;
+        println!("flushed");
 
         Ok(())
     }
@@ -770,6 +790,7 @@ where
     pub(crate) async fn run<A: ApplicationOverQuic>(
         mut self, mut qconn: QuicheConnection, mut ctx: ConnectionStageContext<A>,
     ) -> Closing<Tx, M, A> {
+        println!("IOW - RunningApplication");
         let work_loop_result = self.work_loop(&mut qconn, &mut ctx).await;
 
         Closing {
@@ -790,8 +811,8 @@ where
         mut self, qconn: &mut QuicheConnection,
         ctx: &mut ConnectionStageContext<A>,
     ) {
-        if self.conn_stage.work_loop_result.is_ok() &&
-            self.bw_estimator.max_bandwidth > 0
+        if self.conn_stage.work_loop_result.is_ok()
+            && self.bw_estimator.max_bandwidth > 0
         {
             let metrics = &self.metrics;
 
