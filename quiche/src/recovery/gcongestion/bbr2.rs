@@ -561,10 +561,14 @@ impl CongestionControl for BBRv2 {
     }
 
     fn update_mss(&mut self, new_mss: usize) {
-        self.cwnd_limits.hi = self.cwnd_limits.hi * new_mss / self.mss;
-        self.cwnd_limits.lo = self.cwnd_limits.lo * new_mss / self.mss;
-        self.cwnd = self.cwnd * new_mss / self.mss;
-        self.initial_cwnd = self.initial_cwnd * new_mss / self.mss;
+        self.cwnd_limits.hi = (self.cwnd_limits.hi as u64 * new_mss as u64 /
+            self.mss as u64) as usize;
+        self.cwnd_limits.lo = (self.cwnd_limits.lo as u64 * new_mss as u64 /
+            self.mss as u64) as usize;
+        self.cwnd =
+            (self.cwnd as u64 * new_mss as u64 / self.mss as u64) as usize;
+        self.initial_cwnd = (self.initial_cwnd as u64 * new_mss as u64 /
+            self.mss as u64) as usize;
         self.mss = new_mss;
     }
 
