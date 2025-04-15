@@ -46,20 +46,13 @@ use self::mode::ModeImpl;
 use super::bandwidth::Bandwidth;
 use super::bbr::SendTimeState;
 use super::Acked;
+use super::BbrBwLoReductionStrategy;
+use super::BbrParams;
 use super::CongestionControl;
 use super::Lost;
 use super::RttStats;
 
 const MAX_MODE_CHANGES_PER_CONGESTION_EVENT: usize = 4;
-
-#[derive(Debug, PartialEq)]
-#[allow(dead_code)]
-enum BwLoMode {
-    Default,
-    MinRttReduction,
-    InflightReduction,
-    CwndReduction,
-}
 
 #[derive(Debug)]
 struct Params {
@@ -169,6 +162,39 @@ struct Params {
     bw_lo_mode: BwLoMode,
 }
 
+impl Params {
+    fn with_overrides(mut self, custom_bbr_settings: &BbrParams) -> Self {
+        macro_rules! apply_override {
+            ($field:ident) => {
+                if let Some(custom_value) = custom_bbr_settings.$field {
+                    self.$field = custom_value;
+                }
+            };
+        }
+
+        apply_override!(startup_cwnd_gain);
+        apply_override!(startup_pacing_gain);
+        apply_override!(full_bw_threshold);
+        apply_override!(startup_full_loss_count);
+        apply_override!(drain_cwnd_gain);
+        apply_override!(drain_pacing_gain);
+        apply_override!(enable_reno_coexistence);
+        apply_override!(probe_bw_probe_up_pacing_gain);
+        apply_override!(probe_bw_probe_down_pacing_gain);
+        apply_override!(probe_bw_cwnd_gain);
+        apply_override!(max_probe_up_queue_rounds);
+        apply_override!(loss_threshold);
+        apply_override!(use_bytes_delivered_for_inflight_hi);
+        apply_override!(decrease_startup_pacing_at_end_of_round);
+
+        if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
+            self.bw_lo_mode = custom_value.into();
+        }
+
+        self
+    }
+}
+
 const DEFAULT_PARAMS: Params = Params {
     startup_cwnd_gain: 2.0,
 
@@ -238,6 +264,27 @@ const DEFAULT_PARAMS: Params = Params {
 
     bw_lo_mode: BwLoMode::InflightReduction,
 };
+
+#[derive(Debug, PartialEq)]
+enum BwLoMode {
+    Default,
+    MinRttReduction,
+    InflightReduction,
+    CwndReduction,
+}
+
+impl From<BbrBwLoReductionStrategy> for BwLoMode {
+    fn from(value: BbrBwLoReductionStrategy) -> Self {
+        match value {
+            BbrBwLoReductionStrategy::Default => BwLoMode::Default,
+            BbrBwLoReductionStrategy::MinRttReduction =>
+                BwLoMode::MinRttReduction,
+            BbrBwLoReductionStrategy::InflightReduction =>
+                BwLoMode::InflightReduction,
+            BbrBwLoReductionStrategy::CwndReduction => BwLoMode::CwndReduction,
+        }
+    }
+}
 
 #[derive(Debug)]
 struct Limits<T: Ord> {
@@ -342,9 +389,14 @@ impl BBRv2 {
     pub fn new(
         initial_congestion_window: usize, max_congestion_window: usize,
         max_segment_size: usize, smoothed_rtt: Duration,
+        custom_bbr_params: Option<&BbrParams>,
     ) -> Self {
         let cwnd = initial_congestion_window * max_segment_size;
-        let params = DEFAULT_PARAMS;
+        let params = if let Some(custom_bbr_settings) = custom_bbr_params {
+            DEFAULT_PARAMS.with_overrides(custom_bbr_settings)
+        } else {
+            DEFAULT_PARAMS
+        };
 
         BBRv2 {
             mode: Mode::startup(BBRv2NetworkModel::new(&params)),
