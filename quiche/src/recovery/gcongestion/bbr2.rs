@@ -219,24 +219,93 @@ impl From<BbrBwLoReductionStrategy> for BwLoMode {
 }
 
 const DEFAULT_PARAMS: Params = Params {
+    // Experiment
+    // - function: how aggressively to capture a share of the bandwidth at startup
+    // - modify: bbrv3 reduced to 2.0 from 2.89. We should experiment with higher value to confirm
+    //   the value is not too conservative.
+    // - risk: other flows need to yield bandwidth; which takes time. Probing too quickly could
+    //   lead to packet loss and increased congestion.
+    //
+    // Note: based on the spec, this should match drain_cwnd_gain
     startup_cwnd_gain: 2.0,
 
+    // Experiment
+    // - function: how aggressively to capture a share of the bandwidth at startup
+    // - modify: bbrv3 reduced to 2.77 from 2.89. We should experiment with higher value to confirm
+    //   the value is not too conservative.
+    // - risk: other flows need to yield bandwidth; which takes time. Probing too quickly could
+    //   lead to packet loss and increased congestion.
     startup_pacing_gain: 2.773,
 
+    // Experiment
+    // - function: the threshold is used to determining when to exit startup and probing_up modes.
+    //   Its also used to determine the low bw estimates on congestion event. The current value
+    //   matches the spec and implementation.
+    // - modify: not recommended for initial experimentation since the value is tightly coupled
+    //   across multiple BBR calculation.
+    // - risk: increasing this value would result in being less responsive to congestion and
+    //   maintaining a higher inflight which continue to result in more loss and network
+    //   degradation. Note: network degradation matters most when the network is congested.
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L85
     full_bw_threshold: 1.25,
 
     startup_full_bw_rounds: 3,
 
     max_startup_queue_rounds: 0,
 
+    // Experiment TODO
+    //
+    // [BBRv3] updates this to 6, however the google quiche impl still uses the value of 8.
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/common/quiche_protocol_flags_list.h#L151-L153
+    // [BBRv3]: https://datatracker.ietf.org/meeting/117/materials/slides-117-ccwg-bbrv3-algorithm-bug-fixes-and-public-internet-deployment
     startup_full_loss_count: 8,
 
+    // Experiment
+    //
+    // Note: based on the spec, this should match startup_cwnd_gain
     drain_cwnd_gain: 2.0,
 
+    // Experiment TODO
+    //
+    // Needs more investigation.
+    //
+    // https://datatracker.ietf.org/doc/html/draft-cardwell-iccrg-bbr-congestion-control-02#name-drain
+    // The spec defines this is as 1/BBRStartupCwndGain, which means this should be 1/2. However...
+    //
+    // https://github.com/google/quiche/blob/7aec9bcbc0d32f18674e3eab8ecb27c0de1c6df1/quiche/quic/core/congestion_control/bbr2_misc.h#L111
+    // The current value is based on google quiche impl.
+    //
+    // ```
+    // # not the startup_cwnd_gain is 2 and break with the spec calculation.
+    // float startup_cwnd_gain = 2.0;
+    // float drain_pacing_gain = 1.0 / 2.885;
+    // ```
+    //
+    // Notably, BBRv3 also makes changes to a few related parameters.
+    //
+    // [BBRv3]: https://datatracker.ietf.org/meeting/117/materials/slides-117-ccwg-bbrv3-algorithm-bug-fixes-and-public-internet-deployment
     drain_pacing_gain: 1.0 / 2.885,
 
+    // Related to reno coexistence
+    //
+    // Value seems to assume "Public Internet last mile traffic".
+    // spec: https://datatracker.ietf.org/doc/html/draft-cardwell-iccrg-bbr-congestion-control-02#name-bandwidth-probing-and-coexi
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L119-L120
     probe_bw_probe_max_rounds: 63,
 
+    // Experiment
+    //
+    // - function: allow for cross flows using cubic/reno to claim a fair share of the bandwidth
+    // - modify: not recommended.
+    // - risk: There are a lot assumptions backed by decades of google experiments built into this
+    //   calculation. Without being able to measure the impact to cross traffic flows, disabling or
+    //   modifying the reno-coexistence calculation seems risky.
+    //
+    // spec: https://datatracker.ietf.org/doc/html/draft-cardwell-iccrg-bbr-congestion-control-02#name-bandwidth-probing-and-coexi
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L122-L124
     enable_reno_coexistence: true,
 
     probe_bw_probe_reno_gain: 1.0,
@@ -245,28 +314,93 @@ const DEFAULT_PARAMS: Params = Params {
 
     probe_bw_full_loss_count: 2,
 
+    // Experiment
+    //
+    // Possibly change in conjunction with `probe_bw_cwnd_gain`.
+    // Possibly change in conjunction with `probe_bw_probe_down_pacing_gain` to balance draining
+    // the queue.
+    //
+    // - function: used to accelerate the sending rate during probe_up mode. The probe_up operation runs
+    //   periodically to probe for higher capacity.
+    // - modify: we should experiment with higher values. Since a higher pacing rate is useful if
+    //   the cwnd is also growing faster, it might make sense to couple this experiment with a higher
+    //   probe_bw_cwnd_gain.
+    // - risk: A higher value results in a more aggressive probe up phase. If the value is too
+    //   high, it will result in more congestion and worse performance.
+    //
+    // https://github.com/google/quiche/blob/cfe837e3581c47701a2697659f51b098f70fc77c/quiche/quic/core/congestion_control/bbr2_misc.h#L141
     probe_bw_probe_up_pacing_gain: 1.25,
 
+    // Experiment
+    //
+    // Possibly lower if increasing `probe_bw_probe_up_pacing_gain`.
+    //
+    // https://datatracker.ietf.org/doc/html/draft-cardwell-iccrg-bbr-congestion-control-02#name-probebw_down
+    // > The pacing_gain value of 0.9 is derived based on the ProbeBW_UP pacing gain of 1.25, as the
+    // > minimum pacing_gain value that allows bandwidth-based convergence to approximate fairness.
+    //
+    // - function: used to deaccelerate the sending rate during probe_down in order to achieve
+    //   fairness. the google quiche use a value 0.91. The probe_drain mode runs periodically to
+    //   counter the probe_up phase.
+    // - modify: we should experiment with higher values. A higher value would allow us to
+    //   "retain" the higher bandwidth we discovered during the probe_up mode
+    // - risk: A higher value results in a more aggressive probe_down phase. If the value is too
+    //   high, we will hog all the bandwidth and make it unfair for new flows joining the
+    //   connection. Retaining more bandwidth can also lead to higher congestion.
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/quic/core/congestion_control/bbr2_misc.h#L142
     probe_bw_probe_down_pacing_gain: 0.9, // BBRv3
 
     probe_bw_default_pacing_gain: 1.0,
 
+    // Experiment
+    //
+    // Possibly change in conjunction with `probe_bw_probe_up_pacing_gain`.
+    //
+    // BBRv3 recommends 2.25 but google quiche is still using a value of 2.0.
+    //
+    // - function: controls how fast the cwnd will grow during the probe_bw mode. Its probably
+    //   most relavant during the probe_up mode.
+    // - modify: we should experiment with higher values. Since a higher value allows for more
+    //   in-flight packets, it might make sense to couple this experiment with a higher
+    //   probe_bw_probe_up_pacing_gain
+    // - risk: A higher value results in a more aggressive probe up phase. If the value is too
+    //   high, it will result in more congestion and worse performance.
+    //
+    // https://github.com/google/quiche/blob/cfe837e3581c47701a2697659f51b098f70fc77c/quiche/quic/core/congestion_control/bbr2_misc.h#L145
+    // [BBRv3]: https://datatracker.ietf.org/meeting/117/materials/slides-117-ccwg-bbrv3-algorithm-bug-fixes-and-public-internet-deployment
     probe_bw_cwnd_gain: 2.25, // BBRv3
 
     probe_up_ignore_inflight_hi: false,
 
+    // Experiment TODO
+    //
+    // google quiche seems to configure this value. Is setting this to `0` (disabling) this
+    // appropriate?
+    // https://github.com/search?q=repo%3Agoogle%2Fquiche%20max_probe_up_queue_rounds&type=code
     max_probe_up_queue_rounds: 2,
 
     probe_rtt_inflight_target_bdp_fraction: 0.5,
 
+    // The default period for entering PROBE_RTT. 10s
     probe_rtt_period: Duration::from_millis(10000),
 
+    // The default time to spend in PROBE_RTT mode
     probe_rtt_duration: Duration::from_millis(200),
 
     initial_max_ack_height_filter_window: 10,
 
     inflight_hi_headroom: 0.15,
 
+    // Experiment
+    // - function: controls when loss is "sufficiently" high to stop probing. Both the spec and
+    //   google quiche impl use a value of 2%.
+    // - modify: we should increase this value up to 2%.
+    // - risk: a higher loss threshold would result in more packet loss and network degradation.
+    //   Note: network degradation matters most when the network is already congested.
+    //
+    // https://github.com/google/quiche/blob/98c9cdb4cd17ea043243037bfdee3cdf024cab54/quiche/common/quiche_protocol_flags_list.h#L146-L149
+    // https://datatracker.ietf.org/doc/html/draft-cardwell-iccrg-bbr-congestion-control-02#section-2.8
     loss_threshold: 0.015,
 
     beta: 0.3,
@@ -279,12 +413,34 @@ const DEFAULT_PARAMS: Params = Params {
 
     startup_loss_exit_use_max_delivered_for_inflight_hi: true,
 
+    // Experiment TODO
+    // This is set to false by default in google quiche. Needs investigation
+    //
+    // https://github.com/google/quiche/blob/7aec9bcbc0d32f18674e3eab8ecb27c0de1c6df1/quiche/quic/core/congestion_control/bbr2_misc.h#L209
     use_bytes_delivered_for_inflight_hi: true,
 
+    // Experiment
+    // This is set to false by default in google quiche
+    //
+    // https://github.com/google/quiche/blob/7aec9bcbc0d32f18674e3eab8ecb27c0de1c6df1/quiche/quic/core/congestion_control/bbr2_misc.h#L226
+    //
+    // Potentially also missing some checks in startup:
+    // https://github.com/google/quiche/blob/7aec9bcbc0d32f18674e3eab8ecb27c0de1c6df1/quiche/quic/core/congestion_control/bbr2_startup.cc#L73
     decrease_startup_pacing_at_end_of_round: true,
 
     overestimate_avoidance: true,
 
+    // Experiment
+    //
+    // Requires more investigation to fully understand behavior, but it's worth experimenting since
+    // there is known set of options.
+    //
+    // - function: Controls bandwidth_lo reduction on congestion event. Clearing bandwidth_lo when
+    //   entering probe_down mode (Default mode). Determining if pacing rate should change on
+    //   congestion event (Default mode).
+    // - modify: we should try different modes and compare behavior.
+    // - risk: the risk is unclear with using different options. The `Default` mode enables some
+    //   new code paths which could merit a closer look.
     bw_lo_mode: BwLoMode::InflightReduction,
 };
 
