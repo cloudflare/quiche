@@ -382,7 +382,7 @@ impl GRecovery {
             CongestionControlAlgorithm::Bbr2Gcongestion => Congestion::bbrv2(
                 INITIAL_WINDOW_PACKETS,
                 MAX_WINDOW_PACKETS,
-                recovery_config.max_send_udp_payload_size,
+                recovery_config,
             ),
             _ => return None,
         };

@@ -92,11 +92,12 @@ impl std::fmt::Debug for LossDetectionTimer {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct RecoveryConfig {
     pub max_send_udp_payload_size: usize,
     pub max_ack_delay: Duration,
     pub cc_algorithm: CongestionControlAlgorithm,
+    pub custom_bbr_params: Option<BbrParams>,
     pub hystart: bool,
     pub pacing: bool,
     pub max_pacing_rate: Option<u64>,
@@ -109,6 +110,7 @@ impl RecoveryConfig {
             max_send_udp_payload_size: config.max_send_udp_payload_size,
             max_ack_delay: Duration::ZERO,
             cc_algorithm: config.cc_algorithm,
+            custom_bbr_params: config.custom_bbr_params,
             hystart: config.hystart,
             pacing: config.pacing,
             max_pacing_rate: config.max_pacing_rate,
@@ -248,6 +250,105 @@ impl Recovery {
     #[cfg(test)]
     pub fn new(config: &crate::Config) -> Self {
         Self::new_with_config(&RecoveryConfig::from_config(config))
+    }
+}
+
+/// BBR settings used to customize the algorithm's behavior.
+///
+/// This functionality is experimental and will be removed in the future.
+///
+/// A congestion control algorithm has dual-responsibility of effective network
+/// utilization and avoiding congestion. Custom values should be choosen
+/// carefully since incorrect values can lead to network degradation for all
+/// connections on the shared network.
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[repr(C)]
+#[doc(hidden)]
+pub struct BbrParams {
+    /// Control Bbr startup gain.
+    pub startup_cwnd_gain: Option<f32>,
+
+    /// Control Bbr startup pacing gain.
+    pub startup_pacing_gain: Option<f32>,
+
+    /// Control Bbr full bandwidth threshold.
+    pub full_bw_threshold: Option<f32>,
+
+    /// Control Bbr startup loss count necessary to exit startup.
+    pub startup_full_loss_count: Option<usize>,
+
+    /// Control Bbr drain cwnd gain.
+    pub drain_cwnd_gain: Option<f32>,
+
+    /// Control Bbr drain pacing gain.
+    pub drain_pacing_gain: Option<f32>,
+
+    /// Control if Bbr should respect reno coexistence.
+    pub enable_reno_coexistence: Option<bool>,
+
+    /// Control Bbr bandwidth probe up pacing gain.
+    pub probe_bw_probe_up_pacing_gain: Option<f32>,
+
+    /// Control Bbr bandwidth probe down pacing gain.
+    pub probe_bw_probe_down_pacing_gain: Option<f32>,
+
+    /// Control Bbr probe bandwidth cwnd gain.
+    pub probe_bw_cwnd_gain: Option<f32>,
+
+    /// Control number of rounds Bbr should stay in probe up if bytes_in_flight
+    /// doesn't drop below target.
+    pub max_probe_up_queue_rounds: Option<usize>,
+
+    /// Control Bbr loss threshold.
+    pub loss_threshold: Option<f32>,
+
+    /// Control if Bbr should use bytes delievered as an estimate for
+    /// inflight_hi.
+    pub use_bytes_delivered_for_inflight_hi: Option<bool>,
+
+    /// Control if Bbr should adjust startup pacing at round end.
+    pub decrease_startup_pacing_at_end_of_round: Option<bool>,
+
+    /// Control Bbr bandwidth lo reduction strategy.
+    pub bw_lo_reduction_strategy: Option<BbrBwLoReductionStrategy>,
+}
+
+/// Controls BBR's bandwidth reduction strategy on congestion event.
+///
+/// This functionality is experimental and will be removed in the future.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
+#[doc(hidden)]
+pub enum BbrBwLoReductionStrategy {
+    /// Uses the default strategy based on `BBRBeta`.
+    Default           = 0,
+
+    /// Considers min-rtt to estimate bandwidth reduction.
+    MinRttReduction   = 1,
+
+    /// Considers inflight data to estimate bandwidth reduction.
+    InflightReduction = 2,
+
+    /// Considers cwnd to estimate bandwidth reduction.
+    CwndReduction     = 3,
+}
+
+#[doc(hidden)]
+impl FromStr for BbrBwLoReductionStrategy {
+    type Err = crate::Error;
+
+    /// Converts a string to `BbrBwLoReductionStrategy`.
+    ///
+    /// If `name` is not valid, `Error::CongestionControl` is returned.
+    fn from_str(name: &str) -> std::result::Result<Self, Self::Err> {
+        match name {
+            "default" => Ok(BbrBwLoReductionStrategy::Default),
+            "minrtt" => Ok(BbrBwLoReductionStrategy::MinRttReduction),
+            "inflight" => Ok(BbrBwLoReductionStrategy::InflightReduction),
+            "cwnd" => Ok(BbrBwLoReductionStrategy::CwndReduction),
+
+            _ => Err(crate::Error::CongestionControl),
+        }
     }
 }
 

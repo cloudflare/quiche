@@ -38,6 +38,9 @@ mod startup;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::recovery::BbrBwLoReductionStrategy;
+use crate::BbrParams;
+
 use network_model::BBRv2NetworkModel;
 
 use self::mode::Mode;
@@ -167,6 +170,52 @@ struct Params {
     overestimate_avoidance: bool,
 
     bw_lo_mode: BwLoMode,
+}
+
+impl Params {
+    fn with_overrides(mut self, custom_bbr_settings: &BbrParams) -> Self {
+        macro_rules! apply_override {
+            ($field:ident) => {
+                if let Some(custom_value) = custom_bbr_settings.$field {
+                    self.$field = custom_value;
+                }
+            };
+        }
+
+        apply_override!(startup_cwnd_gain);
+        apply_override!(startup_pacing_gain);
+        apply_override!(full_bw_threshold);
+        apply_override!(startup_full_loss_count);
+        apply_override!(drain_cwnd_gain);
+        apply_override!(drain_pacing_gain);
+        apply_override!(enable_reno_coexistence);
+        apply_override!(probe_bw_probe_up_pacing_gain);
+        apply_override!(probe_bw_probe_down_pacing_gain);
+        apply_override!(probe_bw_cwnd_gain);
+        apply_override!(max_probe_up_queue_rounds);
+        apply_override!(loss_threshold);
+        apply_override!(use_bytes_delivered_for_inflight_hi);
+        apply_override!(decrease_startup_pacing_at_end_of_round);
+
+        if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
+            self.bw_lo_mode = custom_value.into();
+        }
+
+        self
+    }
+}
+
+impl From<BbrBwLoReductionStrategy> for BwLoMode {
+    fn from(value: BbrBwLoReductionStrategy) -> Self {
+        match value {
+            BbrBwLoReductionStrategy::Default => BwLoMode::Default,
+            BbrBwLoReductionStrategy::MinRttReduction =>
+                BwLoMode::MinRttReduction,
+            BbrBwLoReductionStrategy::InflightReduction =>
+                BwLoMode::InflightReduction,
+            BbrBwLoReductionStrategy::CwndReduction => BwLoMode::CwndReduction,
+        }
+    }
 }
 
 const DEFAULT_PARAMS: Params = Params {
@@ -342,9 +391,14 @@ impl BBRv2 {
     pub fn new(
         initial_congestion_window: usize, max_congestion_window: usize,
         max_segment_size: usize, smoothed_rtt: Duration,
+        custom_bbr_params: Option<&BbrParams>,
     ) -> Self {
         let cwnd = initial_congestion_window * max_segment_size;
-        let params = DEFAULT_PARAMS;
+        let params = if let Some(custom_bbr_settings) = custom_bbr_params {
+            DEFAULT_PARAMS.with_overrides(custom_bbr_settings)
+        } else {
+            DEFAULT_PARAMS
+        };
 
         BBRv2 {
             mode: Mode::startup(BBRv2NetworkModel::new(&params)),

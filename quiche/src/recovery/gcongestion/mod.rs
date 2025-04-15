@@ -38,6 +38,7 @@ pub use self::recovery::GRecovery;
 
 use crate::recovery::rtt::RttStats;
 use crate::recovery::rtt::INITIAL_RTT;
+use crate::recovery::RecoveryConfig;
 
 #[derive(Debug)]
 pub struct Lost {
@@ -61,13 +62,14 @@ pub(crate) enum Congestion {
 impl Congestion {
     pub(super) fn bbrv2(
         initial_tcp_congestion_window: usize, max_congestion_window: usize,
-        max_segment_size: usize,
+        recovery_config: &RecoveryConfig,
     ) -> Self {
         Congestion::BBRv2(bbr2::BBRv2::new(
             initial_tcp_congestion_window,
             max_congestion_window,
-            max_segment_size,
+            recovery_config.max_send_udp_payload_size,
             INITIAL_RTT,
+            recovery_config.custom_bbr_params.as_ref(),
         ))
     }
 }
