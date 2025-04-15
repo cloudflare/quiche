@@ -80,6 +80,8 @@ thread_local! {static CONNECTION_IDLE_TIMEOUT: RefCell<u64> = const { RefCell::n
 // TODO(erittenhouse): exploring generating prompts at compile-time
 const HEADERS: &str = "headers";
 const HEADERS_NO_PSEUDO: &str = "headers_no_pseudo";
+const HEADERS_LITERAL: &str = "headers_literal";
+const HEADERS_NO_PSEUDO_LITERAL: &str = "headers_no_pseudo_literal";
 const DATA: &str = "data";
 const SETTINGS: &str = "settings";
 const PUSH_PROMISE: &str = "push_promise";
@@ -137,12 +139,19 @@ impl Prompter {
 
     fn handle_action(&mut self, action: &str) -> PromptOutcome {
         let res = match action {
-            HEADERS | HEADERS_NO_PSEUDO => {
-                let raw = action == HEADERS_NO_PSEUDO;
+            HEADERS |
+            HEADERS_NO_PSEUDO |
+            HEADERS_LITERAL |
+            HEADERS_NO_PSEUDO_LITERAL => {
+                let literal = action == HEADERS_LITERAL ||
+                    action == HEADERS_NO_PSEUDO_LITERAL;
+                let raw = action == HEADERS_NO_PSEUDO ||
+                    action == HEADERS_NO_PSEUDO_LITERAL;
                 headers::prompt_headers(
                     &mut self.bidi_sid_alloc,
                     &self.host_port,
                     raw,
+                    literal,
                 )
             },
 
@@ -244,6 +253,8 @@ fn action_suggester(val: &str) -> SuggestionResult<Vec<String>> {
     let suggestions = [
         HEADERS,
         HEADERS_NO_PSEUDO,
+        HEADERS_LITERAL,
+        HEADERS_NO_PSEUDO_LITERAL,
         DATA,
         SETTINGS,
         GOAWAY,

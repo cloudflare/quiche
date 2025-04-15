@@ -117,7 +117,7 @@ fn lookup_static<T: NameValue>(h: &T) -> Option<(u64, bool)> {
     None
 }
 
-fn encode_int(
+pub fn encode_int(
     mut v: u64, first: u8, prefix: usize, b: &mut octets::OctetsMut,
 ) -> Result<()> {
     let mask = 2u64.pow(prefix as u32) - 1;
@@ -147,7 +147,7 @@ fn encode_int(
 }
 
 #[inline]
-fn encode_str<const LOWER_CASE: bool>(
+pub fn encode_str<const LOWER_CASE: bool>(
     v: &[u8], first: u8, prefix: usize, b: &mut octets::OctetsMut,
 ) -> Result<()> {
     // Huffman-encoding generally saves space but in some cases it doesn't, for
