@@ -40,6 +40,8 @@ use smallvec::SmallVec;
 
 use self::congestion::recovery::LegacyRecovery;
 use self::gcongestion::GRecovery;
+pub use gcongestion::BbrBwLoReductionStrategy;
+pub use gcongestion::BbrParams;
 
 // Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
@@ -92,11 +94,12 @@ impl std::fmt::Debug for LossDetectionTimer {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct RecoveryConfig {
     pub max_send_udp_payload_size: usize,
     pub max_ack_delay: Duration,
     pub cc_algorithm: CongestionControlAlgorithm,
+    pub custom_bbr_params: Option<BbrParams>,
     pub hystart: bool,
     pub pacing: bool,
     pub max_pacing_rate: Option<u64>,
@@ -109,6 +112,7 @@ impl RecoveryConfig {
             max_send_udp_payload_size: config.max_send_udp_payload_size,
             max_ack_delay: Duration::ZERO,
             cc_algorithm: config.cc_algorithm,
+            custom_bbr_params: config.custom_bbr_params,
             hystart: config.hystart,
             pacing: config.pacing,
             max_pacing_rate: config.max_pacing_rate,

@@ -795,6 +795,7 @@ pub struct Config {
     grease: bool,
 
     cc_algorithm: CongestionControlAlgorithm,
+    custom_bbr_params: Option<BbrParams>,
     initial_congestion_window_packets: usize,
 
     pmtud: bool,
@@ -867,6 +868,7 @@ impl Config {
             application_protos: Vec::new(),
             grease: true,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
+            custom_bbr_params: None,
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
             pmtud: false,
@@ -1249,6 +1251,20 @@ impl Config {
     /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
+    /// Sets custom BBR settings.
+    ///
+    /// This API is experimental and will be removed in the future.
+    ///
+    /// Currently this only applies if cc_algorithm is
+    /// `CongestionControlAlgorithm::Bbr2Gcongestion` is set.
+    ///
+    /// The default value is `None`.
+    #[cfg(feature = "internal")]
+    #[doc(hidden)]
+    pub fn set_custom_bbr_params(&mut self, custom_bbr_settings: BbrParams) {
+        self.custom_bbr_params = Some(custom_bbr_settings);
     }
 
     /// Sets the congestion control algorithm used by string.
@@ -2271,6 +2287,33 @@ impl Connection {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
 
         ex_data.recovery_config.cc_algorithm = algo;
+
+        Ok(())
+    }
+
+    /// Sets custom BBR settings.
+    ///
+    /// This API is experimental and will be removed in the future.
+    ///
+    /// Currently this only applies if cc_algorithm is
+    /// `CongestionControlAlgorithm::Bbr2Gcongestion` is set.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_custom_bbr_settings()`].
+    ///
+    /// [`Config::set_custom_bbr_settings()`]: struct.Config.html#method.set_custom_bbr_settings
+    #[cfg(all(feature = "boringssl-boring-crate", feature = "internal"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    #[doc(hidden)]
+    pub fn set_custom_bbr_settings_in_handshake(
+        ssl: &mut boring::ssl::SslRef, custom_bbr_params: BbrParams,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.custom_bbr_params = Some(custom_bbr_params);
 
         Ok(())
     }
@@ -18604,6 +18647,8 @@ pub use crate::path::PathEvent;
 pub use crate::path::PathStats;
 pub use crate::path::SocketAddrIter;
 
+pub use crate::recovery::BbrBwLoReductionStrategy;
+pub use crate::recovery::BbrParams;
 pub use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::RecoveryOps;
 
