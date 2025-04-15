@@ -266,7 +266,6 @@ const DEFAULT_PARAMS: Params = Params {
 };
 
 #[derive(Debug, PartialEq)]
-#[allow(dead_code)]
 enum BwLoMode {
     Default,
     MinRttReduction,
