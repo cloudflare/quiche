@@ -38,8 +38,6 @@ use super::CongestionControl;
 use super::Lost;
 
 // Congestion Control
-const INITIAL_WINDOW_PACKETS: usize = 10;
-
 const MAX_WINDOW_PACKETS: usize = 20_000;
 
 #[derive(Debug)]
@@ -380,7 +378,7 @@ impl GRecovery {
     pub fn new(recovery_config: &RecoveryConfig) -> Option<Self> {
         let cc = match recovery_config.cc_algorithm {
             CongestionControlAlgorithm::Bbr2Gcongestion => Congestion::bbrv2(
-                INITIAL_WINDOW_PACKETS,
+                recovery_config.initial_congestion_window_packets,
                 MAX_WINDOW_PACKETS,
                 recovery_config.max_send_udp_payload_size,
             ),
