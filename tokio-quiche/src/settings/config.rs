@@ -176,7 +176,10 @@ fn make_quiche_config(
         config.set_max_pacing_rate(max_pacing_rate);
     }
 
-    config.verify_peer(quic_settings.verify_peer);
+    if quic_settings.verify_peer {
+        config.verify_peer(quic_settings.verify_peer);
+    }
+
     config.set_max_connection_window(quic_settings.max_connection_window);
     config.set_max_stream_window(quic_settings.max_stream_window);
     config.grease(quic_settings.grease);
