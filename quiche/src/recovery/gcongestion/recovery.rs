@@ -636,8 +636,7 @@ impl RecoveryOps for GRecovery {
         trace!("{} {:?}", trace_id, self);
     }
 
-    fn get_packet_send_time(&self) -> Instant {
-        let now = Instant::now();
+    fn get_packet_send_time(&self, now: Instant) -> Instant {
         self.pacer.get_next_release_time().time(now).unwrap_or(now)
     }
 

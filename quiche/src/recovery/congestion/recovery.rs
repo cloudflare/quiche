@@ -587,7 +587,8 @@ impl RecoveryOps for LegacyRecovery {
         trace!("{} {:?}", trace_id, self);
     }
 
-    fn get_packet_send_time(&self) -> Instant {
+    fn get_packet_send_time(&self, _now: Instant) -> Instant {
+        // TODO .max(now)
         self.congestion.get_packet_send_time()
     }
 
