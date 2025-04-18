@@ -585,6 +585,9 @@ pub enum Error {
 
     /// The peer sent more data in CRYPTO frames than we can buffer.
     CryptoBufferExceeded,
+
+    /// The peer sent an ACK frame with an invalid range.
+    InvalidAckRange,
 }
 
 /// QUIC error codes sent on the wire.
@@ -696,6 +699,7 @@ impl Error {
             Error::OutOfIdentifiers => -18,
             Error::KeyUpdate => -19,
             Error::CryptoBufferExceeded => -20,
+            Error::InvalidAckRange => -21,
         }
     }
 }
@@ -5045,14 +5049,9 @@ impl<F: BufFactory> Connection<F> {
             completed: self.handshake_completed,
         };
 
-        path.recovery.on_packet_sent(
-            sent_pkt,
-            epoch,
-            handshake_status,
-            now,
-            &self.trace_id,
-        );
+        self.on_packet_sent(send_pid, sent_pkt, epoch, handshake_status, now)?;
 
+        let path = self.paths.get_mut(send_pid)?;
         qlog_with_type!(QLOG_METRICS, self.qlog, q, {
             if let Some(ev_data) = path.recovery.maybe_qlog() {
                 q.add_event_data_with_instant(ev_data, now).ok();
@@ -5100,6 +5099,25 @@ impl<F: BufFactory> Connection<F> {
         }
 
         Ok((pkt_type, written))
+    }
+
+    fn on_packet_sent(
+        &mut self, send_pid: usize, sent_pkt: recovery::Sent,
+        epoch: packet::Epoch, handshake_status: recovery::HandshakeStatus,
+        now: std::time::Instant,
+    ) -> Result<()> {
+        self.pkt_num_spaces[epoch].on_packet_sent(&sent_pkt);
+
+        let path = self.paths.get_mut(send_pid)?;
+        path.recovery.on_packet_sent(
+            sent_pkt,
+            epoch,
+            handshake_status,
+            now,
+            &self.trace_id,
+        );
+
+        Ok(())
     }
 
     /// Returns the desired send time for the next packet.
@@ -7535,7 +7553,22 @@ impl<F: BufFactory> Connection<F> {
 
                 let is_app_limited = self.delivery_rate_check_if_app_limited();
 
+                let largest_acked = ranges.last().expect(
+                    "ACK frames should always have at least one ack range",
+                );
+
                 for (_, p) in self.paths.iter_mut() {
+                    if self.pkt_num_spaces[epoch]
+                        .largest_tx_pkt_num
+                        .is_some_and(|largest_sent| largest_sent < largest_acked)
+                    {
+                        // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
+                        // An endpoint SHOULD treat receipt of an acknowledgment
+                        // for a packet it did not send as
+                        // a connection error of type PROTOCOL_VIOLATION
+                        return Err(Error::InvalidAckRange);
+                    }
+
                     if is_app_limited {
                         p.recovery.delivery_rate_update_app_limited(true);
                     }
@@ -14627,6 +14660,209 @@ mod tests {
             pipe.client.send(&mut buf),
             Err(Error::Done),
             "nothing for client to send after ACK-only packet"
+        );
+    }
+
+    #[rstest]
+    fn validate_peer_sent_ack_range(
+        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+
+        config.set_initial_max_data(50000);
+        config.set_initial_max_stream_data_bidi_local(30);
+        config.set_initial_max_stream_data_bidi_remote(30);
+        config.set_initial_max_stream_data_uni(30);
+        config.set_initial_max_streams_bidi(10);
+        config.set_initial_max_streams_uni(10);
+        config.set_max_recv_udp_payload_size(1200);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        pipe.handshake().unwrap();
+
+        let mut buf = [0; 2000];
+        let epoch = packet::Epoch::Application;
+        let pkt_type = packet::Type::Short;
+
+        // Elicit client to send an ACK to the server
+        let flight = testing::emit_flight(&mut pipe.client).unwrap();
+        testing::process_flight(&mut pipe.server, flight).unwrap();
+
+        let expected_max_active_pkt_sent = 3;
+        let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+        assert_eq!(
+            recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+            expected_max_active_pkt_sent
+        );
+        assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 3);
+        assert_eq!(recovery.sent_packets_len(epoch), 0);
+        // Verify largest sent on the connection
+        assert_eq!(
+            pipe.server.pkt_num_spaces[epoch]
+                .largest_tx_pkt_num
+                .unwrap(),
+            expected_max_active_pkt_sent
+        );
+
+        // Elicit server to send a packet(ACK) by sending it a packet first. This
+        // will result in Server sent packets that require an ACK
+        let frames = [frame::Frame::Stream {
+            stream_id: 0,
+            data: <RangeBuf>::from(b"aa", 0, false),
+        }];
+        pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+        let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+        assert_eq!(recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 4);
+        assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 3);
+        assert_eq!(recovery.sent_packets_len(epoch), 1);
+
+        // Send an invalid ACK range to the server and expect server error
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(0..10);
+        let frames = [frame::Frame::ACK {
+            ack_delay: 15,
+            ranges,
+            ecn_counts: None,
+        }];
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+                .unwrap_err(),
+            Error::InvalidAckRange
+        );
+
+        // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
+        // An endpoint SHOULD treat receipt of an acknowledgment for a packet it
+        // did not send as a connection error of type PROTOCOL_VIOLATION
+        assert_eq!(
+            pipe.server.local_error.unwrap().error_code,
+            WireErrorCode::ProtocolViolation as u64
+        );
+    }
+
+    #[rstest]
+    fn validate_peer_sent_ack_range_for_multi_path(
+        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(2);
+
+        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
+
+        let server_addr = testing::Pipe::server_addr();
+        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+        let probed_pid =
+            pipe.client.probe_path(client_addr_2, server_addr).unwrap() as usize;
+
+        // Exchange path challenge/response and establish the second path
+        pipe.advance().unwrap();
+        assert_eq!(pipe.server.paths.len(), 2);
+
+        let mut buf = [0; 2000];
+        let epoch = packet::Epoch::Application;
+        let pkt_type = packet::Type::Short;
+
+        // active path
+        let expected_max_active_pkt_sent = 7;
+        let active_path = &pipe.server.paths.get_mut(0).unwrap();
+        let p1_recovery = &active_path.recovery;
+        assert_eq!(
+            p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+            expected_max_active_pkt_sent
+        );
+        assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 6);
+        assert_eq!(p1_recovery.sent_packets_len(epoch), 1);
+
+        // non-active path
+        let expected_max_second_pkt_sent = 5;
+        let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
+        let p2_recovery = &second_path.recovery;
+        assert_eq!(
+            p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+            expected_max_second_pkt_sent
+        );
+        assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 5);
+        assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
+
+        // Verify largest sent on the connection is the max of the two paths
+        let global_max_sent = pipe.server.pkt_num_spaces[epoch]
+            .largest_tx_pkt_num
+            .unwrap();
+        assert_eq!(
+            global_max_sent,
+            expected_max_active_pkt_sent.max(expected_max_second_pkt_sent)
+        );
+
+        // Send a valid ACK range based on the global max.  Range is not inclusive
+        // so +1 to include global_max_sent pkt
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(0..global_max_sent + 1);
+        let frames = [frame::Frame::ACK {
+            ack_delay: 15,
+            ranges,
+            ecn_counts: None,
+        }];
+        pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        // active path
+        let active_path = &pipe.server.paths.get_mut(0).unwrap();
+        assert!(active_path.active());
+        let p1_recovery = &active_path.recovery;
+        assert_eq!(p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 7);
+        assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 7);
+        assert_eq!(p1_recovery.sent_packets_len(epoch), 0);
+
+        // non-active path
+        let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
+        let p2_recovery = &second_path.recovery;
+        assert_eq!(p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 5);
+        assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 5);
+        assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
+
+        // Send a large invalid ACK range to the server. Range is not inclusive so
+        // +2 to include a packet greater than global_max_sent pkt
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(0..global_max_sent + 2);
+        let frames = [frame::Frame::ACK {
+            ack_delay: 15,
+            ranges,
+            ecn_counts: None,
+        }];
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+                .unwrap_err(),
+            Error::InvalidAckRange
+        );
+
+        // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
+        // An endpoint SHOULD treat receipt of an acknowledgment for a packet it
+        // did not send as a connection error of type PROTOCOL_VIOLATION
+        assert_eq!(
+            pipe.server.local_error.unwrap().error_code,
+            WireErrorCode::ProtocolViolation as u64
         );
     }
 

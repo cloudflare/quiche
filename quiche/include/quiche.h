@@ -127,6 +127,9 @@ enum quiche_error {
 
     // The peer sent more data in CRYPTO frames than we can buffer.
     QUICHE_ERR_CRYPTO_BUFFER_EXCEEDED = -20,
+
+    // The peer sent an ACK frame with an invalid range.
+    QUICHE_ERR_INVALID_ACK_RANGE = -21,
 };
 
 // Returns a human readable string with the quiche version number.
@@ -1003,6 +1006,12 @@ enum quiche_h3_error {
 
     // See QUICHE_ERR_KEY_UPDATE.
     QUICHE_H3_TRANSPORT_ERR_KEY_UPDATE = QUICHE_ERR_KEY_UPDATE - 1000,
+
+    // See QUICHE_ERR_CRYPTO_BUFFER_EXCEEDED.
+    QUICHE_H3_TRANSPORT_ERR_CRYPTO_BUFFER_EXCEEDED = QUICHE_ERR_CRYPTO_BUFFER_EXCEEDED - 1000,
+
+    // See QUICHE_ERR_INVALID_ACK_RANGE.
+    QUICHE_H3_TRANSPORT_ERR_INVALID_ACK_RANGE = QUICHE_ERR_INVALID_ACK_RANGE - 1000,
 };
 
 // Stores configuration shared between multiple connections.

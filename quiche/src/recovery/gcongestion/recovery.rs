@@ -102,6 +102,10 @@ struct RecoveryEpoch {
 
     acked_frames: Vec<frame::Frame>,
     lost_frames: Vec<frame::Frame>,
+
+    /// The largest packet number sent in the packet number space so far.
+    #[allow(dead_code)]
+    test_largest_sent_pkt_num_on_path: Option<u64>,
 }
 
 struct AckedDetectionResult {
@@ -155,16 +159,11 @@ impl RecoveryEpoch {
         unacked_bytes
     }
 
+    // `peer_sent_ack_ranges` should not be used without validation.
     fn detect_and_remove_acked_packets(
-        &mut self, acked: &RangeSet, newly_acked: &mut Vec<Acked>, trace_id: &str,
+        &mut self, peer_sent_ack_ranges: &RangeSet, newly_acked: &mut Vec<Acked>,
+        trace_id: &str,
     ) -> AckedDetectionResult {
-        // Update the largest acked packet
-        self.largest_acked_packet.replace(
-            self.largest_acked_packet
-                .unwrap_or(0)
-                .max(acked.last().unwrap()),
-        );
-
         newly_acked.clear();
 
         let mut acked_bytes = 0;
@@ -172,29 +171,33 @@ impl RecoveryEpoch {
         let mut spurious_pkt_thresh = None;
         let mut has_ack_eliciting = false;
 
-        let largest_acked = self.largest_acked_packet.unwrap();
+        let largest_ack_received = peer_sent_ack_ranges.last().unwrap();
+        let largest_acked = self
+            .largest_acked_packet
+            .unwrap_or(0)
+            .max(largest_ack_received);
 
-        for ack in acked.iter() {
+        for peer_sent_range in peer_sent_ack_ranges.iter() {
             // Because packets always have incrementing numbers, they are always
             // in sorted order.
             let start = if self
                 .sent_packets
                 .front()
-                .filter(|e| e.pkt_num >= ack.start)
+                .filter(|e| e.pkt_num >= peer_sent_range.start)
                 .is_some()
             {
                 // Usually it will be the first packet.
                 0
             } else {
                 self.sent_packets
-                    .binary_search_by_key(&ack.start, |p| p.pkt_num)
+                    .binary_search_by_key(&peer_sent_range.start, |p| p.pkt_num)
                     .unwrap_or_else(|e| e)
             };
 
             for SentPacket { pkt_num, status } in
                 self.sent_packets.range_mut(start..)
             {
-                if *pkt_num < ack.end {
+                if *pkt_num < peer_sent_range.end {
                     match status.ack() {
                         SentStatus::Sent {
                             time_sent,
@@ -619,6 +622,13 @@ impl RecoveryOps for GRecovery {
             frames: pkt.frames,
         };
 
+        #[cfg(test)]
+        {
+            epoch.test_largest_sent_pkt_num_on_path = epoch
+                .test_largest_sent_pkt_num_on_path
+                .max(Some(pkt.pkt_num));
+        }
+
         epoch.sent_packets.push_back(SentPacket { pkt_num, status });
 
         if ack_eliciting {
@@ -652,9 +662,11 @@ impl RecoveryOps for GRecovery {
         self.pacer.get_next_release_time().time(now).unwrap_or(now)
     }
 
+    // `peer_sent_ack_ranges` should not be used without validation.
     fn on_ack_received(
-        &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        &mut self, peer_sent_ack_ranges: &RangeSet, ack_delay: u64,
+        epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
+        trace_id: &str,
     ) -> OnAckReceivedOutcome {
         let prior_in_flight = self.bytes_in_flight.get();
 
@@ -664,7 +676,7 @@ impl RecoveryOps for GRecovery {
             spurious_pkt_thresh,
             has_ack_eliciting,
         } = self.epochs[epoch].detect_and_remove_acked_packets(
-            ranges,
+            peer_sent_ack_ranges,
             &mut self.newly_acked,
             trace_id,
         );
@@ -681,10 +693,18 @@ impl RecoveryOps for GRecovery {
 
         self.bytes_in_flight.saturating_subtract(acked_bytes, now);
 
-        // Check if largest packet is newly acked.
         let largest_newly_acked = self.newly_acked.last().unwrap();
-        let update_rtt: bool = largest_newly_acked.pkt_num ==
-            ranges.last().unwrap() &&
+
+        // Update `largest_acked_packet` based on the validated `newly_acked`
+        // value.
+        let largest_acked_pkt_num = self.epochs[epoch]
+            .largest_acked_packet
+            .unwrap_or(0)
+            .max(largest_newly_acked.pkt_num);
+        self.epochs[epoch].largest_acked_packet = Some(largest_acked_pkt_num);
+
+        // Check if largest packet is newly acked.
+        let update_rtt = largest_newly_acked.pkt_num == largest_acked_pkt_num &&
             has_ack_eliciting;
         if update_rtt {
             let latest_rtt = now - largest_newly_acked.time_sent;
@@ -962,6 +982,11 @@ impl RecoveryOps for GRecovery {
         let ret = self.detect_and_remove_lost_packets(epoch, now);
         self.epochs[epoch].drain_acked_and_lost_packets();
         ret
+    }
+
+    #[cfg(test)]
+    fn largest_sent_pkt_num_on_path(&self, epoch: packet::Epoch) -> Option<u64> {
+        self.epochs[epoch].test_largest_sent_pkt_num_on_path
     }
 
     #[cfg(test)]

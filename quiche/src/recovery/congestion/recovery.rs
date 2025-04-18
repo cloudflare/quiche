@@ -47,7 +47,6 @@ use crate::recovery::QlogMetrics;
 
 use crate::frame;
 use crate::packet;
-use crate::ranges;
 
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
@@ -89,6 +88,10 @@ struct RecoveryEpoch {
 
     acked_frames: Vec<frame::Frame>,
     lost_frames: Vec<frame::Frame>,
+
+    /// The largest packet number sent in the packet number space so far.
+    #[cfg(test)]
+    test_largest_sent_pkt_num_on_path: Option<u64>,
 }
 
 struct AckedDetectionResult {
@@ -107,9 +110,10 @@ struct LossDetectionResult {
 }
 
 impl RecoveryEpoch {
+    // `peer_sent_ack_ranges` should not be used without validation.
     fn detect_and_remove_acked_packets(
-        &mut self, now: Instant, acked: &RangeSet, newly_acked: &mut Vec<Acked>,
-        rtt_stats: &RttStats, trace_id: &str,
+        &mut self, now: Instant, peer_sent_ack_ranges: &RangeSet,
+        newly_acked: &mut Vec<Acked>, rtt_stats: &RttStats, trace_id: &str,
     ) -> AckedDetectionResult {
         newly_acked.clear();
 
@@ -119,27 +123,33 @@ impl RecoveryEpoch {
         let mut has_ack_eliciting = false;
         let mut has_in_flight_spurious_loss = false;
 
-        let largest_acked = self.largest_acked_packet.unwrap();
+        let largest_ack_received = peer_sent_ack_ranges
+            .last()
+            .expect("ACK frames should always have at least one ack range");
+        let largest_acked = self
+            .largest_acked_packet
+            .unwrap_or(0)
+            .max(largest_ack_received);
 
-        for ack in acked.iter() {
+        for peer_sent_range in peer_sent_ack_ranges.iter() {
             // Because packets always have incrementing numbers, they are always
             // in sorted order.
             let start = if self
                 .sent_packets
                 .front()
-                .filter(|e| e.pkt_num >= ack.start)
+                .filter(|e| e.pkt_num >= peer_sent_range.start)
                 .is_some()
             {
                 // Usually it will be the first packet.
                 0
             } else {
                 self.sent_packets
-                    .binary_search_by_key(&ack.start, |p| p.pkt_num)
+                    .binary_search_by_key(&peer_sent_range.start, |p| p.pkt_num)
                     .unwrap_or_else(|e| e)
             };
 
             for unacked in self.sent_packets.range_mut(start..) {
-                if unacked.pkt_num >= ack.end {
+                if unacked.pkt_num >= peer_sent_range.end {
                     break;
                 }
 
@@ -590,6 +600,14 @@ impl RecoveryOps for LegacyRecovery {
 
         self.bytes_sent += sent_bytes;
 
+        #[cfg(test)]
+        {
+            self.epochs[epoch].test_largest_sent_pkt_num_on_path = self.epochs
+                [epoch]
+                .test_largest_sent_pkt_num_on_path
+                .max(Some(pkt.pkt_num));
+        }
+
         self.epochs[epoch].sent_packets.push_back(pkt);
 
         trace!("{} {:?}", trace_id, self);
@@ -600,22 +618,12 @@ impl RecoveryOps for LegacyRecovery {
         self.congestion.get_packet_send_time()
     }
 
-    #[allow(clippy::too_many_arguments)]
+    // `peer_sent_ack_ranges` should not be used without validation.
     fn on_ack_received(
-        &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
+        &mut self, peer_sent_ack_ranges: &RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
     ) -> OnAckReceivedOutcome {
-        let largest_acked = ranges.last().unwrap();
-
-        // Update the largest acked packet.
-        let largest_acked = self.epochs[epoch]
-            .largest_acked_packet
-            .unwrap_or(0)
-            .max(largest_acked);
-
-        self.epochs[epoch].largest_acked_packet = Some(largest_acked);
-
         let AckedDetectionResult {
             acked_bytes,
             spurious_losses,
@@ -624,7 +632,7 @@ impl RecoveryOps for LegacyRecovery {
             has_in_flight_spurious_loss,
         } = self.epochs[epoch].detect_and_remove_acked_packets(
             now,
-            ranges,
+            peer_sent_ack_ranges,
             &mut self.newly_acked,
             &self.rtt_stats,
             trace_id,
@@ -645,10 +653,20 @@ impl RecoveryOps for LegacyRecovery {
             return OnAckReceivedOutcome::default();
         }
 
-        // Check if largest packet is newly acked.
         let largest_newly_acked = self.newly_acked.last().unwrap();
 
-        if largest_newly_acked.pkt_num == largest_acked && has_ack_eliciting {
+        // Update `largest_acked_packet` based on the validated `newly_acked`
+        // value.
+        let largest_acked_pkt_num = self.epochs[epoch]
+            .largest_acked_packet
+            .unwrap_or(0)
+            .max(largest_newly_acked.pkt_num);
+        self.epochs[epoch].largest_acked_packet = Some(largest_acked_pkt_num);
+
+        // Check if largest packet is newly acked.
+        if largest_newly_acked.pkt_num == largest_acked_pkt_num &&
+            has_ack_eliciting
+        {
             let latest_rtt = now - largest_newly_acked.time_sent;
             self.rtt_stats.update_rtt(
                 latest_rtt,
@@ -927,6 +945,11 @@ impl RecoveryOps for LegacyRecovery {
     fn on_app_limited(&mut self) {
         // Not implemented for legacy recovery, update_app_limited and
         // delivery_rate_update_app_limited used instead.
+    }
+
+    #[cfg(test)]
+    fn largest_sent_pkt_num_on_path(&self, epoch: packet::Epoch) -> Option<u64> {
+        self.epochs[epoch].test_largest_sent_pkt_num_on_path
     }
 
     #[cfg(test)]

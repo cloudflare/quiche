@@ -216,6 +216,11 @@ pub trait RecoveryOps {
 
     fn on_app_limited(&mut self);
 
+    // Since a recovery module is path specific, this tracks the largest packet
+    // sent per path.
+    #[cfg(test)]
+    fn largest_sent_pkt_num_on_path(&self, epoch: packet::Epoch) -> Option<u64>;
+
     #[cfg(test)]
     fn app_limited(&self) -> bool;
 
@@ -1617,6 +1622,84 @@ mod tests {
             Duration::from_secs_f64(scale_factor * 12000.0 / pacing_rate as f64)
         );
         assert_eq!(r.startup_exit(), None);
+    }
+
+    #[rstest]
+    fn validate_ack_range_on_ack_received(
+        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+
+        let epoch = packet::Epoch::Application;
+        let mut r = Recovery::new(&cfg);
+        let mut now = Instant::now();
+        assert_eq!(r.sent_packets_len(epoch), 0);
+
+        // Send 4 packets
+        let pkt_size = 1000;
+        let pkt_count = 4;
+        for pkt_num in 0..pkt_count {
+            let sent = crate::testing::helper_packet_sent(pkt_num, now, pkt_size);
+            r.on_packet_sent(sent, epoch, HandshakeStatus::default(), now, "");
+        }
+        assert_eq!(r.sent_packets_len(epoch), pkt_count as usize);
+        assert_eq!(r.bytes_in_flight(), pkt_count as usize * pkt_size);
+        assert!(r.get_largest_acked_on_epoch(epoch).is_none());
+        assert_eq!(r.largest_sent_pkt_num_on_path(epoch).unwrap(), 3);
+
+        // Wait for 10ms.
+        now += Duration::from_millis(10);
+
+        // ACK 2 packets
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..2);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                epoch,
+                HandshakeStatus::default(),
+                now,
+                "",
+            ),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 2 * 1000,
+                spurious_losses: 0,
+            }
+        );
+        assert_eq!(r.sent_packets_len(epoch), 2);
+        assert_eq!(r.bytes_in_flight(), 2 * 1000);
+
+        assert_eq!(r.get_largest_acked_on_epoch(epoch).unwrap(), 1);
+        assert_eq!(r.largest_sent_pkt_num_on_path(epoch).unwrap(), 3);
+
+        // ACK large range
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..10);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                epoch,
+                HandshakeStatus::default(),
+                now,
+                "",
+            ),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 2 * 1000,
+                spurious_losses: 0,
+            }
+        );
+        assert_eq!(r.sent_packets_len(epoch), 0);
+        assert_eq!(r.bytes_in_flight(), 0);
+
+        assert_eq!(r.get_largest_acked_on_epoch(epoch).unwrap(), 3);
+        assert_eq!(r.largest_sent_pkt_num_on_path(epoch).unwrap(), 3);
     }
 
     #[rstest]

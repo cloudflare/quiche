@@ -36,6 +36,7 @@ use crate::Result;
 use crate::crypto;
 use crate::rand;
 use crate::ranges;
+use crate::recovery;
 use crate::stream;
 
 const FORM_BIT: u8 = 0x80;
@@ -862,6 +863,9 @@ pub struct PktNumSpace {
     /// The largest non-probing packet number.
     pub largest_rx_non_probing_pkt_num: u64,
 
+    /// The largest packet number send in the packet number space so far.
+    pub largest_tx_pkt_num: Option<u64>,
+
     /// Range of packet numbers that we need to send an ACK for.
     pub recv_pkt_need_ack: ranges::RangeSet,
 
@@ -878,6 +882,7 @@ impl PktNumSpace {
             largest_rx_pkt_num: 0,
             largest_rx_pkt_time: time::Instant::now(),
             largest_rx_non_probing_pkt_num: 0,
+            largest_tx_pkt_num: None,
             recv_pkt_need_ack: ranges::RangeSet::new(crate::MAX_ACK_RANGES),
             recv_pkt_num: PktNumWindow::default(),
             ack_elicited: false,
@@ -890,6 +895,12 @@ impl PktNumSpace {
 
     pub fn ready(&self) -> bool {
         self.ack_elicited
+    }
+
+    pub fn on_packet_sent(&mut self, sent_pkt: &recovery::Sent) {
+        // Track the largest packet number sent
+        self.largest_tx_pkt_num =
+            self.largest_tx_pkt_num.max(Some(sent_pkt.pkt_num));
     }
 }
 
@@ -996,6 +1007,7 @@ impl PktNumWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing;
 
     #[test]
     fn retry() {
@@ -2008,5 +2020,21 @@ mod tests {
             decrypt_pkt(&mut b, 0, 1, payload_len, &aead),
             Err(Error::CryptoFail)
         );
+    }
+
+    #[test]
+    fn on_packet_sent() {
+        let now = time::Instant::now();
+        let mut pkt_space = PktNumSpace::new();
+
+        assert!(pkt_space.largest_tx_pkt_num.is_none());
+
+        let sent_ctx = testing::helper_packet_sent(1, now, 10);
+        pkt_space.on_packet_sent(&sent_ctx);
+        assert_eq!(pkt_space.largest_tx_pkt_num.unwrap(), 1);
+
+        let sent_ctx = testing::helper_packet_sent(2, now, 10);
+        pkt_space.on_packet_sent(&sent_ctx);
+        assert_eq!(pkt_space.largest_tx_pkt_num.unwrap(), 2);
     }
 }
