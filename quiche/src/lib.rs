@@ -7854,7 +7854,7 @@ impl<F: BufFactory> Connection<F> {
     /// Returns the idle timeout value.
     ///
     /// `None` is returned if both end-points disabled the idle timeout.
-    fn idle_timeout(&mut self) -> Option<time::Duration> {
+    fn idle_timeout(&self) -> Option<time::Duration> {
         // If the transport parameter is set to 0, then the respective endpoint
         // decided to disable the idle timeout. If both are disabled we should
         // not set any timeout.
