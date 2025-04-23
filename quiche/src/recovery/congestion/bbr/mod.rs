@@ -468,8 +468,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 2,
                 lost_bytes: 2 * mss,
@@ -540,8 +542,10 @@ mod tests {
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
+                    None,
                     "",
-                ),
+                )
+                .unwrap(),
                 OnAckReceivedOutcome {
                     lost_packets: 0,
                     lost_bytes: 0,
@@ -597,8 +601,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
@@ -666,8 +672,10 @@ mod tests {
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
+                    None,
                     "",
-                ),
+                )
+                .unwrap(),
                 OnAckReceivedOutcome {
                     lost_packets: 0,
                     lost_bytes: 0,
@@ -742,8 +750,10 @@ mod tests {
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
+                    None,
                     "",
-                ),
+                )
+                .unwrap(),
                 OnAckReceivedOutcome {
                     lost_packets: 0,
                     lost_bytes: 0,
@@ -803,8 +813,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,

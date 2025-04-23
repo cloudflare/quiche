@@ -35,6 +35,8 @@ use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
+use crate::Error;
+use crate::Result;
 
 use super::pacer::Pacer;
 use super::Acked;
@@ -162,8 +164,8 @@ impl RecoveryEpoch {
     // `peer_sent_ack_ranges` should not be used without validation.
     fn detect_and_remove_acked_packets(
         &mut self, peer_sent_ack_ranges: &RangeSet, newly_acked: &mut Vec<Acked>,
-        trace_id: &str,
-    ) -> AckedDetectionResult {
+        skip_pn: Option<u64>, trace_id: &str,
+    ) -> Result<AckedDetectionResult> {
         newly_acked.clear();
 
         let mut acked_bytes = 0;
@@ -178,6 +180,14 @@ impl RecoveryEpoch {
             .max(largest_ack_received);
 
         for peer_sent_range in peer_sent_ack_ranges.iter() {
+            if skip_pn.is_some_and(|skip_pn| peer_sent_range.contains(&skip_pn)) {
+                // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
+                // An endpoint SHOULD treat receipt of an acknowledgment
+                // for a packet it did not send as
+                // a connection error of type PROTOCOL_VIOLATION
+                return Err(Error::OptimisticAckDetected);
+            }
+
             // Because packets always have incrementing numbers, they are always
             // in sorted order.
             let start = if self
@@ -239,12 +249,12 @@ impl RecoveryEpoch {
 
         self.drain_acked_and_lost_packets();
 
-        AckedDetectionResult {
+        Ok(AckedDetectionResult {
             acked_bytes,
             spurious_losses,
             spurious_pkt_thresh,
             has_ack_eliciting,
-        }
+        })
     }
 
     fn detect_and_remove_lost_packets(
@@ -666,8 +676,8 @@ impl RecoveryOps for GRecovery {
     fn on_ack_received(
         &mut self, peer_sent_ack_ranges: &RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
-        trace_id: &str,
-    ) -> OnAckReceivedOutcome {
+        skip_pn: Option<u64>, trace_id: &str,
+    ) -> Result<OnAckReceivedOutcome> {
         let prior_in_flight = self.bytes_in_flight.get();
 
         let AckedDetectionResult {
@@ -678,8 +688,9 @@ impl RecoveryOps for GRecovery {
         } = self.epochs[epoch].detect_and_remove_acked_packets(
             peer_sent_ack_ranges,
             &mut self.newly_acked,
+            skip_pn,
             trace_id,
-        );
+        )?;
 
         self.lost_spurious_count += spurious_losses;
         if let Some(thresh) = spurious_pkt_thresh {
@@ -688,7 +699,7 @@ impl RecoveryOps for GRecovery {
         }
 
         if self.newly_acked.is_empty() {
-            return OnAckReceivedOutcome::default();
+            return Ok(OnAckReceivedOutcome::default());
         }
 
         self.bytes_in_flight.saturating_subtract(acked_bytes, now);
@@ -738,12 +749,12 @@ impl RecoveryOps for GRecovery {
 
         trace!("{} {:?}", trace_id, self);
 
-        OnAckReceivedOutcome {
+        Ok(OnAckReceivedOutcome {
             lost_packets,
             lost_bytes,
             acked_bytes,
             spurious_losses,
-        }
+        })
     }
 
     fn on_loss_detection_timeout(

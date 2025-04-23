@@ -130,6 +130,10 @@ enum quiche_error {
 
     // The peer sent an ACK frame with an invalid range.
     QUICHE_ERR_INVALID_ACK_RANGE = -21,
+
+    // The peer send an ACK frame for a skipped packet used for Optimistic ACK
+    // mitigation.
+    QUICHE_ERR_OPTIMISTIC_ACK_DETECTED = -22,
 };
 
 // Returns a human readable string with the quiche version number.
@@ -1012,6 +1016,9 @@ enum quiche_h3_error {
 
     // See QUICHE_ERR_INVALID_ACK_RANGE.
     QUICHE_H3_TRANSPORT_ERR_INVALID_ACK_RANGE = QUICHE_ERR_INVALID_ACK_RANGE - 1000,
+
+    // See QUICHE_ERR_OPTIMISTIC_ACK_DETECTED.
+    QUICHE_H3_TRANSPORT_ERR_OPTIMISTIC_ACK_DETECTED = QUICHE_ERR_OPTIMISTIC_ACK_DETECTED - 1000,
 };
 
 // Stores configuration shared between multiple connections.

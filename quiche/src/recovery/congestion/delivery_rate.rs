@@ -501,14 +501,17 @@ mod tests {
         // Ack packets, which generates a new delivery_rate
         let mut acked = ranges::RangeSet::default();
         acked.insert(range);
+
         let ack_outcome = recovery.on_ack_received(
             &acked,
             25,
             packet::Epoch::Application,
             HandshakeStatus::default(),
             now + rtt,
+            None,
             "",
-        );
+        ).unwrap();
+
         assert_eq!(ack_outcome, OnAckReceivedOutcome {
             lost_packets: 0,
             lost_bytes: 0,

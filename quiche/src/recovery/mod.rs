@@ -33,6 +33,7 @@ use crate::packet;
 use crate::ranges::RangeSet;
 use crate::recovery::bandwidth::Bandwidth;
 use crate::Config;
+use crate::Result;
 
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
@@ -175,8 +176,9 @@ pub trait RecoveryOps {
 
     fn on_ack_received(
         &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
-    ) -> OnAckReceivedOutcome;
+        handshake_status: HandshakeStatus, now: Instant, skip_pn: Option<u64>,
+        trace_id: &str,
+    ) -> Result<OnAckReceivedOutcome>;
 
     fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: Instant,
@@ -835,8 +837,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
@@ -934,8 +938,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 2,
                 lost_bytes: 2000,
@@ -1117,8 +1123,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
@@ -1311,8 +1319,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 1,
                 lost_bytes: 1000,
@@ -1335,8 +1345,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
@@ -1445,8 +1457,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
@@ -1654,6 +1668,7 @@ mod tests {
         // ACK 2 packets
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..2);
+
         assert_eq!(
             r.on_ack_received(
                 &acked,
@@ -1661,8 +1676,10 @@ mod tests {
                 epoch,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
@@ -1670,6 +1687,7 @@ mod tests {
                 spurious_losses: 0,
             }
         );
+
         assert_eq!(r.sent_packets_len(epoch), 2);
         assert_eq!(r.bytes_in_flight(), 2 * 1000);
 
@@ -1686,8 +1704,10 @@ mod tests {
                 epoch,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
@@ -1823,8 +1843,10 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
-            ),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
@@ -1914,8 +1936,9 @@ mod tests {
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now + interval,
+                None,
                 "",
-            ),
+            ).unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,

@@ -588,6 +588,10 @@ pub enum Error {
 
     /// The peer sent an ACK frame with an invalid range.
     InvalidAckRange,
+
+    /// The peer send an ACK frame for a skipped packet used for Optimistic ACK
+    /// mitigation.
+    OptimisticAckDetected,
 }
 
 /// QUIC error codes sent on the wire.
@@ -700,6 +704,7 @@ impl Error {
             Error::KeyUpdate => -19,
             Error::CryptoBufferExceeded => -20,
             Error::InvalidAckRange => -21,
+            Error::OptimisticAckDetected => -22,
         }
     }
 }
@@ -1436,6 +1441,11 @@ where
     /// Next packet number.
     next_pkt_num: u64,
 
+    // TODO
+    // combine with `next_pkt_num`
+    /// Track the packet skip context
+    pkt_num_manager: packet::PktNumManager,
+
     /// Peer's transport parameters.
     peer_transport_params: TransportParams,
 
@@ -2009,6 +2019,8 @@ impl<F: BufFactory> Connection<F> {
             ],
 
             next_pkt_num: 0,
+
+            pkt_num_manager: packet::PktNumManager::new(),
 
             peer_transport_params: TransportParams::default(),
 
@@ -4033,6 +4045,7 @@ impl<F: BufFactory> Connection<F> {
         let flow_control = &mut self.flow_control;
         let pkt_space = &mut self.pkt_num_spaces[epoch];
         let crypto_ctx = &mut self.crypto_ctx[epoch];
+        let pkt_num_manager = &mut self.pkt_num_manager;
 
         let mut left = if path.pmtud.is_enabled() {
             // Limit output buffer size by estimated path MTU.
@@ -4041,7 +4054,12 @@ impl<F: BufFactory> Connection<F> {
             b.cap()
         };
 
+        if pkt_num_manager.should_skip_pn(self.handshake_completed) {
+            pkt_num_manager.set_skip_pn(Some(self.next_pkt_num));
+            self.next_pkt_num += 1;
+        };
         let pn = self.next_pkt_num;
+
         let largest_acked_pkt =
             path.recovery.get_largest_acked_on_epoch(epoch).unwrap_or(0);
         let pn_len = packet::pkt_num_len(pn, largest_acked_pkt);
@@ -5106,9 +5124,18 @@ impl<F: BufFactory> Connection<F> {
         epoch: packet::Epoch, handshake_status: recovery::HandshakeStatus,
         now: std::time::Instant,
     ) -> Result<()> {
-        self.pkt_num_spaces[epoch].on_packet_sent(&sent_pkt);
-
         let path = self.paths.get_mut(send_pid)?;
+
+        // It's fine to set the skip counter based on a non-active path's values.
+        let cwnd = path.recovery.cwnd();
+        let max_datagram_size = path.recovery.max_datagram_size();
+        self.pkt_num_spaces[epoch].on_packet_sent(&sent_pkt);
+        self.pkt_num_manager.on_packet_sent(
+            cwnd,
+            max_datagram_size,
+            self.handshake_completed,
+        );
+
         path.recovery.on_packet_sent(
             sent_pkt,
             epoch,
@@ -7584,8 +7611,23 @@ impl<F: BufFactory> Connection<F> {
                         epoch,
                         handshake_status,
                         now,
+                        self.pkt_num_manager.skip_pn(),
                         &self.trace_id,
-                    );
+                    )?;
+
+                    let skip_pn = self.pkt_num_manager.skip_pn();
+                    let largest_acked =
+                        p.recovery.get_largest_acked_on_epoch(epoch);
+
+                    // Consider the skip_pn validated if the peer has sent an ack
+                    // for a larger pkt number.
+                    if let Some((largest_acked, skip_pn)) =
+                        largest_acked.zip(skip_pn)
+                    {
+                        if largest_acked > skip_pn {
+                            self.pkt_num_manager.set_skip_pn(None);
+                        }
+                    }
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
@@ -14855,6 +14897,134 @@ mod tests {
             pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
                 .unwrap_err(),
             Error::InvalidAckRange
+        );
+
+        // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
+        // An endpoint SHOULD treat receipt of an acknowledgment for a packet it
+        // did not send as a connection error of type PROTOCOL_VIOLATION
+        assert_eq!(
+            pipe.server.local_error.unwrap().error_code,
+            WireErrorCode::ProtocolViolation as u64
+        );
+    }
+
+    // Both Client and Server should skip pn to prevent an optimistic ack attack
+    #[rstest]
+    fn optimistic_ack_mitigation_via_skip_pn(
+        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(100_0000);
+        config.set_initial_max_stream_data_bidi_local(100_000);
+        config.set_initial_max_stream_data_bidi_remote(100_000);
+        config.set_initial_max_streams_bidi(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        pipe.handshake().unwrap();
+
+        let mut server_skip_pn = None;
+        let mut client_skip_pn = None;
+        let buf = [42; 100];
+        while server_skip_pn.is_none() || client_skip_pn.is_none() {
+            // Server should send some data
+            assert_eq!(pipe.server.stream_send(1, &buf, false).unwrap(), 100);
+
+            // Advance server tx and client rx
+            let flight = testing::emit_flight(&mut pipe.server).unwrap();
+            testing::process_flight(&mut pipe.client, flight).unwrap();
+
+            // Check if server skipped a pn
+            let server_num_manager = &pipe.server.pkt_num_manager;
+            if let Some(skip_pn) = server_num_manager.skip_pn() {
+                server_skip_pn = Some(skip_pn);
+            }
+
+            // Advance client tx and server rx
+            let flight = testing::emit_flight(&mut pipe.client).unwrap();
+            testing::process_flight(&mut pipe.server, flight).unwrap();
+
+            // Check if client skipped a pn
+            let client_num_manager = &pipe.client.pkt_num_manager;
+            if let Some(skip_pn) = client_num_manager.skip_pn() {
+                client_skip_pn = Some(skip_pn);
+            }
+        }
+
+        // Confirm both server and client skip pn
+        assert!(server_skip_pn.is_some() && client_skip_pn.is_some());
+    }
+
+    // Connection should validate skip pn to prevent an optimistic ack attack
+    #[rstest]
+    fn prevent_optimistic_ack(
+        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(100_0000);
+        config.set_initial_max_stream_data_bidi_local(100_000);
+        config.set_initial_max_stream_data_bidi_remote(100_000);
+        config.set_initial_max_streams_bidi(10);
+        config.verify_peer(false);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        pipe.handshake().unwrap();
+
+        let mut server_skip_pn = None;
+        let buf = [42; 100];
+        while server_skip_pn.is_none() {
+            // Server should send some data
+            pipe.server.stream_send(1, &buf, false).unwrap();
+
+            // Advance server tx and client rx
+            let flight = testing::emit_flight(&mut pipe.server).unwrap();
+            testing::process_flight(&mut pipe.client, flight).unwrap();
+
+            // Check if server skipped a pn
+            if let Some(skip_pn) = pipe.server.pkt_num_manager.skip_pn() {
+                server_skip_pn = Some(skip_pn);
+            }
+        }
+
+        let pkt_type = packet::Type::Short;
+        let mut buf = [0; 2000];
+
+        // Construct an ACK with the skip_pn to send to the server
+        let skip_pn = server_skip_pn.unwrap();
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(skip_pn..skip_pn + 1);
+        let frames = [frame::Frame::ACK {
+            ack_delay: 15,
+            ranges,
+            ecn_counts: None,
+        }];
+
+        // Receiving an ACK for the skip_pn results in an error
+        assert_eq!(
+            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+                .err()
+                .unwrap(),
+            Error::OptimisticAckDetected
         );
 
         // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
