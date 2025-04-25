@@ -884,11 +884,11 @@ impl PktNumSpace {
         }
     }
 
-    fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.ack_elicited = false;
     }
 
-    fn ready(&self) -> bool {
+    pub fn ready(&self) -> bool {
         self.ack_elicited
     }
 }
@@ -920,7 +920,9 @@ impl CryptoContext {
         }
     }
 
-    pub fn clear(&mut self, pkt_space: &mut PktNumSpace) {
+    pub fn clear(&mut self) {
+        self.crypto_open = None;
+        self.crypto_seal = None;
         self.crypto_stream = <stream::Stream>::new(
             0, // dummy
             u64::MAX,
@@ -929,12 +931,10 @@ impl CryptoContext {
             true,
             stream::MAX_STREAM_WINDOW,
         );
-
-        pkt_space.clear();
     }
 
-    pub fn ready(&self, pkt_space: &PktNumSpace) -> bool {
-        self.crypto_stream.is_flushable() || pkt_space.ready()
+    pub fn data_available(&self) -> bool {
+        self.crypto_stream.is_flushable()
     }
 
     pub fn crypto_overhead(&self) -> Option<usize> {

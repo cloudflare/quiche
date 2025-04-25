@@ -7248,13 +7248,16 @@ impl<F: BufFactory> Connection<F> {
         for &epoch in packet::Epoch::epochs(
             packet::Epoch::Initial..=packet::Epoch::Application,
         ) {
+            let crypto_ctx = &self.crypto_ctx[epoch];
+            let pkt_space = &self.pkt_num_spaces[epoch];
+
             // Only send packets in a space when we have the send keys for it.
-            if self.crypto_ctx[epoch].crypto_seal.is_none() {
+            if crypto_ctx.crypto_seal.is_none() {
                 continue;
             }
 
             // We are ready to send data for this packet number space.
-            if self.crypto_ctx[epoch].ready(&self.pkt_num_spaces[epoch]) {
+            if crypto_ctx.data_available() || pkt_space.ready() {
                 return Ok(packet::Type::from_epoch(epoch));
             }
 
@@ -7817,13 +7820,12 @@ impl<F: BufFactory> Connection<F> {
 
     /// Drops the keys and recovery state for the given epoch.
     fn drop_epoch_state(&mut self, epoch: packet::Epoch, now: time::Instant) {
-        if self.crypto_ctx[epoch].crypto_open.is_none() {
+        let crypto_ctx = &mut self.crypto_ctx[epoch];
+        if crypto_ctx.crypto_open.is_none() {
             return;
         }
-
-        self.crypto_ctx[epoch].crypto_open = None;
-        self.crypto_ctx[epoch].crypto_seal = None;
-        self.crypto_ctx[epoch].clear(&mut self.pkt_num_spaces[epoch]);
+        crypto_ctx.clear();
+        self.pkt_num_spaces[epoch].clear();
 
         let handshake_status = self.handshake_status();
         for (_, p) in self.paths.iter_mut() {
