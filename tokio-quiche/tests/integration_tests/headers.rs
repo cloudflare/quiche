@@ -32,7 +32,7 @@ use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::http3::driver::OutboundFrame;
 use tokio_quiche::http3::driver::ServerH3Event;
-use tokio_quiche::quiche::h3::Header;
+use tokio_quiche::h3::Header;
 
 #[tokio::test]
 async fn test_additional_headers() {

@@ -29,8 +29,7 @@
 use inquire::error::InquireResult;
 use inquire::validator::Validation;
 use inquire::Text;
-use quiche;
-use quiche::h3::frame::Frame;
+use ::h3::frame::Frame;
 
 use crate::encode_header_block;
 use crate::encode_header_block_literal;
@@ -120,7 +119,7 @@ pub fn prompt_push_promise() -> InquireResult<Action> {
     Ok(action)
 }
 
-fn pseudo_headers(host_port: &str) -> InquireResult<Vec<quiche::h3::Header>> {
+fn pseudo_headers(host_port: &str) -> InquireResult<Vec<::h3::Header>> {
     let method = Text::new("method:")
         .with_autocomplete(&method_suggester)
         .with_default("GET")
@@ -141,14 +140,14 @@ fn pseudo_headers(host_port: &str) -> InquireResult<Vec<quiche::h3::Header>> {
         .prompt()?;
 
     Ok(vec![
-        quiche::h3::Header::new(b":method", method.as_bytes()),
-        quiche::h3::Header::new(b":authority", authority.as_bytes()),
-        quiche::h3::Header::new(b":path", path.as_bytes()),
-        quiche::h3::Header::new(b":scheme", scheme.as_bytes()),
+        ::h3::Header::new(b":method", method.as_bytes()),
+        ::h3::Header::new(b":authority", authority.as_bytes()),
+        ::h3::Header::new(b":path", path.as_bytes()),
+        ::h3::Header::new(b":scheme", scheme.as_bytes()),
     ])
 }
 
-fn headers_read_loop() -> InquireResult<Vec<quiche::h3::Header>> {
+fn headers_read_loop() -> InquireResult<Vec<::h3::Header>> {
     let mut headers = vec![];
     loop {
         let name = Text::new("field name:")
@@ -165,7 +164,7 @@ fn headers_read_loop() -> InquireResult<Vec<quiche::h3::Header>> {
             .with_help_message(ESC_TO_RET)
             .prompt()?;
 
-        headers.push(quiche::h3::Header::new(name.as_bytes(), value.as_bytes()));
+        headers.push(::h3::Header::new(name.as_bytes(), value.as_bytes()));
     }
 
     Ok(headers)

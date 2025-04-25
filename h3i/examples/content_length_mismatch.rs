@@ -4,9 +4,9 @@ use h3i::actions::h3::StreamEventType;
 use h3i::actions::h3::WaitType;
 use h3i::client::sync_client;
 use h3i::config::Config;
-use quiche::h3::frame::Frame;
-use quiche::h3::Header;
-use quiche::h3::NameValue;
+use h3::frame::Frame;
+use h3::{quiche, Header};
+use h3::NameValue;
 
 /// The QUIC stream to send the frames on. See
 /// https://datatracker.ietf.org/doc/html/rfc9000#name-streams and
@@ -61,7 +61,7 @@ fn main() {
         Action::ConnectionClose {
             error: quiche::ConnectionError {
                 is_app: true,
-                error_code: quiche::h3::WireErrorCode::NoError as u64,
+                error_code: h3::WireErrorCode::NoError as u64,
                 reason: vec![],
             },
         },
@@ -84,9 +84,9 @@ fn main() {
 // `send_headers_frame` helper function to abstract this, but for clarity, we do
 // it here.
 fn encode_header_block(
-    headers: &[quiche::h3::Header],
+    headers: &[h3::Header],
 ) -> std::result::Result<Vec<u8>, String> {
-    let mut encoder = quiche::h3::qpack::Encoder::new();
+    let mut encoder = h3::qpack::Encoder::new();
 
     let headers_len = headers
         .iter()

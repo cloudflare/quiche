@@ -26,7 +26,7 @@
 
 //! Summarizes events that occurred during a connection.
 
-use quiche;
+use h3::quiche;
 use quiche::Connection;
 use quiche::ConnectionError;
 use quiche::PathStats;
@@ -124,7 +124,7 @@ impl StreamMap {
     /// use h3i::client::connection_summary::StreamMap;
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
-    /// use quiche::h3::Header;
+    /// use h3::Header;
     /// use std::iter::FromIterator;
     ///
     /// let h = Header::new(b"hello", b"world");
@@ -149,7 +149,7 @@ impl StreamMap {
     /// use h3i::client::connection_summary::StreamMap;
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
-    /// use quiche::h3::Header;
+    /// use h3::Header;
     /// use std::iter::FromIterator;
     ///
     /// let mut stream_map = StreamMap::default();
@@ -176,7 +176,7 @@ impl StreamMap {
     /// use h3i::client::connection_summary::StreamMap;
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
-    /// use quiche::h3::Header;
+    /// use h3::Header;
     /// use std::iter::FromIterator;
     ///
     /// let h = Header::new(b"hello", b"world");
@@ -197,7 +197,7 @@ impl StreamMap {
     /// use h3i::client::connection_summary::StreamMap;
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
-    /// use quiche::h3::Header;
+    /// use h3::Header;
     /// use std::iter::FromIterator;
     ///
     /// let h = Header::new(b"hello", b"world");
@@ -223,7 +223,7 @@ impl StreamMap {
     /// use h3i::client::connection_summary::StreamMap;
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
-    /// use quiche::h3::Header;
+    /// use h3::Header;
     /// use std::iter::FromIterator;
     ///
     /// let mut stream_map = StreamMap::default();
@@ -247,13 +247,13 @@ impl StreamMap {
     /// use h3i::client::connection_summary::StreamMap;
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
-    /// use quiche::h3::Header;
+    /// use h3::Header;
     /// use std::iter::FromIterator;
     ///
     /// let h = Header::new(b"hello", b"world");
     /// let enriched = EnrichedHeaders::from(vec![h]);
     /// let headers = H3iFrame::Headers(enriched.clone());
-    /// let data = H3iFrame::QuicheH3(quiche::h3::frame::Frame::Data {
+    /// let data = H3iFrame::QuicheH3(h3::frame::Frame::Data {
     ///     payload: b"hello world".to_vec(),
     /// });
     ///
@@ -344,7 +344,7 @@ impl CloseTriggerFrames {
     pub fn new(frames: Vec<CloseTriggerFrame>) -> Self {
         Self::new_with_connection_close(frames, ConnectionError {
             is_app: true,
-            error_code: quiche::h3::WireErrorCode::NoError as u64,
+            error_code: h3::WireErrorCode::NoError as u64,
             reason: b"saw all close trigger frames".to_vec(),
         })
     }
@@ -562,7 +562,7 @@ impl Serialize for SerializableConnectionError<'_> {
 mod tests {
     use super::*;
     use crate::frame::EnrichedHeaders;
-    use quiche::h3::Header;
+    use h3::Header;
 
     fn h3i_frame() -> H3iFrame {
         vec![Header::new(b"hello", b"world")].into()
@@ -602,7 +602,7 @@ mod tests {
             H3iFrame::Headers(EnrichedHeaders::from(vec![Header::new(
                 b"hello", b"world",
             )]));
-        let data = H3iFrame::QuicheH3(quiche::h3::frame::Frame::Data {
+        let data = H3iFrame::QuicheH3(h3::frame::Frame::Data {
             payload: b"hello world".to_vec(),
         });
 

@@ -54,6 +54,9 @@ pub struct EcnCounts {
     ecn_ce_count: u64,
 }
 
+/// QUIC frames. RFC 9000 section 19.
+/// todo add docs
+#[allow(missing_docs)]
 #[derive(Clone, PartialEq, Eq)]
 pub enum Frame {
     Padding {
@@ -186,6 +189,8 @@ pub enum Frame {
     },
 }
 
+/// todo add docs
+#[allow(missing_docs)]
 impl Frame {
     pub fn from_bytes(
         b: &mut octets::Octets, pkt: packet::Type,

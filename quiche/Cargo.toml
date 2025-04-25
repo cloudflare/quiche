@@ -83,6 +83,7 @@ sfv = { version = "0.9", optional = true }
 slab = "0.4"
 smallvec = { workspace = true, features = ["union"] }
 enum_dispatch = "0.3"
+visibility = "0.1.1"
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.59", features = [

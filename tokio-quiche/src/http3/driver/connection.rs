@@ -33,7 +33,7 @@ use datagram_socket::AsSocketStats;
 use datagram_socket::QuicAuditStats;
 use datagram_socket::ShutdownConnection;
 use datagram_socket::SocketStats;
-use quiche::ConnectionId;
+use h3::quiche::ConnectionId;
 
 use super::client;
 use super::server;

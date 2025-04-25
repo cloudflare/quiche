@@ -44,7 +44,7 @@ use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
 use futures::FutureExt;
 use futures_util::stream::FuturesUnordered;
-use quiche::h3;
+use h3;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -53,7 +53,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 use tokio_util::sync::PollSender;
-
+use h3::quiche;
 use self::hooks::DriverHooks;
 use self::hooks::InboundHeaders;
 use self::streams::FlowCtx;
@@ -765,8 +765,8 @@ impl<H: DriverHooks> H3Driver<H> {
                     self.finish_stream(
                         qconn,
                         stream_id,
-                        Some(quiche::h3::WireErrorCode::NoError as u64),
-                        Some(quiche::h3::WireErrorCode::NoError as u64),
+                        Some(h3::WireErrorCode::NoError as u64),
+                        Some(h3::WireErrorCode::NoError as u64),
                     )?;
                     self.flow_map.remove(&flow_id);
                     break;
@@ -913,8 +913,8 @@ impl<H: DriverHooks> H3Driver<H> {
                     return self.finish_stream(
                         qconn,
                         stream_id,
-                        Some(quiche::h3::WireErrorCode::MessageError as u64),
-                        Some(quiche::h3::WireErrorCode::MessageError as u64),
+                        Some(h3::WireErrorCode::MessageError as u64),
+                        Some(h3::WireErrorCode::MessageError as u64),
                     );
                 },
                 Err(h3::Error::TransportError(quiche::Error::StreamStopped(
@@ -999,8 +999,8 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
         &mut self.pooled_buf
     }
 
-    /// Poll the underlying [`quiche::h3::Connection`] for
-    /// [`quiche::h3::Event`]s and DATAGRAMs, delegating processing to
+    /// Poll the underlying [`h3::Connection`] for
+    /// [`h3::Event`]s and DATAGRAMs, delegating processing to
     /// `Self::process_read_event`.
     ///
     /// If a DATAGRAM is found, it is sent to the receiver on its channel.
@@ -1024,7 +1024,7 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
         Ok(())
     }
 
-    /// Write as much data as possible into the [`quiche::h3::Connection`] from
+    /// Write as much data as possible into the [`h3::Connection`] from
     /// all sources. This will attempt to write any queued frames into their
     /// respective streams, if writable.
     fn process_writes(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()> {

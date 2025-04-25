@@ -36,9 +36,9 @@ use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
 use tokio_quiche::quic::ConnectionHook;
 use tokio_quiche::quic::SimpleConnectionIdGenerator;
-use tokio_quiche::quiche::h3::Header;
-use tokio_quiche::quiche::h3::NameValue;
-use tokio_quiche::quiche::h3::{
+use tokio_quiche::h3::Header;
+use tokio_quiche::h3::NameValue;
+use tokio_quiche::h3::{
     self,
 };
 use tokio_quiche::settings::Hooks;

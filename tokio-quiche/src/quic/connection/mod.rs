@@ -43,6 +43,7 @@ use datagram_socket::SocketStats;
 use foundations::telemetry::log;
 use futures::future::BoxFuture;
 use futures::Future;
+use h3::quiche;
 use quiche::ConnectionId;
 use std::fmt;
 use std::io;

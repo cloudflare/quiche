@@ -48,8 +48,9 @@ use ring::rand::SecureRandom;
 
 use quiche::ConnectionId;
 
-use quiche::h3::NameValue;
-use quiche::h3::Priority;
+use h3::quiche;
+use h3::NameValue;
+use h3::Priority;
 
 pub fn stdout_sink(out: String) {
     print!("{out}");
@@ -70,8 +71,8 @@ pub struct PartialRequest {
 }
 
 pub struct PartialResponse {
-    pub headers: Option<Vec<quiche::h3::Header>>,
-    pub priority: Option<quiche::h3::Priority>,
+    pub headers: Option<Vec<h3::Header>>,
+    pub priority: Option<h3::Priority>,
 
     pub body: Vec<u8>,
 
@@ -241,7 +242,7 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
     output_sink(out);
 }
 
-pub fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
+pub fn hdrs_to_strings(hdrs: &[h3::Header]) -> Vec<(String, String)> {
     hdrs.iter()
         .map(|h| {
             let name = String::from_utf8_lossy(h.name()).to_string();
@@ -350,7 +351,7 @@ pub trait HttpConn {
         partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, buf: &mut [u8],
-    ) -> quiche::h3::Result<()>;
+    ) -> h3::Result<()>;
 
     fn handle_writable(
         &mut self, conn: &mut quiche::Connection,
@@ -378,16 +379,16 @@ struct Http3Request {
     url: url::Url,
     cardinal: u64,
     stream_id: Option<u64>,
-    hdrs: Vec<quiche::h3::Header>,
+    hdrs: Vec<h3::Header>,
     priority: Option<Priority>,
-    response_hdrs: Vec<quiche::h3::Header>,
+    response_hdrs: Vec<h3::Header>,
     response_body: Vec<u8>,
     response_body_max: usize,
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
 }
 
 type Http3ResponseBuilderResult = std::result::Result<
-    (Vec<quiche::h3::Header>, Vec<u8>, Vec<u8>),
+    (Vec<h3::Header>, Vec<u8>, Vec<u8>),
     (u64, String),
 >;
 
@@ -573,7 +574,7 @@ impl HttpConn for Http09Conn {
         partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, buf: &mut [u8],
-    ) -> quiche::h3::Result<()> {
+    ) -> h3::Result<()> {
         // Process all readable streams.
         for s in conn.readable() {
             while let Ok((read, fin)) = conn.stream_recv(s, buf) {
@@ -737,8 +738,8 @@ impl Http3DgramSender {
 fn make_h3_config(
     max_field_section_size: Option<u64>, qpack_max_table_capacity: Option<u64>,
     qpack_blocked_streams: Option<u64>,
-) -> quiche::h3::Config {
-    let mut config = quiche::h3::Config::new().unwrap();
+) -> h3::Config {
+    let mut config = h3::Config::new().unwrap();
 
     if let Some(v) = max_field_section_size {
         config.set_max_field_section_size(v);
@@ -758,7 +759,7 @@ fn make_h3_config(
 }
 
 pub struct Http3Conn {
-    h3_conn: quiche::h3::Connection,
+    h3_conn: h3::Connection,
     reqs_hdrs_sent: usize,
     reqs_complete: usize,
     largest_processed_request: u64,
@@ -791,14 +792,14 @@ impl Http3Conn {
                 };
 
                 let mut hdrs = vec![
-                    quiche::h3::Header::new(b":method", method.as_bytes()),
-                    quiche::h3::Header::new(b":scheme", url.scheme().as_bytes()),
-                    quiche::h3::Header::new(b":authority", authority.as_bytes()),
-                    quiche::h3::Header::new(
+                    h3::Header::new(b":method", method.as_bytes()),
+                    h3::Header::new(b":scheme", url.scheme().as_bytes()),
+                    h3::Header::new(b":authority", authority.as_bytes()),
+                    h3::Header::new(
                         b":path",
                         url[url::Position::BeforePath..].as_bytes(),
                     ),
-                    quiche::h3::Header::new(b"user-agent", b"quiche"),
+                    h3::Header::new(b"user-agent", b"quiche"),
                 ];
 
                 let priority = if send_priority_update {
@@ -816,14 +817,14 @@ impl Http3Conn {
                         panic!("malformed header provided - \"{}\"", header);
                     }
 
-                    hdrs.push(quiche::h3::Header::new(
+                    hdrs.push(h3::Header::new(
                         header_split[0].as_bytes(),
                         header_split[1].as_bytes(),
                     ));
                 }
 
                 if body.is_some() {
-                    hdrs.push(quiche::h3::Header::new(
+                    hdrs.push(h3::Header::new(
                         b"content-length",
                         body.as_ref().unwrap().len().to_string().as_bytes(),
                     ));
@@ -844,7 +845,7 @@ impl Http3Conn {
         }
 
         let h_conn = Http3Conn {
-            h3_conn: quiche::h3::Connection::with_transport(
+            h3_conn: h3::Connection::with_transport(
                 conn,
                 &make_h3_config(
                     max_field_section_size,
@@ -873,7 +874,7 @@ impl Http3Conn {
         dgram_sender: Option<Http3DgramSender>,
         output_sink: Rc<RefCell<dyn FnMut(String)>>,
     ) -> std::result::Result<Box<dyn HttpConn>, String> {
-        let h3_conn = quiche::h3::Connection::with_transport(
+        let h3_conn = h3::Connection::with_transport(
             conn,
             &make_h3_config(
                 max_field_section_size,
@@ -900,7 +901,7 @@ impl Http3Conn {
 
     /// Builds an HTTP/3 response given a request.
     fn build_h3_response(
-        root: &str, index: &str, request: &[quiche::h3::Header],
+        root: &str, index: &str, request: &[h3::Header],
     ) -> Http3ResponseBuilderResult {
         let mut file_path = path::PathBuf::from(root);
         let mut scheme = None;
@@ -984,11 +985,11 @@ impl Http3Conn {
                     "CONNECT" => {
                         // not allowed
                         let headers = vec![
-                            quiche::h3::Header::new(
+                            h3::Header::new(
                                 b":status",
                                 "405".to_string().as_bytes(),
                             ),
-                            quiche::h3::Header::new(b"server", b"quiche"),
+                            h3::Header::new(b"server", b"quiche"),
                         ];
 
                         return Ok((headers, b"".to_vec(), Default::default()));
@@ -1009,11 +1010,11 @@ impl Http3Conn {
             Some(scheme) => {
                 if scheme != "http" && scheme != "https" {
                     let headers = vec![
-                        quiche::h3::Header::new(
+                        h3::Header::new(
                             b":status",
                             "400".to_string().as_bytes(),
                         ),
-                        quiche::h3::Header::new(b"server", b"quiche"),
+                        h3::Header::new(b"server", b"quiche"),
                     ];
 
                     return Ok((
@@ -1111,9 +1112,9 @@ impl Http3Conn {
         };
 
         let headers = vec![
-            quiche::h3::Header::new(b":status", status.to_string().as_bytes()),
-            quiche::h3::Header::new(b"server", b"quiche"),
-            quiche::h3::Header::new(
+            h3::Header::new(b":status", status.to_string().as_bytes()),
+            h3::Header::new(b"server", b"quiche"),
+            h3::Header::new(
                 b"content-length",
                 body.len().to_string().as_bytes(),
             ),
@@ -1138,14 +1139,14 @@ impl HttpConn for Http3Conn {
             ) {
                 Ok(v) => v,
 
-                Err(quiche::h3::Error::TransportError(
+                Err(h3::Error::TransportError(
                     quiche::Error::StreamLimit,
                 )) => {
                     debug!("not enough stream credits, retry later...");
                     break;
                 },
 
-                Err(quiche::h3::Error::StreamBlocked) => {
+                Err(h3::Error::StreamBlocked) => {
                     debug!("stream is blocked, retry later...");
                     break;
                 },
@@ -1191,7 +1192,7 @@ impl HttpConn for Http3Conn {
                 ) {
                     Ok(v) => v,
 
-                    Err(quiche::h3::Error::Done) => 0,
+                    Err(h3::Error::Done) => 0,
 
                     Err(e) => {
                         error!("failed to send request body {:?}", e);
@@ -1231,7 +1232,7 @@ impl HttpConn for Http3Conn {
     ) {
         loop {
             match self.h3_conn.poll(conn) {
-                Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
+                Ok((stream_id, h3::Event::Headers { list, .. })) => {
                     debug!(
                         "got response headers {:?} on stream id {}",
                         hdrs_to_strings(&list),
@@ -1247,7 +1248,7 @@ impl HttpConn for Http3Conn {
                     req.response_hdrs = list;
                 },
 
-                Ok((stream_id, quiche::h3::Event::Data)) => {
+                Ok((stream_id, h3::Event::Data)) => {
                     while let Ok(read) =
                         self.h3_conn.recv_body(conn, stream_id, buf)
                     {
@@ -1285,7 +1286,7 @@ impl HttpConn for Http3Conn {
                     }
                 },
 
-                Ok((_stream_id, quiche::h3::Event::Finished)) => {
+                Ok((_stream_id, h3::Event::Finished)) => {
                     self.reqs_complete += 1;
                     let reqs_count = self.reqs.len();
 
@@ -1320,7 +1321,7 @@ impl HttpConn for Http3Conn {
                     }
                 },
 
-                Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
+                Ok((_stream_id, h3::Event::Reset(e))) => {
                     error!("request was reset by peer with {}, closing...", e);
 
                     match conn.close(true, 0x100, b"kthxbye") {
@@ -1335,7 +1336,7 @@ impl HttpConn for Http3Conn {
 
                 Ok((
                     prioritized_element_id,
-                    quiche::h3::Event::PriorityUpdate,
+                    h3::Event::PriorityUpdate,
                 )) => {
                     info!(
                         "{} PRIORITY_UPDATE triggered for element ID={}",
@@ -1344,7 +1345,7 @@ impl HttpConn for Http3Conn {
                     );
                 },
 
-                Ok((goaway_id, quiche::h3::Event::GoAway)) => {
+                Ok((goaway_id, h3::Event::GoAway)) => {
                     info!(
                         "{} got GOAWAY with ID {} ",
                         conn.trace_id(),
@@ -1352,7 +1353,7 @@ impl HttpConn for Http3Conn {
                     );
                 },
 
-                Err(quiche::h3::Error::Done) => {
+                Err(h3::Error::Done) => {
                     break;
                 },
 
@@ -1402,14 +1403,14 @@ impl HttpConn for Http3Conn {
         _partial_requests: &mut HashMap<u64, PartialRequest>,
         partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
         index: &str, buf: &mut [u8],
-    ) -> quiche::h3::Result<()> {
+    ) -> h3::Result<()> {
         // Process HTTP stream-related events.
         //
         // This loops over any and all received HTTP requests and sends just the
         // HTTP response headers.
         loop {
             match self.h3_conn.poll(conn) {
-                Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
+                Ok((stream_id, h3::Event::Headers { list, .. })) => {
                     info!(
                         "{} got request {:?} on stream id {}",
                         conn.trace_id(),
@@ -1447,7 +1448,7 @@ impl HttpConn for Http3Conn {
                             priority = v;
                         },
 
-                        Err(quiche::h3::Error::Done) => (),
+                        Err(h3::Error::Done) => (),
 
                         Err(e) => error!(
                             "{} error taking PRIORITY_UPDATE {}",
@@ -1457,7 +1458,7 @@ impl HttpConn for Http3Conn {
                     }
 
                     if !priority.is_empty() {
-                        headers.push(quiche::h3::Header::new(
+                        headers.push(h3::Header::new(
                             b"priority",
                             priority.as_slice(),
                         ));
@@ -1465,11 +1466,11 @@ impl HttpConn for Http3Conn {
 
                     #[cfg(feature = "sfv")]
                     let priority =
-                        quiche::h3::Priority::try_from(priority.as_slice())
+                        h3::Priority::try_from(priority.as_slice())
                             .unwrap_or_default();
 
                     #[cfg(not(feature = "sfv"))]
-                    let priority = quiche::h3::Priority::default();
+                    let priority = h3::Priority::default();
 
                     info!(
                         "{} prioritizing response on stream {} as {:?}",
@@ -1483,7 +1484,7 @@ impl HttpConn for Http3Conn {
                     ) {
                         Ok(v) => v,
 
-                        Err(quiche::h3::Error::StreamBlocked) => {
+                        Err(h3::Error::StreamBlocked) => {
                             let response = PartialResponse {
                                 headers: Some(headers),
                                 priority: Some(priority),
@@ -1516,7 +1517,7 @@ impl HttpConn for Http3Conn {
                     partial_responses.insert(stream_id, response);
                 },
 
-                Ok((stream_id, quiche::h3::Event::Data)) => {
+                Ok((stream_id, h3::Event::Data)) => {
                     info!(
                         "{} got data on stream id {}",
                         conn.trace_id(),
@@ -1524,13 +1525,13 @@ impl HttpConn for Http3Conn {
                     );
                 },
 
-                Ok((_stream_id, quiche::h3::Event::Finished)) => (),
+                Ok((_stream_id, h3::Event::Finished)) => (),
 
-                Ok((_stream_id, quiche::h3::Event::Reset { .. })) => (),
+                Ok((_stream_id, h3::Event::Reset { .. })) => (),
 
                 Ok((
                     prioritized_element_id,
-                    quiche::h3::Event::PriorityUpdate,
+                    h3::Event::PriorityUpdate,
                 )) => {
                     info!(
                         "{} PRIORITY_UPDATE triggered for element ID={}",
@@ -1539,7 +1540,7 @@ impl HttpConn for Http3Conn {
                     );
                 },
 
-                Ok((goaway_id, quiche::h3::Event::GoAway)) => {
+                Ok((goaway_id, h3::Event::GoAway)) => {
                     trace!(
                         "{} got GOAWAY with ID {} ",
                         conn.trace_id(),
@@ -1549,7 +1550,7 @@ impl HttpConn for Http3Conn {
                         .send_goaway(conn, self.largest_processed_request)?;
                 },
 
-                Err(quiche::h3::Error::Done) => {
+                Err(h3::Error::Done) => {
                     break;
                 },
 
@@ -1625,7 +1626,7 @@ impl HttpConn for Http3Conn {
             ) {
                 Ok(_) => (),
 
-                Err(quiche::h3::Error::StreamBlocked) => {
+                Err(h3::Error::StreamBlocked) => {
                     return;
                 },
 
@@ -1644,7 +1645,7 @@ impl HttpConn for Http3Conn {
         let written = match self.h3_conn.send_body(conn, stream_id, body, true) {
             Ok(v) => v,
 
-            Err(quiche::h3::Error::Done) => 0,
+            Err(h3::Error::Done) => 0,
 
             Err(e) => {
                 partial_responses.remove(&stream_id);

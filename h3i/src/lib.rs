@@ -52,9 +52,10 @@
 //! use h3i::actions::h3::WaitType;
 //! use h3i::client::sync_client;
 //! use h3i::config::Config;
-//! use quiche::h3::frame::Frame;
-//! use quiche::h3::Header;
-//! use quiche::h3::NameValue;
+//! use h3::frame::Frame;
+//! use h3::Header;
+//! use h3::NameValue;
+//! use h3::quiche;
 //!
 //! fn main() {
 //!    /// The QUIC stream to send the frames on. See
@@ -106,7 +107,7 @@
 //!        Action::ConnectionClose {
 //!            error: quiche::ConnectionError {
 //!                is_app: true,
-//!                error_code: quiche::h3::WireErrorCode::NoError as u64,
+//!                error_code: h3::WireErrorCode::NoError as u64,
 //!                reason: vec![],
 //!            },
 //!        },
@@ -127,9 +128,9 @@
 //! // `send_headers_frame` helper function to abstract this, but for clarity, we do
 //! // it here.
 //! fn encode_header_block(
-//!     headers: &[quiche::h3::Header],
+//!     headers: &[h3::Header],
 //! ) -> std::result::Result<Vec<u8>, String> {
-//!     let mut encoder = quiche::h3::qpack::Encoder::new();
+//!     let mut encoder = h3::qpack::Encoder::new();
 //!
 //!     let headers_len = headers
 //!         .iter()
@@ -157,11 +158,12 @@ use qlog::events::quic::PacketSent;
 use qlog::events::quic::PacketType;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
-pub use quiche;
-use quiche::h3::qpack::encode_int;
-use quiche::h3::qpack::encode_str;
-use quiche::h3::qpack::LITERAL;
-use quiche::h3::NameValue;
+pub use h3::quiche;
+pub use h3;
+use h3::qpack::encode_int;
+use h3::qpack::encode_str;
+use h3::qpack::LITERAL;
+use h3::NameValue;
 
 use smallvec::SmallVec;
 
@@ -208,9 +210,9 @@ impl StreamIdAllocator {
 /// means it does not use the huffman lookup table, nor does it convert
 /// the header names to lowercase before encoding.
 fn encode_header_block_literal(
-    headers: &[quiche::h3::Header],
+    headers: &[h3::Header],
 ) -> std::result::Result<Vec<u8>, String> {
-    // This is a combination of a modified `quiche::h3::qpack::Encoder::encode`
+    // This is a combination of a modified `h3::qpack::Encoder::encode`
     // and the [`encode_header_block`] function.
     let headers_len = headers
         .iter()
@@ -240,9 +242,9 @@ fn encode_header_block_literal(
 }
 
 fn encode_header_block(
-    headers: &[quiche::h3::Header],
+    headers: &[h3::Header],
 ) -> std::result::Result<Vec<u8>, String> {
-    let mut encoder = quiche::h3::qpack::Encoder::new();
+    let mut encoder = h3::qpack::Encoder::new();
 
     let headers_len = headers
         .iter()

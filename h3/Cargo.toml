@@ -1,0 +1,50 @@
+[package]
+name = "h3"
+version = "0.1.0"
+authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
+edition = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[features]
+
+# Enable quiche's fuzzing mode.
+fuzzing = ["quiche/fuzzing"]
+
+# Build and expose the FFI API.
+ffi = ["quiche/ffi"]
+
+# Exposes internal APIs that have no stability guarantees across versions.
+internal = ["quiche/internal"]
+
+# Use BoringSSL provided by the boring crate.
+boringssl-boring-crate = ["quiche/boringssl-boring-crate"]
+
+qlog = ["quiche/qlog", "dep:qlog"]
+
+# Replaces quiche's original congestion control
+# implementation with one adapted from google/quiche.
+gcongestion = ["quiche/gcongestion"]
+
+sfv = ["quiche/sfv", "dep:sfv"]
+
+# Build quiche against OpenSSL instead of BoringSSL.
+openssl = ["quiche/openssl"]
+
+[dependencies]
+quiche = { workspace = true }
+qlog = { workspace = true, optional = true }
+log = { workspace = true, features = ["std"] }
+octets = { workspace = true }
+sfv = { version = "0.9", optional = true }
+
+[dev-dependencies]
+mio = { workspace = true, features = ["net", "os-poll"] }
+ring = { workspace = true }
+url = { workspace = true }
+
+[lib]
+crate-type = ["lib"]

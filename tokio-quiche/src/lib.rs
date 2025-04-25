@@ -95,7 +95,8 @@
 //! - `--cfg capture_keylogs`: Optional `SSLKEYLOGFILE` capturing for QUIC
 //!   connections.
 
-pub extern crate quiche;
+pub use h3;
+pub use h3::quiche;
 
 pub mod buf_factory;
 pub mod http3;

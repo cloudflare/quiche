@@ -60,7 +60,7 @@ pub struct Http3Settings {
     pub post_accept_timeout: Option<Duration>,
 }
 
-impl From<&Http3Settings> for quiche::h3::Config {
+impl From<&Http3Settings> for h3::Config {
     fn from(value: &Http3Settings) -> Self {
         let mut config = Self::new().unwrap();
 
@@ -158,7 +158,7 @@ impl Http3SettingsEnforcer {
 
         if result.connection_timed_out {
             log::debug!("connection timed out due to post-accept-timeout"; "scid" => ?qconn.source_id());
-            qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[])?;
+            qconn.close(true, h3::WireErrorCode::NoError as u64, &[])?;
         }
 
         Ok(())

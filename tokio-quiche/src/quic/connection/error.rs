@@ -26,6 +26,7 @@
 
 use crate::result::QuicResult;
 use std::io;
+use h3::quiche;
 
 /// Additional error types that can occur during a QUIC handshake.
 ///

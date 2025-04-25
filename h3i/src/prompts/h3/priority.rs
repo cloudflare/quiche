@@ -32,8 +32,6 @@ use super::stream::prompt_fin_stream;
 use crate::actions::h3::Action;
 use crate::prompts::h3;
 
-use quiche;
-
 const REQUEST: &str = "request";
 const PUSH: &str = "push";
 
@@ -46,12 +44,12 @@ pub fn prompt_priority() -> InquireResult<Action> {
     let priority_field_value = Text::new("priority field value:").prompt()?;
 
     let frame = if ty.as_str() == REQUEST {
-        quiche::h3::frame::Frame::PriorityUpdateRequest {
+        ::h3::frame::Frame::PriorityUpdateRequest {
             prioritized_element_id,
             priority_field_value: priority_field_value.into(),
         }
     } else {
-        quiche::h3::frame::Frame::PriorityUpdatePush {
+        ::h3::frame::Frame::PriorityUpdatePush {
             prioritized_element_id,
             priority_field_value: priority_field_value.into(),
         }

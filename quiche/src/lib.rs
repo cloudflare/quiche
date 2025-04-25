@@ -1595,7 +1595,10 @@ where
     /// TLS keylog writer.
     keylog: Option<Box<dyn std::io::Write + Send + Sync>>,
 
-    #[cfg(feature = "qlog")]
+    /// Qlog info.
+    #[cfg(all(feature = "qlog", feature = "internal"))]
+    pub qlog: QlogInfo,
+    #[cfg(all(feature = "qlog", not(feature = "internal")))]
     qlog: QlogInfo,
 
     /// DATAGRAM queues.
@@ -1847,6 +1850,7 @@ macro_rules! push_frame_to_pkt {
 /// Executes the provided body if the qlog feature is enabled, quiche has been
 /// configured with a log writer, the event's importance is within the
 /// configured level.
+#[macro_export]
 macro_rules! qlog_with_type {
     ($ty:expr, $qlog:expr, $qlog_streamer_ref:ident, $body:block) => {{
         #[cfg(feature = "qlog")]
@@ -1884,11 +1888,15 @@ const QLOG_METRICS: EventType =
 const QLOG_CONNECTION_CLOSED: EventType =
     EventType::ConnectivityEventType(ConnectivityEventType::ConnectionClosed);
 
+/// Qlog info
+#[cfg_attr(feature = "internal", visibility::make(pub))]
 #[cfg(feature = "qlog")]
 struct QlogInfo {
-    streamer: Option<qlog::streamer::QlogStreamer>,
+    /// todo add getter instead
+    pub streamer: Option<qlog::streamer::QlogStreamer>,
     logged_peer_params: bool,
-    level: EventImportance,
+    /// todo add getter instead
+    pub level: EventImportance,
 }
 
 #[cfg(feature = "qlog")]
@@ -6162,7 +6170,8 @@ impl<F: BufFactory> Connection<F> {
         }
     }
 
-    fn dgram_enabled(&self) -> bool {
+    /// Whether the connection can receive DATAGRAM frames (RFC 9221).
+    pub fn dgram_enabled(&self) -> bool {
         self.local_transport_params
             .max_datagram_frame_size
             .is_some()
@@ -8272,6 +8281,43 @@ impl<F: BufFactory> Connection<F> {
             self.qlog.streamer = None;
         }
         self.closed = true;
+    }
+
+    /// Whether to send GREASE.
+    #[cfg(feature = "internal")]
+    pub fn grease_enabled(&self) -> bool {
+        self.grease
+    }
+
+    /// Returns the current max_streams_bidi limit.
+    #[cfg(feature = "internal")]
+    pub fn max_streams_bidi(&self) -> u64 {
+        self.streams.max_streams_bidi()
+    }
+
+    /// Returns true if the stream has been collected.
+    #[cfg(feature = "internal")]
+    pub fn stream_is_collected(&self, stream_id: u64) -> bool {
+        self.streams.is_collected(stream_id)
+    }
+
+    /// Number of raw packets that were received before they could be decrypted.
+    #[cfg(feature = "internal")]
+    pub fn num_undecryptable_pkts(&self) -> usize {
+        self.undecryptable_pkts.len()
+    }
+
+
+    /// Number of streams that need to send STREAM_DATA_BLOCKED.
+    #[cfg(feature = "internal")]
+    pub fn num_streams_blocked(&self) -> usize {
+        self.streams.blocked().len()
+    }
+
+    /// Number of stream data bytes that can be buffered.
+    #[cfg(feature = "internal")]
+    pub fn tx_cap(&self) -> usize {
+        self.tx_cap
     }
 }
 
@@ -18743,9 +18789,20 @@ pub use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::RecoveryOps;
 
 pub use crate::stream::StreamIter;
+#[cfg(feature = "internal")]
+pub use crate::stream::StreamIdHashMap;
+#[cfg(feature = "internal")]
+pub use crate::stream::is_bidi as stream_is_bidi;
+#[cfg(feature = "internal")]
+pub use crate::stream::is_local as stream_is_local;
 
 pub use crate::range_buf::BufFactory;
 pub use crate::range_buf::BufSplit;
+#[cfg(feature = "internal")]
+pub use crate::range_buf::RangeBuf;
+
+#[cfg(feature = "internal")]
+pub use crate::frame::Frame;
 
 mod cid;
 mod crypto;
@@ -18754,12 +18811,13 @@ mod dgram;
 mod ffi;
 mod flowcontrol;
 mod frame;
-pub mod h3;
 mod minmax;
 mod packet;
 mod path;
 mod pmtud;
-mod rand;
+/// Utils for secure randomness
+#[cfg(feature = "internal")]
+pub mod rand;
 mod range_buf;
 mod ranges;
 mod recovery;

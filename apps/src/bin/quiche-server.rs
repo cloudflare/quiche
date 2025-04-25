@@ -43,6 +43,8 @@ use std::cell::RefCell;
 
 use ring::rand::*;
 
+use h3::quiche;
+
 use quiche_apps::args::*;
 
 use quiche_apps::common::*;

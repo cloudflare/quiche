@@ -39,7 +39,7 @@
 //!
 //! ```
 //! let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
-//! config.set_application_protos(quiche::h3::APPLICATION_PROTOCOL)?;
+//! config.set_application_protos(h3::APPLICATION_PROTOCOL)?;
 //! # Ok::<(), quiche::Error>(())
 //! ```
 //!
@@ -49,8 +49,8 @@
 //! connection is creating its configuration object:
 //!
 //! ```
-//! let h3_config = quiche::h3::Config::new()?;
-//! # Ok::<(), quiche::h3::Error>(())
+//! let h3_config = h3::Config::new()?;
+//! # Ok::<(), h3::Error>(())
 //! ```
 //!
 //! HTTP/3 client and server connections are both created using the
@@ -63,9 +63,9 @@
 //! # let peer = "127.0.0.1:1234".parse().unwrap();
 //! # let local = "127.0.0.1:4321".parse().unwrap();
 //! # let mut conn = quiche::accept(&scid, None, local, peer, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new()?;
-//! let h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
-//! # Ok::<(), quiche::h3::Error>(())
+//! # let h3_config = h3::Config::new()?;
+//! let h3_conn = h3::Connection::with_transport(&mut conn, &h3_config)?;
+//! # Ok::<(), h3::Error>(())
 //! ```
 //!
 //! ## Sending a request
@@ -80,18 +80,18 @@
 //! # let peer = "127.0.0.1:1234".parse().unwrap();
 //! # let local = "127.0.0.1:4321".parse().unwrap();
 //! # let mut conn = quiche::connect(None, &scid, local, peer, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new()?;
-//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
+//! # let h3_config = h3::Config::new()?;
+//! # let mut h3_conn = h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
-//!     quiche::h3::Header::new(b":method", b"GET"),
-//!     quiche::h3::Header::new(b":scheme", b"https"),
-//!     quiche::h3::Header::new(b":authority", b"quic.tech"),
-//!     quiche::h3::Header::new(b":path", b"/"),
-//!     quiche::h3::Header::new(b"user-agent", b"quiche"),
+//!     h3::Header::new(b":method", b"GET"),
+//!     h3::Header::new(b":scheme", b"https"),
+//!     h3::Header::new(b":authority", b"quic.tech"),
+//!     h3::Header::new(b":path", b"/"),
+//!     h3::Header::new(b"user-agent", b"quiche"),
 //! ];
 //!
 //! h3_conn.send_request(&mut conn, &req, true)?;
-//! # Ok::<(), quiche::h3::Error>(())
+//! # Ok::<(), h3::Error>(())
 //! ```
 //!
 //! An HTTP/3 client can send a request with additional body data by using
@@ -103,19 +103,19 @@
 //! # let peer = "127.0.0.1:1234".parse().unwrap();
 //! # let local = "127.0.0.1:4321".parse().unwrap();
 //! # let mut conn = quiche::connect(None, &scid, local, peer, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new()?;
-//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
+//! # let h3_config = h3::Config::new()?;
+//! # let mut h3_conn = h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! let req = vec![
-//!     quiche::h3::Header::new(b":method", b"GET"),
-//!     quiche::h3::Header::new(b":scheme", b"https"),
-//!     quiche::h3::Header::new(b":authority", b"quic.tech"),
-//!     quiche::h3::Header::new(b":path", b"/"),
-//!     quiche::h3::Header::new(b"user-agent", b"quiche"),
+//!     h3::Header::new(b":method", b"GET"),
+//!     h3::Header::new(b":scheme", b"https"),
+//!     h3::Header::new(b":authority", b"quic.tech"),
+//!     h3::Header::new(b":path", b"/"),
+//!     h3::Header::new(b"user-agent", b"quiche"),
 //! ];
 //!
 //! let stream_id = h3_conn.send_request(&mut conn, &req, false)?;
 //! h3_conn.send_body(&mut conn, stream_id, b"Hello World!", true)?;
-//! # Ok::<(), quiche::h3::Error>(())
+//! # Ok::<(), h3::Error>(())
 //! ```
 //!
 //! ## Handling requests and responses
@@ -128,18 +128,18 @@
 //! [`send_response()`] and [`send_body()`]:
 //!
 //! ```no_run
-//! use quiche::h3::NameValue;
+//! use h3::NameValue;
 //!
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let peer = "127.0.0.1:1234".parse().unwrap();
 //! # let local = "127.0.0.1:1234".parse().unwrap();
 //! # let mut conn = quiche::accept(&scid, None, local, peer, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new()?;
-//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
+//! # let h3_config = h3::Config::new()?;
+//! # let mut h3_conn = h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
-//!         Ok((stream_id, quiche::h3::Event::Headers{list, more_frames})) => {
+//!         Ok((stream_id, h3::Event::Headers{list, more_frames})) => {
 //!             let mut headers = list.into_iter();
 //!
 //!             // Look for the request's method.
@@ -150,8 +150,8 @@
 //!
 //!             if method.value() == b"GET" && path.value() == b"/" {
 //!                 let resp = vec![
-//!                     quiche::h3::Header::new(b":status", 200.to_string().as_bytes()),
-//!                     quiche::h3::Header::new(b"server", b"quiche"),
+//!                     h3::Header::new(b":status", 200.to_string().as_bytes()),
+//!                     h3::Header::new(b"server", b"quiche"),
 //!                 ];
 //!
 //!                 h3_conn.send_response(&mut conn, stream_id, &resp, false)?;
@@ -159,26 +159,26 @@
 //!             }
 //!         },
 //!
-//!         Ok((stream_id, quiche::h3::Event::Data)) => {
+//!         Ok((stream_id, h3::Event::Data)) => {
 //!             // Request body data, handle it.
 //!             # return Ok(());
 //!         },
 //!
-//!         Ok((stream_id, quiche::h3::Event::Finished)) => {
+//!         Ok((stream_id, h3::Event::Finished)) => {
 //!             // Peer terminated stream, handle it.
 //!         },
 //!
-//!         Ok((stream_id, quiche::h3::Event::Reset(err))) => {
+//!         Ok((stream_id, h3::Event::Reset(err))) => {
 //!             // Peer reset the stream, handle it.
 //!         },
 //!
-//!         Ok((_flow_id, quiche::h3::Event::PriorityUpdate)) => (),
+//!         Ok((_flow_id, h3::Event::PriorityUpdate)) => (),
 //!
-//!         Ok((goaway_id, quiche::h3::Event::GoAway)) => {
+//!         Ok((goaway_id, h3::Event::GoAway)) => {
 //!              // Peer signalled it is going away, handle it.
 //!         },
 //!
-//!         Err(quiche::h3::Error::Done) => {
+//!         Err(h3::Error::Done) => {
 //!             // Done reading.
 //!             break;
 //!         },
@@ -189,31 +189,31 @@
 //!         },
 //!     }
 //! }
-//! # Ok::<(), quiche::h3::Error>(())
+//! # Ok::<(), h3::Error>(())
 //! ```
 //!
 //! An HTTP/3 client uses [`poll()`] to read responses:
 //!
 //! ```no_run
-//! use quiche::h3::NameValue;
+//! use h3::NameValue;
 //!
 //! # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
 //! # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
 //! # let peer = "127.0.0.1:1234".parse().unwrap();
 //! # let local = "127.0.0.1:1234".parse().unwrap();
 //! # let mut conn = quiche::connect(None, &scid, local, peer, &mut config).unwrap();
-//! # let h3_config = quiche::h3::Config::new()?;
-//! # let mut h3_conn = quiche::h3::Connection::with_transport(&mut conn, &h3_config)?;
+//! # let h3_config = h3::Config::new()?;
+//! # let mut h3_conn = h3::Connection::with_transport(&mut conn, &h3_config)?;
 //! loop {
 //!     match h3_conn.poll(&mut conn) {
-//!         Ok((stream_id, quiche::h3::Event::Headers{list, more_frames})) => {
+//!         Ok((stream_id, h3::Event::Headers{list, more_frames})) => {
 //!             let status = list.iter().find(|h| h.name() == b":status").unwrap();
 //!             println!("Received {} response on stream {}",
 //!                      std::str::from_utf8(status.value()).unwrap(),
 //!                      stream_id);
 //!         },
 //!
-//!         Ok((stream_id, quiche::h3::Event::Data)) => {
+//!         Ok((stream_id, h3::Event::Data)) => {
 //!             let mut body = vec![0; 4096];
 //!
 //!             // Consume all body data received on the stream.
@@ -225,21 +225,21 @@
 //!             }
 //!         },
 //!
-//!         Ok((stream_id, quiche::h3::Event::Finished)) => {
+//!         Ok((stream_id, h3::Event::Finished)) => {
 //!             // Peer terminated stream, handle it.
 //!         },
 //!
-//!         Ok((stream_id, quiche::h3::Event::Reset(err))) => {
+//!         Ok((stream_id, h3::Event::Reset(err))) => {
 //!             // Peer reset the stream, handle it.
 //!         },
 //!
-//!         Ok((_prioritized_element_id, quiche::h3::Event::PriorityUpdate)) => (),
+//!         Ok((_prioritized_element_id, h3::Event::PriorityUpdate)) => (),
 //!
-//!         Ok((goaway_id, quiche::h3::Event::GoAway)) => {
+//!         Ok((goaway_id, h3::Event::GoAway)) => {
 //!              // Peer signalled it is going away, handle it.
 //!         },
 //!
-//!         Err(quiche::h3::Error::Done) => {
+//!         Err(h3::Error::Done) => {
 //!             // Done reading.
 //!             break;
 //!         },
@@ -250,7 +250,7 @@
 //!         },
 //!     }
 //! }
-//! # Ok::<(), quiche::h3::Error>(())
+//! # Ok::<(), h3::Error>(())
 //! ```
 //!
 //! ## Detecting end of request or response
@@ -289,7 +289,7 @@ use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Write;
-
+use log::trace;
 #[cfg(feature = "qlog")]
 use qlog::events::h3::H3FrameCreated;
 #[cfg(feature = "qlog")]
@@ -312,9 +312,8 @@ use qlog::events::EventData;
 use qlog::events::EventImportance;
 #[cfg(feature = "qlog")]
 use qlog::events::EventType;
-
-use crate::range_buf::BufFactory;
-use crate::BufSplit;
+use quiche::{qlog_with_type, BufFactory};
+use quiche::BufSplit;
 
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
@@ -395,7 +394,7 @@ pub enum Error {
     QpackDecompressionFailed,
 
     /// Error originated from the transport layer.
-    TransportError(crate::Error),
+    TransportError(quiche::Error),
 
     /// The underlying QUIC stream (or connection) doesn't have enough capacity
     /// for the operation to complete. The application should retry later on.
@@ -547,10 +546,10 @@ impl std::error::Error for Error {
     }
 }
 
-impl std::convert::From<super::Error> for Error {
-    fn from(err: super::Error) -> Self {
+impl std::convert::From<quiche::Error> for Error {
+    fn from(err: quiche::Error) -> Self {
         match err {
-            super::Error::Done => Error::Done,
+            quiche::Error::Done => Error::Done,
 
             _ => Error::TransportError(err),
         }
@@ -840,7 +839,7 @@ impl Priority {
 #[cfg(feature = "sfv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sfv")))]
 impl TryFrom<&[u8]> for Priority {
-    type Error = crate::h3::Error;
+    type Error = crate::Error;
 
     /// Try to parse an Extensible Priority field value.
     ///
@@ -935,7 +934,7 @@ pub struct Stats {
 }
 
 fn close_conn_critical_stream<F: BufFactory>(
-    conn: &mut super::Connection<F>,
+    conn: &mut quiche::Connection<F>,
 ) -> Result<()> {
     conn.close(
         true,
@@ -947,7 +946,7 @@ fn close_conn_critical_stream<F: BufFactory>(
 }
 
 fn close_conn_if_critical_stream_finished<F: BufFactory>(
-    conn: &mut super::Connection<F>, stream_id: u64,
+    conn: &mut quiche::Connection<F>, stream_id: u64,
 ) -> Result<()> {
     if conn.stream_finished(stream_id) {
         close_conn_critical_stream(conn)?;
@@ -963,7 +962,7 @@ pub struct Connection {
     next_request_stream_id: u64,
     next_uni_stream_id: u64,
 
-    streams: crate::stream::StreamIdHashMap<stream::Stream>,
+    streams: quiche::StreamIdHashMap<stream::Stream>,
 
     local_settings: ConnectionSettings,
     peer_settings: ConnectionSettings,
@@ -1060,16 +1059,16 @@ impl Connection {
     /// [`StreamLimit`]: ../enum.Error.html#variant.StreamLimit
     /// [`InternalError`]: ../enum.Error.html#variant.InternalError
     pub fn with_transport<F: BufFactory>(
-        conn: &mut super::Connection<F>, config: &Config,
+        conn: &mut quiche::Connection<F>, config: &Config,
     ) -> Result<Connection> {
-        let is_client = !conn.is_server;
+        let is_client = !conn.is_server();
         if is_client && !(conn.is_established() || conn.is_in_early_data()) {
             trace!("{} QUIC connection must be established or in early data before creating an HTTP/3 connection", conn.trace_id());
             return Err(Error::InternalError);
         }
 
         let mut http3_conn =
-            Connection::new(config, conn.is_server, conn.dgram_enabled())?;
+            Connection::new(config, conn.is_server(), conn.dgram_enabled())?;
 
         match http3_conn.send_settings(conn) {
             Ok(_) => (),
@@ -1085,7 +1084,7 @@ impl Connection {
         http3_conn.open_qpack_encoder_stream(conn).ok();
         http3_conn.open_qpack_decoder_stream(conn).ok();
 
-        if conn.grease {
+        if conn.grease_enabled() {
             // Try opening a GREASE stream, but ignore errors since it's not
             // critical.
             http3_conn.open_grease_stream(conn).ok();
@@ -1111,7 +1110,7 @@ impl Connection {
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_request<T: NameValue, F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, headers: &[T], fin: bool,
+        &mut self, conn: &mut quiche::Connection<F>, headers: &[T], fin: bool,
     ) -> Result<u64> {
         // If we received a GOAWAY from the peer, MUST NOT initiate new
         // requests.
@@ -1131,7 +1130,7 @@ impl Connection {
         if let Err(e) = conn.stream_send(stream_id, b"", false) {
             self.streams.remove(&stream_id);
 
-            if e == super::Error::Done {
+            if e == quiche::Error::Done {
                 return Err(Error::StreamBlocked);
             }
 
@@ -1188,7 +1187,7 @@ impl Connection {
     /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response<T: NameValue, F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
         headers: &[T], fin: bool,
     ) -> Result<()> {
         let priority = Default::default();
@@ -1244,7 +1243,7 @@ impl Connection {
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     pub fn send_response_with_priority<T: NameValue, F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
         headers: &[T], priority: &Priority, fin: bool,
     ) -> Result<()> {
         match self.streams.get(&stream_id) {
@@ -1300,7 +1299,7 @@ impl Connection {
     /// [Section 4.1 of RFC 9114]:
     ///     https://www.rfc-editor.org/rfc/rfc9114.html#section-4.1.
     pub fn send_additional_headers<T: NameValue, F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
         headers: &[T], is_trailer_section: bool, fin: bool,
     ) -> Result<()> {
         // Clients can only send trailer headers.
@@ -1358,13 +1357,13 @@ impl Connection {
     }
 
     fn send_headers<T: NameValue, F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
         headers: &[T], fin: bool,
     ) -> Result<()> {
         let mut d = [42; 10];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
-        if !self.frames_greased && conn.grease {
+        if !self.frames_greased && conn.grease_enabled() {
             self.send_grease_frames(conn, stream_id)?;
             self.frames_greased = true;
         }
@@ -1454,7 +1453,7 @@ impl Connection {
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     pub fn send_body<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64, body: &[u8],
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64, body: &[u8],
         fin: bool,
     ) -> Result<usize> {
         self.do_send_body(
@@ -1462,7 +1461,7 @@ impl Connection {
             stream_id,
             body,
             fin,
-            |conn: &mut super::Connection<F>,
+            |conn: &mut quiche::Connection<F>,
              header: &[u8],
              stream_id: u64,
              body: &[u8],
@@ -1495,7 +1494,7 @@ impl Connection {
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     pub fn send_body_zc<F>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
         body: &mut F::Buf, fin: bool,
     ) -> Result<usize>
     where
@@ -1507,7 +1506,7 @@ impl Connection {
             stream_id,
             body,
             fin,
-            |conn: &mut super::Connection<F>,
+            |conn: &mut quiche::Connection<F>,
              header: &[u8],
              stream_id: u64,
              body: &mut F::Buf,
@@ -1541,14 +1540,14 @@ impl Connection {
     }
 
     fn do_send_body<F, B, R, SND>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64, body: B,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64, body: B,
         fin: bool, write_fn: SND,
     ) -> Result<R>
     where
         F: BufFactory,
         B: AsRef<[u8]>,
         SND: FnOnce(
-            &mut super::Connection<F>,
+            &mut quiche::Connection<F>,
             &[u8],
             u64,
             B,
@@ -1675,7 +1674,7 @@ impl Connection {
     ///
     /// [`poll()`]: struct.Connection.html#method.poll
     pub fn dgram_enabled_by_peer<F: BufFactory>(
-        &self, conn: &super::Connection<F>,
+        &self, conn: &quiche::Connection<F>,
     ) -> bool {
         self.peer_settings.h3_datagram == Some(1) &&
             conn.dgram_max_writable_len().is_some()
@@ -1704,7 +1703,7 @@ impl Connection {
     /// [`Data`]: enum.Event.html#variant.Data
     /// [`Done`]: enum.Error.html#variant.Done
     pub fn recv_body<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
         out: &mut [u8],
     ) -> Result<usize> {
         let mut total = 0;
@@ -1779,7 +1778,7 @@ impl Connection {
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     pub fn send_priority_update_for_request<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
         priority: &Priority,
     ) -> Result<()> {
         let mut d = [42; 20];
@@ -1928,12 +1927,12 @@ impl Connection {
     /// [`take_last_priority_update()`]: struct.Connection.html#method.take_last_priority_update
     /// [`close()`]: ../struct.Connection.html#method.close
     pub fn poll<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>,
+        &mut self, conn: &mut quiche::Connection<F>,
     ) -> Result<(u64, Event)> {
         // When connection close is initiated by the local application (e.g. due
         // to a protocol error), the connection itself might be in a broken
         // state, so return early.
-        if conn.local_error.is_some() {
+        if conn.local_error().is_some() {
             return Err(Error::Done);
         }
 
@@ -1984,7 +1983,7 @@ impl Connection {
 
                 // Return early if the stream was reset, to avoid returning
                 // a Finished event later as well.
-                Err(Error::TransportError(crate::Error::StreamReset(e))) =>
+                Err(Error::TransportError(quiche::Error::StreamReset(e))) =>
                     return Ok((s, Event::Reset(e))),
 
                 Err(e) => return Err(e),
@@ -2007,7 +2006,7 @@ impl Connection {
             if conn.stream_readable(finished) {
                 // The stream is finished, but is still readable, it may
                 // indicate that there is a pending error, such as reset.
-                if let Err(crate::Error::StreamReset(e)) =
+                if let Err(quiche::Error::StreamReset(e)) =
                     conn.stream_recv(finished, &mut [])
                 {
                     return Ok((finished, Event::Reset(e)));
@@ -2031,7 +2030,7 @@ impl Connection {
     ///
     /// [`close()`]: ../struct.Connection.html#method.close
     pub fn send_goaway<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, id: u64,
     ) -> Result<()> {
         let mut id = id;
 
@@ -2095,7 +2094,7 @@ impl Connection {
     }
 
     fn open_uni_stream<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, ty: u64,
+        &mut self, conn: &mut quiche::Connection<F>, ty: u64,
     ) -> Result<u64> {
         let stream_id = self.next_uni_stream_id;
 
@@ -2132,7 +2131,7 @@ impl Connection {
     }
 
     fn open_qpack_encoder_stream<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>,
+        &mut self, conn: &mut quiche::Connection<F>,
     ) -> Result<()> {
         let stream_id =
             self.open_uni_stream(conn, stream::QPACK_ENCODER_STREAM_TYPE_ID)?;
@@ -2154,7 +2153,7 @@ impl Connection {
     }
 
     fn open_qpack_decoder_stream<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>,
+        &mut self, conn: &mut quiche::Connection<F>,
     ) -> Result<()> {
         let stream_id =
             self.open_uni_stream(conn, stream::QPACK_DECODER_STREAM_TYPE_ID)?;
@@ -2177,7 +2176,7 @@ impl Connection {
 
     /// Send GREASE frames on the provided stream ID.
     fn send_grease_frames<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
     ) -> Result<()> {
         let mut d = [0; 8];
 
@@ -2270,7 +2269,7 @@ impl Connection {
     /// Opens a new unidirectional stream with a GREASE type and sends some
     /// unframed payload.
     fn open_grease_stream<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>,
+        &mut self, conn: &mut quiche::Connection<F>,
     ) -> Result<()> {
         let ty = grease_value();
         match self.open_uni_stream(conn, ty) {
@@ -2306,7 +2305,7 @@ impl Connection {
 
     /// Sends SETTINGS frame based on HTTP/3 configuration.
     fn send_settings<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>,
+        &mut self, conn: &mut quiche::Connection<F>,
     ) -> Result<()> {
         let stream_id = match self
             .open_uni_stream(conn, stream::HTTP3_CONTROL_STREAM_TYPE_ID)
@@ -2337,7 +2336,7 @@ impl Connection {
             q.add_event_data_now(ev_data).ok();
         });
 
-        let grease = if conn.grease {
+        let grease = if conn.grease_enabled() {
             Some((grease_value(), grease_value()))
         } else {
             None
@@ -2392,7 +2391,7 @@ impl Connection {
     }
 
     fn process_control_stream<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
     ) -> Result<(u64, Event)> {
         close_conn_if_critical_stream_finished(conn, stream_id)?;
 
@@ -2414,7 +2413,7 @@ impl Connection {
     }
 
     fn process_readable_stream<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64, polling: bool,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64, polling: bool,
     ) -> Result<(u64, Event)> {
         self.streams
             .entry(stream_id)
@@ -2724,7 +2723,7 @@ impl Connection {
                     // Discard incoming data on the stream.
                     conn.stream_shutdown(
                         stream_id,
-                        crate::Shutdown::Read,
+                        quiche::Shutdown::Read,
                         0x100,
                     )?;
 
@@ -2761,7 +2760,7 @@ impl Connection {
     }
 
     fn process_frame<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        &mut self, conn: &mut quiche::Connection<F>, stream_id: u64,
         frame: frame::Frame, payload_len: u64,
     ) -> Result<(u64, Event)> {
         trace!(
@@ -3064,7 +3063,7 @@ impl Connection {
                     return Err(Error::FrameUnexpected);
                 }
 
-                if prioritized_element_id > conn.streams.max_streams_bidi() * 4 {
+                if prioritized_element_id > conn.max_streams_bidi() * 4 {
                     conn.close(
                         true,
                         Error::IdError.to_wire(),
@@ -3080,7 +3079,7 @@ impl Connection {
                 // been opened and that's OK because it's within our concurrency
                 // limit. However, we discard PRIORITY_UPDATE that refers to
                 // streams that we know have been collected.
-                if conn.streams.is_collected(prioritized_element_id) {
+                if conn.stream_is_collected(prioritized_element_id) {
                     return Err(Error::Done);
                 }
 
@@ -3161,15 +3160,13 @@ impl Connection {
 
 /// Generates an HTTP/3 GREASE variable length integer.
 pub fn grease_value() -> u64 {
-    let n = super::rand::rand_u64_uniform(148_764_065_110_560_899);
+    let n = quiche::rand::rand_u64_uniform(148_764_065_110_560_899);
     31 * n + 33
 }
 
 #[doc(hidden)]
 pub mod testing {
     use super::*;
-
-    use crate::testing;
 
     /// Session is an HTTP/3 test helper structure. It holds a client, server
     /// and pipe that allows them to communicate.
@@ -3186,7 +3183,7 @@ pub mod testing {
     /// available for any test that need to do unconventional things (such as
     /// bad behaviour that triggers errors).
     pub struct Session {
-        pub pipe: testing::Pipe,
+        pub pipe: quiche::testing::Pipe,
         pub client: Connection,
         pub server: Connection,
     }
@@ -3202,12 +3199,12 @@ pub mod testing {
                 .into_owned()
             }
 
-            let mut config = crate::Config::new(crate::PROTOCOL_VERSION)?;
+            let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file(
-                &path_relative_to_manifest_dir("examples/cert.crt"),
+                &path_relative_to_manifest_dir("../quiche/examples/cert.crt"),
             )?;
             config.load_priv_key_from_pem_file(
-                &path_relative_to_manifest_dir("examples/cert.key"),
+                &path_relative_to_manifest_dir("../quiche/examples/cert.key"),
             )?;
             config.set_application_protos(&[b"h3"])?;
             config.set_initial_max_data(1500);
@@ -3225,9 +3222,9 @@ pub mod testing {
         }
 
         pub fn with_configs(
-            config: &mut crate::Config, h3_config: &Config,
+            config: &mut quiche::Config, h3_config: &Config,
         ) -> Result<Session> {
-            let pipe = testing::Pipe::with_config(config)?;
+            let pipe = quiche::testing::Pipe::with_config(config)?;
             let client_dgram = pipe.client.dgram_enabled();
             let server_dgram = pipe.server.dgram_enabled();
             Ok(Session {
@@ -3253,7 +3250,7 @@ pub mod testing {
                 .open_qpack_decoder_stream(&mut self.pipe.client)?;
             self.pipe.advance().ok();
 
-            if self.pipe.client.grease {
+            if self.pipe.client.grease_enabled() {
                 self.client.open_grease_stream(&mut self.pipe.client)?;
             }
 
@@ -3271,7 +3268,7 @@ pub mod testing {
                 .open_qpack_decoder_stream(&mut self.pipe.server)?;
             self.pipe.advance().ok();
 
-            if self.pipe.server.grease {
+            if self.pipe.server.grease_enabled() {
                 self.server.open_grease_stream(&mut self.pipe.server)?;
             }
 
@@ -3289,7 +3286,7 @@ pub mod testing {
         }
 
         /// Advances the session pipe over the buffer.
-        pub fn advance(&mut self) -> crate::Result<()> {
+        pub fn advance(&mut self) -> quiche::Result<()> {
             self.pipe.advance()
         }
 
@@ -3539,12 +3536,12 @@ mod tests {
     fn h3_handshake_0rtt() {
         let mut buf = [0; 65535];
 
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
@@ -3561,14 +3558,14 @@ mod tests {
         let h3_config = Config::new().unwrap();
 
         // Perform initial handshake.
-        let mut pipe = crate::testing::Pipe::with_config(&mut config).unwrap();
+        let mut pipe = quiche::testing::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Extract session,
         let session = pipe.client.session().unwrap();
 
         // Configure session on new connection.
-        let mut pipe = crate::testing::Pipe::with_config(&mut config).unwrap();
+        let mut pipe = quiche::testing::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.client.set_session(session), Ok(()));
 
         // Can't create an H3 connection until the QUIC connection is determined
@@ -3586,11 +3583,11 @@ mod tests {
         assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
         // Client sends 0-RTT packet.
-        let pkt_type = crate::packet::Type::ZeroRTT;
+        let pkt_type = quiche::Type::ZeroRTT;
 
-        let frames = [crate::frame::Frame::Stream {
+        let frames = [quiche::Frame::Stream {
             stream_id: 6,
-            data: <crate::range_buf::RangeBuf>::from(b"aaaaa", 0, true),
+            data: <quiche::RangeBuf>::from(b"aaaaa", 0, true),
         }];
 
         assert_eq!(
@@ -3598,7 +3595,7 @@ mod tests {
             Ok(1200)
         );
 
-        assert_eq!(pipe.server.undecryptable_pkts.len(), 0);
+        assert_eq!(pipe.server.num_undecryptable_pkts(), 0);
 
         // 0-RTT stream data is readable.
         let mut r = pipe.server.readable();
@@ -4980,11 +4977,11 @@ mod tests {
 
         s.pipe
             .client
-            .stream_shutdown(stream, crate::Shutdown::Write, 0x100)
+            .stream_shutdown(stream, quiche::Shutdown::Write, 0x100)
             .unwrap();
         s.pipe
             .client
-            .stream_shutdown(stream, crate::Shutdown::Read, 0x100)
+            .stream_shutdown(stream, quiche::Shutdown::Read, 0x100)
             .unwrap();
 
         s.advance().ok();
@@ -5190,7 +5187,7 @@ mod tests {
             .client
             .stream_shutdown(
                 s.client.control_stream_id.unwrap(),
-                crate::Shutdown::Write,
+                quiche::Shutdown::Write,
                 0,
             )
             .unwrap();
@@ -5224,7 +5221,7 @@ mod tests {
             .client
             .stream_shutdown(
                 s.client.control_stream_id.unwrap(),
-                crate::Shutdown::Write,
+                quiche::Shutdown::Write,
                 0,
             )
             .unwrap();
@@ -5293,7 +5290,7 @@ mod tests {
             .client
             .stream_shutdown(
                 s.client.local_qpack_streams.encoder_stream_id.unwrap(),
-                crate::Shutdown::Write,
+                quiche::Shutdown::Write,
                 0,
             )
             .unwrap();
@@ -5325,7 +5322,7 @@ mod tests {
 
         s.pipe
             .client
-            .stream_shutdown(stream_id, crate::Shutdown::Write, 0)
+            .stream_shutdown(stream_id, quiche::Shutdown::Write, 0)
             .unwrap();
 
         s.advance().ok();
@@ -5498,12 +5495,12 @@ mod tests {
     #[test]
     /// Tests that the max header list size setting is enforced.
     fn request_max_header_size_limit() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
@@ -5541,7 +5538,7 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::ExcessiveLoad));
 
         assert_eq!(
-            s.pipe.server.local_error.as_ref().unwrap().error_code,
+            s.pipe.server.local_error().as_ref().unwrap().error_code,
             Error::to_wire(Error::ExcessiveLoad)
         );
     }
@@ -5578,7 +5575,7 @@ mod tests {
 
         assert_eq!(
             s.client.send_request(&mut s.pipe.client, &req, true),
-            Err(Error::TransportError(crate::Error::StreamLimit))
+            Err(Error::TransportError(quiche::Error::StreamLimit))
         );
     }
 
@@ -5635,12 +5632,12 @@ mod tests {
     #[test]
     /// Tests that we limit sending HEADERS based on the stream capacity.
     fn headers_blocked() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
@@ -5688,12 +5685,12 @@ mod tests {
     #[test]
     /// Ensure StreamBlocked when connection flow control prevents headers.
     fn headers_blocked_on_conn() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
@@ -5747,14 +5744,14 @@ mod tests {
     /// Ensure STREAM_DATA_BLOCKED is not emitted multiple times with the same
     /// offset when trying to send large bodies.
     fn send_body_truncation_stream_blocked() {
-        use crate::testing::decode_pkt;
+        use quiche::testing::decode_pkt;
 
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(10000); // large connection-level flow control
@@ -5783,7 +5780,7 @@ mod tests {
 
         let _ = s.send_response(stream, false).unwrap();
 
-        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
+        assert_eq!(s.pipe.server.num_streams_blocked(), 0);
 
         // The body must be larger than the stream window would allow
         let d = [42; 500];
@@ -5797,13 +5794,13 @@ mod tests {
         off += sent;
 
         // send_body wrote as much as it could (sent < size of buff).
-        assert_eq!(s.pipe.server.streams.blocked().len(), 1);
+        assert_eq!(s.pipe.server.num_streams_blocked(), 1);
         assert_eq!(
             s.server
                 .send_body(&mut s.pipe.server, stream, &d[off..], true),
             Err(Error::Done)
         );
-        assert_eq!(s.pipe.server.streams.blocked().len(), 1);
+        assert_eq!(s.pipe.server.num_streams_blocked(), 1);
 
         // Now read raw frames to see what the QUIC layer did
         let mut buf = [0; 65535];
@@ -5815,7 +5812,7 @@ mod tests {
 
         assert_eq!(
             iter.next(),
-            Some(&crate::frame::Frame::StreamDataBlocked {
+            Some(&quiche::Frame::StreamDataBlocked {
                 stream_id: 0,
                 limit: 80,
             })
@@ -5823,7 +5820,7 @@ mod tests {
 
         // At the server, after sending the STREAM_DATA_BLOCKED frame, we clear
         // the mark.
-        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
+        assert_eq!(s.pipe.server.num_streams_blocked(), 0);
 
         // Don't read any data from the client, so stream flow control is never
         // given back in the form of changing the stream's max offset.
@@ -5835,16 +5832,16 @@ mod tests {
                 .send_body(&mut s.pipe.server, stream, &d[off..], true),
             Err(Error::Done)
         );
-        assert_eq!(s.pipe.server.streams.blocked().len(), 0);
-        assert_eq!(s.pipe.server.send(&mut buf), Err(crate::Error::Done));
+        assert_eq!(s.pipe.server.num_streams_blocked(), 0);
+        assert_eq!(s.pipe.server.send(&mut buf), Err(quiche::Error::Done));
 
         // Now update the client's max offset manually.
-        let frames = [crate::frame::Frame::MaxStreamData {
+        let frames = [quiche::Frame::MaxStreamData {
             stream_id: 0,
             max: 100,
         }];
 
-        let pkt_type = crate::packet::Type::Short;
+        let pkt_type = quiche::Type::Short;
         assert_eq!(
             s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Ok(39),
@@ -5857,13 +5854,13 @@ mod tests {
         assert_eq!(sent, 18);
 
         // Same thing here...
-        assert_eq!(s.pipe.server.streams.blocked().len(), 1);
+        assert_eq!(s.pipe.server.num_streams_blocked(), 1);
         assert_eq!(
             s.server
                 .send_body(&mut s.pipe.server, stream, &d[off..], true),
             Err(Error::Done)
         );
-        assert_eq!(s.pipe.server.streams.blocked().len(), 1);
+        assert_eq!(s.pipe.server.num_streams_blocked(), 1);
 
         let (len, _) = s.pipe.server.send(&mut buf).unwrap();
 
@@ -5873,7 +5870,7 @@ mod tests {
 
         assert_eq!(
             iter.next(),
-            Some(&crate::frame::Frame::StreamDataBlocked {
+            Some(&quiche::Frame::StreamDataBlocked {
                 stream_id: 0,
                 limit: 100,
             })
@@ -5883,12 +5880,12 @@ mod tests {
     #[test]
     /// Ensure stream doesn't hang due to small cwnd.
     fn send_body_stream_blocked_by_small_cwnd() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(100000); // large connection-level flow control
@@ -5946,7 +5943,7 @@ mod tests {
         s.advance().ok();
 
         // Server send cap is smaller than remaining body buffer.
-        assert!(s.pipe.server.tx_cap < send_buf.len() - sent);
+        assert!(s.pipe.server.tx_cap() < send_buf.len() - sent);
 
         // Once the server cwnd opens up, we can send more body.
         assert_eq!(s.pipe.server.stream_writable_next(), Some(0));
@@ -5955,12 +5952,12 @@ mod tests {
     #[test]
     /// Ensure stream doesn't hang due to small cwnd.
     fn send_body_stream_blocked_zero_length() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(100000); // large connection-level flow control
@@ -6088,12 +6085,12 @@ mod tests {
     #[test]
     /// Tests that blocked 0-length DATA writes are reported correctly.
     fn zero_length_data_blocked() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(69);
@@ -6143,12 +6140,12 @@ mod tests {
     #[test]
     /// Tests that receiving an empty SETTINGS frame is handled and reported.
     fn empty_settings() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
@@ -6173,12 +6170,12 @@ mod tests {
     #[test]
     /// Tests that receiving a H3_DATAGRAM setting is ok.
     fn dgram_setting() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
@@ -6218,12 +6215,12 @@ mod tests {
     /// Tests that receiving a H3_DATAGRAM setting when no TP is set generates
     /// an error.
     fn dgram_setting_no_tp() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
@@ -6270,12 +6267,12 @@ mod tests {
     #[test]
     /// Tests that receiving SETTINGS with prohibited values generates an error.
     fn settings_h2_prohibited() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
@@ -6380,12 +6377,12 @@ mod tests {
     #[test]
     /// Tests additional settings are actually exchanged by the peers.
     fn set_additional_settings() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
@@ -6504,12 +6501,12 @@ mod tests {
     #[test]
     /// Send a single DATAGRAM and request.
     fn poll_datagram_cycling_no_read() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
@@ -6548,12 +6545,12 @@ mod tests {
     fn poll_datagram_single_read() {
         let mut buf = [0; 65535];
 
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
@@ -6633,12 +6630,12 @@ mod tests {
     fn poll_datagram_multi_read() {
         let mut buf = [0; 65535];
 
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
@@ -7008,12 +7005,12 @@ mod tests {
     fn dgram_event_rearm() {
         let mut buf = [0; 65535];
 
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .load_cert_chain_from_pem_file("../quiche/examples/cert.crt")
             .unwrap();
         config
-            .load_priv_key_from_pem_file("examples/cert.key")
+            .load_priv_key_from_pem_file("../quiche/examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
@@ -7113,13 +7110,13 @@ mod tests {
         assert_eq!(s.poll_client(), Err(Error::Done));
 
         // Client sends RESET_STREAM, closing stream.
-        let frames = [crate::frame::Frame::ResetStream {
+        let frames = [quiche::Frame::ResetStream {
             stream_id: stream,
             error_code: 42,
             final_size: 68,
         }];
 
-        let pkt_type = crate::packet::Type::Short;
+        let pkt_type = quiche::Type::Short;
         assert_eq!(
             s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Ok(39)
@@ -7148,7 +7145,7 @@ mod tests {
 
         // ..then Client sends RESET_STREAM
         assert_eq!(
-            s.pipe.client.stream_shutdown(0, crate::Shutdown::Write, 0),
+            s.pipe.client.stream_shutdown(0, quiche::Shutdown::Write, 0),
             Ok(())
         );
 
@@ -7163,7 +7160,7 @@ mod tests {
 
         // ..then Client sends RESET_STREAM
         assert_eq!(
-            s.pipe.client.stream_shutdown(4, crate::Shutdown::Write, 0),
+            s.pipe.client.stream_shutdown(4, quiche::Shutdown::Write, 0),
             Ok(())
         );
 
@@ -7203,7 +7200,7 @@ mod tests {
         assert_eq!(
             s.pipe
                 .client
-                .stream_shutdown(stream, crate::Shutdown::Write, 0),
+                .stream_shutdown(stream, quiche::Shutdown::Write, 0),
             Ok(())
         );
 
@@ -7242,7 +7239,7 @@ mod tests {
         assert_eq!(
             s.pipe
                 .server
-                .stream_shutdown(stream, crate::Shutdown::Write, 0),
+                .stream_shutdown(stream, quiche::Shutdown::Write, 0),
             Ok(())
         );
 
@@ -7271,13 +7268,13 @@ mod tests {
         assert_eq!(s.pipe.advance(), Ok(()));
 
         // ..then Server sends RESET_STREAM
-        let frames = [crate::frame::Frame::ResetStream {
+        let frames = [quiche::Frame::ResetStream {
             stream_id: stream,
             error_code: 42,
             final_size: 68,
         }];
 
-        let pkt_type = crate::packet::Type::Short;
+        let pkt_type = quiche::Type::Short;
         assert_eq!(
             s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
             Ok(39)
@@ -7296,6 +7293,8 @@ mod tests {
         assert_eq!(s.poll_client(), Err(Error::Done));
     }
 }
+
+pub use quiche;
 
 #[cfg(feature = "ffi")]
 mod ffi;

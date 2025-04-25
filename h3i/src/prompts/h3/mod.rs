@@ -34,7 +34,7 @@ use inquire::InquireError;
 use inquire::Select;
 use inquire::Text;
 use qlog::events::quic::ErrorSpace;
-use quiche::ConnectionError;
+use ::h3::quiche::ConnectionError;
 
 use crate::actions::h3::Action;
 use crate::config::Config;
@@ -43,8 +43,6 @@ use crate::prompts::h3::headers::prompt_push_promise;
 use crate::StreamIdAllocator;
 
 use std::cell::RefCell;
-
-use quiche;
 
 use self::stream::prompt_fin_stream;
 use self::wait::prompt_wait;
@@ -73,7 +71,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 type SuggestionResult<T> = std::result::Result<T, CustomUserError>;
 
 /// A tuple of stream ID and quiche HTTP/3 frame.
-pub type PromptedFrame = (u64, quiche::h3::frame::Frame);
+pub type PromptedFrame = (u64, ::h3::frame::Frame);
 
 thread_local! {static CONNECTION_IDLE_TIMEOUT: RefCell<u64> = const { RefCell::new(0) }}
 
@@ -349,7 +347,7 @@ fn prompt_data() -> InquireResult<Action> {
     let action = Action::SendFrame {
         stream_id,
         fin_stream,
-        frame: quiche::h3::frame::Frame::Data {
+        frame: ::h3::frame::Frame::Data {
             payload: payload.into(),
         },
     };
@@ -366,7 +364,7 @@ fn prompt_max_push_id() -> InquireResult<Action> {
     let action = Action::SendFrame {
         stream_id,
         fin_stream,
-        frame: quiche::h3::frame::Frame::MaxPushId { push_id },
+        frame: ::h3::frame::Frame::MaxPushId { push_id },
     };
 
     Ok(action)
@@ -381,7 +379,7 @@ fn prompt_cancel_push() -> InquireResult<Action> {
     let action = Action::SendFrame {
         stream_id,
         fin_stream,
-        frame: quiche::h3::frame::Frame::CancelPush { push_id },
+        frame: ::h3::frame::Frame::CancelPush { push_id },
     };
 
     Ok(action)
@@ -396,7 +394,7 @@ fn prompt_goaway() -> InquireResult<Action> {
     let action = Action::SendFrame {
         stream_id,
         fin_stream,
-        frame: quiche::h3::frame::Frame::GoAway { id },
+        frame: ::h3::frame::Frame::GoAway { id },
     };
 
     Ok(action)
@@ -404,7 +402,7 @@ fn prompt_goaway() -> InquireResult<Action> {
 
 fn prompt_grease() -> InquireResult<Action> {
     let stream_id = h3::prompt_control_stream_id()?;
-    let raw_type = quiche::h3::grease_value();
+    let raw_type = ::h3::grease_value();
     let payload = Text::new("payload:")
         .prompt()
         .expect("An error happened when asking for payload, try again later.");
@@ -414,7 +412,7 @@ fn prompt_grease() -> InquireResult<Action> {
     let action = Action::SendFrame {
         stream_id,
         fin_stream,
-        frame: quiche::h3::frame::Frame::Unknown {
+        frame: ::h3::frame::Frame::Unknown {
             raw_type,
             payload: payload.into(),
         },
@@ -436,7 +434,7 @@ fn prompt_extension() -> InquireResult<Action> {
     let action = Action::SendFrame {
         stream_id,
         fin_stream,
-        frame: quiche::h3::frame::Frame::Unknown {
+        frame: ::h3::frame::Frame::Unknown {
             raw_type,
             payload: payload.into(),
         },

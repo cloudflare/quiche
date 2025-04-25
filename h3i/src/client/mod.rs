@@ -58,12 +58,12 @@ use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
 use serde::Serialize;
 
-use quiche::h3::frame::Frame as QFrame;
-use quiche::h3::Error;
-use quiche::h3::NameValue;
+use h3::frame::Frame as QFrame;
+use h3::Error;
+use h3::NameValue;
 use quiche::Connection;
 use quiche::Result;
-use quiche::{
+use h3::quiche::{
     self,
 };
 

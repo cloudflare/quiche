@@ -26,7 +26,7 @@
 
 use super::Result;
 
-use crate::h3::NameValue;
+use crate::NameValue;
 
 use super::INDEXED;
 use super::LITERAL;

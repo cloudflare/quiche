@@ -27,7 +27,7 @@
 #[macro_use]
 extern crate log;
 
-use quiche::h3::NameValue;
+use h3::NameValue;
 
 use ring::rand::*;
 
@@ -79,7 +79,7 @@ fn main() {
     config.verify_peer(false);
 
     config
-        .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
+        .set_application_protos(h3::APPLICATION_PROTOCOL)
         .unwrap();
 
     config.set_max_idle_timeout(5000);
@@ -129,7 +129,7 @@ fn main() {
 
     debug!("written {}", write);
 
-    let h3_config = quiche::h3::Config::new().unwrap();
+    let h3_config = h3::Config::new().unwrap();
 
     // Prepare request.
     let mut path = String::from(url.path());
@@ -140,14 +140,14 @@ fn main() {
     }
 
     let req = vec![
-        quiche::h3::Header::new(b":method", b"GET"),
-        quiche::h3::Header::new(b":scheme", url.scheme().as_bytes()),
-        quiche::h3::Header::new(
+        h3::Header::new(b":method", b"GET"),
+        h3::Header::new(b":scheme", url.scheme().as_bytes()),
+        h3::Header::new(
             b":authority",
             url.host_str().unwrap().as_bytes(),
         ),
-        quiche::h3::Header::new(b":path", path.as_bytes()),
-        quiche::h3::Header::new(b"user-agent", b"quiche"),
+        h3::Header::new(b":path", path.as_bytes()),
+        h3::Header::new(b"user-agent", b"quiche"),
     ];
 
     let req_start = std::time::Instant::now();
@@ -216,7 +216,7 @@ fn main() {
         // Create a new HTTP/3 connection once the QUIC connection is established.
         if conn.is_established() && http3_conn.is_none() {
             http3_conn = Some(
-                quiche::h3::Connection::with_transport(&mut conn, &h3_config)
+                h3::Connection::with_transport(&mut conn, &h3_config)
                 .expect("Unable to create HTTP/3 connection, check the server's uni stream limit and window size"),
             );
         }
@@ -237,7 +237,7 @@ fn main() {
             // Process HTTP/3 events.
             loop {
                 match http3_conn.poll(&mut conn) {
-                    Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
+                    Ok((stream_id, h3::Event::Headers { list, .. })) => {
                         info!(
                             "got response headers {:?} on stream id {}",
                             hdrs_to_strings(&list),
@@ -245,7 +245,7 @@ fn main() {
                         );
                     },
 
-                    Ok((stream_id, quiche::h3::Event::Data)) => {
+                    Ok((stream_id, h3::Event::Data)) => {
                         while let Ok(read) =
                             http3_conn.recv_body(&mut conn, stream_id, &mut buf)
                         {
@@ -260,7 +260,7 @@ fn main() {
                         }
                     },
 
-                    Ok((_stream_id, quiche::h3::Event::Finished)) => {
+                    Ok((_stream_id, h3::Event::Finished)) => {
                         info!(
                             "response received in {:?}, closing...",
                             req_start.elapsed()
@@ -269,7 +269,7 @@ fn main() {
                         conn.close(true, 0x100, b"kthxbye").unwrap();
                     },
 
-                    Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
+                    Ok((_stream_id, h3::Event::Reset(e))) => {
                         error!(
                             "request was reset by peer with {}, closing...",
                             e
@@ -278,13 +278,13 @@ fn main() {
                         conn.close(true, 0x100, b"kthxbye").unwrap();
                     },
 
-                    Ok((_, quiche::h3::Event::PriorityUpdate)) => unreachable!(),
+                    Ok((_, h3::Event::PriorityUpdate)) => unreachable!(),
 
-                    Ok((goaway_id, quiche::h3::Event::GoAway)) => {
+                    Ok((goaway_id, h3::Event::GoAway)) => {
                         info!("GOAWAY id={}", goaway_id);
                     },
 
-                    Err(quiche::h3::Error::Done) => {
+                    Err(h3::Error::Done) => {
                         break;
                     },
 
@@ -341,7 +341,7 @@ fn hex_dump(buf: &[u8]) -> String {
     vec.join("")
 }
 
-pub fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
+pub fn hdrs_to_strings(hdrs: &[h3::Header]) -> Vec<(String, String)> {
     hdrs.iter()
         .map(|h| {
             let name = String::from_utf8_lossy(h.name()).to_string();

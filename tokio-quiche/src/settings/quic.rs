@@ -299,7 +299,7 @@ pub struct QuicSettings {
 impl QuicSettings {
     #[inline]
     fn default_alpn() -> Vec<Vec<u8>> {
-        quiche::h3::APPLICATION_PROTOCOL
+        h3::APPLICATION_PROTOCOL
             .iter()
             .map(|v| v.to_vec())
             .collect()

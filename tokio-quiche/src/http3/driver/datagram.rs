@@ -28,8 +28,8 @@ use super::InboundFrame;
 use crate::buf_factory::BufFactory;
 use crate::buf_factory::PooledDgram;
 use crate::quic::QuicheConnection;
-use quiche::h3::NameValue;
-use quiche::h3::{
+use h3::{quiche, NameValue};
+use h3::{
     self,
 };
 

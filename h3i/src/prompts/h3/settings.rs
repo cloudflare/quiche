@@ -34,8 +34,6 @@ use super::SuggestionResult;
 use crate::actions::h3::Action;
 use crate::prompts::h3;
 
-use quiche;
-
 const QPACK_MAX_TABLE_CAPACITY: &str = "QPACK_MAX_TABLE_CAPACITY";
 const MAX_FIELD_SECTION_SIZE: &str = "MAX_FIELD_SECTION_SIZE";
 const QPACK_BLOCKED_STREAMS: &str = "QPACK_BLOCKED_STREAMS";
@@ -53,7 +51,7 @@ pub fn prompt_settings() -> InquireResult<Action> {
     let action = Action::SendFrame {
         stream_id,
         fin_stream,
-        frame: quiche::h3::frame::Frame::Settings {
+        frame: ::h3::frame::Frame::Settings {
             max_field_section_size: None,
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,

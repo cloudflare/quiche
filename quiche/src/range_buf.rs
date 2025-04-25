@@ -133,6 +133,8 @@ where
         Self::from_raw(F::buf_from_slice(buf), off, fin)
     }
 
+    // todo add doc
+    #[allow(missing_docs)]
     pub fn from_raw(data: F::Buf, off: u64, fin: bool) -> RangeBuf<F> {
         RangeBuf {
             len: data.as_ref().len(),

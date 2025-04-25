@@ -32,6 +32,7 @@ use std::time::Instant;
 use datagram_socket::DatagramSocketSend;
 use datagram_socket::DatagramSocketSendExt;
 use datagram_socket::MAX_DATAGRAM_SIZE;
+use h3::quiche;
 use quiche::ConnectionId;
 use quiche::Header;
 use quiche::Type as PacketType;
