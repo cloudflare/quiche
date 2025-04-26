@@ -39,7 +39,7 @@ pub const MAX_NONCE_LEN: usize = 12;
 pub const HP_MASK_LEN: usize = 5;
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq)]
 pub enum Level {
     Initial   = 0,
     ZeroRTT   = 1,
@@ -72,7 +72,7 @@ pub enum Algorithm {
 }
 
 // Note: some vendor-specific methods are implemented by each vendor's submodule
-// (openssl-quictls / boringssl).
+// (openssl / quictls / boringssl).
 impl Algorithm {
     fn get_evp_digest(self) -> *const EVP_MD {
         match self {
@@ -137,7 +137,7 @@ pub struct Open {
 
 impl Open {
     // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // submodule (openssl / quictls / boringssl).
 
     pub const DECRYPT: u32 = 0;
 
@@ -220,7 +220,7 @@ pub struct Seal {
 
 impl Seal {
     // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // submodule (openssl / quictls / boringssl).
 
     pub const ENCRYPT: u32 = 1;
 
@@ -643,12 +643,12 @@ mod tests {
     }
 }
 
-#[cfg(not(feature = "openssl"))]
+#[cfg(not(any(feature = "quictls", feature = "openssl")))]
 mod boringssl;
-#[cfg(not(feature = "openssl"))]
+#[cfg(not(any(feature = "quictls", feature = "openssl")))]
 pub(crate) use boringssl::*;
 
-#[cfg(feature = "openssl")]
-mod openssl_quictls;
-#[cfg(feature = "openssl")]
-pub(crate) use openssl_quictls::*;
+#[cfg(any(feature = "quictls", feature = "openssl"))]
+mod openssl;
+#[cfg(any(feature = "quictls", feature = "openssl"))]
+pub(crate) use openssl::*;

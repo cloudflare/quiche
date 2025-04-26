@@ -13,6 +13,8 @@ publish = false
 # Enable quiche's fuzzing mode.
 fuzzing = ["quiche/fuzzing"]
 
+openssl = ["quiche/openssl"]
+
 # Enable qlog support.
 qlog = ["quiche/qlog"]
 
