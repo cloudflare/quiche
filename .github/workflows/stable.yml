@@ -22,6 +22,7 @@ jobs:
         tls-feature:
           - "" # default, boringssl-vendored
           - "boringssl-boring-crate"
+          - "quictls"
           - "openssl"
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
@@ -42,16 +43,28 @@ jobs:
         if: ${{ matrix.tls-feature == '' }}
         uses: bnjbvr/cargo-machete@main
 
-      - name: Build OpenSSL
-        if: ${{ matrix.tls-feature == 'openssl' }}
+      - name: Build QuicTLS
+        if: ${{ matrix.tls-feature == 'quictls' }}
         run: |
-          git clone https://github.com/quictls/openssl
-          cd openssl
+          git clone https://github.com/openssl/quictls
+          cd quictls
           ./Configure --prefix="$PWD/install"
           make -j"$(nproc)"
           make install -j"$(nproc)"
           echo "PKG_CONFIG_PATH=$PWD" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$PWD" >> "$GITHUB_ENV"
+
+      - name: Build OpenSSL
+        if: ${{ matrix.tls-feature == 'openssl' }}
+        run: |
+          git clone --depth 1 https://github.com/openssl/openssl
+          cd openssl
+          ./Configure --prefix="$PWD/install"
+          make -j"$(nproc)"
+          make install -j"$(nproc)"
+          echo "PKG_CONFIG_PATH=$PWD/install/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PWD/install/lib" >> "$GITHUB_ENV"
+          cargo build --no-default-features --features openssl --release --manifest-path apps/Cargo.toml
 
       - name: Run cargo test
         if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
