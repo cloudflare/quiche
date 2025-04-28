@@ -39,6 +39,9 @@ boringssl-boring-crate = ["boring", "foreign-types-shared"]
 # Build quiche against OpenSSL instead of BoringSSL.
 openssl = ["pkg-config"]
 
+# Build quiche using rustls
+rustls = ["dep:rustls"]
+
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []
 
@@ -83,6 +86,7 @@ sfv = { version = "0.9", optional = true }
 slab = "0.4"
 smallvec = { workspace = true, features = ["union"] }
 enum_dispatch = "0.3"
+rustls = { version = "0.23.26", optional = true }
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.59", features = [

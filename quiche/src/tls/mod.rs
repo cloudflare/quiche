@@ -24,18 +24,15 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#[cfg(any(
-    feature = "boringssl-vendored",
-    feature = "boringssl-boring-crate",
-    feature = "openssl"
-))]
+#[cfg(not(feature = "rustls"))]
 mod boringssl_openssl;
-#[cfg(any(
-    feature = "boringssl-vendored",
-    feature = "boringssl-boring-crate",
-    feature = "openssl"
-))]
+#[cfg(not(feature = "rustls"))]
 pub use boringssl_openssl::*;
+
+#[cfg(feature = "rustls")]
+mod rustls;
+#[cfg(feature = "rustls")]
+pub use rustls::*;
 
 use crate::packet;
 use crate::ConnectionError;
