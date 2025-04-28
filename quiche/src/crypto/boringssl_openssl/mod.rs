@@ -30,23 +30,13 @@ use libc::c_void;
 use crate::Error;
 use crate::Result;
 
+use crate::crypto::Algorithm;
+
 // All the AEAD algorithms we support use 96-bit nonces.
 pub const MAX_NONCE_LEN: usize = 12;
 
 // Length of header protection mask.
 pub const HP_MASK_LEN: usize = 5;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Algorithm {
-    #[allow(non_camel_case_types)]
-    AES128_GCM,
-
-    #[allow(non_camel_case_types)]
-    AES256_GCM,
-
-    #[allow(non_camel_case_types)]
-    ChaCha20_Poly1305,
-}
 
 // Note: some vendor-specific methods are implemented by each vendor's submodule
 // (openssl-quictls / boringssl).
@@ -56,26 +46,6 @@ impl Algorithm {
             Algorithm::AES128_GCM => unsafe { EVP_sha256() },
             Algorithm::AES256_GCM => unsafe { EVP_sha384() },
             Algorithm::ChaCha20_Poly1305 => unsafe { EVP_sha256() },
-        }
-    }
-
-    pub const fn key_len(self) -> usize {
-        match self {
-            Algorithm::AES128_GCM => 16,
-            Algorithm::AES256_GCM => 32,
-            Algorithm::ChaCha20_Poly1305 => 32,
-        }
-    }
-
-    pub const fn tag_len(self) -> usize {
-        if cfg!(feature = "fuzzing") {
-            return 0;
-        }
-
-        match self {
-            Algorithm::AES128_GCM => 16,
-            Algorithm::AES256_GCM => 16,
-            Algorithm::ChaCha20_Poly1305 => 16,
         }
     }
 

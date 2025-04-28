@@ -59,3 +59,37 @@ impl Level {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Algorithm {
+    #[allow(non_camel_case_types)]
+    AES128_GCM,
+
+    #[allow(non_camel_case_types)]
+    AES256_GCM,
+
+    #[allow(non_camel_case_types)]
+    ChaCha20_Poly1305,
+}
+
+impl Algorithm {
+    pub const fn key_len(self) -> usize {
+        match self {
+            Algorithm::AES128_GCM => 16,
+            Algorithm::AES256_GCM => 32,
+            Algorithm::ChaCha20_Poly1305 => 32,
+        }
+    }
+
+    pub const fn tag_len(self) -> usize {
+        if cfg!(feature = "fuzzing") {
+            return 0;
+        }
+
+        match self {
+            Algorithm::AES128_GCM => 16,
+            Algorithm::AES256_GCM => 16,
+            Algorithm::ChaCha20_Poly1305 => 16,
+        }
+    }
+}
