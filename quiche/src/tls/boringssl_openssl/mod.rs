@@ -687,7 +687,7 @@ pub struct ExData<'a> {
 
     pub session: &'a mut Option<Vec<u8>>,
 
-    pub local_error: &'a mut Option<super::ConnectionError>,
+    pub local_error: &'a mut Option<ConnectionError>,
 
     pub keylog: Option<&'a mut Box<dyn std::io::Write + Send + Sync>>,
 
