@@ -10,6 +10,10 @@ on:
 
 name: Semgrep config
 
+permissions:
+  contents: read
+  pull-requests: write
+
 concurrency:
   group: ${{ github.ref }}-semgrep
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}

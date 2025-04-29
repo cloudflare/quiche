@@ -2,6 +2,10 @@ on: [push, pull_request]
 
 name: Stable
 
+permissions:
+  contents: read
+  pull-requests: write
+
 env:
   RUSTFLAGS: "-D warnings"
   RUSTTOOLCHAIN: "stable"
