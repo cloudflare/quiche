@@ -33,12 +33,12 @@ use std::collections::HashMap;
 
 use ring::rand::*;
 
-use quiche::h3::NameValue;
+use h3::NameValue;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 struct PartialResponse {
-    headers: Option<Vec<quiche::h3::Header>>,
+    headers: Option<Vec<h3::Header>>,
 
     body: Vec<u8>,
 
@@ -48,7 +48,7 @@ struct PartialResponse {
 struct Client {
     conn: quiche::Connection,
 
-    http3_conn: Option<quiche::h3::Connection>,
+    http3_conn: Option<h3::Connection>,
 
     partial_responses: HashMap<u64, PartialResponse>,
 }
@@ -91,7 +91,7 @@ fn main() {
         .unwrap();
 
     config
-        .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
+        .set_application_protos(h3::APPLICATION_PROTOCOL)
         .unwrap();
 
     config.set_max_idle_timeout(5000);
@@ -106,7 +106,7 @@ fn main() {
     config.set_disable_active_migration(true);
     config.enable_early_data();
 
-    let h3_config = quiche::h3::Config::new().unwrap();
+    let h3_config = h3::Config::new().unwrap();
 
     let rng = SystemRandom::new();
     let conn_id_seed =
@@ -316,7 +316,7 @@ fn main() {
                     client.conn.trace_id()
                 );
 
-                let h3_conn = match quiche::h3::Connection::with_transport(
+                let h3_conn = match h3::Connection::with_transport(
                     &mut client.conn,
                     &h3_config,
                 ) {
@@ -345,7 +345,7 @@ fn main() {
                     match http3_conn.poll(&mut client.conn) {
                         Ok((
                             stream_id,
-                            quiche::h3::Event::Headers { list, .. },
+                            h3::Event::Headers { list, .. },
                         )) => {
                             handle_request(
                                 client,
@@ -355,7 +355,7 @@ fn main() {
                             );
                         },
 
-                        Ok((stream_id, quiche::h3::Event::Data)) => {
+                        Ok((stream_id, h3::Event::Data)) => {
                             info!(
                                 "{} got data on stream id {}",
                                 client.conn.trace_id(),
@@ -363,18 +363,18 @@ fn main() {
                             );
                         },
 
-                        Ok((_stream_id, quiche::h3::Event::Finished)) => (),
+                        Ok((_stream_id, h3::Event::Finished)) => (),
 
-                        Ok((_stream_id, quiche::h3::Event::Reset { .. })) => (),
+                        Ok((_stream_id, h3::Event::Reset { .. })) => (),
 
                         Ok((
                             _prioritized_element_id,
-                            quiche::h3::Event::PriorityUpdate,
+                            h3::Event::PriorityUpdate,
                         )) => (),
 
-                        Ok((_goaway_id, quiche::h3::Event::GoAway)) => (),
+                        Ok((_goaway_id, h3::Event::GoAway)) => (),
 
-                        Err(quiche::h3::Error::Done) => {
+                        Err(h3::Error::Done) => {
                             break;
                         },
 
@@ -501,7 +501,7 @@ fn validate_token<'a>(
 
 /// Handles incoming HTTP/3 requests.
 fn handle_request(
-    client: &mut Client, stream_id: u64, headers: &[quiche::h3::Header],
+    client: &mut Client, stream_id: u64, headers: &[h3::Header],
     root: &str,
 ) {
     let conn = &mut client.conn;
@@ -525,7 +525,7 @@ fn handle_request(
     match http3_conn.send_response(conn, stream_id, &headers, false) {
         Ok(v) => v,
 
-        Err(quiche::h3::Error::StreamBlocked) => {
+        Err(h3::Error::StreamBlocked) => {
             let response = PartialResponse {
                 headers: Some(headers),
                 body,
@@ -545,7 +545,7 @@ fn handle_request(
     let written = match http3_conn.send_body(conn, stream_id, &body, true) {
         Ok(v) => v,
 
-        Err(quiche::h3::Error::Done) => 0,
+        Err(h3::Error::Done) => 0,
 
         Err(e) => {
             error!("{} stream send failed {:?}", conn.trace_id(), e);
@@ -566,8 +566,8 @@ fn handle_request(
 
 /// Builds an HTTP/3 response given a request.
 fn build_response(
-    root: &str, request: &[quiche::h3::Header],
-) -> (Vec<quiche::h3::Header>, Vec<u8>) {
+    root: &str, request: &[h3::Header],
+) -> (Vec<h3::Header>, Vec<u8>) {
     let mut file_path = std::path::PathBuf::from(root);
     let mut path = std::path::Path::new("");
     let mut method = None;
@@ -605,9 +605,9 @@ fn build_response(
     };
 
     let headers = vec![
-        quiche::h3::Header::new(b":status", status.to_string().as_bytes()),
-        quiche::h3::Header::new(b"server", b"quiche"),
-        quiche::h3::Header::new(
+        h3::Header::new(b":status", status.to_string().as_bytes()),
+        h3::Header::new(b"server", b"quiche"),
+        h3::Header::new(
             b"content-length",
             body.len().to_string().as_bytes(),
         ),
@@ -633,7 +633,7 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
         match http3_conn.send_response(conn, stream_id, headers, false) {
             Ok(_) => (),
 
-            Err(quiche::h3::Error::StreamBlocked) => {
+            Err(h3::Error::StreamBlocked) => {
                 return;
             },
 
@@ -651,7 +651,7 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
     let written = match http3_conn.send_body(conn, stream_id, body, true) {
         Ok(v) => v,
 
-        Err(quiche::h3::Error::Done) => 0,
+        Err(h3::Error::Done) => 0,
 
         Err(e) => {
             client.partial_responses.remove(&stream_id);
@@ -668,7 +668,7 @@ fn handle_writable(client: &mut Client, stream_id: u64) {
     }
 }
 
-pub fn hdrs_to_strings(hdrs: &[quiche::h3::Header]) -> Vec<(String, String)> {
+pub fn hdrs_to_strings(hdrs: &[h3::Header]) -> Vec<(String, String)> {
     hdrs.iter()
         .map(|h| {
             let name = String::from_utf8_lossy(h.name()).to_string();

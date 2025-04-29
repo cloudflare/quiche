@@ -37,8 +37,7 @@ use h3i::actions::h3::Action;
 use h3i::actions::h3::StreamEvent;
 use h3i::actions::h3::StreamEventType;
 use h3i::actions::h3::WaitType;
-use h3i::quiche;
-use h3i::quiche::h3::Header;
+use h3i::h3::Header;
 
 #[tokio::test]
 async fn test_requests_per_connection_limit() -> QuicResult<()> {
@@ -88,7 +87,7 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
         .conn_close_details
         .peer_error()
         .expect("no error received");
-    assert_eq!(error.error_code, quiche::h3::WireErrorCode::NoError as u64);
+    assert_eq!(error.error_code, h3::WireErrorCode::NoError as u64);
 
     Ok(())
 }
@@ -136,7 +135,7 @@ async fn test_max_header_list_size_limit() -> QuicResult<()> {
         .expect("no error received");
     assert_eq!(
         error.error_code,
-        quiche::h3::WireErrorCode::ExcessiveLoad as u64
+        h3::WireErrorCode::ExcessiveLoad as u64
     );
 
     Ok(())

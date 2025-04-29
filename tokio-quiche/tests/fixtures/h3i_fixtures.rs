@@ -32,8 +32,8 @@ use h3i::actions::h3::WaitType;
 use h3i::client::connection_summary::ConnectionSummary;
 use h3i::client::ClientError;
 use h3i::frame::H3iFrame;
-use h3i::quiche::h3::Header;
-use h3i::quiche::h3::{
+use h3i::h3::Header;
+use h3i::h3::{
     self,
 };
 use h3i::quiche::ConnectionError;

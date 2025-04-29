@@ -33,11 +33,10 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use multimap::MultiMap;
-use quiche;
 
-use quiche::h3::frame::Frame as QFrame;
-use quiche::h3::Header;
-use quiche::h3::NameValue;
+use h3::frame::Frame as QFrame;
+use h3::Header;
+use h3::NameValue;
 use serde::ser::SerializeStruct;
 use serde::ser::Serializer;
 use serde::Serialize;
@@ -143,7 +142,7 @@ impl EnrichedHeaders {
     /// # Examples
     /// ```
     /// use h3i::frame::EnrichedHeaders;
-    /// use quiche::h3::Header;
+    /// use h3::Header;
     ///
     /// let raw = vec![
     ///     Header::new(b"new jersey", b"devils"),
@@ -167,7 +166,7 @@ impl EnrichedHeaders {
     /// use h3i::frame::EnrichedHeaders;
     /// use h3i::frame::H3iFrame;
     /// use multimap::MultiMap;
-    /// use quiche::h3::Header;
+    /// use h3::Header;
     /// use std::iter::FromIterator;
     ///
     /// let header_frame = vec![
@@ -199,7 +198,7 @@ impl EnrichedHeaders {
     /// # Examples
     /// ```
     /// use h3i::frame::EnrichedHeaders;
-    /// use quiche::h3::Header;
+    /// use h3::Header;
     ///
     /// let headers = EnrichedHeaders::from(vec![Header::new(b"hello", b"world")]);
     /// assert!(headers.status_code().is_none());
@@ -249,7 +248,7 @@ impl TryFrom<QFrame> for EnrichedHeaders {
     fn try_from(value: QFrame) -> Result<Self, Self::Error> {
         match value {
             QFrame::Headers { header_block } => {
-                let mut qpack_decoder = quiche::h3::qpack::Decoder::new();
+                let mut qpack_decoder = h3::qpack::Decoder::new();
                 let headers =
                     qpack_decoder.decode(&header_block, u64::MAX).unwrap();
 
@@ -597,7 +596,7 @@ impl PartialEq for CloseTriggerFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quiche::h3::frame::Frame;
+    use h3::frame::Frame;
 
     #[test]
     fn test_header_equivalence() {

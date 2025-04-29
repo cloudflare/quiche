@@ -35,6 +35,8 @@ use std::cell::RefCell;
 
 use ring::rand::*;
 
+use h3::quiche;
+
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
 #[derive(Debug)]

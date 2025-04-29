@@ -36,6 +36,7 @@ use datagram_socket::DatagramSocketSendExt;
 use datagram_socket::MaybeConnectedSocket;
 use datagram_socket::MAX_DATAGRAM_SIZE;
 use foundations::telemetry::log;
+use h3::quiche;
 use quiche::ConnectionId;
 use quiche::Header;
 use tokio_util::time::delay_queue::Key;

@@ -52,6 +52,7 @@ use foundations::telemetry::metrics::TimeHistogram;
 use libc::sockaddr_in;
 #[cfg(target_os = "linux")]
 use libc::sockaddr_in6;
+use h3::quiche;
 use quiche::ConnectionId;
 use quiche::Header;
 use quiche::MAX_CONN_ID_LEN;

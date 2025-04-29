@@ -24,7 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::range_buf::BufFactory;
+use log::trace;
+use quiche::BufFactory;
 
 use super::Error;
 use super::Result;
@@ -178,7 +179,7 @@ impl Stream {
     /// The `is_local` parameter indicates whether the stream was created by the
     /// local endpoint, or by the peer.
     pub fn new(id: u64, is_local: bool) -> Stream {
-        let (ty, state) = if crate::stream::is_bidi(id) {
+        let (ty, state) = if quiche::stream_is_bidi(id) {
             // All bidirectional streams are "request" streams, so we don't
             // need to read the stream type.
             (Some(Type::Request), State::FrameType)
@@ -434,7 +435,7 @@ impl Stream {
     /// When not enough data can be read to complete the state, this returns
     /// `Error::Done`.
     pub fn try_fill_buffer<F: BufFactory>(
-        &mut self, conn: &mut crate::Connection<F>,
+        &mut self, conn: &mut quiche::Connection<F>,
     ) -> Result<()> {
         // If no bytes are required to be read, return early.
         if self.state_buffer_complete() {
@@ -460,7 +461,7 @@ impl Stream {
                 len
             },
 
-            Err(e @ crate::Error::StreamReset(_)) => {
+            Err(e @ quiche::Error::StreamReset(_)) => {
                 // Check whether one of the critical stream was closed.
                 if matches!(
                     self.ty,
@@ -476,7 +477,7 @@ impl Stream {
 
             Err(e) => {
                 // The stream is not readable anymore, so re-arm the Data event.
-                if e == crate::Error::Done {
+                if e == quiche::Error::Done {
                     self.reset_data_event();
                 }
 
@@ -596,7 +597,7 @@ impl Stream {
 
     /// Tries to read DATA payload from the transport stream.
     pub fn try_consume_data<F: BufFactory>(
-        &mut self, conn: &mut crate::Connection<F>, out: &mut [u8],
+        &mut self, conn: &mut quiche::Connection<F>, out: &mut [u8],
     ) -> Result<(usize, bool)> {
         let left = std::cmp::min(out.len(), self.state_len - self.state_off);
 
@@ -605,7 +606,7 @@ impl Stream {
 
             Err(e) => {
                 // The stream is not readable anymore, so re-arm the Data event.
-                if e == crate::Error::Done {
+                if e == quiche::Error::Done {
                     self.reset_data_event();
                 }
 
@@ -720,7 +721,7 @@ impl Stream {
 
 #[cfg(test)]
 mod tests {
-    use crate::h3::frame::*;
+    use crate::frame::*;
 
     use super::*;
 

@@ -82,6 +82,7 @@ impl std::hash::Hasher for StreamIdHasher {
 
 type BuildStreamIdHasher = std::hash::BuildHasherDefault<StreamIdHasher>;
 
+/// A map with fast access via stream_id keys.
 pub type StreamIdHashMap<V> = HashMap<u64, V, BuildStreamIdHasher>;
 pub type StreamIdHashSet = HashSet<u64, BuildStreamIdHasher>;
 

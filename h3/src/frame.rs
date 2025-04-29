@@ -961,7 +961,7 @@ mod tests {
                 frame_payload_len as u64,
                 &d[frame_header_len..]
             ),
-            Err(crate::h3::Error::SettingsError)
+            Err(crate::Error::SettingsError)
         );
     }
 
@@ -1035,7 +1035,7 @@ mod tests {
                 frame_payload_len as u64,
                 &d[frame_header_len..]
             ),
-            Err(crate::h3::Error::SettingsError)
+            Err(crate::Error::SettingsError)
         );
     }
 
@@ -1100,7 +1100,7 @@ mod tests {
                 frame_payload_len,
                 &d[frame_header_len..]
             ),
-            Err(crate::h3::Error::SettingsError)
+            Err(crate::Error::SettingsError)
         );
 
         d[frame_header_len] = 0x2;
@@ -1111,7 +1111,7 @@ mod tests {
                 frame_payload_len,
                 &d[frame_header_len..]
             ),
-            Err(crate::h3::Error::SettingsError)
+            Err(crate::Error::SettingsError)
         );
 
         d[frame_header_len] = 0x3;
@@ -1122,7 +1122,7 @@ mod tests {
                 frame_payload_len,
                 &d[frame_header_len..]
             ),
-            Err(crate::h3::Error::SettingsError)
+            Err(crate::Error::SettingsError)
         );
 
         d[frame_header_len] = 0x4;
@@ -1133,7 +1133,7 @@ mod tests {
                 frame_payload_len,
                 &d[frame_header_len..]
             ),
-            Err(crate::h3::Error::SettingsError)
+            Err(crate::Error::SettingsError)
         );
 
         d[frame_header_len] = 0x5;
@@ -1144,7 +1144,7 @@ mod tests {
                 frame_payload_len,
                 &d[frame_header_len..]
             ),
-            Err(crate::h3::Error::SettingsError)
+            Err(crate::Error::SettingsError)
         );
     }
 
@@ -1169,7 +1169,7 @@ mod tests {
                 frame_payload_len as u64,
                 &d[frame_header_len..]
             ),
-            Err(crate::h3::Error::ExcessiveLoad)
+            Err(crate::Error::ExcessiveLoad)
         );
     }
 

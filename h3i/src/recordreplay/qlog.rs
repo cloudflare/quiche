@@ -39,9 +39,9 @@ use qlog::events::EventData;
 use qlog::events::ExData;
 use qlog::events::JsonEvent;
 use qlog::events::RawInfo;
-use quiche;
-use quiche::h3::frame::Frame;
-use quiche::h3::NameValue;
+use ::h3::quiche;
+use ::h3::frame::Frame;
+use ::h3::NameValue;
 
 use serde_json::json;
 
@@ -436,16 +436,16 @@ impl From<&PacketSent> for H3Actions {
 
 fn map_header(
     hdr: &HttpHeader, host_override: Option<&str>,
-) -> quiche::h3::Header {
+) -> h3::Header {
     if hdr.name.eq_ignore_ascii_case(":authority") ||
         hdr.name.eq_ignore_ascii_case("host")
     {
         if let Some(host) = host_override {
-            return quiche::h3::Header::new(hdr.name.as_bytes(), host.as_bytes());
+            return h3::Header::new(hdr.name.as_bytes(), host.as_bytes());
         }
     }
 
-    quiche::h3::Header::new(hdr.name.as_bytes(), hdr.value.as_bytes())
+    h3::Header::new(hdr.name.as_bytes(), hdr.value.as_bytes())
 }
 
 impl From<H3FrameCreatedEx> for Action {
@@ -506,7 +506,7 @@ impl From<H3FrameCreatedEx> for Action {
             },
 
             Http3Frame::Headers { headers } => {
-                let hdrs: Vec<quiche::h3::Header> = headers
+                let hdrs: Vec<h3::Header> = headers
                     .iter()
                     .map(|h| map_header(h, host_override))
                     .collect();
@@ -606,7 +606,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use quiche::h3::Header;
+    use h3::Header;
     use serde_json;
 
     const NOW: f32 = 123.0;

@@ -26,12 +26,13 @@
 
 //! Stateful parsing of QUIC streams into HTTP/3 frames.
 
-use quiche::h3::frame::Frame as QFrame;
-use quiche::h3::Error as H3Error;
-use quiche::h3::Result;
-use quiche::Connection;
+use h3::frame::Frame as QFrame;
+use h3::Error as H3Error;
+use h3::Result;
+use h3::quiche::Connection;
 
 use crate::frame::H3iFrame;
+use h3::quiche;
 
 /// Max stream state size in bytes (2MB).
 const MAX_STREAM_STATE_SIZE: usize = 2_000_000;
@@ -56,7 +57,7 @@ pub enum InterruptCause {
 pub enum FrameParseResult {
     /// The frame was unable to be parsed at the current moment. This signifies
     /// that the stream is retryable without another I/O cycle. If another
-    /// I/O cycle is needed, a [`quiche::h3::Error::TransportError`]
+    /// I/O cycle is needed, a [`h3::Error::TransportError`]
     /// containing [`quiche::Error::Done`] will be returned.
     Retry,
     /// A frame has been successfully parsed. `fin` denotes if the FIN bit was
@@ -108,7 +109,7 @@ impl FrameParser {
     /// executing another I/O cycle.
     ///
     /// If the available stream data does not provide a complete frame, a
-    /// [`quiche::h3::Error::TransportError`] containing [`quiche::Error::Done`]
+    /// [`h3::Error::TransportError`] containing [`quiche::Error::Done`]
     /// is returned. Callers should execute an I/O cycle before calling
     /// try_parse_frame() again.
     ///
@@ -247,7 +248,7 @@ impl FrameParser {
         // payload size of a GREASE frame), so we need to limit the maximum
         // size to avoid DoS.
         if expected_len > MAX_STREAM_STATE_SIZE {
-            return Err(quiche::h3::Error::ExcessiveLoad);
+            return Err(h3::Error::ExcessiveLoad);
         }
 
         self.state_buf.resize(expected_len, 0);
@@ -281,7 +282,7 @@ impl FrameParser {
 
         match qframe {
             QFrame::Headers { ref header_block } => {
-                let mut qpack_decoder = quiche::h3::qpack::Decoder::new();
+                let mut qpack_decoder = h3::qpack::Decoder::new();
                 let headers =
                     qpack_decoder.decode(header_block, u64::MAX).unwrap();
 
@@ -320,8 +321,8 @@ impl Default for FrameParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quiche::h3::frame::Frame;
-    use quiche::h3::testing::*;
+    use h3::frame::Frame;
+    use h3::testing::*;
 
     fn session() -> Result<Session> {
         Session::new()

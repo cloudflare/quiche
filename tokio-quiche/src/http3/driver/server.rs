@@ -203,7 +203,7 @@ impl DriverHooks for ServerHooks {
             .enforce_requests_limit(driver.hooks.requests)
         {
             let _ =
-                qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
+                qconn.close(true, h3::WireErrorCode::NoError as u64, &[]);
             return Ok(());
         }
 

@@ -274,7 +274,7 @@ async fn test_post_accept_timeout() {
         .peer_error()
         .expect("no error received");
     assert!(err.is_app);
-    assert_eq!(err.error_code, quiche::h3::WireErrorCode::NoError as u64);
+    assert_eq!(err.error_code, h3::WireErrorCode::NoError as u64);
 }
 
 #[tokio::test]

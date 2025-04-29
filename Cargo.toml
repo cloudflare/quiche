@@ -3,6 +3,7 @@ members = [
   "apps",
   "buffer-pool",
   "datagram-socket",
+  "h3",
   "h3i",
   "octets",
   "qlog",
@@ -38,6 +39,7 @@ env_logger = "0.10"
 foundations = { version = "4", default-features = false }
 futures = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false }
+h3 = { version = "0.1.0", path= "./h3" }
 h3i = { version = "0.4", path = "./h3i" }
 ipnetwork = { version = "0.20" }
 libc = { version = "0.2.76", default-features = false }

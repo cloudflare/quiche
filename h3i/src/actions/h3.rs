@@ -33,9 +33,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use quiche;
-use quiche::h3::frame::Frame;
-use quiche::h3::Header;
+use h3::quiche;
+use h3::frame::Frame;
+use h3::Header;
 use quiche::ConnectionError;
 use serde::Deserialize;
 use serde::Serialize;
@@ -52,7 +52,7 @@ use crate::encode_header_block_literal;
 /// action.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// Send a [quiche::h3::frame::Frame] over a stream.
+    /// Send a [h3::frame::Frame] over a stream.
     SendFrame {
         stream_id: u64,
         fin_stream: bool,

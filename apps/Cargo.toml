@@ -11,16 +11,16 @@ publish = false
 
 [features]
 # Enable quiche's fuzzing mode.
-fuzzing = ["quiche/fuzzing"]
+fuzzing = ["h3/fuzzing"]
 
 # Enable qlog support.
-qlog = ["quiche/qlog"]
+qlog = ["h3/qlog"]
 
 # Use BoringSSL provided by the boring crate.
-boringssl-boring-crate = ["quiche/boringssl-boring-crate"]
+boringssl-boring-crate = ["h3/boringssl-boring-crate"]
 
 # Enable sfv support.
-sfv = ["quiche/sfv"]
+sfv = ["h3/sfv"]
 
 default = ["qlog", "sfv"]
 
@@ -32,7 +32,7 @@ log = { workspace = true }
 mio = { workspace = true, features = ["net", "os-poll"] }
 nix = { workspace = true, features = ["net", "socket", "uio"] }
 octets = { workspace = true }
-quiche = { workspace = true }
+h3 = { workspace = true }
 ring = { workspace = true }
 url = { workspace = true }
 

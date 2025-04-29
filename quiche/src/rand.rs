@@ -24,12 +24,14 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+/// Fill buf with random bytes
 pub fn rand_bytes(buf: &mut [u8]) {
     unsafe {
         RAND_bytes(buf.as_mut_ptr(), buf.len());
     }
 }
 
+/// Random byte
 pub fn rand_u8() -> u8 {
     let mut buf = [0; 1];
 
@@ -38,6 +40,8 @@ pub fn rand_u8() -> u8 {
     buf[0]
 }
 
+
+/// Random u64
 pub fn rand_u64() -> u64 {
     let mut buf = [0; 8];
 
@@ -46,6 +50,13 @@ pub fn rand_u64() -> u64 {
     u64::from_ne_bytes(buf)
 }
 
+/// Uniformly distributed random `u64` in the range `0 <= value < max`.
+///
+/// Avoids bias by rejecting values the fall into a smaller last chunk.
+///
+/// This function is **not constant time**.
+///
+/// Panics if `max == 0` as this results in a division by zero.
 pub fn rand_u64_uniform(max: u64) -> u64 {
     let chunk_size = u64::MAX / max;
     let end_of_last_chunk = chunk_size * max;

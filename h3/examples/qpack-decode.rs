@@ -31,9 +31,9 @@ use std::fs::File;
 
 use std::io::prelude::*;
 
-use quiche::h3::NameValue;
+use h3::NameValue;
 
-use quiche::h3::qpack;
+use h3::qpack;
 
 fn main() {
     // TODO: parse params from file name.

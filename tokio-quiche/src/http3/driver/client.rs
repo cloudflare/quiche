@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use foundations::telemetry::log;
-use quiche::h3;
+use h3;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 

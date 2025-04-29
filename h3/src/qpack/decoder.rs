@@ -24,10 +24,11 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use log::trace;
 use super::Error;
 use super::Result;
 
-use crate::h3::Header;
+use crate::Header;
 
 use super::INDEXED;
 use super::INDEXED_WITH_POST_BASE;

@@ -57,6 +57,7 @@ use datagram_socket::DatagramSocketSendExt;
 use datagram_socket::MaybeConnectedSocket;
 use datagram_socket::QuicAuditStats;
 use foundations::telemetry::log;
+use h3::quiche;
 use quiche::ConnectionId;
 use quiche::Error as QuicheError;
 use quiche::SendInfo;

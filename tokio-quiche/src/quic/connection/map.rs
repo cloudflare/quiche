@@ -29,6 +29,7 @@ use super::InitialQuicConnection;
 use crate::metrics::Metrics;
 
 use datagram_socket::DatagramSocketSend;
+use h3::quiche;
 use quiche::ConnectionId;
 use quiche::MAX_CONN_ID_LEN;
 use std::collections::BTreeMap;

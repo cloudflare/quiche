@@ -12,8 +12,8 @@ readme = "README.md"
 
 [features]
 # Forwarded quiche features for re-exports
-fuzzing = ["quiche/fuzzing"]
-quiche_internal = ["quiche/internal"]
+fuzzing = ["h3/fuzzing"]
+quiche_internal = ["h3/internal"]
 
 # Enable extra timing instrumentation for QUIC handshakes, including protocol
 # overhead and network delays.
@@ -24,7 +24,7 @@ rpk = ["boring/rpk"]
 
 # Replaces quiche's original congestion control
 # implementation with one adapted from google/quiche.
-gcongestion = ["quiche/gcongestion"]
+gcongestion = ["h3/gcongestion"]
 # Use quiche with zero-copy send calls.
 zero-copy = ["gcongestion"]
 
@@ -52,7 +52,7 @@ ipnetwork = { workspace = true }
 log = { workspace = true }
 octets = { workspace = true }
 pin-project = { workspace = true }
-quiche = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
+h3 = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_with = { workspace = true }
 slog-scope = { workspace = true }

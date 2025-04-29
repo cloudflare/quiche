@@ -93,15 +93,15 @@ mod tests {
         let mut encoded = [0u8; 240];
 
         let headers = vec![
-            h3::Header::new(b":path", b"/rsrc.php/v3/yn/r/rIPZ9Qkrdd9.png"),
-            h3::Header::new(b"accept-encoding", b"gzip, deflate, br"),
-            h3::Header::new(b"accept-language", b"en-US,en;q=0.9"),
-            h3::Header::new(b"user-agent", b"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.70 Safari/537.36"),
-            h3::Header::new(b"accept", b"image/webp,image/apng,image/*,*/*;q=0.8"),
-            h3::Header::new(b"referer", b"https://static.xx.fbcdn.net/rsrc.php/v3/yT/l/0,cross/dzXGESIlGQQ.css"),
-            h3::Header::new(b":authority", b"static.xx.fbcdn.net"),
-            h3::Header::new(b":scheme", b"https"),
-            h3::Header::new(b":method", b"GET"),
+            Header::new(b":path", b"/rsrc.php/v3/yn/r/rIPZ9Qkrdd9.png"),
+            Header::new(b"accept-encoding", b"gzip, deflate, br"),
+            Header::new(b"accept-language", b"en-US,en;q=0.9"),
+            Header::new(b"user-agent", b"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.70 Safari/537.36"),
+            Header::new(b"accept", b"image/webp,image/apng,image/*,*/*;q=0.8"),
+            Header::new(b"referer", b"https://static.xx.fbcdn.net/rsrc.php/v3/yT/l/0,cross/dzXGESIlGQQ.css"),
+            Header::new(b":authority", b"static.xx.fbcdn.net"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":method", b"GET"),
         ];
 
         let mut enc = Encoder::new();
@@ -116,20 +116,20 @@ mod tests {
         let mut encoded = [0u8; 35];
 
         let headers_expected = vec![
-            crate::h3::Header::new(b":status", b"200"),
-            crate::h3::Header::new(b":path", b"/HeLlO"),
-            crate::h3::Header::new(b"woot", b"woot"),
-            crate::h3::Header::new(b"hello", b"WorlD"),
-            crate::h3::Header::new(b"foo", b"BaR"),
+            Header::new(b":status", b"200"),
+            Header::new(b":path", b"/HeLlO"),
+            Header::new(b"woot", b"woot"),
+            Header::new(b"hello", b"WorlD"),
+            Header::new(b"foo", b"BaR"),
         ];
 
         // Header.
         let headers_in = vec![
-            crate::h3::Header::new(b":StAtUs", b"200"),
-            crate::h3::Header::new(b":PaTh", b"/HeLlO"),
-            crate::h3::Header::new(b"WooT", b"woot"),
-            crate::h3::Header::new(b"hello", b"WorlD"),
-            crate::h3::Header::new(b"fOo", b"BaR"),
+            Header::new(b":StAtUs", b"200"),
+            Header::new(b":PaTh", b"/HeLlO"),
+            Header::new(b"WooT", b"woot"),
+            Header::new(b"hello", b"WorlD"),
+            Header::new(b"fOo", b"BaR"),
         ];
 
         let mut enc = Encoder::new();
@@ -142,11 +142,11 @@ mod tests {
 
         // HeaderRef.
         let headers_in = vec![
-            crate::h3::HeaderRef::new(b":StAtUs", b"200"),
-            crate::h3::HeaderRef::new(b":PaTh", b"/HeLlO"),
-            crate::h3::HeaderRef::new(b"WooT", b"woot"),
-            crate::h3::HeaderRef::new(b"hello", b"WorlD"),
-            crate::h3::HeaderRef::new(b"fOo", b"BaR"),
+            HeaderRef::new(b":StAtUs", b"200"),
+            HeaderRef::new(b":PaTh", b"/HeLlO"),
+            HeaderRef::new(b"WooT", b"woot"),
+            HeaderRef::new(b"hello", b"WorlD"),
+            HeaderRef::new(b"fOo", b"BaR"),
         ];
 
         let mut enc = Encoder::new();
@@ -165,14 +165,14 @@ mod tests {
 
         // Indexed name with literal value
         let headers1 =
-            vec![crate::h3::Header::new(b"location", b"															")];
+            vec![Header::new(b"location", b"															")];
         assert_eq!(enc.encode(&headers1, &mut encoded), Ok(19));
 
         // Literal name and value
-        let headers2 = vec![crate::h3::Header::new(b"a", b"")];
+        let headers2 = vec![Header::new(b"a", b"")];
         assert_eq!(enc.encode(&headers2, &mut encoded), Ok(20));
 
-        let headers3 = vec![crate::h3::Header::new(b"															", b"hello")];
+        let headers3 = vec![Header::new(b"															", b"hello")];
         assert_eq!(enc.encode(&headers3, &mut encoded), Ok(24));
     }
 
@@ -185,15 +185,15 @@ mod tests {
         let value = "£££££££££££££££";
 
         // Indexed name with literal value
-        let headers1 = vec![crate::h3::Header::new(name, value.as_bytes())];
+        let headers1 = vec![Header::new(name, value.as_bytes())];
         assert_eq!(enc.encode(&headers1, &mut encoded), Ok(34));
 
         // Literal name and value
         let value = "ððððððððððððððð";
-        let headers2 = vec![crate::h3::Header::new(b"a", value.as_bytes())];
+        let headers2 = vec![Header::new(b"a", value.as_bytes())];
         assert_eq!(enc.encode(&headers2, &mut encoded), Ok(35));
 
-        let headers3 = vec![crate::h3::Header::new(value.as_bytes(), b"hello")];
+        let headers3 = vec![Header::new(value.as_bytes(), b"hello")];
         assert_eq!(enc.encode(&headers3, &mut encoded), Ok(39));
     }
 }

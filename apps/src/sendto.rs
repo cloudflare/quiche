@@ -28,6 +28,8 @@ use std::cmp;
 
 use std::io;
 
+use h3::quiche;
+
 /// For Linux, try to detect GSO is available.
 #[cfg(target_os = "linux")]
 pub fn detect_gso(socket: &mio::net::UdpSocket, segment_size: usize) -> bool {
