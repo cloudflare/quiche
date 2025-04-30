@@ -853,22 +853,22 @@ pub struct KeyUpdate {
 }
 
 pub struct PktNumSpace {
-    /// The largest packet number received
+    /// The largest packet number received.
     pub largest_rx_pkt_num: u64,
 
-    /// Time the largest packet number received
+    /// Time the largest packet number received.
     pub largest_rx_pkt_time: time::Instant,
 
-    /// The largest non-probing packet number
+    /// The largest non-probing packet number.
     pub largest_rx_non_probing_pkt_num: u64,
 
-    /// Range of pn that we need to send an ACK for
+    /// Range of packet numbers that we need to send an ACK for.
     pub recv_pkt_need_ack: ranges::RangeSet,
 
-    /// Tracks received packet numbers
+    /// Tracks received packet numbers.
     pub recv_pkt_num: PktNumWindow,
 
-    /// Track if a received packet is ack eliciting
+    /// Track if a received packet is ack eliciting.
     pub ack_elicited: bool,
 }
 
