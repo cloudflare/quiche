@@ -853,62 +853,76 @@ pub struct KeyUpdate {
 }
 
 pub struct PktNumSpace {
+    /// The largest packet number received.
     pub largest_rx_pkt_num: u64,
 
+    /// Time the largest packet number received.
     pub largest_rx_pkt_time: time::Instant,
 
+    /// The largest non-probing packet number.
     pub largest_rx_non_probing_pkt_num: u64,
 
+    /// Range of packet numbers that we need to send an ACK for.
     pub recv_pkt_need_ack: ranges::RangeSet,
 
+    /// Tracks received packet numbers.
     pub recv_pkt_num: PktNumWindow,
 
+    /// Track if a received packet is ack eliciting.
     pub ack_elicited: bool,
-
-    pub key_update: Option<KeyUpdate>,
-
-    pub crypto_open: Option<crypto::Open>,
-    pub crypto_seal: Option<crypto::Seal>,
-
-    pub crypto_0rtt_open: Option<crypto::Open>,
-
-    pub crypto_stream: stream::Stream,
 }
 
 impl PktNumSpace {
     pub fn new() -> PktNumSpace {
         PktNumSpace {
             largest_rx_pkt_num: 0,
-
             largest_rx_pkt_time: time::Instant::now(),
-
             largest_rx_non_probing_pkt_num: 0,
-
             recv_pkt_need_ack: ranges::RangeSet::new(crate::MAX_ACK_RANGES),
-
             recv_pkt_num: PktNumWindow::default(),
-
             ack_elicited: false,
-
-            key_update: None,
-
-            crypto_open: None,
-            crypto_seal: None,
-
-            crypto_0rtt_open: None,
-
-            crypto_stream: <stream::Stream>::new(
-                0, // dummy
-                u64::MAX,
-                u64::MAX,
-                true,
-                true,
-                stream::MAX_STREAM_WINDOW,
-            ),
         }
     }
 
     pub fn clear(&mut self) {
+        self.ack_elicited = false;
+    }
+
+    pub fn ready(&self) -> bool {
+        self.ack_elicited
+    }
+}
+
+pub struct CryptoContext {
+    pub key_update: Option<KeyUpdate>,
+    pub crypto_open: Option<crypto::Open>,
+    pub crypto_seal: Option<crypto::Seal>,
+    pub crypto_0rtt_open: Option<crypto::Open>,
+    pub crypto_stream: stream::Stream,
+}
+
+impl CryptoContext {
+    pub fn new() -> CryptoContext {
+        let crypto_stream = stream::Stream::new(
+            0, // dummy
+            u64::MAX,
+            u64::MAX,
+            true,
+            true,
+            stream::MAX_STREAM_WINDOW,
+        );
+        CryptoContext {
+            key_update: None,
+            crypto_open: None,
+            crypto_seal: None,
+            crypto_0rtt_open: None,
+            crypto_stream,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.crypto_open = None;
+        self.crypto_seal = None;
         self.crypto_stream = <stream::Stream>::new(
             0, // dummy
             u64::MAX,
@@ -917,16 +931,14 @@ impl PktNumSpace {
             true,
             stream::MAX_STREAM_WINDOW,
         );
+    }
 
-        self.ack_elicited = false;
+    pub fn data_available(&self) -> bool {
+        self.crypto_stream.is_flushable()
     }
 
     pub fn crypto_overhead(&self) -> Option<usize> {
         Some(self.crypto_seal.as_ref()?.alg().tag_len())
-    }
-
-    pub fn ready(&self) -> bool {
-        self.crypto_stream.is_flushable() || self.ack_elicited
     }
 
     pub fn has_keys(&self) -> bool {

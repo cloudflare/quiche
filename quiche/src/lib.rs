@@ -1424,6 +1424,9 @@ where
     /// Packet number spaces.
     pkt_num_spaces: [packet::PktNumSpace; packet::Epoch::count()],
 
+    /// The crypto context.
+    crypto_ctx: [packet::CryptoContext; packet::Epoch::count()],
+
     /// Next packet number.
     next_pkt_num: u64,
 
@@ -1990,6 +1993,12 @@ impl<F: BufFactory> Connection<F> {
                 packet::PktNumSpace::new(),
             ],
 
+            crypto_ctx: [
+                packet::CryptoContext::new(),
+                packet::CryptoContext::new(),
+                packet::CryptoContext::new(),
+            ],
+
             next_pkt_num: 0,
 
             peer_transport_params: TransportParams::default(),
@@ -2165,10 +2174,8 @@ impl<F: BufFactory> Connection<F> {
                 active_path_id,
             )?;
 
-            conn.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            conn.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            conn.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
+            conn.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
 
             conn.derived_initial_secrets = true;
         }
@@ -2645,7 +2652,7 @@ impl<F: BufFactory> Connection<F> {
     fn process_undecrypted_0rtt_packets(&mut self) -> Result<()> {
         // Process previously undecryptable 0-RTT packets if the decryption key
         // is now available.
-        if self.pkt_num_spaces[packet::Epoch::Application]
+        if self.crypto_ctx[packet::Epoch::Application]
             .crypto_0rtt_open
             .is_some()
         {
@@ -2811,10 +2818,8 @@ impl<F: BufFactory> Connection<F> {
             self.got_peer_conn_id = false;
             self.handshake.clear()?;
 
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
 
             self.handshake
                 .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
@@ -2877,10 +2882,8 @@ impl<F: BufFactory> Connection<F> {
             self.got_peer_conn_id = false;
             self.handshake.clear()?;
 
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
 
             return Err(Error::Done);
         }
@@ -2942,10 +2945,8 @@ impl<F: BufFactory> Connection<F> {
                 false,
             )?;
 
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
 
             self.derived_initial_secrets = true;
         }
@@ -2956,10 +2957,10 @@ impl<F: BufFactory> Connection<F> {
         // Select AEAD context used to open incoming packet.
         let aead = if hdr.ty == packet::Type::ZeroRTT {
             // Only use 0-RTT key if incoming packet is 0-RTT.
-            self.pkt_num_spaces[epoch].crypto_0rtt_open.as_ref()
+            self.crypto_ctx[epoch].crypto_0rtt_open.as_ref()
         } else {
             // Otherwise use the packet number space's main key.
-            self.pkt_num_spaces[epoch].crypto_open.as_ref()
+            self.crypto_ctx[epoch].crypto_open.as_ref()
         };
 
         // Finally, discard packet if no usable key is available.
@@ -3028,7 +3029,7 @@ impl<F: BufFactory> Connection<F> {
             hdr.key_phase != self.key_phase
         {
             // Check if this packet arrived before key update.
-            if let Some(key_update) = self.pkt_num_spaces[epoch]
+            if let Some(key_update) = self.crypto_ctx[epoch]
                 .key_update
                 .as_ref()
                 .and_then(|key_update| {
@@ -3040,12 +3041,12 @@ impl<F: BufFactory> Connection<F> {
                 trace!("{} peer-initiated key update", self.trace_id);
 
                 aead_next = Some((
-                    self.pkt_num_spaces[epoch]
+                    self.crypto_ctx[epoch]
                         .crypto_open
                         .as_ref()
                         .unwrap()
                         .derive_next_packet_key()?,
-                    self.pkt_num_spaces[epoch]
+                    self.crypto_ctx[epoch]
                         .crypto_seal
                         .as_ref()
                         .unwrap()
@@ -3092,7 +3093,7 @@ impl<F: BufFactory> Connection<F> {
         // The key update is verified once a packet is successfully decrypted
         // using the new keys.
         if let Some((open_next, seal_next)) = aead_next {
-            if !self.pkt_num_spaces[epoch]
+            if !self.crypto_ctx[epoch]
                 .key_update
                 .as_ref()
                 .map_or(true, |prev| prev.update_acked)
@@ -3103,16 +3104,16 @@ impl<F: BufFactory> Connection<F> {
 
             trace!("{} key update verified", self.trace_id);
 
-            let _ = self.pkt_num_spaces[epoch].crypto_seal.replace(seal_next);
+            let _ = self.crypto_ctx[epoch].crypto_seal.replace(seal_next);
 
-            let open_prev = self.pkt_num_spaces[epoch]
+            let open_prev = self.crypto_ctx[epoch]
                 .crypto_open
                 .replace(open_next)
                 .unwrap();
 
             let recv_path = self.paths.get_mut(recv_pid)?;
 
-            self.pkt_num_spaces[epoch].key_update = Some(packet::KeyUpdate {
+            self.crypto_ctx[epoch].key_update = Some(packet::KeyUpdate {
                 crypto_open: open_prev,
                 pn_on_update: pn,
                 update_acked: false,
@@ -3308,7 +3309,7 @@ impl<F: BufFactory> Connection<F> {
                     },
 
                     frame::Frame::CryptoHeader { offset, length } => {
-                        self.pkt_num_spaces[epoch]
+                        self.crypto_ctx[epoch]
                             .crypto_stream
                             .send
                             .ack_and_drop(offset, length);
@@ -3819,13 +3820,14 @@ impl<F: BufFactory> Connection<F> {
 
         let epoch = pkt_type.to_epoch()?;
         let pkt_space = &mut self.pkt_num_spaces[epoch];
+        let crypto_ctx = &mut self.crypto_ctx[epoch];
 
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
             for lost in p.recovery.get_lost_frames(epoch) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
-                        pkt_space.crypto_stream.send.retransmit(offset, length);
+                        crypto_ctx.crypto_stream.send.retransmit(offset, length);
 
                         self.stream_retrans_bytes += length as u64;
                         p.stream_retrans_bytes += length as u64;
@@ -3924,6 +3926,7 @@ impl<F: BufFactory> Connection<F> {
         let path = self.paths.get_mut(send_pid)?;
         let flow_control = &mut self.flow_control;
         let pkt_space = &mut self.pkt_num_spaces[epoch];
+        let crypto_ctx = &mut self.crypto_ctx[epoch];
 
         let mut left = if path.pmtud.is_enabled() {
             // Limit output buffer size by estimated path MTU.
@@ -3938,7 +3941,7 @@ impl<F: BufFactory> Connection<F> {
         let pn_len = packet::pkt_num_len(pn, largest_acked_pkt);
 
         // The AEAD overhead at the current encryption level.
-        let crypto_overhead = pkt_space.crypto_overhead().ok_or(Error::Done)?;
+        let crypto_overhead = crypto_ctx.crypto_overhead().ok_or(Error::Done)?;
 
         let dcid_seq = path.active_dcid_seq.ok_or(Error::OutOfIdentifiers)?;
 
@@ -4215,7 +4218,7 @@ impl<F: BufFactory> Connection<F> {
                 }
             }
 
-            if let Some(key_update) = pkt_space.key_update.as_mut() {
+            if let Some(key_update) = crypto_ctx.key_update.as_mut() {
                 key_update.update_acked = true;
             }
         }
@@ -4482,12 +4485,12 @@ impl<F: BufFactory> Connection<F> {
         }
 
         // Create CRYPTO frame.
-        if pkt_space.crypto_stream.is_flushable() &&
+        if crypto_ctx.crypto_stream.is_flushable() &&
             left > frame::MAX_CRYPTO_OVERHEAD &&
             !is_closing &&
             path.active()
         {
-            let crypto_off = pkt_space.crypto_stream.send.off_front();
+            let crypto_off = crypto_ctx.crypto_stream.send.off_front();
 
             // Encode the frame.
             //
@@ -4512,7 +4515,7 @@ impl<F: BufFactory> Connection<F> {
                     b.split_at(hdr_off + hdr_len)?;
 
                 // Write stream data into the packet buffer.
-                let (len, _) = pkt_space
+                let (len, _) = crypto_ctx
                     .crypto_stream
                     .send
                     .emit(&mut crypto_payload.as_mut()[..max_len])?;
@@ -4892,7 +4895,7 @@ impl<F: BufFactory> Connection<F> {
             }
         });
 
-        let aead = match pkt_space.crypto_seal {
+        let aead = match crypto_ctx.crypto_seal {
             Some(ref v) => v,
             None => return Err(Error::InvalidState),
         };
@@ -4939,7 +4942,7 @@ impl<F: BufFactory> Connection<F> {
         self.next_pkt_num += 1;
 
         let handshake_status = recovery::HandshakeStatus {
-            has_handshake_keys: self.pkt_num_spaces[packet::Epoch::Handshake]
+            has_handshake_keys: self.crypto_ctx[packet::Epoch::Handshake]
                 .has_keys(),
             peer_verified_address: self.peer_verified_initial_address,
             completed: self.handshake_completed,
@@ -6191,7 +6194,7 @@ impl<F: BufFactory> Connection<F> {
                 max_len = max_len.saturating_sub(packet::MAX_PKT_NUM_LEN);
                 // ...subtract the crypto overhead...
                 max_len = max_len.saturating_sub(
-                    self.pkt_num_spaces[packet::Epoch::Application]
+                    self.crypto_ctx[packet::Epoch::Application]
                         .crypto_overhead()?,
                 );
                 // ...clamp to what peer can support...
@@ -6237,8 +6240,7 @@ impl<F: BufFactory> Connection<F> {
                 .filter_map(|(_, p)| p.recovery.loss_detection_timer())
                 .min();
 
-            let key_update_timer = self.pkt_num_spaces
-                [packet::Epoch::Application]
+            let key_update_timer = self.crypto_ctx[packet::Epoch::Application]
                 .key_update
                 .as_ref()
                 .map(|key_update| key_update.timer);
@@ -6296,14 +6298,14 @@ impl<F: BufFactory> Connection<F> {
             }
         }
 
-        if let Some(timer) = self.pkt_num_spaces[packet::Epoch::Application]
+        if let Some(timer) = self.crypto_ctx[packet::Epoch::Application]
             .key_update
             .as_ref()
             .map(|key_update| key_update.timer)
         {
             if timer <= now {
                 // Discard previous key once key update timer expired.
-                let _ = self.pkt_num_spaces[packet::Epoch::Application]
+                let _ = self.crypto_ctx[packet::Epoch::Application]
                     .key_update
                     .take();
             }
@@ -7147,7 +7149,7 @@ impl<F: BufFactory> Connection<F> {
         let mut ex_data = tls::ExData {
             application_protos: &self.application_protos,
 
-            pkt_num_spaces: &mut self.pkt_num_spaces,
+            crypto_ctx: &mut self.crypto_ctx,
 
             session: &mut self.session,
 
@@ -7280,8 +7282,7 @@ impl<F: BufFactory> Connection<F> {
                     // Downgrade the epoch to Initial as the remote peer might
                     // not be able to decrypt handshake packets yet.
                     packet::Epoch::Handshake
-                        if self.pkt_num_spaces[packet::Epoch::Initial]
-                            .has_keys() =>
+                        if self.crypto_ctx[packet::Epoch::Initial].has_keys() =>
                         return Ok(packet::Type::Initial),
 
                     _ => (),
@@ -7294,13 +7295,16 @@ impl<F: BufFactory> Connection<F> {
         for &epoch in packet::Epoch::epochs(
             packet::Epoch::Initial..=packet::Epoch::Application,
         ) {
+            let crypto_ctx = &self.crypto_ctx[epoch];
+            let pkt_space = &self.pkt_num_spaces[epoch];
+
             // Only send packets in a space when we have the send keys for it.
-            if self.pkt_num_spaces[epoch].crypto_seal.is_none() {
+            if crypto_ctx.crypto_seal.is_none() {
                 continue;
             }
 
             // We are ready to send data for this packet number space.
-            if self.pkt_num_spaces[epoch].ready() {
+            if crypto_ctx.data_available() || pkt_space.ready() {
                 return Ok(packet::Type::from_epoch(epoch));
             }
 
@@ -7536,7 +7540,7 @@ impl<F: BufFactory> Connection<F> {
                 }
 
                 // Push the data to the stream so it can be re-ordered.
-                self.pkt_num_spaces[epoch].crypto_stream.recv.write(data)?;
+                self.crypto_ctx[epoch].crypto_stream.recv.write(data)?;
 
                 // Feed crypto data to the TLS state, if there's data
                 // available at the expected offset.
@@ -7544,7 +7548,7 @@ impl<F: BufFactory> Connection<F> {
 
                 let level = crypto::Level::from_epoch(epoch);
 
-                let stream = &mut self.pkt_num_spaces[epoch].crypto_stream;
+                let stream = &mut self.crypto_ctx[epoch].crypto_stream;
 
                 while let Ok((read, _)) = stream.recv.emit(&mut crypto_buf) {
                     let recv_buf = &crypto_buf[..read];
@@ -7863,12 +7867,11 @@ impl<F: BufFactory> Connection<F> {
 
     /// Drops the keys and recovery state for the given epoch.
     fn drop_epoch_state(&mut self, epoch: packet::Epoch, now: time::Instant) {
-        if self.pkt_num_spaces[epoch].crypto_open.is_none() {
+        let crypto_ctx = &mut self.crypto_ctx[epoch];
+        if crypto_ctx.crypto_open.is_none() {
             return;
         }
-
-        self.pkt_num_spaces[epoch].crypto_open = None;
-        self.pkt_num_spaces[epoch].crypto_seal = None;
+        crypto_ctx.clear();
         self.pkt_num_spaces[epoch].clear();
 
         let handshake_status = self.handshake_status();
@@ -7938,7 +7941,7 @@ impl<F: BufFactory> Connection<F> {
     /// Returns the connection's handshake status for use in loss recovery.
     fn handshake_status(&self) -> recovery::HandshakeStatus {
         recovery::HandshakeStatus {
-            has_handshake_keys: self.pkt_num_spaces[packet::Epoch::Handshake]
+            has_handshake_keys: self.crypto_ctx[packet::Epoch::Handshake]
                 .has_keys(),
 
             peer_verified_address: self.peer_verified_initial_address,
@@ -9298,26 +9301,26 @@ pub mod testing {
         }
 
         pub fn client_update_key(&mut self) -> Result<()> {
-            let space =
-                &mut self.client.pkt_num_spaces[packet::Epoch::Application];
+            let crypto_ctx =
+                &mut self.client.crypto_ctx[packet::Epoch::Application];
 
-            let open_next = space
+            let open_next = crypto_ctx
                 .crypto_open
                 .as_ref()
                 .unwrap()
                 .derive_next_packet_key()
                 .unwrap();
 
-            let seal_next = space
+            let seal_next = crypto_ctx
                 .crypto_seal
                 .as_ref()
                 .unwrap()
                 .derive_next_packet_key()?;
 
-            let open_prev = space.crypto_open.replace(open_next);
-            space.crypto_seal.replace(seal_next);
+            let open_prev = crypto_ctx.crypto_open.replace(open_next);
+            crypto_ctx.crypto_seal.replace(seal_next);
 
-            space.key_update = Some(packet::KeyUpdate {
+            crypto_ctx.key_update = Some(packet::KeyUpdate {
                 crypto_open: open_prev.unwrap(),
                 pn_on_update: self.client.next_pkt_num,
                 update_acked: true,
@@ -9419,7 +9422,7 @@ pub mod testing {
 
         let epoch = pkt_type.to_epoch()?;
 
-        let space = &mut conn.pkt_num_spaces[epoch];
+        let crypto_ctx = &mut conn.crypto_ctx[epoch];
 
         let pn = conn.next_pkt_num;
         let pn_len = 4;
@@ -9455,7 +9458,8 @@ pub mod testing {
         let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len());
 
         if pkt_type != packet::Type::Short {
-            let len = pn_len + payload_len + space.crypto_overhead().unwrap();
+            let len =
+                pn_len + payload_len + crypto_ctx.crypto_overhead().unwrap();
             b.put_varint(len as u64)?;
         }
 
@@ -9469,7 +9473,7 @@ pub mod testing {
             frame.to_bytes(&mut b)?;
         }
 
-        let aead = match space.crypto_seal {
+        let aead = match crypto_ctx.crypto_seal {
             Some(ref v) => v,
             None => return Err(Error::InvalidState),
         };
@@ -9498,7 +9502,7 @@ pub mod testing {
 
         let epoch = hdr.ty.to_epoch()?;
 
-        let aead = conn.pkt_num_spaces[epoch].crypto_open.as_ref().unwrap();
+        let aead = conn.crypto_ctx[epoch].crypto_open.as_ref().unwrap();
 
         let payload_len = b.cap();
 
@@ -10682,7 +10686,7 @@ mod tests {
 
         // Ensure ACK for key update.
         assert!(
-            pipe.server.pkt_num_spaces[packet::Epoch::Application]
+            pipe.server.crypto_ctx[packet::Epoch::Application]
                 .key_update
                 .as_ref()
                 .unwrap()
@@ -12986,12 +12990,12 @@ mod tests {
             frame.to_bytes(&mut b).unwrap();
         }
 
-        let space = &mut pipe.client.pkt_num_spaces[epoch];
+        let crypto_ctx = &mut pipe.client.crypto_ctx[epoch];
 
         // Use correct payload length when encrypting the packet.
         let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len());
 
-        let aead = space.crypto_seal.as_ref().unwrap();
+        let aead = crypto_ctx.crypto_seal.as_ref().unwrap();
 
         let written = packet::encrypt_pkt(
             &mut b,
@@ -18670,7 +18674,7 @@ mod tests {
         let mut pkt_buf = [0u8; 1500];
         let mut b = octets::OctetsMut::with_slice(&mut pkt_buf);
         let epoch = packet::Type::Short.to_epoch().unwrap();
-        let space = &mut pipe.client.pkt_num_spaces[epoch];
+        let crypto_ctx = &mut pipe.client.crypto_ctx[epoch];
         let pn = pipe.client.next_pkt_num;
         let pn_len = 4;
 
@@ -18695,7 +18699,7 @@ mod tests {
             frame.to_bytes(&mut b).expect("encode frames");
         }
 
-        let aead = space.crypto_seal.as_ref().expect("crypto seal");
+        let aead = crypto_ctx.crypto_seal.as_ref().expect("crypto seal");
 
         let written = packet::encrypt_pkt(
             &mut b,
