@@ -186,7 +186,7 @@ pub trait RecoveryOps {
     fn pto(&self) -> Duration;
 
     /// The most recent data delivery rate estimate in bytes/s.
-    fn delivery_rate(&self) -> u64;
+    fn track_usage(&self) -> u64;
 
     fn max_datagram_size(&self) -> usize;
 

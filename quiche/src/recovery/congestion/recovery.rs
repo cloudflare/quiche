@@ -811,7 +811,7 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     /// The most recent data delivery rate estimate in bytes/s.
-    fn delivery_rate(&self) -> u64 {
+    fn track_usage(&self) -> u64 {
         self.congestion.delivery_rate()
     }
 

@@ -857,7 +857,7 @@ impl RecoveryOps for GRecovery {
     }
 
     /// The most recent data delivery rate estimate in bytes/s.
-    fn delivery_rate(&self) -> u64 {
+    fn track_usage(&self) -> u64 {
         self.pacer
             .bandwidth_estimate(&self.rtt_stats)
             .to_bits_per_second() / 8
@@ -963,7 +963,7 @@ impl RecoveryOps for GRecovery {
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight as u64,
             ssthresh: self.pacer.ssthresh(),
-            pacing_rate: self.delivery_rate(),
+            pacing_rate: self.track_usage(),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
