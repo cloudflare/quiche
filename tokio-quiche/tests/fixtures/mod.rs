@@ -168,9 +168,10 @@ pub async fn handle_forwarded_headers_frame(
     stream_id: u64, list: Vec<Header>, mut send: OutboundFrameSender,
     mut recv: InboundFrameStream,
 ) {
-    send.send(OutboundFrame::Headers(vec![h3::Header::new(
-        b":status", b"200",
-    )]))
+    send.send(OutboundFrame::Headers(
+        vec![h3::Header::new(b":status", b"200")],
+        None,
+    ))
     .await
     .unwrap();
 

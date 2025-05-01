@@ -89,8 +89,8 @@ pub use self::server::ServerH3Controller;
 pub use self::server::ServerH3Driver;
 pub use self::server::ServerH3Event;
 
-// The priority of all HTTP/3 responses is currently fixed at this value.
-// TODO: make this configurable as part of `OutboundFrame::Headers`
+// The default priority for HTTP/3 responses if the application didn't provide
+// one.
 const DEFAULT_PRIO: h3::Priority = h3::Priority::new(3, true);
 
 // For a stream use a channel with 16 entries, which works out to 16 * 64KB =
@@ -263,8 +263,8 @@ impl H3Event {
 /// UDP datagrams.
 #[derive(Debug)]
 pub enum OutboundFrame {
-    /// Response headers to be sent to the peer.
-    Headers(Vec<h3::Header>),
+    /// Response headers to be sent to the peer, with optional priority.
+    Headers(Vec<h3::Header>, Option<quiche::h3::Priority>),
     /// Response body/CONNECT downstream data plus FIN flag.
     #[cfg(feature = "zero-copy")]
     Body(crate::buf_factory::QuicheBuf, bool),
@@ -623,20 +623,23 @@ impl<H: DriverHooks> H3Driver<H> {
         let stream_id = audit_stats.stream_id();
 
         match frame {
-            // Initial headers were already sent, send additional headers now.
-            OutboundFrame::Headers(headers) if ctx.initial_headers_sent => conn
-                .send_additional_headers(qconn, stream_id, headers, false, false),
+            OutboundFrame::Headers(headers, priority) => {
+                let prio = priority.as_ref().unwrap_or(&DEFAULT_PRIO);
 
-            // Send initial headers.
-            OutboundFrame::Headers(headers) => conn
-                .send_response_with_priority(
-                    qconn,
-                    stream_id,
-                    headers,
-                    &DEFAULT_PRIO,
-                    false,
-                )
-                .inspect(|_| ctx.initial_headers_sent = true),
+                if ctx.initial_headers_sent {
+                    // Initial headers were already sent, send additional
+                    // headers now.
+                    conn.send_additional_headers_with_priority(
+                        qconn, stream_id, headers, prio, false, false,
+                    )
+                } else {
+                    // Send initial headers.
+                    conn.send_response_with_priority(
+                        qconn, stream_id, headers, prio, false,
+                    )
+                    .inspect(|_| ctx.initial_headers_sent = true)
+                }
+            },
 
             OutboundFrame::Body(body, fin) => {
                 let len = body.as_ref().len();

@@ -53,9 +53,10 @@ async fn test_additional_headers() {
                         let IncomingH3Headers { mut send, .. } = headers;
 
                         // Send initial headers.
-                        send.send(OutboundFrame::Headers(vec![Header::new(
-                            b":status", b"103",
-                        )]))
+                        send.send(OutboundFrame::Headers(
+                            vec![Header::new(b":status", b"103")],
+                            None,
+                        ))
                         .await
                         .unwrap();
 
@@ -65,9 +66,10 @@ async fn test_additional_headers() {
                         tokio::task::yield_now().await;
 
                         // Send additional headers.
-                        send.send(OutboundFrame::Headers(vec![Header::new(
-                            b":status", b"200",
-                        )]))
+                        send.send(OutboundFrame::Headers(
+                            vec![Header::new(b":status", b"200")],
+                            None,
+                        ))
                         .await
                         .unwrap();
                     },

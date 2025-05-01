@@ -811,7 +811,7 @@ pub enum Event {
 /// Structured Fields Dictionary field value. I.e, use `TryFrom` to parse the
 /// value of a Priority header field or a PRIORITY_UPDATE frame. Using this
 /// trait requires the `sfv` feature to be enabled.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct Priority {
     urgency: u8,
@@ -1203,10 +1203,6 @@ impl Connection {
     /// Sends an HTTP/3 response on the specified stream with specified
     /// priority.
     ///
-    /// The `priority` parameter represents [Extensible Priority]
-    /// parameters. If the urgency is outside the range 0-7, it will be clamped
-    /// to 7.
-    ///
     /// This method sends the provided `headers` as a single initial response
     /// without a body.
     ///
@@ -1224,6 +1220,10 @@ impl Connection {
     /// To send a final 200+ with body:
     ///   * send_response_with_priority() with `fin` set to `false`.
     ///   * [`send_body()`] with same `stream_id`.
+    ///
+    /// The `priority` parameter represents [Extensible Priority]
+    /// parameters. If the urgency is outside the range 0-7, it will be clamped
+    /// to 7.
     ///
     /// Additional headers can only be sent during certain phases of an HTTP/3
     /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
@@ -1335,6 +1335,60 @@ impl Connection {
                 s.mark_trailers_sent();
             }
         }
+
+        Ok(())
+    }
+
+    /// Sends additional HTTP/3 headers with specified priority.
+    ///
+    /// After the initial request or response headers have been sent, using
+    /// [`send_request()`] or [`send_response()`] respectively, this method can
+    /// be used send an additional HEADERS frame. For example, to send a single
+    /// instance of trailers after a request with a body, or to issue another
+    /// non-final 1xx after a preceding 1xx, or to issue a final response after
+    /// a preceding 1xx.
+    ///
+    /// The `priority` parameter represents [Extensible Priority]
+    /// parameters. If the urgency is outside the range 0-7, it will be clamped
+    /// to 7.
+    ///
+    /// Additional headers can only be sent during certain phases of an HTTP/3
+    /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
+    /// error is returned when this method is called during the wrong phase,
+    /// such as before initial headers have been sent, or if trailers have
+    /// already been sent.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`send_request()`]: struct.Connection.html#method.send_request
+    /// [`send_response()`]: struct.Connection.html#method.send_response
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
+    /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
+    /// [Section 4.1 of RFC 9114]:
+    ///     https://www.rfc-editor.org/rfc/rfc9114.html#section-4.1.
+    /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
+    pub fn send_additional_headers_with_priority<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        headers: &[T], priority: &Priority, is_trailer_section: bool, fin: bool,
+    ) -> Result<()> {
+        self.send_additional_headers(
+            conn,
+            stream_id,
+            headers,
+            is_trailer_section,
+            fin,
+        )?;
+
+        // Clamp and shift urgency into quiche-priority space
+        let urgency = priority
+            .urgency
+            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
+            PRIORITY_URGENCY_OFFSET;
+
+        conn.stream_priority(stream_id, urgency, priority.incremental)?;
 
         Ok(())
     }
