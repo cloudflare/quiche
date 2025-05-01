@@ -856,10 +856,11 @@ impl RecoveryOps for GRecovery {
         r.rtt() + (r.rttvar() * 4).max(GRANULARITY)
     }
 
+    /// The most recent data delivery rate estimate in bytes/s.
     fn delivery_rate(&self) -> u64 {
         self.pacer
             .bandwidth_estimate(&self.rtt_stats)
-            .to_bits_per_second()
+            .to_bits_per_second() / 8
     }
 
     fn max_datagram_size(&self) -> usize {
