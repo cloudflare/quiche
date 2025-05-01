@@ -347,6 +347,9 @@ pub struct H3Driver<H: DriverHooks> {
     /// Tracks whether we have forwarded the HTTP/3 SETTINGS frame
     /// to the [H3Controller] once.
     settings_received_and_forwarded: bool,
+
+    /// The default priority to use for outgoing responses.
+    default_response_priority: quiche::h3::Priority,
 }
 
 impl<H: DriverHooks> H3Driver<H> {
@@ -379,6 +382,11 @@ impl<H: DriverHooks> H3Driver<H> {
                 waiting_streams: FuturesUnordered::new(),
 
                 settings_received_and_forwarded: false,
+
+                default_response_priority: *http3_settings
+                    .default_response_priority
+                    .as_ref()
+                    .unwrap_or(&DEFAULT_PRIO),
             },
             H3Controller {
                 cmd_sender,
@@ -613,7 +621,7 @@ impl<H: DriverHooks> H3Driver<H> {
     /// this method in a loop for each stream to send all writable packets.
     fn process_write_frame(
         conn: &mut h3::Connection, qconn: &mut QuicheConnection,
-        ctx: &mut StreamCtx,
+        ctx: &mut StreamCtx, default_response_priority: &quiche::h3::Priority,
     ) -> h3::Result<()> {
         let Some(frame) = &mut ctx.queued_frame else {
             return Ok(());
@@ -624,18 +632,18 @@ impl<H: DriverHooks> H3Driver<H> {
 
         match frame {
             OutboundFrame::Headers(headers, priority) => {
-                let prio = priority.as_ref().unwrap_or(&DEFAULT_PRIO);
+                let prio = priority.as_ref().unwrap_or(default_response_priority);
 
                 if ctx.initial_headers_sent {
                     // Initial headers were already sent, send additional
                     // headers now.
                     conn.send_additional_headers_with_priority(
-                        qconn, stream_id, headers, &prio, false, false,
+                        qconn, stream_id, headers, prio, false, false,
                     )
                 } else {
                     // Send initial headers.
                     conn.send_response_with_priority(
-                        qconn, stream_id, headers, &prio, false,
+                        qconn, stream_id, headers, prio, false,
                     )
                     .inspect(|_| ctx.initial_headers_sent = true)
                 }
@@ -906,10 +914,12 @@ impl<H: DriverHooks> H3Driver<H> {
             return Ok(()); // Unknown stream_id
         };
 
+        let default_prio = &self.default_response_priority;
+
         loop {
             // Process each writable frame, queue the next frame for processing
             // and shut down any errored streams.
-            match Self::process_write_frame(conn, qconn, ctx) {
+            match Self::process_write_frame(conn, qconn, ctx, default_prio) {
                 Ok(()) => ctx.queued_frame = None,
                 Err(h3::Error::StreamBlocked | h3::Error::Done) => break,
                 Err(h3::Error::MessageError) => {

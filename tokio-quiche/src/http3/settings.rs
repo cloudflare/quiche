@@ -58,6 +58,8 @@ pub struct Http3Settings {
     /// request on a connection. Only applicable to
     /// [ServerH3Driver](crate::http3::driver::ServerH3Driver).
     pub post_accept_timeout: Option<Duration>,
+    /// The default priority to use for outgoing responses.
+    pub default_response_priority: Option<quiche::h3::Priority>,
 }
 
 impl From<&Http3Settings> for quiche::h3::Config {
