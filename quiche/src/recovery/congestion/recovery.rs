@@ -817,6 +817,7 @@ impl RecoveryOps for LegacyRecovery {
         self.rtt() + cmp::max(self.rtt_stats.rttvar * 4, GRANULARITY)
     }
 
+    /// The most recent data delivery rate estimate in bytes/s.
     fn delivery_rate(&self) -> u64 {
         self.congestion.delivery_rate()
     }

@@ -191,6 +191,7 @@ impl Rate {
 
 #[derive(Default, Debug)]
 struct RateSample {
+    // The sample delivery_rate in bytes/sec
     delivery_rate: u64,
 
     is_app_limited: bool,
