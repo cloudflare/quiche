@@ -1023,7 +1023,7 @@ impl Config {
     /// specific key (e.g. in order to support resumption across multiple
     /// servers), in which case the application is also responsible for
     /// rotating the key to provide forward secrecy.
-    #[cfg(not(feature = "rustls"))]
+    #[cfg(not(feature = "__rustls"))]
     pub fn set_ticket_key(&mut self, key: &[u8]) -> Result<()> {
         self.tls_ctx.set_ticket_key(key)
     }
@@ -1463,7 +1463,7 @@ where
     path_challenge_rx_count: u64,
 
     /// List of supported application protocols.
-    #[cfg(not(feature = "rustls"))]
+    #[cfg(not(feature = "__rustls"))]
     application_protos: Vec<Vec<u8>>,
 
     /// Total number of received packets.
@@ -2021,7 +2021,7 @@ impl<F: BufFactory> Connection<F> {
                 .path_challenge_recv_max_queue_len,
             path_challenge_rx_count: 0,
 
-            #[cfg(not(feature = "rustls"))]
+            #[cfg(not(feature = "__rustls"))]
             application_protos: config.application_protos.clone(),
 
             recv_count: 0,
@@ -3076,7 +3076,7 @@ impl<F: BufFactory> Connection<F> {
         let mut payload = match payload_res {
             Ok(payload) => payload,
             Err(e) => {
-                #[cfg(feature = "rustls")]
+                #[cfg(feature = "__rustls")]
                 // rustls updates the secrets when deriving the next packet keys
                 // therefore needed to return the keys in case they are not
                 // verified successfully
@@ -7165,7 +7165,7 @@ impl<F: BufFactory> Connection<F> {
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self, now: time::Instant) -> Result<()> {
         let mut ex_data = tls::ExData {
-            #[cfg(not(feature = "rustls"))]
+            #[cfg(not(feature = "__rustls"))]
             application_protos: &self.application_protos,
 
             crypto_ctx: &mut self.crypto_ctx,
@@ -7174,17 +7174,17 @@ impl<F: BufFactory> Connection<F> {
 
             local_error: &mut self.local_error,
 
-            #[cfg(not(feature = "rustls"))]
+            #[cfg(not(feature = "__rustls"))]
             keylog: self.keylog.as_mut(),
 
-            #[cfg(not(feature = "rustls"))]
+            #[cfg(not(feature = "__rustls"))]
             trace_id: &self.trace_id,
 
             recovery_config: self.recovery_config,
 
             tx_cap_factor: self.tx_cap_factor,
 
-            #[cfg(not(feature = "rustls"))]
+            #[cfg(not(feature = "__rustls"))]
             is_server: self.is_server,
         };
 
@@ -9057,9 +9057,9 @@ pub mod testing {
 
     pub(super) static KEY: &str = "examples/cert.key";
 
-    #[cfg(not(feature = "rustls"))]
+    #[cfg(not(feature = "__rustls"))]
     pub(super) static CERT: &str = "examples/cert.crt";
-    #[cfg(feature = "rustls")]
+    #[cfg(feature = "__rustls")]
     pub(super) static CERT: &str = "examples/cert_rustls.crt";
 
     pub struct Pipe {
@@ -9580,14 +9580,14 @@ mod tests {
     use super::testing::*;
     use super::*;
 
-    #[cfg(not(feature = "rustls"))]
+    #[cfg(not(feature = "__rustls"))]
     pub(super) static CERT_BIG: &str = "examples/cert-big.crt";
-    #[cfg(not(feature = "rustls"))]
+    #[cfg(not(feature = "__rustls"))]
     pub(super) static ROOTCA: &str = "examples/rootca.crt";
 
-    #[cfg(feature = "rustls")]
+    #[cfg(feature = "__rustls")]
     pub(super) static CERT_BIG: &str = "examples/cert-big_rustls.crt";
-    #[cfg(feature = "rustls")]
+    #[cfg(feature = "__rustls")]
     pub(super) static ROOTCA: &str = "examples/rootca_rustls.crt";
 
     #[test]
@@ -9884,10 +9884,10 @@ mod tests {
         .unwrap();
         assert_eq!(pipe.handshake(), Err(Error::TlsFail));
 
-        #[cfg(not(feature = "rustls"))]
+        #[cfg(not(feature = "__rustls"))]
         // Client did send a certificate.
         assert!(pipe.server.peer_cert().is_some());
-        #[cfg(feature = "rustls")]
+        #[cfg(feature = "__rustls")]
         // rustls does not provide the peer certificate when verification failed
         assert!(pipe.server.peer_cert().is_none());
     }
@@ -10023,7 +10023,7 @@ mod tests {
 
         // Disable session tickets on the server (SSL_OP_NO_TICKET) to avoid
         // triggering 1-RTT packet send with a CRYPTO frame.
-        #[cfg(not(feature = "rustls"))]
+        #[cfg(not(feature = "__rustls"))]
         pipe.server.handshake.set_options(0x0000_4000);
 
         assert_eq!(pipe.handshake(), Ok(()));
@@ -10093,7 +10093,7 @@ mod tests {
     }
 
     #[rstest]
-    #[cfg(not(feature = "rustls"))]
+    #[cfg(not(feature = "__rustls"))]
     fn handshake_resumption(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
@@ -13536,9 +13536,9 @@ mod tests {
 
         match pipe.client.peer_cert() {
             Some(c) => {
-                #[cfg(not(feature = "rustls"))]
+                #[cfg(not(feature = "__rustls"))]
                 assert_eq!(c.len(), 753);
-                #[cfg(feature = "rustls")]
+                #[cfg(feature = "__rustls")]
                 assert_eq!(c.len(), 847);
             },
 
@@ -14269,7 +14269,9 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     Ok(12345)
-                } else if cfg!(feature = "rustls") {
+                } else if cfg!(feature = "rustls-ring") {
+                    Ok(12320)
+                } else if cfg!(feature = "rustls-aws-lc-rs") {
                     Ok(12324)
                 } else {
                     Ok(12299)
@@ -14346,7 +14348,9 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     Ok(12345)
-                } else if cfg!(feature = "rustls") {
+                } else if cfg!(feature = "rustls-ring") {
+                    Ok(12320)
+                } else if cfg!(feature = "rustls-aws-lc-rs") {
                     Ok(12324)
                 } else {
                     Ok(12299)
@@ -15841,7 +15845,7 @@ mod tests {
     // OpenSSL does not provide a straightforward interface to deal with custom
     // off-load key signing.
     #[cfg(not(feature = "openssl"))]
-    #[cfg(not(feature = "rustls"))]
+    #[cfg(not(feature = "__rustls"))]
     #[rstest]
     fn app_close_by_server_during_handshake_private_key_failure(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -16210,7 +16214,7 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     13437
-                } else if cfg!(feature = "rustls") {
+                } else if cfg!(feature = "__rustls") {
                     13535
                 } else {
                     13421
@@ -16274,7 +16278,7 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     13959
-                } else if cfg!(feature = "rustls") {
+                } else if cfg!(feature = "__rustls") {
                     13753
                 } else {
                     13873
@@ -16291,7 +16295,7 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     Ok(3959)
-                } else if cfg!(feature = "rustls") {
+                } else if cfg!(feature = "__rustls") {
                     Ok(3753)
                 } else {
                     Ok(3873)
@@ -16481,7 +16485,7 @@ mod tests {
             let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 +
                 if cfg!(feature = "openssl") {
                     1463
-                } else if cfg!(feature = "rustls") {
+                } else if cfg!(feature = "__rustls") {
                     1561
                 } else {
                     1447
@@ -18041,7 +18045,7 @@ mod tests {
             "bbr2" =>
                 if cfg!(feature = "openssl") {
                     14041
-                } else if cfg!(feature = "rustls") {
+                } else if cfg!(feature = "__rustls") {
                     13835
                 } else {
                     13955
@@ -18049,7 +18053,7 @@ mod tests {
             "bbr2_gcongestion" =>
                 if cfg!(feature = "openssl") {
                     13966
-                } else if cfg!(feature = "rustls") {
+                } else if cfg!(feature = "__rustls") {
                     13760
                 } else {
                     13880

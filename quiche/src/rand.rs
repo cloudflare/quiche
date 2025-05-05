@@ -24,19 +24,19 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#[cfg(feature = "rustls")]
-use crate::crypto::init_crypto_provider;
+#[cfg(feature = "__rustls")]
+use crate::crypto::crypto_provider;
 
-#[cfg(not(feature = "rustls"))]
+#[cfg(not(feature = "__rustls"))]
 pub fn rand_bytes(buf: &mut [u8]) {
     unsafe {
         RAND_bytes(buf.as_mut_ptr(), buf.len());
     }
 }
 
-#[cfg(feature = "rustls")]
+#[cfg(feature = "__rustls")]
 pub fn rand_bytes(buf: &mut [u8]) {
-    let provider = init_crypto_provider();
+    let provider = crypto_provider();
     provider.secure_random.fill(buf).unwrap()
 }
 
@@ -69,7 +69,7 @@ pub fn rand_u64_uniform(max: u64) -> u64 {
     r / chunk_size
 }
 
-#[cfg(not(feature = "rustls"))]
+#[cfg(not(feature = "__rustls"))]
 extern "C" {
     fn RAND_bytes(buf: *mut u8, len: libc::size_t) -> libc::c_int;
 }

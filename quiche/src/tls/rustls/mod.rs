@@ -26,7 +26,7 @@
 
 mod verifiers;
 
-use crate::crypto::init_crypto_provider;
+use crate::crypto::crypto_provider;
 use crate::crypto::key_material_from_keys;
 use crate::crypto::Algorithm;
 use crate::crypto::Level;
@@ -87,7 +87,7 @@ pub struct Context {
 
 impl Context {
     pub fn new() -> Result<Self> {
-        let _ = init_crypto_provider();
+        let _ = crypto_provider();
 
         Ok(Self {
             client_config: None,
@@ -120,7 +120,13 @@ impl Context {
             self.private_key_server.is_some() &&
             self.ca_certificates.is_some()
         {
-            let builder = ServerConfig::builder_with_protocol_versions(&[&TLS13]);
+            let builder =
+                ServerConfig::builder_with_provider(crypto_provider().clone())
+                    .with_protocol_versions(&[&TLS13])
+                    .map_err(|e| {
+                        error!("failed to set protocol version for server config builder: {}", e);
+                        Error::TlsFail
+                    })?;
             // setup user supplied and enabled CA certificates for mTLS auth
             let builder = if let Some(verify_store) = verify_store.clone() {
                 let client_verifier =
@@ -178,7 +184,13 @@ impl Context {
         };
 
         if self.client_config.is_none() {
-            let builder = ClientConfig::builder_with_protocol_versions(&[&TLS13]);
+            let builder =
+                ClientConfig::builder_with_provider(crypto_provider().clone())
+                    .with_protocol_versions(&[&TLS13])
+                    .map_err(|e| {
+                        error!("failed to set protocol version for client config builder: {}", e);
+                        Error::TlsFail
+                    })?;
 
             // setup user supplied and enabled CA certificates for server
             // certificate validation

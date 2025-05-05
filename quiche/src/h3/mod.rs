@@ -3227,10 +3227,10 @@ pub mod testing {
 
     pub(super) static KEY: &str = "examples/cert.key";
 
-    #[cfg(not(feature = "rustls"))]
+    #[cfg(not(feature = "__rustls"))]
     pub(super) static CERT: &str = "examples/cert.crt";
 
-    #[cfg(feature = "rustls")]
+    #[cfg(feature = "__rustls")]
     pub(super) static CERT: &str = "examples/cert_rustls.crt";
 
     /// Session is an HTTP/3 test helper structure. It holds a client, server

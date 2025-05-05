@@ -40,7 +40,9 @@ boringssl-boring-crate = ["boring", "foreign-types-shared"]
 openssl = ["pkg-config"]
 
 # Build quiche using rustls
-rustls = ["dep:rustls", "dep:rustls-native-certs", "dep:ring"]
+rustls-aws-lc-rs = ["rustls/aws-lc-rs", "dep:aws-lc-rs", "dep:rustls", "dep:rustls-native-certs", "__rustls"]
+rustls-ring = ["rustls/ring", "dep:rustls", "dep:ring", "dep:rustls-native-certs", "__rustls"]
+__rustls = []
 
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []
@@ -86,9 +88,10 @@ sfv = { version = "0.9", optional = true }
 slab = "0.4"
 smallvec = { workspace = true, features = ["union"] }
 enum_dispatch = "0.3"
-rustls = { version = "0.23.26", optional = true }
+rustls = { version = "0.23.26", default-features = false, features = ["std", "logging"], optional = true }
 rustls-native-certs = { version = "0.8.1", optional = true }
 ring = { workspace = true, optional = true }
+aws-lc-rs = { version = "1.13.0", default-features =  false, optional = true }
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.59", features = [
