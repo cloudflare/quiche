@@ -46,6 +46,8 @@ use crate::ConnectionError;
 use crate::crypto;
 use crate::packet;
 
+use crate::tls::ExData;
+
 const TLS1_3_VERSION: u16 = 0x0304;
 const TLS_ALERT_ERROR: u64 = 0x100;
 const INTERNAL_ERROR: u64 = 0x01;
@@ -678,26 +680,6 @@ impl Drop for Handshake {
     fn drop(&mut self) {
         unsafe { SSL_free(self.as_mut_ptr()) }
     }
-}
-
-pub struct ExData<'a> {
-    pub application_protos: &'a Vec<Vec<u8>>,
-
-    pub crypto_ctx: &'a mut [packet::CryptoContext; packet::Epoch::count()],
-
-    pub session: &'a mut Option<Vec<u8>>,
-
-    pub local_error: &'a mut Option<ConnectionError>,
-
-    pub keylog: Option<&'a mut Box<dyn std::io::Write + Send + Sync>>,
-
-    pub trace_id: &'a str,
-
-    pub recovery_config: crate::recovery::RecoveryConfig,
-
-    pub tx_cap_factor: f64,
-
-    pub is_server: bool,
 }
 
 impl<'a> ExData<'a> {
