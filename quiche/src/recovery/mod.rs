@@ -1642,6 +1642,8 @@ mod tests {
         assert_eq!(r.lost_count(), 0);
     }
 
+    // Modeling delivery_rate for gcongestion is non-trivial so we only test the
+    // congestion specific algorithms.
     #[rstest]
     fn congestion_delivery_rate(
         #[values("reno", "cubic", "bbr", "bbr2")] cc_algorithm_name: &str,
