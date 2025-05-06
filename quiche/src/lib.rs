@@ -9046,6 +9046,9 @@ impl TransportParams {
 #[doc(hidden)]
 pub mod testing {
     use super::*;
+    use crate::recovery::Sent;
+    use smallvec::smallvec;
+    use std::time::Instant;
 
     pub struct Pipe {
         pub client: Connection,
@@ -9554,6 +9557,27 @@ pub mod testing {
         let reset_token = u128::from_be_bytes(reset_token);
 
         (cid, reset_token)
+    }
+
+    pub fn helper_packet_sent(pkt_num: u64, now: Instant, size: usize) -> Sent {
+        Sent {
+            pkt_num,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+            pmtud: false,
+        }
     }
 }
 
