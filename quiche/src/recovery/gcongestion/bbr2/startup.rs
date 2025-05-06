@@ -85,6 +85,7 @@ impl ModeImpl for Startup {
         let check_persisten_queue =
             params.max_startup_queue_rounds > 0 && !has_bandwidth_growth;
         if check_persisten_queue {
+            // https://github.com/google/quiche/blob/27eca0257490df89d2bd2c2a8bcea15565e7831c/quiche/quic/core/congestion_control/bbr2_startup.cc#L60-L62
             // 1.75 is less than the 2x CWND gain, but substantially more than
             // 1.25x, the minimum bandwidth increase expected during
             // STARTUP.
