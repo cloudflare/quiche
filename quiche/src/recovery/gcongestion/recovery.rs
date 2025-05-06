@@ -14,6 +14,7 @@ use crate::recovery::QlogMetrics;
 
 use crate::frame;
 
+use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::HandshakeStatus;
@@ -30,7 +31,6 @@ use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
 
-use super::bandwidth::Bandwidth;
 use super::pacer::Pacer;
 use super::Acked;
 use super::Congestion;

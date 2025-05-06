@@ -24,7 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod bandwidth;
 mod bbr;
 mod bbr2;
 pub mod pacer;
@@ -34,8 +33,8 @@ use std::fmt::Debug;
 use std::str::FromStr;
 use std::time::Instant;
 
-use self::bandwidth::Bandwidth;
 pub use self::recovery::GRecovery;
+use crate::recovery::bandwidth::Bandwidth;
 
 use crate::recovery::rtt::RttStats;
 use crate::recovery::rtt::INITIAL_RTT;
