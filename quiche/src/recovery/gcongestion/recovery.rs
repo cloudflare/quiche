@@ -860,8 +860,7 @@ impl RecoveryOps for GRecovery {
     fn delivery_rate(&self) -> u64 {
         self.pacer
             .bandwidth_estimate(&self.rtt_stats)
-            .to_bits_per_second() /
-            8
+            .to_bytes_per_second()
     }
 
     fn max_datagram_size(&self) -> usize {

@@ -146,8 +146,9 @@ impl Congestion {
         }
     }
 
+    /// The most recent data delivery rate estimate in bytes/s.
     pub(crate) fn delivery_rate(&self) -> u64 {
-        self.delivery_rate.sample_delivery_rate()
+        self.delivery_rate.sample_bandwidth().to_bytes_per_second()
     }
 
     pub(crate) fn send_quantum(&self) -> usize {
