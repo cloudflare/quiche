@@ -112,27 +112,17 @@ impl Pacer {
             allow_burst,
         }
     }
-}
 
-impl CongestionControl for Pacer {
     #[cfg(feature = "qlog")]
-    fn state_str(&self) -> &'static str {
+    pub fn state_str(&self) -> &'static str {
         self.sender.state_str()
     }
 
-    fn get_congestion_window(&self) -> usize {
+    pub fn get_congestion_window(&self) -> usize {
         self.sender.get_congestion_window()
     }
 
-    fn get_congestion_window_in_packets(&self) -> usize {
-        self.sender.get_congestion_window_in_packets()
-    }
-
-    fn can_send(&self, bytes_in_flight: usize) -> bool {
-        self.sender.can_send(bytes_in_flight)
-    }
-
-    fn on_packet_sent(
+    pub fn on_packet_sent(
         &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
         rtt_stats: &RttStats,
@@ -204,8 +194,9 @@ impl CongestionControl for Pacer {
         self.pacing_limited = self.sender.can_send(bytes_in_flight + bytes);
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[inline]
-    fn on_congestion_event(
+    pub fn on_congestion_event(
         &mut self, rtt_updated: bool, prior_in_flight: usize,
         bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
         lost_packets: &[Lost], least_unacked: u64, rtt_stats: &RttStats,
@@ -242,27 +233,15 @@ impl CongestionControl for Pacer {
         }
     }
 
-    fn on_packet_neutered(&mut self, packet_number: u64) {
+    pub fn on_packet_neutered(&mut self, packet_number: u64) {
         self.sender.on_packet_neutered(packet_number);
     }
 
-    fn on_retransmission_timeout(&mut self, packets_retransmitted: bool) {
+    pub fn on_retransmission_timeout(&mut self, packets_retransmitted: bool) {
         self.sender.on_retransmission_timeout(packets_retransmitted)
     }
 
-    fn on_connection_migration(&mut self) {
-        self.sender.on_connection_migration()
-    }
-
-    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
-        !self.pacing_limited && self.sender.is_cwnd_limited(bytes_in_flight)
-    }
-
-    fn is_in_recovery(&self) -> bool {
-        self.sender.is_in_recovery()
-    }
-
-    fn pacing_rate(
+    pub fn pacing_rate(
         &self, bytes_in_flight: usize, rtt_stats: &RttStats,
     ) -> Bandwidth {
         let sender_rate = self.sender.pacing_rate(bytes_in_flight, rtt_stats);
@@ -272,21 +251,31 @@ impl CongestionControl for Pacer {
         }
     }
 
-    fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth {
+    pub fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth {
         self.sender.bandwidth_estimate(rtt_stats)
     }
 
-    fn on_app_limited(&mut self, bytes_in_flight: usize) {
+    pub fn on_app_limited(&mut self, bytes_in_flight: usize) {
         self.pacing_limited = false;
         self.sender.on_app_limited(bytes_in_flight);
     }
 
-    fn update_mss(&mut self, new_mss: usize) {
+    pub fn update_mss(&mut self, new_mss: usize) {
         self.sender.update_mss(new_mss)
     }
 
     #[cfg(feature = "qlog")]
-    fn ssthresh(&self) -> Option<u64> {
+    pub fn ssthresh(&self) -> Option<u64> {
         self.sender.ssthresh()
+    }
+
+    #[cfg(test)]
+    pub fn is_app_limited(&self, bytes_in_flight: usize) -> bool {
+        !self.is_cwnd_limited(bytes_in_flight)
+    }
+
+    #[cfg(test)]
+    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
+        !self.pacing_limited && self.sender.is_cwnd_limited(bytes_in_flight)
     }
 }
