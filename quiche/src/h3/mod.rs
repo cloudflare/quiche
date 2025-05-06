@@ -3225,6 +3225,14 @@ pub mod testing {
 
     use crate::testing;
 
+    pub(super) static KEY: &str = "examples/cert.key";
+
+    #[cfg(not(feature = "rustls"))]
+    pub(super) static CERT: &str = "examples/cert.crt";
+
+    #[cfg(feature = "rustls")]
+    pub(super) static CERT: &str = "examples/cert_rustls.crt";
+
     /// Session is an HTTP/3 test helper structure. It holds a client, server
     /// and pipe that allows them to communicate.
     ///
@@ -3258,10 +3266,10 @@ pub mod testing {
 
             let mut config = crate::Config::new(crate::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file(
-                &path_relative_to_manifest_dir("examples/cert.crt"),
+                &path_relative_to_manifest_dir(CERT),
             )?;
             config.load_priv_key_from_pem_file(
-                &path_relative_to_manifest_dir("examples/cert.key"),
+                &path_relative_to_manifest_dir(KEY),
             )?;
             config.set_application_protos(&[b"h3"])?;
             config.set_initial_max_data(1500);
@@ -3594,12 +3602,8 @@ mod tests {
         let mut buf = [0; 65535];
 
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -5553,12 +5557,8 @@ mod tests {
     /// Tests that the max header list size setting is enforced.
     fn request_max_header_size_limit() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -5690,12 +5690,8 @@ mod tests {
     /// Tests that we limit sending HEADERS based on the stream capacity.
     fn headers_blocked() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -5743,12 +5739,8 @@ mod tests {
     /// Ensure StreamBlocked when connection flow control prevents headers.
     fn headers_blocked_on_conn() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -5804,12 +5796,8 @@ mod tests {
         use crate::testing::decode_pkt;
 
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(10000); // large connection-level flow control
         config.set_initial_max_stream_data_bidi_local(80);
@@ -5938,12 +5926,8 @@ mod tests {
     /// Ensure stream doesn't hang due to small cwnd.
     fn send_body_stream_blocked_by_small_cwnd() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(100000); // large connection-level flow control
         config.set_initial_max_stream_data_bidi_local(100000);
@@ -6010,12 +5994,8 @@ mod tests {
     /// Ensure stream doesn't hang due to small cwnd.
     fn send_body_stream_blocked_zero_length() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(100000); // large connection-level flow control
         config.set_initial_max_stream_data_bidi_local(100000);
@@ -6143,12 +6123,8 @@ mod tests {
     /// Tests that blocked 0-length DATA writes are reported correctly.
     fn zero_length_data_blocked() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(69);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -6198,12 +6174,8 @@ mod tests {
     /// Tests that receiving an empty SETTINGS frame is handled and reported.
     fn empty_settings() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -6228,12 +6200,8 @@ mod tests {
     /// Tests that receiving a H3_DATAGRAM setting is ok.
     fn dgram_setting() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -6273,12 +6241,8 @@ mod tests {
     /// an error.
     fn dgram_setting_no_tp() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -6325,12 +6289,8 @@ mod tests {
     /// Tests that receiving SETTINGS with prohibited values generates an error.
     fn settings_h2_prohibited() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -6435,12 +6395,8 @@ mod tests {
     /// Tests additional settings are actually exchanged by the peers.
     fn set_additional_settings() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -6559,12 +6515,8 @@ mod tests {
     /// Send a single DATAGRAM and request.
     fn poll_datagram_cycling_no_read() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -6603,12 +6555,8 @@ mod tests {
         let mut buf = [0; 65535];
 
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -6688,12 +6636,8 @@ mod tests {
         let mut buf = [0; 65535];
 
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);
@@ -7063,12 +7007,8 @@ mod tests {
         let mut buf = [0; 65535];
 
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(1500);
         config.set_initial_max_stream_data_bidi_local(150);

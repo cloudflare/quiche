@@ -9033,6 +9033,13 @@ impl TransportParams {
 pub mod testing {
     use super::*;
 
+    pub(super) static KEY: &str = "examples/cert.key";
+
+    #[cfg(not(feature = "rustls"))]
+    pub(super) static CERT: &str = "examples/cert.crt";
+    #[cfg(feature = "rustls")]
+    pub(super) static CERT: &str = "examples/cert_rustls.crt";
+
     pub struct Pipe {
         pub client: Connection,
         pub server: Connection,
@@ -9042,8 +9049,8 @@ pub mod testing {
         pub fn new(cc_algorithm_name: &str) -> Result<Pipe> {
             let mut config = Config::new(crate::PROTOCOL_VERSION)?;
             assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-            config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-            config.load_priv_key_from_pem_file("examples/cert.key")?;
+            config.load_cert_chain_from_pem_file(CERT)?;
+            config.load_priv_key_from_pem_file(KEY)?;
             config.set_application_protos(&[b"proto1", b"proto2"])?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
@@ -9138,8 +9145,8 @@ pub mod testing {
             let server_addr = Pipe::server_addr();
 
             let mut config = Config::new(crate::PROTOCOL_VERSION)?;
-            config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-            config.load_priv_key_from_pem_file("examples/cert.key")?;
+            config.load_cert_chain_from_pem_file(CERT)?;
+            config.load_priv_key_from_pem_file(KEY)?;
             config.set_application_protos(&[b"proto1", b"proto2"])?;
             config.set_initial_max_data(30);
             config.set_initial_max_stream_data_bidi_local(15);
@@ -9548,7 +9555,18 @@ mod tests {
     use crate::range_buf::RangeBuf;
     use rstest::rstest;
 
+    use super::testing::*;
     use super::*;
+
+    #[cfg(not(feature = "rustls"))]
+    pub(super) static CERT_BIG: &str = "examples/cert-big.crt";
+    #[cfg(not(feature = "rustls"))]
+    pub(super) static ROOTCA: &str = "examples/rootca.crt";
+
+    #[cfg(feature = "rustls")]
+    pub(super) static CERT_BIG: &str = "examples/cert-big_rustls.crt";
+    #[cfg(feature = "rustls")]
+    pub(super) static ROOTCA: &str = "examples/rootca_rustls.crt";
 
     #[test]
     fn transport_params() {
@@ -9790,9 +9808,7 @@ mod tests {
     fn verify_custom_root() {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         config.verify_peer(true);
-        config
-            .load_verify_locations_from_file("examples/rootca.crt")
-            .unwrap();
+        config.load_verify_locations_from_file(ROOTCA).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -9807,12 +9823,8 @@ mod tests {
     #[test]
     fn verify_client_invalid() {
         let mut server_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        server_config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        server_config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        server_config.load_cert_chain_from_pem_file(CERT).unwrap();
+        server_config.load_priv_key_from_pem_file(KEY).unwrap();
         server_config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -9826,12 +9838,8 @@ mod tests {
         server_config.verify_peer(true);
 
         let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        client_config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        client_config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        client_config.load_cert_chain_from_pem_file(CERT).unwrap();
+        client_config.load_priv_key_from_pem_file(KEY).unwrap();
         client_config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -9843,7 +9851,7 @@ mod tests {
         // The client is able to verify the server's certificate with the
         // appropriate CA.
         client_config
-            .load_verify_locations_from_file("examples/rootca.crt")
+            .load_verify_locations_from_file(ROOTCA)
             .unwrap();
         client_config.verify_peer(true);
 
@@ -9854,19 +9862,19 @@ mod tests {
         .unwrap();
         assert_eq!(pipe.handshake(), Err(Error::TlsFail));
 
+        #[cfg(not(feature = "rustls"))]
         // Client did send a certificate.
         assert!(pipe.server.peer_cert().is_some());
+        #[cfg(feature = "rustls")]
+        // rustls does not provide the peer certificate when verification failed
+        assert!(pipe.server.peer_cert().is_none());
     }
 
     #[test]
     fn verify_client_anonymous() {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -9993,6 +10001,7 @@ mod tests {
 
         // Disable session tickets on the server (SSL_OP_NO_TICKET) to avoid
         // triggering 1-RTT packet send with a CRYPTO frame.
+        #[cfg(not(feature = "rustls"))]
         pipe.server.handshake.set_options(0x0000_4000);
 
         assert_eq!(pipe.handshake(), Ok(()));
@@ -10062,6 +10071,7 @@ mod tests {
     }
 
     #[rstest]
+    #[cfg(not(feature = "rustls"))]
     fn handshake_resumption(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
@@ -10077,12 +10087,8 @@ mod tests {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -10107,12 +10113,8 @@ mod tests {
 
         // Configure session on new connection and perform handshake.
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -10170,12 +10172,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -10235,12 +10233,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -10310,12 +10304,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -10371,12 +10361,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -10440,12 +10426,8 @@ mod tests {
     ) {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert-big.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT_BIG).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -10470,12 +10452,8 @@ mod tests {
 
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert-big.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT_BIG).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -10525,12 +10503,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -10586,12 +10560,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -12137,12 +12107,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -12342,12 +12308,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -12511,12 +12473,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -12789,12 +12747,8 @@ mod tests {
     ) {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
         config.set_initial_max_data(70);
         config.set_initial_max_stream_data_bidi_local(150000);
@@ -13164,12 +13118,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -13226,12 +13176,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -13305,12 +13251,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -13571,7 +13513,12 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
 
         match pipe.client.peer_cert() {
-            Some(c) => assert_eq!(c.len(), 753),
+            Some(c) => {
+                #[cfg(not(feature = "rustls"))]
+                assert_eq!(c.len(), 753);
+                #[cfg(feature = "rustls")]
+                assert_eq!(c.len(), 847);
+            },
 
             None => panic!("missing server certificate"),
         }
@@ -13583,12 +13530,8 @@ mod tests {
     ) {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert-big.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT_BIG).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -13611,12 +13554,8 @@ mod tests {
 
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -13680,12 +13619,8 @@ mod tests {
 
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -13754,12 +13689,8 @@ mod tests {
 
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -13817,12 +13748,8 @@ mod tests {
 
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -14246,12 +14173,8 @@ mod tests {
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config.set_initial_max_data(50000);
         config.set_initial_max_stream_data_bidi_local(12000);
         config.set_initial_max_stream_data_bidi_remote(12000);
@@ -14298,12 +14221,8 @@ mod tests {
     ) {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -14328,6 +14247,8 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     Ok(12345)
+                } else if cfg!(feature = "rustls") {
+                    Ok(12324)
                 } else {
                     Ok(12299)
                 }
@@ -14377,12 +14298,8 @@ mod tests {
     ) {
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -14407,6 +14324,8 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     Ok(12345)
+                } else if cfg!(feature = "rustls") {
+                    Ok(12324)
                 } else {
                     Ok(12299)
                 }
@@ -14663,12 +14582,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -14889,12 +14804,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15012,12 +14923,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15333,12 +15240,8 @@ mod tests {
 
         let mut config = Config::new(PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert-big.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT_BIG).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15448,12 +15351,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15534,12 +15433,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15574,12 +15469,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15651,12 +15542,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15700,12 +15587,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15750,12 +15633,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15804,12 +15683,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -15944,6 +15819,7 @@ mod tests {
     // OpenSSL does not provide a straightforward interface to deal with custom
     // off-load key signing.
     #[cfg(not(feature = "openssl"))]
+    #[cfg(not(feature = "rustls"))]
     #[rstest]
     fn app_close_by_server_during_handshake_private_key_failure(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -16245,12 +16121,8 @@ mod tests {
             server_config.set_cc_algorithm_name(cc_algorithm_name),
             Ok(())
         );
-        server_config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        server_config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        server_config.load_cert_chain_from_pem_file(CERT).unwrap();
+        server_config.load_priv_key_from_pem_file(KEY).unwrap();
         server_config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -16316,6 +16188,8 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     13437
+                } else if cfg!(feature = "rustls") {
+                    13535
                 } else {
                     13421
                 }
@@ -16333,12 +16207,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -16382,6 +16252,8 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     13959
+                } else if cfg!(feature = "rustls") {
+                    13753
                 } else {
                     13873
                 }
@@ -16397,6 +16269,8 @@ mod tests {
             } else {
                 if cfg!(feature = "openssl") {
                     Ok(3959)
+                } else if cfg!(feature = "rustls") {
+                    Ok(3753)
                 } else {
                     Ok(3873)
                 }
@@ -16423,13 +16297,10 @@ mod tests {
             boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
                 .unwrap();
         server_tls_ctx_builder
-            .set_certificate_chain_file("examples/cert.crt")
+            .set_certificate_chain_file(CERT)
             .unwrap();
         server_tls_ctx_builder
-            .set_private_key_file(
-                "examples/cert.key",
-                boring::ssl::SslFiletype::PEM,
-            )
+            .set_private_key_file(KEY, boring::ssl::SslFiletype::PEM)
             .unwrap();
 
         let mut server_config = Config::with_boring_ssl_ctx_builder(
@@ -16441,8 +16312,8 @@ mod tests {
             client_config.set_cc_algorithm_name(cc_algorithm_name),
             Ok(())
         );
-        client_config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-        client_config.load_priv_key_from_pem_file("examples/cert.key")?;
+        client_config.load_cert_chain_from_pem_file(CERT)?;
+        client_config.load_priv_key_from_pem_file(KEY)?;
 
         for config in [&mut client_config, &mut server_config] {
             config.set_application_protos(&[b"proto1", b"proto2"])?;
@@ -16481,13 +16352,10 @@ mod tests {
             boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
                 .unwrap();
         server_tls_ctx_builder
-            .set_certificate_chain_file("examples/cert.crt")
+            .set_certificate_chain_file(CERT)
             .unwrap();
         server_tls_ctx_builder
-            .set_private_key_file(
-                "examples/cert.key",
-                boring::ssl::SslFiletype::PEM,
-            )
+            .set_private_key_file(KEY, boring::ssl::SslFiletype::PEM)
             .unwrap();
         server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
             <Connection>::set_initial_congestion_window_packets_in_handshake(
@@ -16509,8 +16377,8 @@ mod tests {
         );
 
         let mut client_config = Config::new(crate::PROTOCOL_VERSION)?;
-        client_config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-        client_config.load_priv_key_from_pem_file("examples/cert.key")?;
+        client_config.load_cert_chain_from_pem_file(CERT)?;
+        client_config.load_priv_key_from_pem_file(KEY)?;
 
         for config in [&mut client_config, &mut server_config] {
             config.set_application_protos(&[b"proto1", b"proto2"])?;
@@ -16564,8 +16432,8 @@ mod tests {
             CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS,
         );
         // From Pipe::new()
-        config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-        config.load_priv_key_from_pem_file("examples/cert.key")?;
+        config.load_cert_chain_from_pem_file(CERT)?;
+        config.load_priv_key_from_pem_file(KEY)?;
         config.set_application_protos(&[b"proto1", b"proto2"])?;
         config.set_initial_max_data(1000000);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -16591,6 +16459,8 @@ mod tests {
             let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 +
                 if cfg!(feature = "openssl") {
                     1463
+                } else if cfg!(feature = "rustls") {
+                    1561
                 } else {
                     1447
                 };
@@ -16684,12 +16554,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -16747,12 +16613,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -16820,12 +16682,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -16893,12 +16751,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -16981,12 +16835,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17041,12 +16891,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17091,12 +16937,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17240,12 +17082,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17328,12 +17166,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17396,12 +17230,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17451,12 +17281,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17487,12 +17313,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17543,12 +17365,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17612,12 +17430,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17638,12 +17452,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -17829,12 +17639,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -18045,12 +17851,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -18125,12 +17927,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -18195,12 +17993,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -18222,14 +18016,22 @@ mod tests {
         let mut recv_buf = [0; DATA_BYTES];
         let send1_bytes = pipe.server.stream_send(1, &buf, true).unwrap();
         assert_eq!(send1_bytes, match cc_algorithm_name {
-            #[cfg(feature = "openssl")]
-            "bbr2" => 14041,
-            #[cfg(not(feature = "openssl"))]
-            "bbr2" => 13955,
-            #[cfg(feature = "openssl")]
-            "bbr2_gcongestion" => 13966,
-            #[cfg(not(feature = "openssl"))]
-            "bbr2_gcongestion" => 13880,
+            "bbr2" =>
+                if cfg!(feature = "openssl") {
+                    14041
+                } else if cfg!(feature = "rustls") {
+                    13835
+                } else {
+                    13955
+                },
+            "bbr2_gcongestion" =>
+                if cfg!(feature = "openssl") {
+                    13966
+                } else if cfg!(feature = "rustls") {
+                    13760
+                } else {
+                    13880
+                },
             _ => 12000,
         });
         assert_eq!(
@@ -18445,12 +18247,8 @@ mod tests {
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -18631,12 +18429,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -18733,12 +18527,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
@@ -18782,12 +18572,8 @@ mod tests {
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
+        config.load_cert_chain_from_pem_file(CERT).unwrap();
+        config.load_priv_key_from_pem_file(KEY).unwrap();
         config
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
