@@ -32,7 +32,7 @@ use std::ops::Add;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery::gcongestion::bbr::BandwidthSampler;
+use crate::recovery::gcongestion::bandwidth_sampler::BandwidthSampler;
 use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::gcongestion::Lost;

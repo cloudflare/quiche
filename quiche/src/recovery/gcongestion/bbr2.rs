@@ -40,13 +40,13 @@ use std::time::Instant;
 
 use network_model::BBRv2NetworkModel;
 
+use crate::recovery::gcongestion::bandwidth_sampler::SendTimeState;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::RecoveryStats;
 
 use self::mode::Mode;
 use self::mode::ModeImpl;
 
-use super::bbr::SendTimeState;
 use super::Acked;
 use super::BbrBwLoReductionStrategy;
 use super::BbrParams;

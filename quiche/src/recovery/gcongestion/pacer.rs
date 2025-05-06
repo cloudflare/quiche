@@ -115,7 +115,7 @@ impl Pacer {
 
     #[cfg(feature = "qlog")]
     pub fn state_str(&self) -> &'static str {
-        self.sender.state_str()
+        self.cc.state_str()
     }
 
     pub fn get_congestion_window(&self) -> usize {
