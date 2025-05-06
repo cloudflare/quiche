@@ -557,13 +557,13 @@ impl ReleaseDecision {
 
 #[cfg(test)]
 mod tests {
-    use rstest::rstest;
-
     use super::*;
     use crate::packet;
     use crate::ranges;
     use crate::recovery::congestion::PACING_MULTIPLIER;
+    use crate::testing;
     use crate::CongestionControlAlgorithm;
+    use rstest::rstest;
     use smallvec::smallvec;
     use std::str::FromStr;
 
@@ -1639,6 +1639,58 @@ mod tests {
         assert_eq!(r.in_flight_count(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.lost_count(), 0);
+    }
+
+    #[rstest]
+    fn congestion_delivery_rate(
+        #[values("reno", "cubic", "bbr", "bbr2")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let mut r = Recovery::new(&cfg);
+        assert_eq!(r.cwnd(), 12000);
+
+        let now = Instant::now();
+
+        let mut total_bytes_sent = 0;
+        for pn in 0..10 {
+            // Start by sending a few packets.
+            let bytes = 1000;
+            let sent = testing::helper_packet_sent(pn, now, bytes);
+            r.on_packet_sent(
+                sent,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+
+            total_bytes_sent += bytes;
+        }
+
+        // Ack
+        let interval = Duration::from_secs(10);
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..10);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now + interval,
+                "",
+            ),
+            (0, 0, total_bytes_sent)
+        );
+        assert_eq!(r.delivery_rate(), 1000);
+        assert_eq!(r.min_rtt().unwrap(), interval);
+        // delivery rate should be in units bytes/sec
+        assert_eq!(
+            total_bytes_sent as u64 / interval.as_secs(),
+            r.delivery_rate()
+        );
     }
 }
 
