@@ -31,6 +31,7 @@ use std::time::Instant;
 use crate::frame;
 use crate::packet;
 use crate::ranges::RangeSet;
+use crate::recovery::bandwidth::Bandwidth;
 use crate::Config;
 
 #[cfg(feature = "qlog")]
@@ -185,8 +186,8 @@ pub trait RecoveryOps {
 
     fn pto(&self) -> Duration;
 
-    /// The most recent data delivery rate estimate in bytes/s.
-    fn delivery_rate(&self) -> u64;
+    /// The most recent bandwidth estimate
+    fn bandwidth(&self) -> Bandwidth;
 
     fn max_datagram_size(&self) -> usize;
 
@@ -1684,12 +1685,12 @@ mod tests {
             ),
             (0, 0, total_bytes_sent)
         );
-        assert_eq!(r.delivery_rate(), 1000);
+        assert_eq!(r.bandwidth().to_bytes_per_second(), 1000);
         assert_eq!(r.min_rtt().unwrap(), interval);
         // delivery rate should be in units bytes/sec
         assert_eq!(
             total_bytes_sent as u64 / interval.as_secs(),
-            r.delivery_rate()
+            r.bandwidth().to_bytes_per_second()
         );
     }
 }

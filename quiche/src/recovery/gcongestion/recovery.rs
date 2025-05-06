@@ -856,11 +856,9 @@ impl RecoveryOps for GRecovery {
         r.rtt() + (r.rttvar() * 4).max(GRANULARITY)
     }
 
-    /// The most recent data delivery rate estimate in bytes/s.
-    fn delivery_rate(&self) -> u64 {
-        self.pacer
-            .bandwidth_estimate(&self.rtt_stats)
-            .to_bytes_per_second()
+    /// The most recent bandwidth estimate
+    fn bandwidth(&self) -> Bandwidth {
+        self.pacer.bandwidth_estimate(&self.rtt_stats)
     }
 
     fn max_datagram_size(&self) -> usize {
@@ -963,7 +961,7 @@ impl RecoveryOps for GRecovery {
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight as u64,
             ssthresh: self.pacer.ssthresh(),
-            pacing_rate: self.delivery_rate(),
+            pacing_rate: self.bandwidth().to_bytes_per_second(),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
