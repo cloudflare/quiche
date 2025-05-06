@@ -39,6 +39,9 @@ pub use boringssl_openssl::*;
 
 use crate::packet;
 
+// All the AEAD algorithms we support use 96-bit nonces.
+pub const MAX_NONCE_LEN: usize = 12;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -92,4 +95,17 @@ impl Algorithm {
             Algorithm::ChaCha20_Poly1305 => 16,
         }
     }
+}
+
+fn make_nonce(iv: &[u8], counter: u64) -> [u8; MAX_NONCE_LEN] {
+    let mut nonce = [0; MAX_NONCE_LEN];
+    nonce.copy_from_slice(iv);
+
+    // XOR the last bytes of the IV with the counter. This is equivalent to
+    // left-padding the counter with zero bytes.
+    for (a, b) in nonce[4..].iter_mut().zip(counter.to_be_bytes().iter()) {
+        *a ^= b;
+    }
+
+    nonce
 }

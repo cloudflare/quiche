@@ -30,10 +30,8 @@ use libc::c_void;
 use crate::Error;
 use crate::Result;
 
+use crate::crypto::make_nonce;
 use crate::crypto::Algorithm;
-
-// All the AEAD algorithms we support use 96-bit nonces.
-pub const MAX_NONCE_LEN: usize = 12;
 
 // Length of header protection mask.
 pub const HP_MASK_LEN: usize = 5;
@@ -421,19 +419,6 @@ fn hkdf_expand_label(
     hkdf_expand(alg, out, prk, &info)?;
 
     Ok(())
-}
-
-fn make_nonce(iv: &[u8], counter: u64) -> [u8; MAX_NONCE_LEN] {
-    let mut nonce = [0; MAX_NONCE_LEN];
-    nonce.copy_from_slice(iv);
-
-    // XOR the last bytes of the IV with the counter. This is equivalent to
-    // left-padding the counter with zero bytes.
-    for (a, b) in nonce[4..].iter_mut().zip(counter.to_be_bytes().iter()) {
-        *a ^= b;
-    }
-
-    nonce
 }
 
 pub fn verify_slices_are_equal(a: &[u8], b: &[u8]) -> Result<()> {
