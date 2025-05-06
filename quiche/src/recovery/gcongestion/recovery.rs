@@ -41,7 +41,6 @@ use crate::Result;
 use super::pacer::Pacer;
 use super::Acked;
 use super::Congestion;
-use super::CongestionControl;
 use super::Lost;
 
 // Congestion Control
@@ -128,7 +127,7 @@ struct LossDetectionResult {
 impl RecoveryEpoch {
     /// Discard the Epoch state and return the total size of unacked packets
     /// that were discarded
-    fn discard(&mut self, cc: &mut impl CongestionControl) -> usize {
+    fn discard(&mut self, cc: &mut Pacer) -> usize {
         let unacked_bytes = self
             .sent_packets
             .drain(..)
