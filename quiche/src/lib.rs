@@ -405,6 +405,7 @@ use qlog::events::EventType;
 use qlog::events::RawInfo;
 use stream::StreamPriorityKey;
 
+use std::borrow::Cow;
 use std::cmp;
 use std::convert::TryInto;
 use std::time;
@@ -6050,6 +6051,30 @@ impl<F: BufFactory> Connection<F> {
         self.dgram_recv_queue.is_full()
     }
 
+    fn dgram_send_cow(&mut self, buf: Cow<'_, [u8]>) -> Result<()> {
+        let max_payload_len = match self.dgram_max_writable_len() {
+            Some(v) => v,
+
+            None => return Err(Error::InvalidState),
+        };
+
+        if buf.len() > max_payload_len {
+            return Err(Error::BufferTooShort);
+        }
+
+        self.dgram_send_queue.push(buf.into_owned())?;
+
+        let active_path = self.paths.get_active_mut()?;
+
+        if self.dgram_send_queue.byte_size() >
+            active_path.recovery.cwnd_available()
+        {
+            active_path.recovery.update_app_limited(false);
+        }
+
+        Ok(())
+    }
+
     /// Sends data in a DATAGRAM frame.
     ///
     /// [`Done`] is returned if no data was written.
@@ -6083,27 +6108,7 @@ impl<F: BufFactory> Connection<F> {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
-        let max_payload_len = match self.dgram_max_writable_len() {
-            Some(v) => v,
-
-            None => return Err(Error::InvalidState),
-        };
-
-        if buf.len() > max_payload_len {
-            return Err(Error::BufferTooShort);
-        }
-
-        self.dgram_send_queue.push(buf.to_vec())?;
-
-        let active_path = self.paths.get_active_mut()?;
-
-        if self.dgram_send_queue.byte_size() >
-            active_path.recovery.cwnd_available()
-        {
-            active_path.recovery.update_app_limited(false);
-        }
-
-        Ok(())
+        self.dgram_send_cow(buf.into())
     }
 
     /// Sends data in a DATAGRAM frame.
@@ -6113,27 +6118,7 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// [`dgram_send()`]: struct.Connection.html#method.dgram_send
     pub fn dgram_send_vec(&mut self, buf: Vec<u8>) -> Result<()> {
-        let max_payload_len = match self.dgram_max_writable_len() {
-            Some(v) => v,
-
-            None => return Err(Error::InvalidState),
-        };
-
-        if buf.len() > max_payload_len {
-            return Err(Error::BufferTooShort);
-        }
-
-        self.dgram_send_queue.push(buf)?;
-
-        let active_path = self.paths.get_active_mut()?;
-
-        if self.dgram_send_queue.byte_size() >
-            active_path.recovery.cwnd_available()
-        {
-            active_path.recovery.update_app_limited(false);
-        }
-
-        Ok(())
+        self.dgram_send_cow(buf.into())
     }
 
     /// Purges queued outgoing DATAGRAMs matching the predicate.
