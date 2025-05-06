@@ -1023,6 +1023,7 @@ impl Config {
     /// specific key (e.g. in order to support resumption across multiple
     /// servers), in which case the application is also responsible for
     /// rotating the key to provide forward secrecy.
+    #[cfg(not(feature = "rustls"))]
     pub fn set_ticket_key(&mut self, key: &[u8]) -> Result<()> {
         self.tls_ctx.set_ticket_key(key)
     }
@@ -1462,6 +1463,7 @@ where
     path_challenge_rx_count: u64,
 
     /// List of supported application protocols.
+    #[cfg(not(feature = "rustls"))]
     application_protos: Vec<Vec<u8>>,
 
     /// Total number of received packets.
@@ -2019,6 +2021,7 @@ impl<F: BufFactory> Connection<F> {
                 .path_challenge_recv_max_queue_len,
             path_challenge_rx_count: 0,
 
+            #[cfg(not(feature = "rustls"))]
             application_protos: config.application_protos.clone(),
 
             recv_count: 0,
@@ -3059,7 +3062,7 @@ impl<F: BufFactory> Connection<F> {
             }
         }
 
-        let mut payload = packet::decrypt_pkt(
+        let payload_res = packet::decrypt_pkt(
             &mut b,
             pn,
             pn_len,
@@ -3068,7 +3071,22 @@ impl<F: BufFactory> Connection<F> {
         )
         .map_err(|e| {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
-        })?;
+        });
+
+        let mut payload = match payload_res {
+            Ok(payload) => payload,
+            Err(e) => {
+                #[cfg(feature = "rustls")]
+                // rustls updates the secrets when deriving the next packet keys
+                // therefore needed to return the keys in case they are not
+                // verified successfully
+                if let Some((open, seal)) = aead_next {
+                    let _ = open.return_next_key();
+                    let _ = seal.return_next_key();
+                }
+                return Err(e);
+            },
+        };
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -7147,6 +7165,7 @@ impl<F: BufFactory> Connection<F> {
     /// If the connection is already established, it does nothing.
     fn do_handshake(&mut self, now: time::Instant) -> Result<()> {
         let mut ex_data = tls::ExData {
+            #[cfg(not(feature = "rustls"))]
             application_protos: &self.application_protos,
 
             crypto_ctx: &mut self.crypto_ctx,
@@ -7155,14 +7174,17 @@ impl<F: BufFactory> Connection<F> {
 
             local_error: &mut self.local_error,
 
+            #[cfg(not(feature = "rustls"))]
             keylog: self.keylog.as_mut(),
 
+            #[cfg(not(feature = "rustls"))]
             trace_id: &self.trace_id,
 
             recovery_config: self.recovery_config,
 
             tx_cap_factor: self.tx_cap_factor,
 
+            #[cfg(not(feature = "rustls"))]
             is_server: self.is_server,
         };
 
