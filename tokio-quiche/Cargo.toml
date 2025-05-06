@@ -15,6 +15,12 @@ readme = "README.md"
 fuzzing = ["quiche/fuzzing"]
 quiche_internal = ["quiche/internal"]
 
+default = ["quiche/boringssl-boring-crate"]
+
+rustls-aws-lc-rs = ["quiche/rustls-aws-lc-rs", "__rustls"]
+rustls-ring = ["quiche/rustls-ring", "__rustls"]
+__rustls = []
+
 # Enable extra timing instrumentation for QUIC handshakes, including protocol
 # overhead and network delays.
 perf-quic-listener-metrics = []
@@ -52,7 +58,7 @@ ipnetwork = { workspace = true }
 log = { workspace = true }
 octets = { workspace = true }
 pin-project = { workspace = true }
-quiche = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
+quiche = { workspace = true, features = ["qlog"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_with = { workspace = true }
 slog-scope = { workspace = true }
@@ -71,6 +77,7 @@ tokio-util = { workspace = true, features = [
 ] }
 triomphe = { workspace = true }
 url = { workspace = true }
+env_logger = "0.10.2"
 
 [dev-dependencies]
 h3i = { workspace = true }

@@ -41,6 +41,7 @@ use tokio_quiche::settings::TlsCertificatePaths;
 use tokio_quiche::ConnectionParams;
 use tokio_quiche::InitialQuicConnection;
 
+#[cfg(not(feature = "__rustls"))]
 pub mod async_callbacks;
 pub mod connection_close;
 pub mod headers;
@@ -71,7 +72,10 @@ async fn echo() {
         assert_eq!(resps.len(), req_count(i));
     }
 
+    #[cfg(not(feature = "__rustls"))]
     assert!(hook.was_called());
+    #[cfg(feature = "__rustls")]
+    assert!(!hook.was_called());
 }
 
 #[tokio::test]
@@ -86,7 +90,10 @@ async fn e2e() {
 
     let resps = res_map.get(&1).unwrap();
     assert_eq!(resps.len(), 1);
+    #[cfg(not(feature = "__rustls"))]
     assert!(hook.was_called());
+    #[cfg(feature = "__rustls")]
+    assert!(!hook.was_called());
 }
 
 #[tokio::test]
@@ -115,7 +122,10 @@ async fn e2e_client_ip_validation_disabled() {
 
     let resps = res_map.get(&1).unwrap();
     assert_eq!(resps.len(), 1);
+    #[cfg(not(feature = "__rustls"))]
     assert!(hook.was_called());
+    #[cfg(feature = "__rustls")]
+    assert!(!hook.was_called());
 }
 
 #[with_test_telemetry(tokio::test)]

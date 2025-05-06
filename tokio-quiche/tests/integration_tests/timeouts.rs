@@ -24,17 +24,25 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use boring::ssl::BoxSelectCertFinish;
-use boring::ssl::ClientHello;
-use boring::ssl::SslContextBuilder;
-use boring::ssl::SslFiletype;
-use boring::ssl::SslMethod;
+#[cfg(not(feature = "__rustls"))]
+mod boringssl {
+    pub(super) use boring::ssl::BoxSelectCertFinish;
+    pub(super) use boring::ssl::ClientHello;
+    pub(super) use boring::ssl::SslContextBuilder;
+    pub(super) use boring::ssl::SslFiletype;
+    pub(super) use boring::ssl::SslMethod;
+    pub(super) use std::sync::atomic::AtomicBool;
+    pub(super) use tokio_quiche::quic::ConnectionHook;
+    pub(super) use tokio_quiche::settings::TlsCertificatePaths;
+}
+#[cfg(not(feature = "__rustls"))]
+use self::boringssl::*;
+
 use h3i::actions::h3::send_headers_frame;
 use h3i::actions::h3::Action;
 use h3i::actions::h3::WaitType;
@@ -45,8 +53,6 @@ use h3i::quiche::{
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tokio_quiche::http3::driver::H3ConnectionError;
-use tokio_quiche::quic::ConnectionHook;
-use tokio_quiche::settings::TlsCertificatePaths;
 use url::Url;
 
 use crate::fixtures::h3i_fixtures::*;
@@ -54,6 +60,7 @@ use crate::fixtures::*;
 
 // TODO(erittenhouse): figure out a way to avoid all of this duplication
 #[tokio::test]
+#[cfg(not(feature = "__rustls"))]
 async fn test_handshake_duration_ioworker() {
     use h3i::client::ClientError;
 

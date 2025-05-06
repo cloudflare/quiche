@@ -33,6 +33,7 @@ pub use self::id::ConnectionIdGenerator;
 pub use self::id::SimpleConnectionIdGenerator;
 pub(crate) use self::map::ConnectionMap;
 
+#[cfg(not(feature = "__rustls"))]
 use boring::ssl::SslRef;
 use datagram_socket::AsSocketStats;
 use datagram_socket::DatagramSocketSend;
@@ -230,6 +231,7 @@ where
 
     /// [boring]'s SSL object for this connection.
     #[doc(hidden)]
+    #[cfg(not(feature = "__rustls"))]
     pub fn ssl_mut(&mut self) -> &mut SslRef {
         self.params.quiche_conn.as_mut()
     }
