@@ -194,6 +194,7 @@ impl Pacer {
         self.pacing_limited = self.cc.can_send(bytes_in_flight + bytes);
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn on_congestion_event(
         &mut self, rtt_updated: bool, prior_in_flight: usize,
