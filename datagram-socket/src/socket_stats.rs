@@ -50,6 +50,7 @@ pub struct SocketStats {
     pub packets_sent: u64,
     pub packets_recvd: u64,
     pub packets_lost: u64,
+    pub packets_lost_spurious: u64,
     pub packets_retrans: u64,
     pub bytes_sent: u64,
     pub bytes_recvd: u64,
