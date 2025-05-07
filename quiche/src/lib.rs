@@ -422,6 +422,7 @@ use std::time::Duration;
 use range_buf::DefaultBufFactory;
 use smallvec::SmallVec;
 
+use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::ReleaseDecision;
 
 /// The current QUIC wire version.
@@ -7407,15 +7408,18 @@ impl<F: BufFactory> Connection<F> {
                         p.recovery.delivery_rate_update_app_limited(true);
                     }
 
-                    let (lost_packets, lost_bytes, acked_bytes) =
-                        p.recovery.on_ack_received(
-                            &ranges,
-                            ack_delay,
-                            epoch,
-                            handshake_status,
-                            now,
-                            &self.trace_id,
-                        );
+                    let OnAckReceivedOutcome {
+                        lost_packets,
+                        lost_bytes,
+                        acked_bytes,
+                    } = p.recovery.on_ack_received(
+                        &ranges,
+                        ack_delay,
+                        epoch,
+                        handshake_status,
+                        now,
+                        &self.trace_id,
+                    );
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;

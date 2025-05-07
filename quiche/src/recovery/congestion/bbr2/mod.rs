@@ -669,6 +669,7 @@ mod tests {
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryOps;
     use crate::CongestionControlAlgorithm;
+    use crate::OnAckReceivedOutcome;
 
     #[test]
     fn bbr_init() {
@@ -744,7 +745,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, 5 * mss)
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: mss * 5
+            }
         );
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Startup);
@@ -813,7 +818,11 @@ mod tests {
                 now,
                 "",
             ),
-            (2, 2 * mss, mss)
+            OnAckReceivedOutcome {
+                lost_packets: 2,
+                lost_bytes: 2 * mss,
+                acked_bytes: mss
+            }
         );
 
         assert!(r.congestion.bbr2_state.in_recovery);
@@ -884,7 +893,11 @@ mod tests {
                     now,
                     "",
                 ),
-                (0, 0, mss)
+                OnAckReceivedOutcome {
+                    lost_packets: 0,
+                    lost_bytes: 0,
+                    acked_bytes: mss
+                }
             );
         }
 
@@ -938,7 +951,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, mss)
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: mss
+            }
         );
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Drain);
@@ -1005,7 +1022,11 @@ mod tests {
                     now,
                     "",
                 ),
-                (0, 0, mss)
+                OnAckReceivedOutcome {
+                    lost_packets: 0,
+                    lost_bytes: 0,
+                    acked_bytes: mss
+                }
             );
         }
 
@@ -1064,7 +1085,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, mss)
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: mss
+            }
         );
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::ProbeRTT);

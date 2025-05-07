@@ -18,6 +18,7 @@ use crate::recovery::rtt::RttStats;
 use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::HandshakeStatus;
 use crate::recovery::LossDetectionTimer;
+use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::RangeSet;
 use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryOps;
@@ -643,7 +644,7 @@ impl RecoveryOps for GRecovery {
     fn on_ack_received(
         &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
-    ) -> (usize, usize, usize) {
+    ) -> OnAckReceivedOutcome {
         let prior_in_flight = self.bytes_in_flight;
 
         let AckedDetectionResult {
@@ -664,7 +665,7 @@ impl RecoveryOps for GRecovery {
         }
 
         if self.newly_acked.is_empty() {
-            return (0, 0, 0);
+            return OnAckReceivedOutcome::default();
         }
 
         self.bytes_in_flight -= acked_bytes;
@@ -705,7 +706,11 @@ impl RecoveryOps for GRecovery {
 
         trace!("{} {:?}", trace_id, self);
 
-        (lost_packets, lost_bytes, acked_bytes)
+        OnAckReceivedOutcome {
+            lost_packets,
+            lost_bytes,
+            acked_bytes,
+        }
     }
 
     fn on_loss_detection_timeout(

@@ -54,6 +54,7 @@ use super::pacer;
 use super::Congestion;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::LossDetectionTimer;
+use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
 use crate::recovery::GRANULARITY;
@@ -597,7 +598,7 @@ impl RecoveryOps for LegacyRecovery {
         &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
-    ) -> (usize, usize, usize) {
+    ) -> OnAckReceivedOutcome {
         let largest_acked = ranges.last().unwrap();
 
         // Update the largest acked packet.
@@ -634,7 +635,7 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         if self.newly_acked.is_empty() {
-            return (0, 0, 0);
+            return OnAckReceivedOutcome::default();
         }
 
         // Check if largest packet is newly acked.
@@ -652,7 +653,8 @@ impl RecoveryOps for LegacyRecovery {
 
         // Detect and mark lost packets without removing them from the sent
         // packets list.
-        let loss = self.detect_lost_packets(epoch, now, trace_id);
+        let (lost_packets, lost_bytes) =
+            self.detect_lost_packets(epoch, now, trace_id);
 
         self.congestion.on_packets_acked(
             self.bytes_in_flight,
@@ -670,7 +672,11 @@ impl RecoveryOps for LegacyRecovery {
         self.epochs[epoch]
             .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
-        (loss.0, loss.1, acked_bytes)
+        OnAckReceivedOutcome {
+            lost_packets,
+            lost_bytes,
+            acked_bytes,
+        }
     }
 
     fn on_loss_detection_timeout(
