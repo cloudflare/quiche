@@ -45,7 +45,7 @@ pub struct RttStats {
 
     pub(super) max_ack_delay: Duration,
 
-    pub(super) first_rtt_sample: Option<Instant>,
+    pub(super) has_first_rtt_sample: bool,
 }
 
 impl std::fmt::Debug for RttStats {
@@ -66,7 +66,7 @@ impl RttStats {
             min_rtt: Minmax::new(INITIAL_RTT),
             smoothed_rtt: INITIAL_RTT,
             rttvar: INITIAL_RTT / 2,
-            first_rtt_sample: None,
+            has_first_rtt_sample: false,
             max_ack_delay,
         }
     }
@@ -77,11 +77,11 @@ impl RttStats {
     ) {
         self.latest_rtt = latest_rtt;
 
-        if self.first_rtt_sample.is_none() {
+        if !self.has_first_rtt_sample {
             self.min_rtt.reset(now, latest_rtt);
             self.smoothed_rtt = latest_rtt;
             self.rttvar = latest_rtt / 2;
-            self.first_rtt_sample = Some(now);
+            self.has_first_rtt_sample = true;
             return;
         }
 
@@ -124,7 +124,11 @@ impl RttStats {
     }
 
     pub(crate) fn min_rtt(&self) -> Option<Duration> {
-        self.min_rtt.ne(&Duration::ZERO).then_some(*self.min_rtt)
+        if self.has_first_rtt_sample {
+            Some(*self.min_rtt)
+        } else {
+            None
+        }
     }
 
     pub(crate) fn loss_delay(&self, time_thresh: f64) -> Duration {

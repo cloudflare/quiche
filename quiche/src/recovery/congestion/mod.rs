@@ -189,9 +189,7 @@ impl Congestion {
         }
 
         // Pacing: Set the pacing rate if CC doesn't do its own.
-        if !(self.cc_ops.has_custom_pacing)() &&
-            rtt_stats.first_rtt_sample.is_some()
-        {
+        if !(self.cc_ops.has_custom_pacing)() && rtt_stats.has_first_rtt_sample {
             let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
                 rtt_stats.smoothed_rtt.as_secs_f64();
             self.set_pacing_rate(rate as u64, now);
