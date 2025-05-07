@@ -640,6 +640,7 @@ impl RecoveryOps for GRecovery {
         self.pacer.get_next_release_time().time(now).unwrap_or(now)
     }
 
+    // bla on_ack_received -> on_congestion_event
     fn on_ack_received(
         &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
@@ -687,6 +688,7 @@ impl RecoveryOps for GRecovery {
         let (lost_bytes, lost_packets) =
             self.detect_and_remove_lost_packets(epoch, now);
 
+        // bla on_ack_received -> on_congestion_event
         self.pacer.on_congestion_event(
             update_rtt,
             prior_in_flight,
@@ -720,6 +722,7 @@ impl RecoveryOps for GRecovery {
             let (lost_bytes, lost_packets) =
                 self.detect_and_remove_lost_packets(epoch, now);
 
+            // bla on_congestion_event
             self.pacer.on_congestion_event(
                 false,
                 prior_in_flight,

@@ -162,12 +162,12 @@ impl Pacer {
             // Reset lumpy_tokens_ if either application or cwnd throttles sending
             // or token runs out.
             self.lumpy_tokens = 1.max(LUMPY_PACING_SIZE.min(
-                (self.cc.get_congestion_window_in_packets() as f64 *
-                    LUMPY_PACING_CWND_FRACTION) as usize,
+                (self.cc.get_congestion_window_in_packets() as f64
+                    * LUMPY_PACING_CWND_FRACTION) as usize,
             ));
 
-            if self.cc.bandwidth_estimate(rtt_stats) <
-                LUMPY_PACING_MIN_BANDWIDTH_KBPS
+            if self.cc.bandwidth_estimate(rtt_stats)
+                < LUMPY_PACING_MIN_BANDWIDTH_KBPS
             {
                 // Below 1.2Mbps, send 1 packet at once, because one full-sized
                 // packet is about 10ms of queueing.
@@ -190,11 +190,13 @@ impl Pacer {
 
     #[allow(clippy::too_many_arguments)]
     #[inline]
+    // bla on_congestion_event
     pub fn on_congestion_event(
         &mut self, rtt_updated: bool, prior_in_flight: usize,
         bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
         lost_packets: &[Lost], least_unacked: u64, rtt_stats: &RttStats,
     ) {
+        // bla on_congestion_event
         self.cc.on_congestion_event(
             rtt_updated,
             prior_in_flight,
