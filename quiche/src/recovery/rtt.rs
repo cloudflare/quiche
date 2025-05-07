@@ -37,6 +37,8 @@ pub(crate) const RTT_WINDOW: Duration = Duration::from_secs(300);
 pub struct RttStats {
     pub(super) latest_rtt: Duration,
 
+    max_rtt: Duration,
+
     pub(super) smoothed_rtt: Duration,
 
     pub(super) rttvar: Duration,
@@ -65,6 +67,7 @@ impl RttStats {
             latest_rtt: Duration::ZERO,
             min_rtt: Minmax::new(INITIAL_RTT),
             smoothed_rtt: INITIAL_RTT,
+            max_rtt: INITIAL_RTT,
             rttvar: INITIAL_RTT / 2,
             has_first_rtt_sample: false,
             max_ack_delay,
@@ -80,6 +83,7 @@ impl RttStats {
         if !self.has_first_rtt_sample {
             self.min_rtt.reset(now, latest_rtt);
             self.smoothed_rtt = latest_rtt;
+            self.max_rtt = latest_rtt;
             self.rttvar = latest_rtt / 2;
             self.has_first_rtt_sample = true;
             return;
@@ -87,6 +91,8 @@ impl RttStats {
 
         // min_rtt ignores acknowledgment delay.
         self.min_rtt.running_min(RTT_WINDOW, now, latest_rtt);
+
+        self.max_rtt = self.max_rtt.max(latest_rtt);
 
         // Limit ack_delay by max_ack_delay after handshake confirmation.
         if handshake_confirmed {
@@ -126,6 +132,14 @@ impl RttStats {
     pub(crate) fn min_rtt(&self) -> Option<Duration> {
         if self.has_first_rtt_sample {
             Some(*self.min_rtt)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn max_rtt(&self) -> Option<Duration> {
+        if self.has_first_rtt_sample {
+            Some(self.max_rtt)
         } else {
             None
         }

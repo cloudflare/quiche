@@ -112,6 +112,11 @@ impl AsSocketStats for QuicConnectionStats {
                 .as_ref()
                 .and_then(|p| p.min_rtt.map(|x| x.as_micros() as i64))
                 .unwrap_or_default(),
+            max_rtt_us: self
+                .path_stats
+                .as_ref()
+                .and_then(|p| p.max_rtt.map(|x| x.as_micros() as i64))
+                .unwrap_or_default(),
             rtt_var_us: self
                 .path_stats
                 .as_ref()

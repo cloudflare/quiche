@@ -190,6 +190,8 @@ pub trait RecoveryOps {
 
     fn min_rtt(&self) -> Option<Duration>;
 
+    fn max_rtt(&self) -> Option<Duration>;
+
     fn rttvar(&self) -> Duration;
 
     fn pto(&self) -> Duration;

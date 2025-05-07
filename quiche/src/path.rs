@@ -502,6 +502,7 @@ impl Path {
             dgram_sent: self.dgram_sent_count,
             rtt: self.recovery.rtt(),
             min_rtt: self.recovery.min_rtt(),
+            max_rtt: self.recovery.max_rtt(),
             rttvar: self.recovery.rttvar(),
             cwnd: self.recovery.cwnd(),
             sent_bytes: self.sent_bytes,
@@ -884,6 +885,9 @@ pub struct PathStats {
 
     /// The minimum round-trip time observed.
     pub min_rtt: Option<time::Duration>,
+
+    /// The maximum round-trip time observed.
+    pub max_rtt: Option<time::Duration>,
 
     /// The estimated round-trip time variation in samples using a mean
     /// variation.
