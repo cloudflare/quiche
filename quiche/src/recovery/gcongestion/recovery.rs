@@ -710,6 +710,7 @@ impl RecoveryOps for GRecovery {
             lost_packets,
             lost_bytes,
             acked_bytes,
+            spurious_losses,
         }
     }
 

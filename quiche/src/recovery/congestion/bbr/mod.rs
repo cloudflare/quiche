@@ -470,7 +470,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 2,
                 lost_bytes: 2 * mss,
-                acked_bytes: mss
+                acked_bytes: mss,
+                spurious_losses: 0,
             },
         );
 
@@ -541,7 +542,8 @@ mod tests {
                 OnAckReceivedOutcome {
                     lost_packets: 0,
                     lost_bytes: 0,
-                    acked_bytes: mss
+                    acked_bytes: mss,
+                    spurious_losses: 0,
                 },
             );
         }
@@ -597,7 +599,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
-                acked_bytes: mss
+                acked_bytes: mss,
+                spurious_losses: 0,
             },
         );
 
@@ -665,7 +668,8 @@ mod tests {
                 OnAckReceivedOutcome {
                     lost_packets: 0,
                     lost_bytes: 0,
-                    acked_bytes: mss
+                    acked_bytes: mss,
+                    spurious_losses: 0,
                 },
             );
         }
@@ -740,7 +744,8 @@ mod tests {
                 OnAckReceivedOutcome {
                     lost_packets: 0,
                     lost_bytes: 0,
-                    acked_bytes: mss
+                    acked_bytes: mss,
+                    spurious_losses: 0,
                 },
             );
         }
@@ -800,7 +805,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
-                acked_bytes: mss
+                acked_bytes: mss,
+                spurious_losses: 0,
             },
         );
 

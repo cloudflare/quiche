@@ -135,6 +135,7 @@ pub struct OnAckReceivedOutcome {
     pub lost_packets: usize,
     pub lost_bytes: usize,
     pub acked_bytes: usize,
+    pub spurious_losses: usize,
 }
 
 #[enum_dispatch::enum_dispatch]
@@ -771,7 +772,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
-                acked_bytes: 2 * 1000
+                acked_bytes: 2 * 1000,
+                spurious_losses: 0,
             }
         );
 
@@ -866,7 +868,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 2,
                 lost_bytes: 2000,
-                acked_bytes: 2 * 1000
+                acked_bytes: 2 * 1000,
+                spurious_losses: 0,
             }
         );
 
@@ -1037,7 +1040,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
-                acked_bytes: 3 * 1000
+                acked_bytes: 3 * 1000,
+                spurious_losses: 0,
             }
         );
 
@@ -1218,7 +1222,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 1,
                 lost_bytes: 1000,
-                acked_bytes: 1000 * 2
+                acked_bytes: 1000 * 2,
+                spurious_losses: 0,
             }
         );
 
@@ -1241,7 +1246,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
-                acked_bytes: 1000
+                acked_bytes: 1000,
+                spurious_losses: 1,
             }
         );
 
@@ -1342,7 +1348,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
-                acked_bytes: 12000
+                acked_bytes: 12000,
+                spurious_losses: 0,
             }
         );
 
@@ -1635,7 +1642,8 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
-                acked_bytes: 2 * 1000
+                acked_bytes: 2 * 1000,
+                spurious_losses: 0,
             }
         );
 
