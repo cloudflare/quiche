@@ -1474,6 +1474,9 @@ where
     /// Total number of lost packets.
     lost_count: usize,
 
+    /// Total number of lost packets that were later acked.
+    spurious_lost_count: usize,
+
     /// Total number of packets sent with data retransmitted.
     retrans_count: usize,
 
@@ -2025,6 +2028,7 @@ impl<F: BufFactory> Connection<F> {
             recv_count: 0,
             sent_count: 0,
             lost_count: 0,
+            spurious_lost_count: 0,
             retrans_count: 0,
             dgram_sent_count: 0,
             dgram_recv_count: 0,
@@ -6994,6 +6998,7 @@ impl<F: BufFactory> Connection<F> {
             recv: self.recv_count,
             sent: self.sent_count,
             lost: self.lost_count,
+            spurious_lost: self.spurious_lost_count,
             retrans: self.retrans_count,
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
@@ -7412,6 +7417,7 @@ impl<F: BufFactory> Connection<F> {
                         lost_packets,
                         lost_bytes,
                         acked_bytes,
+                        spurious_losses,
                     } = p.recovery.on_ack_received(
                         &ranges,
                         ack_delay,
@@ -7424,6 +7430,7 @@ impl<F: BufFactory> Connection<F> {
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
                     self.acked_bytes += acked_bytes as u64;
+                    self.spurious_lost_count += spurious_losses;
                 }
             },
 
@@ -8401,6 +8408,9 @@ pub struct Stats {
 
     /// The number of QUIC packets that were lost.
     pub lost: usize,
+
+    /// The number of QUIC packets that were marked as lost but later acked.
+    pub spurious_lost: usize,
 
     /// The number of sent QUIC packets with retransmitted data.
     pub retrans: usize,
