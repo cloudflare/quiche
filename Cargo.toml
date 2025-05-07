@@ -30,6 +30,7 @@ tag-message = "{{crate_name}} {{version}}"
 publish = false
 
 [workspace.dependencies]
+anyhow = { version = "1" }
 boring = { version = "4.3" }
 buffer-pool = { version = "0.1.0", path = "./buffer-pool" }
 crossbeam = { version = "0.8.1", default-features = false }

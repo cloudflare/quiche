@@ -223,10 +223,10 @@ fn quiche_config_with_tls(
         #[cfg(feature = "rpk")]
         CertificateKind::RawPublicKey => {
             let mut ssl_ctx_builder = boring::ssl::SslContextBuilder::new_rpk()?;
-            let raw_public_key = std::fs::read(tls.cert)?;
+            let raw_public_key = read_file(tls.cert)?;
             ssl_ctx_builder.set_rpk_certificate(&raw_public_key)?;
 
-            let raw_private_key = std::fs::read(tls.private_key)?;
+            let raw_private_key = read_file(tls.private_key)?;
             let pkey =
                 boring::pkey::PKey::private_key_from_pem(&raw_private_key)?;
             ssl_ctx_builder.set_null_chain_private_key(&pkey)?;
@@ -244,4 +244,12 @@ fn quiche_config_with_tls(
             Ok(config)
         },
     }
+}
+
+#[cfg(feature = "rpk")]
+fn read_file(path: &str) -> QuicResult<Vec<u8>> {
+    use anyhow::Context as _;
+    std::fs::read(path)
+        .with_context(|| format!("read {path}"))
+        .map_err(Into::into)
 }
