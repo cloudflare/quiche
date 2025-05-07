@@ -125,6 +125,7 @@ impl AsSocketStats for QuicConnectionStats {
             packets_sent: self.stats.sent as u64,
             packets_recvd: self.stats.recv as u64,
             packets_lost: self.stats.lost as u64,
+            packets_lost_spurious: self.stats.spurious_lost as u64,
             packets_retrans: self.stats.retrans as u64,
             bytes_sent: self.stats.sent_bytes,
             bytes_recvd: self.stats.recv_bytes,
