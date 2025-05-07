@@ -28,6 +28,7 @@ use debug_panic::debug_panic;
 use std::time::Instant;
 
 use self::recovery::Acked;
+use super::bandwidth::Bandwidth;
 use super::RecoveryConfig;
 use super::Sent;
 use crate::recovery::rtt;
@@ -146,7 +147,8 @@ impl Congestion {
         }
     }
 
-    pub(crate) fn delivery_rate(&self) -> u64 {
+    /// The most recent data delivery rate estimate.
+    pub(crate) fn delivery_rate(&self) -> Bandwidth {
         self.delivery_rate.sample_delivery_rate()
     }
 

@@ -75,7 +75,7 @@ pub fn bbr_update_control_parameters(
 fn bbr_update_btlbw(r: &mut Congestion, packet: &Acked, _bytes_in_flight: usize) {
     bbr_update_round(r, packet);
 
-    if r.delivery_rate() >= r.bbr_state.btlbw ||
+    if r.delivery_rate().to_bytes_per_second() >= r.bbr_state.btlbw ||
         !r.delivery_rate.sample_is_app_limited()
     {
         // Since minmax filter is based on time,
@@ -83,7 +83,7 @@ fn bbr_update_btlbw(r: &mut Congestion, packet: &Acked, _bytes_in_flight: usize)
         r.bbr_state.btlbw = r.bbr_state.btlbwfilter.running_max(
             BTLBW_FILTER_LEN,
             r.bbr_state.start_time + Duration::from_secs(r.bbr_state.round_count),
-            r.delivery_rate(),
+            r.delivery_rate().to_bytes_per_second(),
         );
     }
 }

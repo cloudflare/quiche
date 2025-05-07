@@ -757,10 +757,13 @@ mod tests {
         assert_eq!(r.cwnd(), cwnd_prev + mss * 5);
         assert_eq!(r.bytes_in_flight, 0);
         assert_eq!(
-            r.delivery_rate(),
+            r.delivery_rate().to_bytes_per_second(),
             ((mss * 5) as f64 / rtt.as_secs_f64()) as u64
         );
-        assert_eq!(r.congestion.bbr2_state.full_bw, r.delivery_rate());
+        assert_eq!(
+            r.congestion.bbr2_state.full_bw,
+            r.delivery_rate().to_bytes_per_second()
+        );
     }
 
     #[test]

@@ -33,7 +33,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use super::Acked;
-use crate::recovery::gcongestion::bandwidth::Bandwidth;
+use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::gcongestion::Lost;
 
 use super::windowed_filter::WindowedFilter;

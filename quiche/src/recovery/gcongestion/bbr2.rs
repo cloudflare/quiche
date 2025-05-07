@@ -40,10 +40,11 @@ use std::time::Instant;
 
 use network_model::BBRv2NetworkModel;
 
+use crate::recovery::gcongestion::Bandwidth;
+
 use self::mode::Mode;
 use self::mode::ModeImpl;
 
-use super::bandwidth::Bandwidth;
 use super::bbr::SendTimeState;
 use super::Acked;
 use super::BbrBwLoReductionStrategy;

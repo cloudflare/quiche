@@ -428,8 +428,9 @@ fn bbr2_adapt_upper_bounds(r: &mut Congestion, now: Instant) {
         }
 
         // TODO: what's rs.bw???
-        if r.delivery_rate() > r.bbr2_state.bw_hi {
-            r.bbr2_state.bw_hi = r.delivery_rate();
+        let delivery_rate = r.delivery_rate().to_bytes_per_second();
+        if delivery_rate > r.bbr2_state.bw_hi {
+            r.bbr2_state.bw_hi = delivery_rate;
         }
 
         if r.bbr2_state.state == BBR2StateMachine::ProbeBWUP {
@@ -569,7 +570,7 @@ fn bbr2_start_round(r: &mut Congestion) {
 pub fn bbr2_update_max_bw(r: &mut Congestion, packet: &Acked) {
     bbr2_update_round(r, packet);
 
-    if r.delivery_rate() >= r.bbr2_state.max_bw ||
+    if r.delivery_rate().to_bytes_per_second() >= r.bbr2_state.max_bw ||
         !r.delivery_rate.sample_is_app_limited()
     {
         let max_bw_filter_len = r
@@ -581,7 +582,7 @@ pub fn bbr2_update_max_bw(r: &mut Congestion, packet: &Acked) {
             max_bw_filter_len,
             r.bbr2_state.start_time +
                 Duration::from_secs(r.bbr2_state.cycle_count),
-            r.delivery_rate(),
+            r.delivery_rate().to_bytes_per_second(),
         );
     }
 }

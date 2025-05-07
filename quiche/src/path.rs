@@ -509,7 +509,7 @@ impl Path {
             lost_bytes: self.recovery.bytes_lost(),
             stream_retrans_bytes: self.stream_retrans_bytes,
             pmtu: self.recovery.max_datagram_size(),
-            delivery_rate: self.recovery.delivery_rate(),
+            delivery_rate: self.recovery.delivery_rate().to_bytes_per_second(),
         }
     }
 }
