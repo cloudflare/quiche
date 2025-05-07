@@ -45,6 +45,7 @@ pub struct SocketStats {
     pub pmtu: u16,
     pub rtt_us: i64,
     pub min_rtt_us: i64,
+    pub max_rtt_us: i64,
     pub rtt_var_us: i64,
     pub cwnd: u64,
     pub packets_sent: u64,

@@ -853,6 +853,10 @@ impl RecoveryOps for GRecovery {
         self.rtt_stats.min_rtt()
     }
 
+    fn max_rtt(&self) -> Option<Duration> {
+        self.rtt_stats.max_rtt()
+    }
+
     fn rttvar(&self) -> Duration {
         self.rtt_stats.rttvar()
     }
