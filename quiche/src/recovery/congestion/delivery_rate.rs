@@ -220,6 +220,7 @@ mod tests {
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryOps;
     use crate::Config;
+    use crate::OnAckReceivedOutcome;
 
     use smallvec::smallvec;
 
@@ -385,7 +386,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, mss * 5),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: mss * 5
+            },
         );
 
         assert!(r.app_limited());

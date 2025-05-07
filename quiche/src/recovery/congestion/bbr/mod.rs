@@ -357,6 +357,7 @@ mod tests {
     use crate::recovery::congestion::test_sender::TestSender;
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryOps;
+    use crate::OnAckReceivedOutcome;
 
     use smallvec::smallvec;
 
@@ -466,7 +467,11 @@ mod tests {
                 now,
                 "",
             ),
-            (2, 2 * mss, mss),
+            OnAckReceivedOutcome {
+                lost_packets: 2,
+                lost_bytes: 2 * mss,
+                acked_bytes: mss
+            },
         );
 
         // Sent: 0, 1, 2, 3, 4, Acked 4.
@@ -533,7 +538,11 @@ mod tests {
                     now,
                     "",
                 ),
-                (0, 0, mss),
+                OnAckReceivedOutcome {
+                    lost_packets: 0,
+                    lost_bytes: 0,
+                    acked_bytes: mss
+                },
             );
         }
 
@@ -585,7 +594,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, mss),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: mss
+            },
         );
 
         // Now we are in Drain state.
@@ -649,7 +662,11 @@ mod tests {
                     now,
                     "",
                 ),
-                (0, 0, mss),
+                OnAckReceivedOutcome {
+                    lost_packets: 0,
+                    lost_bytes: 0,
+                    acked_bytes: mss
+                },
             );
         }
 
@@ -720,7 +737,11 @@ mod tests {
                     now,
                     "",
                 ),
-                (0, 0, mss),
+                OnAckReceivedOutcome {
+                    lost_packets: 0,
+                    lost_bytes: 0,
+                    acked_bytes: mss
+                },
             );
         }
 
@@ -776,7 +797,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, mss),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: mss
+            },
         );
 
         assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::ProbeRTT);

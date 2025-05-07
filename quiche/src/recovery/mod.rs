@@ -130,6 +130,13 @@ pub(crate) enum Recovery {
     GCongestion(GRecovery),
 }
 
+#[derive(Debug, Default, PartialEq)]
+pub struct OnAckReceivedOutcome {
+    pub lost_packets: usize,
+    pub lost_bytes: usize,
+    pub acked_bytes: usize,
+}
+
 #[enum_dispatch::enum_dispatch]
 /// Api for the Recovery implementation
 pub trait RecoveryOps {
@@ -161,7 +168,7 @@ pub trait RecoveryOps {
     fn on_ack_received(
         &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
-    ) -> (usize, usize, usize);
+    ) -> OnAckReceivedOutcome;
 
     fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: Instant,
@@ -761,7 +768,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, 2 * 1000)
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 2 * 1000
+            }
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
@@ -852,7 +863,11 @@ mod tests {
                 now,
                 "",
             ),
-            (2, 2000, 2 * 1000)
+            OnAckReceivedOutcome {
+                lost_packets: 2,
+                lost_bytes: 2000,
+                acked_bytes: 2 * 1000
+            }
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
@@ -1019,7 +1034,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, 3 * 1000)
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 3 * 1000
+            }
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
@@ -1196,7 +1215,11 @@ mod tests {
                 now,
                 "",
             ),
-            (1, 1000, 1000 * 2)
+            OnAckReceivedOutcome {
+                lost_packets: 1,
+                lost_bytes: 1000,
+                acked_bytes: 1000 * 2
+            }
         );
 
         now += Duration::from_millis(10);
@@ -1215,7 +1238,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, 1000)
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 1000
+            }
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
@@ -1312,7 +1339,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, 12000)
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 12000
+            }
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
@@ -1601,7 +1632,11 @@ mod tests {
                 now,
                 "",
             ),
-            (0, 0, 2 * 1000)
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 2 * 1000
+            }
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
