@@ -1,5 +1,3 @@
-use crate::packet;
-
 use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::Instant;
@@ -13,9 +11,10 @@ use qlog::events::EventData;
 use crate::recovery::QlogMetrics;
 
 use crate::frame;
-
+use crate::packet;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::rtt::RttStats;
+use crate::recovery::rtt::INITIAL_RTT;
 use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::HandshakeStatus;
 use crate::recovery::LossDetectionTimer;
@@ -31,10 +30,9 @@ use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
 
+use super::bbr2::BBRv2;
 use super::pacer::Pacer;
 use super::Acked;
-use super::Congestion;
-use super::CongestionControl;
 use super::Lost;
 
 // Congestion Control
@@ -117,7 +115,7 @@ struct LossDetectionResult {
 impl RecoveryEpoch {
     /// Discard the Epoch state and return the total size of unacked packets
     /// that were discarded
-    fn discard(&mut self, cc: &mut impl CongestionControl) -> usize {
+    fn discard(&mut self, cc: &mut Pacer) -> usize {
         let unacked_bytes = self
             .sent_packets
             .drain(..)
@@ -377,10 +375,12 @@ pub struct GRecovery {
 impl GRecovery {
     pub fn new(recovery_config: &RecoveryConfig) -> Option<Self> {
         let cc = match recovery_config.cc_algorithm {
-            CongestionControlAlgorithm::Bbr2Gcongestion => Congestion::bbrv2(
+            CongestionControlAlgorithm::Bbr2Gcongestion => BBRv2::new(
                 recovery_config.initial_congestion_window_packets,
                 MAX_WINDOW_PACKETS,
-                recovery_config,
+                recovery_config.max_send_udp_payload_size,
+                INITIAL_RTT,
+                recovery_config.custom_bbr_params.as_ref(),
             ),
             _ => return None,
         };

@@ -40,12 +40,12 @@ use std::time::Instant;
 
 use network_model::BBRv2NetworkModel;
 
+use crate::recovery::gcongestion::bandwidth_sampler::SendTimeState;
 use crate::recovery::gcongestion::Bandwidth;
 
 use self::mode::Mode;
 use self::mode::ModeImpl;
 
-use super::bbr::SendTimeState;
 use super::Acked;
 use super::BbrBwLoReductionStrategy;
 use super::BbrParams;
@@ -428,41 +428,43 @@ impl BBRv2 {
     }
 
     fn get_target_congestion_window(&self, gain: f32) -> usize {
-        self.mode
-            .bdp(self.mode.bandwidth_estimate(), gain)
+        let network_model = self.mode.network_model();
+        network_model
+            .bdp(network_model.bandwidth_estimate(), gain)
             .max(self.cwnd_limits.min())
     }
 
     fn update_pacing_rate(&mut self, bytes_acked: usize) {
-        let bandwidth_estimate = match self.mode.bandwidth_estimate() {
+        let network_model = self.mode.network_model();
+        let bandwidth_estimate = match network_model.bandwidth_estimate() {
             e if e == Bandwidth::zero() => return,
             e => e,
         };
 
-        if self.mode.total_bytes_acked() == bytes_acked {
+        if network_model.total_bytes_acked() == bytes_acked {
             // After the first ACK, cwnd is still the initial congestion window.
             self.pacing_rate = Bandwidth::from_bytes_and_time_delta(
                 self.cwnd,
-                self.mode.min_rtt(),
+                network_model.min_rtt(),
             );
             return;
         }
 
-        let target_rate = bandwidth_estimate * self.mode.pacing_gain();
-        if self.mode.full_bandwidth_reached() {
+        let target_rate = bandwidth_estimate * network_model.pacing_gain();
+        if network_model.full_bandwidth_reached() {
             self.pacing_rate = target_rate;
             return;
         }
 
         if self.params.decrease_startup_pacing_at_end_of_round &&
-            self.mode.pacing_gain() < self.params.startup_pacing_gain
+            network_model.pacing_gain() < self.params.startup_pacing_gain
         {
             self.pacing_rate = target_rate;
             return;
         }
 
         if self.params.bw_lo_mode != BwLoMode::Default &&
-            self.mode.loss_events_in_round() > 0
+            network_model.loss_events_in_round() > 0
         {
             self.pacing_rate = target_rate;
             return;
@@ -473,12 +475,13 @@ impl BBRv2 {
     }
 
     fn update_congestion_window(&mut self, bytes_acked: usize) {
+        let network_model = self.mode.network_model();
         let mut target_cwnd =
-            self.get_target_congestion_window(self.mode.cwnd_gain());
+            self.get_target_congestion_window(network_model.cwnd_gain());
 
         let prior_cwnd = self.cwnd;
-        if self.mode.full_bandwidth_reached() {
-            target_cwnd += self.mode.max_ack_height();
+        if network_model.full_bandwidth_reached() {
+            target_cwnd += network_model.max_ack_height();
             self.cwnd = target_cwnd.min(prior_cwnd + bytes_acked);
         } else if prior_cwnd < target_cwnd || prior_cwnd < 2 * self.initial_cwnd {
             self.cwnd = prior_cwnd + bytes_acked;
@@ -496,7 +499,8 @@ impl BBRv2 {
     }
 
     fn target_bytes_inflight(&self) -> usize {
-        let bdp = self.mode.bdp1(self.mode.bandwidth_estimate());
+        let network_model = &self.mode.network_model();
+        let bdp = network_model.bdp1(network_model.bandwidth_estimate());
         bdp.min(self.get_congestion_window())
     }
 }
@@ -523,7 +527,8 @@ impl CongestionControl for BBRv2 {
             self.on_exit_quiescence(sent_time);
         }
 
-        self.mode.on_packet_sent(
+        let network_model = self.mode.network_model_mut();
+        network_model.on_packet_sent(
             sent_time,
             bytes_in_flight,
             packet_number,
@@ -545,7 +550,8 @@ impl CongestionControl for BBRv2 {
             self.mode.is_probing_for_bandwidth(),
         );
 
-        self.mode.on_congestion_event_start(
+        let network_model = self.mode.network_model_mut();
+        network_model.on_congestion_event_start(
             acked_packets,
             lost_packets,
             &mut congestion_event,
@@ -572,7 +578,8 @@ impl CongestionControl for BBRv2 {
 
         self.update_congestion_window(congestion_event.bytes_acked);
 
-        self.mode
+        let network_model = self.mode.network_model_mut();
+        network_model
             .on_congestion_event_finish(least_unacked, &congestion_event);
         self.last_sample_is_app_limited =
             congestion_event.last_packet_send_state.is_app_limited;
@@ -587,7 +594,8 @@ impl CongestionControl for BBRv2 {
     }
 
     fn on_packet_neutered(&mut self, packet_number: u64) {
-        self.mode.on_packet_neutered(packet_number);
+        let network_model = self.mode.network_model_mut();
+        network_model.on_packet_neutered(packet_number);
     }
 
     fn on_retransmission_timeout(&mut self, _packets_retransmitted: bool) {}
@@ -610,7 +618,8 @@ impl CongestionControl for BBRv2 {
     }
 
     fn bandwidth_estimate(&self, _rtt_stats: &super::RttStats) -> Bandwidth {
-        self.mode.bandwidth_estimate()
+        let network_model = self.mode.network_model();
+        network_model.bandwidth_estimate()
     }
 
     fn update_mss(&mut self, new_mss: usize) {
@@ -630,7 +639,8 @@ impl CongestionControl for BBRv2 {
             return;
         }
 
-        self.mode.on_app_limited()
+        let network_model = self.mode.network_model_mut();
+        network_model.on_app_limited()
     }
 
     fn limit_cwnd(&mut self, max_cwnd: usize) {

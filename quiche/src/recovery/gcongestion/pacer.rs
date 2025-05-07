@@ -30,14 +30,14 @@
 
 use std::time::Instant;
 
+use crate::recovery::gcongestion::bbr2::BBRv2;
 use crate::recovery::gcongestion::Bandwidth;
+use crate::recovery::gcongestion::CongestionControl;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
 
 use super::Acked;
-use super::Congestion;
-use super::CongestionControl;
 use super::Lost;
 
 /// Congestion window fraction that the pacing sender allows in bursts during
@@ -61,8 +61,8 @@ const INITIAL_UNPACED_BURST: usize = 10;
 pub struct Pacer {
     /// Should this [`Pacer`] be making any release decisions?
     enabled: bool,
-    /// Underlying sender
-    sender: Congestion,
+    /// Underlying congestion controller
+    cc: BBRv2,
     /// The maximum rate the [`Pacer`] will use.
     max_pacing_rate: Option<Bandwidth>,
     /// Number of unpaced packets to be sent before packets are delayed.
@@ -83,11 +83,11 @@ impl Pacer {
     /// implementation, and an optional throttling as specified by
     /// [`max_pacing_rate`].
     pub(crate) fn new(
-        enabled: bool, congestion: Congestion, max_pacing_rate: Option<Bandwidth>,
+        enabled: bool, cc: BBRv2, max_pacing_rate: Option<Bandwidth>,
     ) -> Self {
         Pacer {
             enabled,
-            sender: congestion,
+            cc,
             max_pacing_rate,
             burst_tokens: INITIAL_UNPACED_BURST,
             ideal_next_packet_send_time: ReleaseTime::Immediate,
@@ -111,27 +111,17 @@ impl Pacer {
             allow_burst,
         }
     }
-}
 
-impl CongestionControl for Pacer {
-    fn get_congestion_window(&self) -> usize {
-        self.sender.get_congestion_window()
+    pub fn get_congestion_window(&self) -> usize {
+        self.cc.get_congestion_window()
     }
 
-    fn get_congestion_window_in_packets(&self) -> usize {
-        self.sender.get_congestion_window_in_packets()
-    }
-
-    fn can_send(&self, bytes_in_flight: usize) -> bool {
-        self.sender.can_send(bytes_in_flight)
-    }
-
-    fn on_packet_sent(
+    pub fn on_packet_sent(
         &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
         rtt_stats: &RttStats,
     ) {
-        self.sender.on_packet_sent(
+        self.cc.on_packet_sent(
             sent_time,
             bytes_in_flight,
             packet_number,
@@ -145,13 +135,13 @@ impl CongestionControl for Pacer {
         }
 
         // If in recovery, the connection is not coming out of quiescence.
-        if bytes_in_flight == 0 && !self.sender.is_in_recovery() {
+        if bytes_in_flight == 0 && !self.cc.is_in_recovery() {
             // Add more burst tokens anytime the connection is leaving quiescence,
             // but limit it to the equivalent of a single bulk write,
             // not exceeding the current CWND in packets.
             self.burst_tokens = self
                 .initial_burst_size
-                .min(self.sender.get_congestion_window_in_packets());
+                .min(self.cc.get_congestion_window_in_packets());
         }
 
         if self.burst_tokens > 0 {
@@ -172,11 +162,11 @@ impl CongestionControl for Pacer {
             // Reset lumpy_tokens_ if either application or cwnd throttles sending
             // or token runs out.
             self.lumpy_tokens = 1.max(LUMPY_PACING_SIZE.min(
-                (self.sender.get_congestion_window_in_packets() as f64 *
+                (self.cc.get_congestion_window_in_packets() as f64 *
                     LUMPY_PACING_CWND_FRACTION) as usize,
             ));
 
-            if self.sender.bandwidth_estimate(rtt_stats) <
+            if self.cc.bandwidth_estimate(rtt_stats) <
                 LUMPY_PACING_MIN_BANDWIDTH_KBPS
             {
                 // Below 1.2Mbps, send 1 packet at once, because one full-sized
@@ -184,7 +174,7 @@ impl CongestionControl for Pacer {
                 self.lumpy_tokens = 1;
             }
 
-            if bytes_in_flight + bytes >= self.sender.get_congestion_window() {
+            if bytes_in_flight + bytes >= self.cc.get_congestion_window() {
                 // Don't add lumpy_tokens if the congestion controller is CWND
                 // limited.
                 self.lumpy_tokens = 1;
@@ -195,16 +185,17 @@ impl CongestionControl for Pacer {
         self.ideal_next_packet_send_time.set_max(sent_time);
         self.ideal_next_packet_send_time.inc(delay);
         // Stop making up for lost time if underlying sender prevents sending.
-        self.pacing_limited = self.sender.can_send(bytes_in_flight + bytes);
+        self.pacing_limited = self.cc.can_send(bytes_in_flight + bytes);
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[inline]
-    fn on_congestion_event(
+    pub fn on_congestion_event(
         &mut self, rtt_updated: bool, prior_in_flight: usize,
         bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
         lost_packets: &[Lost], least_unacked: u64, rtt_stats: &RttStats,
     ) {
-        self.sender.on_congestion_event(
+        self.cc.on_congestion_event(
             rtt_updated,
             prior_in_flight,
             bytes_in_flight,
@@ -229,56 +220,54 @@ impl CongestionControl for Pacer {
                 let max_rate = max_pacing_rate * 1.25f32;
                 let max_cwnd =
                     max_rate.to_bytes_per_period(rtt_stats.smoothed_rtt);
-                self.sender.limit_cwnd(max_cwnd as usize);
+                self.cc.limit_cwnd(max_cwnd as usize);
             }
         }
     }
 
-    fn on_packet_neutered(&mut self, packet_number: u64) {
-        self.sender.on_packet_neutered(packet_number);
+    pub fn on_packet_neutered(&mut self, packet_number: u64) {
+        self.cc.on_packet_neutered(packet_number);
     }
 
-    fn on_retransmission_timeout(&mut self, packets_retransmitted: bool) {
-        self.sender.on_retransmission_timeout(packets_retransmitted)
+    pub fn on_retransmission_timeout(&mut self, packets_retransmitted: bool) {
+        self.cc.on_retransmission_timeout(packets_retransmitted)
     }
 
-    fn on_connection_migration(&mut self) {
-        self.sender.on_connection_migration()
-    }
-
-    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
-        !self.pacing_limited && self.sender.is_cwnd_limited(bytes_in_flight)
-    }
-
-    fn is_in_recovery(&self) -> bool {
-        self.sender.is_in_recovery()
-    }
-
-    fn pacing_rate(
+    pub fn pacing_rate(
         &self, bytes_in_flight: usize, rtt_stats: &RttStats,
     ) -> Bandwidth {
-        let sender_rate = self.sender.pacing_rate(bytes_in_flight, rtt_stats);
+        let sender_rate = self.cc.pacing_rate(bytes_in_flight, rtt_stats);
         match self.max_pacing_rate {
             Some(rate) if self.enabled => rate.min(sender_rate),
             _ => sender_rate,
         }
     }
 
-    fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth {
-        self.sender.bandwidth_estimate(rtt_stats)
+    pub fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth {
+        self.cc.bandwidth_estimate(rtt_stats)
     }
 
-    fn on_app_limited(&mut self, bytes_in_flight: usize) {
+    pub fn on_app_limited(&mut self, bytes_in_flight: usize) {
         self.pacing_limited = false;
-        self.sender.on_app_limited(bytes_in_flight);
+        self.cc.on_app_limited(bytes_in_flight);
     }
 
-    fn update_mss(&mut self, new_mss: usize) {
-        self.sender.update_mss(new_mss)
+    pub fn update_mss(&mut self, new_mss: usize) {
+        self.cc.update_mss(new_mss)
     }
 
     #[cfg(feature = "qlog")]
-    fn ssthresh(&self) -> Option<u64> {
-        self.sender.ssthresh()
+    pub fn ssthresh(&self) -> Option<u64> {
+        self.cc.ssthresh()
+    }
+
+    #[cfg(test)]
+    pub fn is_app_limited(&self, bytes_in_flight: usize) -> bool {
+        !self.is_cwnd_limited(bytes_in_flight)
+    }
+
+    #[cfg(test)]
+    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
+        !self.pacing_limited && self.cc.is_cwnd_limited(bytes_in_flight)
     }
 }

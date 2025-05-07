@@ -24,10 +24,11 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-mod bbr;
+mod bandwidth_sampler;
 mod bbr2;
 pub mod pacer;
 mod recovery;
+mod windowed_filter;
 
 use std::fmt::Debug;
 use std::str::FromStr;
@@ -37,8 +38,6 @@ pub use self::recovery::GRecovery;
 use crate::recovery::bandwidth::Bandwidth;
 
 use crate::recovery::rtt::RttStats;
-use crate::recovery::rtt::INITIAL_RTT;
-use crate::recovery::RecoveryConfig;
 
 #[derive(Debug)]
 pub struct Lost {
@@ -52,29 +51,6 @@ pub struct Acked {
     pub(super) time_sent: Instant,
 }
 
-#[enum_dispatch::enum_dispatch(CongestionControl)]
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub(crate) enum Congestion {
-    BBRv2(bbr2::BBRv2),
-}
-
-impl Congestion {
-    pub(super) fn bbrv2(
-        initial_tcp_congestion_window: usize, max_congestion_window: usize,
-        recovery_config: &RecoveryConfig,
-    ) -> Self {
-        Congestion::BBRv2(bbr2::BBRv2::new(
-            initial_tcp_congestion_window,
-            max_congestion_window,
-            recovery_config.max_send_udp_payload_size,
-            INITIAL_RTT,
-            recovery_config.custom_bbr_params.as_ref(),
-        ))
-    }
-}
-
-#[enum_dispatch::enum_dispatch]
 pub(super) trait CongestionControl: Debug {
     /// Returns the size of the current congestion window in bytes. Note, this
     /// is not the *available* window. Some send algorithms may not use a
@@ -131,11 +107,6 @@ pub(super) trait CongestionControl: Debug {
 
     #[allow(dead_code)]
     fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool;
-
-    #[cfg(test)]
-    fn is_app_limited(&self, bytes_in_flight: usize) -> bool {
-        !self.is_cwnd_limited(bytes_in_flight)
-    }
 
     fn pacing_rate(
         &self, bytes_in_flight: usize, rtt_stats: &RttStats,
