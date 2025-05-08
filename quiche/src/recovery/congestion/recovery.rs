@@ -34,11 +34,11 @@ use std::collections::VecDeque;
 use super::RecoveryConfig;
 use super::Sent;
 
-use crate::recovery::HandshakeStatus;
-use crate::recovery::RecoveryOps;
-
 use crate::packet::Epoch;
 use crate::ranges::RangeSet;
+use crate::recovery::Bandwidth;
+use crate::recovery::HandshakeStatus;
+use crate::recovery::RecoveryOps;
 
 #[cfg(feature = "qlog")]
 use crate::recovery::QlogMetrics;
@@ -817,7 +817,8 @@ impl RecoveryOps for LegacyRecovery {
         self.rtt() + cmp::max(self.rtt_stats.rttvar * 4, GRANULARITY)
     }
 
-    fn delivery_rate(&self) -> u64 {
+    /// The most recent data delivery rate estimate.
+    fn delivery_rate(&self) -> Bandwidth {
         self.congestion.delivery_rate()
     }
 

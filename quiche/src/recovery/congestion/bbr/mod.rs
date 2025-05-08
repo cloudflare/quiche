@@ -405,10 +405,13 @@ mod tests {
         assert_eq!(sender.congestion_window, cwnd_prev + mss * 5);
         assert_eq!(sender.bytes_in_flight, 0);
         assert_eq!(
-            sender.delivery_rate(),
+            sender.delivery_rate().to_bytes_per_second(),
             ((mss * 5) as f64 / rtt.as_secs_f64()) as u64
         );
-        assert_eq!(sender.bbr_state.btlbw, sender.delivery_rate());
+        assert_eq!(
+            sender.bbr_state.btlbw,
+            sender.delivery_rate().to_bytes_per_second()
+        );
     }
 
     #[test]

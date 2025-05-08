@@ -30,11 +30,11 @@
 
 use std::time::Instant;
 
+use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
 
-use super::bandwidth::Bandwidth;
 use super::Acked;
 use super::Congestion;
 use super::CongestionControl;

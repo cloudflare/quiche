@@ -14,6 +14,7 @@ use crate::recovery::QlogMetrics;
 
 use crate::frame;
 
+use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::HandshakeStatus;
@@ -31,7 +32,6 @@ use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
 
-use super::bandwidth::Bandwidth;
 use super::pacer::Pacer;
 use super::Acked;
 use super::Congestion;
@@ -862,10 +862,9 @@ impl RecoveryOps for GRecovery {
         r.rtt() + (r.rttvar() * 4).max(GRANULARITY)
     }
 
-    fn delivery_rate(&self) -> u64 {
-        self.pacer
-            .bandwidth_estimate(&self.rtt_stats)
-            .to_bits_per_second()
+    /// The most recent data delivery rate estimate.
+    fn delivery_rate(&self) -> Bandwidth {
+        self.pacer.bandwidth_estimate(&self.rtt_stats)
     }
 
     fn max_datagram_size(&self) -> usize {
@@ -968,7 +967,7 @@ impl RecoveryOps for GRecovery {
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight as u64,
             ssthresh: self.pacer.ssthresh(),
-            pacing_rate: self.delivery_rate(),
+            pacing_rate: self.delivery_rate().to_bytes_per_second(),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)

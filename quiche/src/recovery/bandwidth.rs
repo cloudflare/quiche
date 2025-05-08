@@ -119,6 +119,10 @@ impl Bandwidth {
         self.bits_per_second
     }
 
+    pub const fn to_bytes_per_second(self) -> u64 {
+        self.bits_per_second / 8
+    }
+
     pub const fn from_kbits_per_second(k_bits_per_second: u64) -> Self {
         Bandwidth {
             bits_per_second: k_bits_per_second * 1_000,
@@ -177,10 +181,9 @@ mod tests {
     fn constructors() {
         // Internal representation is bits per second.
         assert_eq!(Bandwidth::from_bytes_per_second(100).bits_per_second, 800);
-        assert_eq!(
-            Bandwidth::from_bytes_per_second(100).to_bits_per_second(),
-            800
-        );
+        let bw = Bandwidth::from_bytes_per_second(100);
+        assert_eq!(bw.to_bits_per_second(), 800);
+        assert_eq!(bw.to_bytes_per_second(), 100);
 
         // kbits == 1000 bits
         assert_eq!(

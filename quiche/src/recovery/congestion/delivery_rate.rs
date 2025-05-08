@@ -32,6 +32,8 @@
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::recovery::bandwidth::Bandwidth;
+
 use super::Acked;
 use super::Sent;
 
@@ -73,7 +75,7 @@ impl Default for Rate {
 
             largest_acked: 0,
 
-            rate_sample: RateSample::default(),
+            rate_sample: RateSample::new(),
         }
     }
 }
@@ -149,9 +151,11 @@ impl Rate {
 
             if !interval.is_zero() {
                 // Fill in rate_sample with a rate sample.
-                self.rate_sample.delivery_rate =
-                    (self.rate_sample.delivered as f64 / interval.as_secs_f64())
-                        as u64;
+                let bytes_per_second = (self.rate_sample.delivered as f64 /
+                    interval.as_secs_f64())
+                    as u64;
+                self.rate_sample.bandwidth =
+                    Bandwidth::from_bytes_per_second(bytes_per_second);
             }
         }
     }
@@ -168,8 +172,8 @@ impl Rate {
         self.delivered
     }
 
-    pub fn sample_delivery_rate(&self) -> u64 {
-        self.rate_sample.delivery_rate
+    pub fn sample_delivery_rate(&self) -> Bandwidth {
+        self.rate_sample.bandwidth
     }
 
     pub fn sample_rtt(&self) -> Duration {
@@ -189,9 +193,10 @@ impl Rate {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct RateSample {
-    delivery_rate: u64,
+    // The sample delivery_rate in bytes/sec
+    bandwidth: Bandwidth,
 
     is_app_limited: bool,
 
@@ -208,6 +213,22 @@ struct RateSample {
     ack_elapsed: Duration,
 
     rtt: Duration,
+}
+
+impl RateSample {
+    const fn new() -> Self {
+        RateSample {
+            bandwidth: Bandwidth::zero(),
+            is_app_limited: false,
+            interval: Duration::ZERO,
+            delivered: 0,
+            prior_delivered: 0,
+            prior_time: None,
+            send_elapsed: Duration::ZERO,
+            ack_elapsed: Duration::ZERO,
+            rtt: Duration::ZERO,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -288,7 +309,7 @@ mod tests {
         assert_eq!(r.congestion.delivery_rate.delivered(), 2400);
 
         // Estimated delivery rate = (1200 x 2) / 0.05s = 48000.
-        assert_eq!(r.delivery_rate(), 48000);
+        assert_eq!(r.delivery_rate().to_bytes_per_second(), 48000);
     }
 
     #[test]
