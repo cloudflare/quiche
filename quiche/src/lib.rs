@@ -3101,7 +3101,7 @@ impl<F: BufFactory> Connection<F> {
             if !self.crypto_ctx[epoch]
                 .key_update
                 .as_ref()
-                .map_or(true, |prev| prev.update_acked)
+                .is_none_or(|prev| prev.update_acked)
             {
                 // Peer has updated keys twice without awaiting confirmation.
                 return Err(Error::KeyUpdate);
