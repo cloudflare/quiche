@@ -4791,10 +4791,13 @@ impl<F: BufFactory> Connection<F> {
             path.recovery.ping_sent(epoch);
         }
 
+        // FIXME
+        // Updating app_limited for gcongestion
         if !has_data &&
             !dgram_emitted &&
             cwnd_available > frame::MAX_STREAM_OVERHEAD
         {
+            // bla
             path.recovery.on_app_limited();
         }
 
@@ -4941,6 +4944,9 @@ impl<F: BufFactory> Connection<F> {
         };
 
         if in_flight && is_app_limited {
+            // FIXME
+            // Updating app_limited for congestion
+            // bla
             path.recovery.delivery_rate_update_app_limited(true);
         }
 
@@ -7410,6 +7416,8 @@ impl<F: BufFactory> Connection<F> {
 
                 for (_, p) in self.paths.iter_mut() {
                     if is_app_limited {
+                        // Updating app_limited for congestion
+                        // bla
                         p.recovery.delivery_rate_update_app_limited(true);
                     }
 
