@@ -16,11 +16,14 @@ pub struct Pmtud {
     /// The minimum supported MTU.
     minimum_supported_mtu: usize,
 
+    /// The maximum supported MTU.
+    maximum_supported_mtu: usize,
+
     /// The size of the smallest failed probe.
-    last_failed_probe_size: Option<usize>,
+    smallest_failed_probe_size: Option<usize>,
 
     /// The size of the largest successful probe.
-    last_successful_probe_size: Option<usize>,
+    largest_successful_probe_size: Option<usize>,
 
     /// Indicates if PMTUD requires continued probing.
     should_probe: bool,
@@ -57,12 +60,13 @@ impl Pmtud {
         self.enabled
             && self.pmtu.is_none()
             && !(self
-                .last_failed_probe_size
+                .smallest_failed_probe_size
                 .is_some_and(|failed_probe| failed_probe == self.estimated_pmtu))
     }
 
     /// Sets the PMTUD probe size.
     pub fn set_probe_size(&mut self, probe_size: usize) {
+        self.maximum_supported_mtu = probe_size;
         self.probe_size = probe_size;
     }
 
@@ -91,7 +95,10 @@ impl Pmtud {
     /// Based on the Optimistic Binary algorithm defined in:
     /// Ref: <https://www.hb.fh-muenster.de/opus4/frontdoor/deliver/index/docId/14965/file/dplpmtudQuicPaper.pdf>
     fn update_probe_size(&mut self) {
-        match (self.last_failed_probe_size, self.last_successful_probe_size) {
+        match (
+            self.smallest_failed_probe_size,
+            self.largest_successful_probe_size,
+        ) {
             // Binary search between successful and failed probes
             (Some(failed_probe_size), Some(successful_probe_size)) => {
                 // Found the PMTU
@@ -136,8 +143,8 @@ impl Pmtud {
 
     /// Records a successful probe
     pub fn successful_probe(&mut self, probe_size: usize) {
-        self.last_successful_probe_size =
-            std::cmp::max(Some(probe_size), self.last_successful_probe_size);
+        self.largest_successful_probe_size =
+            std::cmp::max(Some(probe_size), self.largest_successful_probe_size);
 
         self.update_probe_size();
         self.inflight = false;
@@ -147,15 +154,25 @@ impl Pmtud {
     pub fn failed_probe(&mut self, probe_size: usize) {
         // Check if we have one instance of a failed probe so that a min comparison
         // can be made otherwise if this is the first failed probe just record it
-        if self.last_failed_probe_size.is_some() {
-            self.last_failed_probe_size =
-                std::cmp::min(Some(probe_size), self.last_failed_probe_size);
+        if self.smallest_failed_probe_size.is_some() {
+            self.smallest_failed_probe_size =
+                std::cmp::min(Some(probe_size), self.smallest_failed_probe_size);
         } else {
-            self.last_failed_probe_size = Some(probe_size);
+            self.smallest_failed_probe_size = Some(probe_size);
         }
 
         self.update_probe_size();
         self.inflight = false;
+    }
+
+    // Resets PMTUD internals such that PMTUD will be recalculated
+    // on the next opportunity
+    pub fn recalculate_pmtu(&mut self) {
+        self.set_probe_size(self.maximum_supported_mtu);
+        self.smallest_failed_probe_size = None;
+        self.largest_successful_probe_size = None;
+        self.estimated_pmtu = self.minimum_supported_mtu;
+        self.pmtu = None;
     }
 }
 
@@ -284,6 +301,45 @@ mod tests {
 
         search.successful_probe(1200);
         assert_eq!(search.pmtu, Some(1200));
+        assert!(!search.should_probe());
+    }
+
+    #[test]
+    fn test_pmtud_reset() {
+        // Start with a large PMTU
+        let mut search = Pmtud::new(1200);
+        search.set_probe_size(1350);
+        search.successful_probe(1350);
+        assert_eq!(search.pmtu, Some(1350));
+        assert!(!search.should_probe());
+
+        // Simulate moving cell towers or some change in the path
+        // where the PMTU drops
+        search.recalculate_pmtu();
+
+        search.failed_probe(1350);
+        assert_eq!(search.get_probe_size(), 1275);
+
+        search.failed_probe(1275);
+        assert_eq!(search.get_probe_size(), 1237);
+
+        search.successful_probe(1237);
+        assert_eq!(search.get_probe_size(), 1256);
+
+        search.failed_probe(1256);
+        assert_eq!(search.get_probe_size(), 1246);
+
+        search.failed_probe(1246);
+        assert_eq!(search.get_probe_size(), 1241);
+
+        search.failed_probe(1241);
+        assert_eq!(search.get_probe_size(), 1239);
+
+        search.failed_probe(1239);
+        assert_eq!(search.get_probe_size(), 1238);
+
+        search.failed_probe(1238);
+        assert_eq!(search.pmtu, Some(1237));
         assert!(!search.should_probe());
     }
 }

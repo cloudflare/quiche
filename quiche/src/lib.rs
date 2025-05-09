@@ -6891,6 +6891,15 @@ impl<F: BufFactory> Connection<F> {
         }
     }
 
+    /// Recalculates PMTU for the active path
+    #[inline]
+    pub fn recalculate_pmtu(&mut self) {
+        let _ = self
+            .paths
+            .get_active_mut()
+            .map(|active_path| active_path.pmtud.recalculate_pmtu());
+    }
+
     /// Returns true if the connection handshake is complete.
     #[inline]
     pub fn is_established(&self) -> bool {
