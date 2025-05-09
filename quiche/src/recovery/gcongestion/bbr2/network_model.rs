@@ -131,7 +131,6 @@ impl MaxBandwidthFilter {
 /// Bbr2NetworkModel takes low level congestion signals(packets sent/acked/lost)
 /// as input and produces BBRv2 model parameters like inflight_(hi|lo),
 /// bandwidth_(hi|lo), bandwidth and rtt estimates, etc.
-#[derive(Debug)]
 pub(super) struct BBRv2NetworkModel {
     round_trip_counter: RoundTripCounter,
     /// Bandwidth sampler provides BBR with the bandwidth measurements at
@@ -184,6 +183,25 @@ pub(super) struct BBRv2NetworkModel {
 
     // Used by STARTUP and PROBE_UP to decide when to exit.
     rounds_with_queueing: usize,
+}
+
+impl std::fmt::Debug for BBRv2NetworkModel {
+    fn fmt(
+        &self, f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        return Ok(());
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct BBRv2NetworkModelDebug<'a> {
+            round_trip_counter: &'a RoundTripCounter,
+        }
+
+        let Self {
+            round_trip_counter, ..
+        } = self;
+
+        std::fmt::Debug::fmt(&BBRv2NetworkModelDebug { round_trip_counter }, f)
+    }
 }
 
 impl BBRv2NetworkModel {

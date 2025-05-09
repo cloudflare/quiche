@@ -66,7 +66,6 @@ impl CyclePhase {
     }
 }
 
-#[derive(Debug)]
 pub(super) struct Cycle {
     pub(super) start_time: Instant,
     pub(super) phase: CyclePhase,
@@ -85,6 +84,50 @@ pub(super) struct Cycle {
 
     pub(super) last_cycle_probed_too_high: bool,
     pub(super) last_cycle_stopped_risky_probe: bool,
+}
+
+impl std::fmt::Debug for Cycle {
+    fn fmt(
+        &self, f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct Cycle<'a> {
+            elapsed: Duration,
+            elapsed_in_phase: Duration,
+            phase: &'a CyclePhase,
+            rounds_in_phase: &'a usize,
+            rounds_since_probe: &'a usize,
+            probe_up_rounds: &'a usize,
+            probe_up_bytes: &'a Option<usize>,
+        }
+
+        let now = Instant::now();
+
+        let Self {
+            start_time,
+            phase,
+            rounds_in_phase,
+            phase_start_time,
+            rounds_since_probe,
+            probe_up_rounds,
+            probe_up_bytes,
+            ..
+        } = self;
+
+        std::fmt::Debug::fmt(
+            &Cycle {
+                elapsed: now - *start_time,
+                elapsed_in_phase: now - *phase_start_time,
+                phase,
+                rounds_in_phase,
+                rounds_since_probe,
+                probe_up_rounds,
+                probe_up_bytes,
+            },
+            f,
+        )
+    }
 }
 
 impl Default for Cycle {
@@ -196,7 +239,14 @@ impl Mode {
 
         let mode_after = std::mem::discriminant(self);
 
-        mode_before != mode_after
+        let mode_changed = mode_before != mode_after;
+        if mode_changed {
+            // println!("Inputs {} {:?} {} {} {}", prior_in_flight, event_time,
+            // acked_packets.len(), lost_packets.len(), target_bytes_inflight);
+            // println!("Mode change {self:?}");
+        }
+
+        mode_changed
     }
 
     pub(super) fn do_on_exit_quiescence(

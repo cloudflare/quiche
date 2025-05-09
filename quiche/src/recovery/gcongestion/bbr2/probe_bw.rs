@@ -77,6 +77,7 @@ impl ModeImpl for ProbeBW {
                 self.enter_probe_refill(self.cycle.probe_up_rounds, now),
             super::mode::CyclePhase::Up | super::mode::CyclePhase::Down => {},
         }
+        println!("Enter ProbeBW");
     }
 
     fn on_congestion_event(
@@ -180,14 +181,21 @@ impl ModeImpl for ProbeBW {
         &mut self, _now: Instant,
         _congestion_event: Option<&BBRv2CongestionEvent>,
     ) {
+        println!("Leave ProbeBW");
     }
 }
 
 impl ProbeBW {
+    fn on_switch_cycle_phase(&self, next_phase: CyclePhase) {
+        println!("Entering {:?} state: {:?}", next_phase, self.cycle);
+    }
+
     fn enter_probe_down(
         &mut self, probed_too_high: bool, stopped_risky_probe: bool,
         now: Instant, params: &Params,
     ) {
+        self.on_switch_cycle_phase(CyclePhase::Down);
+
         let cycle = &mut self.cycle;
         cycle.last_cycle_probed_too_high = probed_too_high;
         cycle.last_cycle_stopped_risky_probe = stopped_risky_probe;
@@ -223,6 +231,8 @@ impl ProbeBW {
             self.exit_probe_down();
         }
 
+        self.on_switch_cycle_phase(CyclePhase::Cruise);
+
         let cycle = &mut self.cycle;
 
         self.model.cap_inflight_lo(self.model.inflight_hi());
@@ -236,6 +246,8 @@ impl ProbeBW {
         if self.cycle.phase == CyclePhase::Down {
             self.exit_probe_down();
         }
+
+        self.on_switch_cycle_phase(CyclePhase::Refill);
 
         let cycle = &mut self.cycle;
 
@@ -254,6 +266,8 @@ impl ProbeBW {
     }
 
     fn enter_probe_up(&mut self, now: Instant, cwnd: usize) {
+        self.on_switch_cycle_phase(CyclePhase::Up);
+
         let cycle = &mut self.cycle;
 
         cycle.phase = CyclePhase::Up;

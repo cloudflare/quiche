@@ -91,9 +91,12 @@ impl ModeImpl for Drain {
     fn enter(
         &mut self, _: Instant, _: Option<&BBRv2CongestionEvent>, _params: &Params,
     ) {
+        println!("Enter Drain");
     }
 
-    fn leave(&mut self, _: Instant, _: Option<&BBRv2CongestionEvent>) {}
+    fn leave(&mut self, _: Instant, _: Option<&BBRv2CongestionEvent>) {
+        println!("Leave Drain");
+    }
 }
 
 impl Drain {
