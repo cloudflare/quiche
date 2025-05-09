@@ -38,9 +38,27 @@ use crate::recovery::gcongestion::Lost;
 
 use super::windowed_filter::WindowedFilter;
 
-#[derive(Debug)]
 struct ConnectionStateMap<T> {
     packet_map: VecDeque<(u64, Option<T>)>,
+}
+
+impl<T> std::fmt::Debug for ConnectionStateMap<T> {
+    fn fmt(
+        &self, f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct ConnectionStateMap {
+            packet_map_len: usize,
+        }
+
+        std::fmt::Debug::fmt(
+            &ConnectionStateMap {
+                packet_map_len: self.packet_map.len(),
+            },
+            f,
+        )
+    }
 }
 
 impl<T> Default for ConnectionStateMap<T> {
@@ -101,7 +119,6 @@ impl<T> ConnectionStateMap<T> {
     }
 }
 
-#[derive(Debug)]
 pub struct BandwidthSampler {
     /// The total number of congestion controlled bytes sent during the
     /// connection.
@@ -126,6 +143,76 @@ pub struct BandwidthSampler {
     limit_max_ack_height_tracker_by_send_rate: bool,
 
     total_bytes_acked_after_last_ack_event: usize,
+}
+
+impl std::fmt::Debug for BandwidthSampler {
+    fn fmt(
+        &self, f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct BandwidthSampler<'a> {
+            total_bytes_sent: &'a usize,
+            total_bytes_acked: &'a usize,
+            total_bytes_lost: &'a usize,
+            total_bytes_neutered: &'a usize,
+            last_sent_packet: &'a u64,
+            last_acked_packet: &'a u64,
+            is_app_limited: &'a bool,
+            last_acked_packet_ack_time: &'a Instant,
+            total_bytes_sent_at_last_acked_packet: &'a usize,
+            last_acked_packet_sent_time: &'a Instant,
+            // a0_candidates: &'a VecDeque<AckPoint>,
+            connection_state_map:
+                &'a ConnectionStateMap<ConnectionStateOnSentPacket>,
+            end_of_app_limited_phase: &'a Option<u64>,
+            overestimate_avoidance: &'a bool,
+            limit_max_ack_height_tracker_by_send_rate: &'a bool,
+            total_bytes_acked_after_last_ack_event: &'a usize,
+        }
+
+        let Self {
+            total_bytes_sent,
+            total_bytes_acked,
+            total_bytes_lost,
+            total_bytes_neutered,
+            last_sent_packet,
+            last_acked_packet,
+            is_app_limited,
+            last_acked_packet_ack_time,
+            total_bytes_sent_at_last_acked_packet,
+            last_acked_packet_sent_time,
+            // a0_candidates,
+            connection_state_map,
+            end_of_app_limited_phase,
+            overestimate_avoidance,
+            limit_max_ack_height_tracker_by_send_rate,
+            total_bytes_acked_after_last_ack_event,
+            ..
+        } = self;
+
+        std::fmt::Debug::fmt(
+            &BandwidthSampler {
+                total_bytes_sent,
+                total_bytes_acked,
+                total_bytes_lost,
+                total_bytes_neutered,
+                last_sent_packet,
+                last_acked_packet,
+                is_app_limited,
+                last_acked_packet_ack_time,
+                total_bytes_sent_at_last_acked_packet,
+                last_acked_packet_sent_time,
+                // a0_candidates,
+                connection_state_map,
+                end_of_app_limited_phase,
+                overestimate_avoidance,
+                limit_max_ack_height_tracker_by_send_rate,
+                total_bytes_acked_after_last_ack_event,
+            },
+            f,
+        )
+    }
 }
 
 /// A subset of [`ConnectionStateOnSentPacket`] which is returned

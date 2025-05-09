@@ -189,18 +189,86 @@ impl std::fmt::Debug for BBRv2NetworkModel {
     fn fmt(
         &self, f: &mut std::fmt::Formatter<'_>,
     ) -> Result<(), std::fmt::Error> {
-        return Ok(());
         #[derive(Debug)]
         #[allow(dead_code)]
-        struct BBRv2NetworkModelDebug<'a> {
+        struct BBRv2NetworkModel<'a> {
             round_trip_counter: &'a RoundTripCounter,
+            bandwidth_sampler: &'a BandwidthSampler,
+            max_bandwidth_filter: &'a MaxBandwidthFilter,
+            min_rtt_filter: &'a MinRttFilter,
+            bytes_lost_in_round: &'a usize,
+            loss_events_in_round: &'a usize,
+            max_bytes_delivered_in_round: &'a usize,
+            min_bytes_in_flight_in_round: &'a usize,
+            inflight_hi_limited_in_round: &'a bool,
+            bandwidth_latest: &'a Bandwidth,
+            bandwidth_lo: &'a Option<Bandwidth>,
+            prior_bandwidth_lo: &'a Option<Bandwidth>,
+            inflight_latest: &'a usize,
+            inflight_lo: &'a usize,
+            inflight_hi: &'a usize,
+            cwnd_gain: &'a f32,
+            pacing_gain: &'a f32,
+            cwnd_limited_before_aggregation_epoch: &'a bool,
+            full_bandwidth_reached: &'a bool,
+            full_bandwidth_baseline: &'a Bandwidth,
+            rounds_without_bandwidth_growth: &'a usize,
+            rounds_with_queueing: &'a usize,
         }
 
         let Self {
-            round_trip_counter, ..
+            round_trip_counter,
+            bandwidth_sampler,
+            max_bandwidth_filter,
+            min_rtt_filter,
+            bytes_lost_in_round,
+            loss_events_in_round,
+            max_bytes_delivered_in_round,
+            min_bytes_in_flight_in_round,
+            inflight_hi_limited_in_round,
+            bandwidth_latest,
+            bandwidth_lo,
+            prior_bandwidth_lo,
+            inflight_latest,
+            inflight_lo,
+            inflight_hi,
+            cwnd_gain,
+            pacing_gain,
+            cwnd_limited_before_aggregation_epoch,
+            full_bandwidth_reached,
+            full_bandwidth_baseline,
+            rounds_without_bandwidth_growth,
+            rounds_with_queueing,
+            ..
         } = self;
 
-        std::fmt::Debug::fmt(&BBRv2NetworkModelDebug { round_trip_counter }, f)
+        std::fmt::Debug::fmt(
+            &BBRv2NetworkModel {
+                round_trip_counter,
+                bandwidth_sampler,
+                max_bandwidth_filter,
+                min_rtt_filter,
+                bytes_lost_in_round,
+                loss_events_in_round,
+                max_bytes_delivered_in_round,
+                min_bytes_in_flight_in_round,
+                inflight_hi_limited_in_round,
+                bandwidth_latest,
+                bandwidth_lo,
+                prior_bandwidth_lo,
+                inflight_latest,
+                inflight_lo,
+                inflight_hi,
+                cwnd_gain,
+                pacing_gain,
+                cwnd_limited_before_aggregation_epoch,
+                full_bandwidth_reached,
+                full_bandwidth_baseline,
+                rounds_without_bandwidth_growth,
+                rounds_with_queueing,
+            },
+            f,
+        )
     }
 }
 

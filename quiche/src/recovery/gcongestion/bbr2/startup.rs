@@ -114,7 +114,8 @@ impl ModeImpl for Startup {
         &mut self, _now: Instant,
         _congestion_event: Option<&BBRv2CongestionEvent>,
     ) {
-        println!("Leave Startup");
+        println!("Leave Startup {:#?}", self);
+
         // Clear bandwidth_lo if it's set during STARTUP.
         self.model.clear_bandwidth_lo();
     }
