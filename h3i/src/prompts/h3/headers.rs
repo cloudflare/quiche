@@ -26,10 +26,10 @@
 
 //! Prompts for HTTP/3 header fields.
 
+use crate::quiche;
 use inquire::error::InquireResult;
 use inquire::validator::Validation;
 use inquire::Text;
-use quiche;
 use quiche::h3::frame::Frame;
 
 use crate::encode_header_block;

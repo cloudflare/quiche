@@ -88,7 +88,7 @@ pub async fn summarize_connection(
     h3i: h3i::config::Config, actions: Vec<Action>,
 ) -> ConnectionSummary {
     tokio::task::spawn_blocking(move || {
-        h3i::client::sync_client::connect(h3i, &actions, None).unwrap()
+        h3i::client::sync_client::connect(h3i, actions, None).unwrap()
     })
     .await
     .unwrap()
@@ -123,7 +123,7 @@ pub async fn request(
     });
 
     tokio::task::spawn_blocking(move || {
-        h3i::client::sync_client::connect(h3i, &actions, None)
+        h3i::client::sync_client::connect(h3i, actions, None)
     })
     .await
     .unwrap()

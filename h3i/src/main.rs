@@ -40,6 +40,8 @@ use qlog::reader::QlogSeqReader;
 
 use clap::App;
 use clap::Arg;
+#[cfg(feature = "async")]
+use tokio_quiche::BoxError;
 
 fn main() -> Result<(), ClientError> {
     let mut log_builder = env_logger::builder();
@@ -63,17 +65,21 @@ fn main() -> Result<(), ClientError> {
         None => prompt_frames(&config),
     };
 
-    match sync_client(config, &actions) {
-        Ok(summary) => {
+    #[cfg(not(feature = "async"))]
+    let summary = sync_client(config, actions);
+    #[cfg(feature = "async")]
+    let summary = async_client(config, actions);
+
+    match summary {
+        Ok(s) => {
             log::debug!(
                 "received connection_summary: {}",
-                serde_json::to_string_pretty(&summary)
+                serde_json::to_string_pretty(&s)
                     .unwrap_or_else(|e| e.to_string())
             );
         },
-
         Err(e) => {
-            log::error!("error: {:?}", e);
+            log::error!("{e:?}");
         },
     }
 
@@ -295,8 +301,32 @@ fn config_from_clap() -> std::result::Result<Config, String> {
     })
 }
 
+#[cfg(feature = "async")]
+fn async_client(
+    config: Config, frame_actions: Vec<Action>,
+) -> Result<ConnectionSummary, BoxError> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(Box::new)?;
+
+    let fut = async {
+        h3i::client::async_client::connect(
+            &config.library_config,
+            frame_actions,
+            None,
+        )
+        .await
+        .unwrap()
+        .await
+    };
+
+    Ok(rt.block_on(fut))
+}
+
+#[cfg(not(feature = "async"))]
 fn sync_client(
-    config: Config, actions: &[Action],
+    config: Config, actions: Vec<Action>,
 ) -> Result<ConnectionSummary, ClientError> {
     // TODO: CLI/qlog don't support passing close trigger frames at the moment
     h3i::client::sync_client::connect(config.library_config, actions, None)
