@@ -19,6 +19,9 @@ qlog = ["quiche/qlog"]
 # Use BoringSSL provided by the boring crate.
 boringssl-boring-crate = ["quiche/boringssl-boring-crate"]
 
+rustls-aws-lc-rs = ["quiche/rustls-aws-lc-rs"]
+rustls-ring = ["quiche/rustls-ring"]
+
 # Enable sfv support.
 sfv = ["quiche/sfv"]
 

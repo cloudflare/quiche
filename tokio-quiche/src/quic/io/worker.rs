@@ -51,6 +51,7 @@ use crate::quic::router::ConnectionMapCommand;
 use crate::quic::QuicheConnection;
 use crate::QuicResult;
 
+#[cfg(not(feature = "__rustls"))]
 use boring::ssl::SslRef;
 use datagram_socket::DatagramSocketSend;
 use datagram_socket::DatagramSocketSendExt;
@@ -630,6 +631,7 @@ pub struct Running<Tx, M, A> {
 }
 
 impl<Tx, M, A> Running<Tx, M, A> {
+    #[cfg(not(feature = "__rustls"))]
     pub fn ssl(&mut self) -> &mut SslRef {
         self.qconn.as_mut()
     }
@@ -663,6 +665,7 @@ where
         // async callback from this task accross a channel, for example, will
         // cause issues as this waker will then be stale and attempt to
         // wake the wrong task.
+        #[cfg(not(feature = "__rustls"))]
         std::future::poll_fn(|cx| {
             let ssl = qconn.as_mut();
             ssl.set_task_waker(Some(cx.waker().clone()));

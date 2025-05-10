@@ -788,10 +788,17 @@ mod tests {
     use tokio::net::UdpSocket;
     use tokio::time;
 
+    #[cfg(not(feature = "__rustls"))]
     const TEST_CERT_FILE: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/",
         "../quiche/examples/cert.crt"
+    );
+    #[cfg(feature = "__rustls")]
+    const TEST_CERT_FILE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/",
+        "../quiche/examples/cert_rustls.crt"
     );
     const TEST_KEY_FILE: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),

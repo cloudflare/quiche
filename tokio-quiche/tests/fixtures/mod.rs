@@ -72,10 +72,17 @@ pub mod h3i_fixtures;
 
 use h3i_fixtures::stream_body;
 
+#[cfg(not(feature = "__rustls"))]
 pub const TEST_CERT_FILE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/",
     "../quiche/examples/cert.crt"
+);
+#[cfg(feature = "__rustls")]
+pub const TEST_CERT_FILE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/",
+    "../quiche/examples/cert_rustls.crt"
 );
 pub const TEST_KEY_FILE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -100,6 +107,7 @@ impl TestConnectionHook {
 }
 
 impl ConnectionHook for TestConnectionHook {
+    #[cfg(not(feature = "__rustls"))]
     fn create_custom_ssl_context_builder(
         &self, _settings: TlsCertificatePaths<'_>,
     ) -> Option<boring::ssl::SslContextBuilder> {

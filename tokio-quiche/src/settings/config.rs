@@ -111,6 +111,7 @@ impl Config {
 fn make_quiche_config(
     params: &ConnectionParams, should_log_keys: bool,
 ) -> QuicResult<quiche::Config> {
+    #[cfg(not(feature = "__rustls"))]
     let ssl_ctx_builder = params
         .hooks
         .connection_hook
@@ -118,6 +119,7 @@ fn make_quiche_config(
         .zip(params.tls_cert)
         .and_then(|(hook, tls)| hook.create_custom_ssl_context_builder(tls));
 
+    #[cfg(not(feature = "__rustls"))]
     let mut config = if let Some(builder) = ssl_ctx_builder {
         quiche::Config::with_boring_ssl_ctx_builder(
             quiche::PROTOCOL_VERSION,
@@ -126,6 +128,9 @@ fn make_quiche_config(
     } else {
         quiche_config_with_tls(params.tls_cert)?
     };
+
+    #[cfg(feature = "__rustls")]
+    let mut config = quiche_config_with_tls(params.tls_cert)?;
 
     let quic_settings = &params.settings;
 
