@@ -484,64 +484,6 @@ mod tests {
         assert!(!r.congestion.delivery_rate.sample_is_app_limited());
     }
 
-    // THIS TEST doesn't check anything since the `app_limited` and
-    // `sample_is_app_limited` values are the same prior to ACKs.
-    // Additionally, ACKing fewer packets also doesn't make the test fail (the
-    // comment "all acked" at the bottom implies that was important).
-    #[test]
-    fn app_limited_check() {
-        let config = Config::new(0xbabababa).unwrap();
-        let mut r = LegacyRecovery::new(&config);
-
-        let now = Instant::now();
-        let mss = r.max_datagram_size();
-
-        // Send 5 packets.
-        for pn in 0..5 {
-            let pkt = testing::helper_packet_sent(pn, now, mss);
-
-            r.on_packet_sent(
-                pkt,
-                packet::Epoch::Application,
-                HandshakeStatus::default(),
-                now,
-                "",
-            );
-        }
-
-        // THIS IS ALSO THE STATE prior to changes.
-        assert!(r.app_limited());
-        assert!(!r.congestion.delivery_rate.sample_is_app_limited());
-
-        let rtt = Duration::from_millis(50);
-        let now = now + rtt;
-
-        let mut acked = ranges::RangeSet::default();
-        acked.insert(0..3);
-        assert_eq!(
-            r.on_ack_received(
-                &acked,
-                25,
-                packet::Epoch::Application,
-                HandshakeStatus::default(),
-                now,
-                "",
-            ),
-            OnAckReceivedOutcome {
-                lost_packets: 0,
-                lost_bytes: 0,
-                acked_bytes: mss * 3,
-                spurious_losses: 0,
-            },
-        );
-
-        // STATE doesnt change
-        assert!(r.app_limited());
-        // Rate sample is not app limited (all acked).
-        assert!(!r.congestion.delivery_rate.sample_is_app_limited());
-        assert_eq!(r.congestion.delivery_rate.sample_rtt(), rtt);
-    }
-
     fn helper_send_and_ack_packets(
         recovery: &mut LegacyRecovery, range: Range<u64>, now: Instant,
         rtt: Duration, mss: usize,
