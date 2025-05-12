@@ -4515,6 +4515,55 @@ fn stop_sending_stream_ack_race(
 }
 
 #[rstest]
+fn uni_stream_local_shutdown_before_read(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] send_fin: bool,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    pipe.handshake().unwrap();
+
+    let mut buf = [0u8; 32];
+
+    // Client sends some data.
+    assert_eq!(pipe.client.stream_send(2, b"hello", send_fin), Ok(5));
+    pipe.advance().unwrap();
+
+    if !send_fin {
+        // Client resets the stream.
+        pipe.client.stream_shutdown(2, Shutdown::Write, 0).unwrap();
+        pipe.advance().unwrap();
+    }
+
+    // Client state is cleaned up, while the server retains the stream until a
+    // local operation.
+    assert_eq!(pipe.client.streams.len(), 0);
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Server shuts down stream before any read.
+    pipe.server.stream_shutdown(2, Shutdown::Read, 0).unwrap();
+
+    // Server state is correctly cleaned up.
+    assert_eq!(pipe.server.streams.len(), 0);
+    assert_eq!(pipe.server.stream_readable_next(), None);
+    assert_eq!(
+        pipe.server.stream_recv(2, &mut buf),
+        Err(Error::InvalidStreamState(2))
+    );
+    assert_eq!(pipe.server.streams.len(), 0);
+
+    // State remains cleaned up even after packet exchange.
+    pipe.advance().unwrap();
+
+    assert_eq!(pipe.server.stream_readable_next(), None);
+    assert_eq!(
+        pipe.server.stream_recv(2, &mut buf),
+        Err(Error::InvalidStreamState(2))
+    );
+    assert_eq!(pipe.server.streams.len(), 0);
+}
+
+#[rstest]
 fn stream_shutdown_read(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
