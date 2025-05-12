@@ -30,8 +30,6 @@ use std::time::Instant;
 use crate::minmax::Minmax;
 use crate::recovery::GRANULARITY;
 
-pub(crate) const INITIAL_RTT: Duration = Duration::from_millis(333);
-
 pub(crate) const RTT_WINDOW: Duration = Duration::from_secs(300);
 
 pub struct RttStats {
@@ -62,13 +60,13 @@ impl std::fmt::Debug for RttStats {
 }
 
 impl RttStats {
-    pub(crate) fn new(max_ack_delay: Duration) -> Self {
+    pub(crate) fn new(initial_rtt: Duration, max_ack_delay: Duration) -> Self {
         RttStats {
             latest_rtt: Duration::ZERO,
-            min_rtt: Minmax::new(INITIAL_RTT),
-            smoothed_rtt: INITIAL_RTT,
-            max_rtt: INITIAL_RTT,
-            rttvar: INITIAL_RTT / 2,
+            min_rtt: Minmax::new(initial_rtt),
+            smoothed_rtt: initial_rtt,
+            max_rtt: initial_rtt,
+            rttvar: initial_rtt / 2,
             has_first_rtt_sample: false,
             max_ack_delay,
         }

@@ -37,7 +37,6 @@ use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::gcongestion::Lost;
 use crate::recovery::rtt::RttStats;
-use crate::recovery::rtt::INITIAL_RTT;
 
 use super::Acked;
 use super::BBRv2CongestionEvent;
@@ -191,7 +190,7 @@ pub(super) struct BBRv2NetworkModel {
 }
 
 impl BBRv2NetworkModel {
-    pub(super) fn new(params: &Params) -> Self {
+    pub(super) fn new(params: &Params, initial_rtt: Duration) -> Self {
         BBRv2NetworkModel {
             min_bytes_in_flight_in_round: usize::MAX,
             inflight_hi_limited_in_round: false,
@@ -206,7 +205,7 @@ impl BBRv2NetworkModel {
                 end_of_round_trip: None,
             },
             min_rtt_filter: MinRttFilter {
-                min_rtt: INITIAL_RTT,
+                min_rtt: initial_rtt,
                 min_rtt_timestamp: Instant::now(),
             },
             max_bandwidth_filter: MaxBandwidthFilter {

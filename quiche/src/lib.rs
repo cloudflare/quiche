@@ -438,6 +438,9 @@ pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
 /// The minimum length of Initial packets sent by a client.
 pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
 
+/// The default initial RTT.
+const DEFAULT_INITIAL_RTT: Duration = Duration::from_millis(333);
+
 #[cfg(not(feature = "fuzzing"))]
 const PAYLOAD_MIN_LEN: usize = 4;
 
@@ -838,6 +841,8 @@ pub struct Config {
     disable_dcid_reuse: bool,
 
     track_unknown_transport_params: Option<usize>,
+
+    initial_rtt: Duration,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -911,6 +916,7 @@ impl Config {
             disable_dcid_reuse: false,
 
             track_unknown_transport_params: None,
+            initial_rtt: DEFAULT_INITIAL_RTT,
         })
     }
 
@@ -1111,6 +1117,13 @@ impl Config {
     /// The default value is `1`.
     pub fn set_send_capacity_factor(&mut self, v: f64) {
         self.tx_cap_factor = v;
+    }
+
+    /// Sets the connection's initial RTT.
+    ///
+    /// The default value is `333`.
+    pub fn set_initial_rtt(&mut self, v: Duration) {
+        self.initial_rtt = v;
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.

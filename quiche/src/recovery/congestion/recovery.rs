@@ -370,7 +370,10 @@ impl LegacyRecovery {
 
             pto_count: 0,
 
-            rtt_stats: RttStats::new(recovery_config.max_ack_delay),
+            rtt_stats: RttStats::new(
+                recovery_config.initial_rtt,
+                recovery_config.max_ack_delay,
+            ),
 
             lost_spurious_count: 0,
 

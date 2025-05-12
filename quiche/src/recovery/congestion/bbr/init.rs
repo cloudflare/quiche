@@ -24,8 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use self::rtt::INITIAL_RTT;
-
 use super::*;
 
 use std::time::Instant;
@@ -37,7 +35,7 @@ use std::time::Instant;
 pub fn bbr_init(r: &mut Congestion) {
     let bbr = &mut r.bbr_state;
 
-    bbr.rtprop = INITIAL_RTT;
+    bbr.rtprop = r.initial_rtt;
     bbr.rtprop_stamp = Instant::now();
     bbr.next_round_delivered = r.delivery_rate.delivered();
 
@@ -62,7 +60,7 @@ fn bbr_init_round_counting(r: &mut Congestion) {
 fn bbr_init_pacing_rate(r: &mut Congestion) {
     let bbr = &mut r.bbr_state;
 
-    let srtt = INITIAL_RTT.as_secs_f64();
+    let srtt = r.initial_rtt.as_secs_f64();
 
     // At init, cwnd is initcwnd.
     let nominal_bandwidth = r.congestion_window as f64 / srtt;

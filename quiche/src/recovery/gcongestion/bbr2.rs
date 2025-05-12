@@ -419,7 +419,7 @@ impl BBRv2 {
         };
 
         BBRv2 {
-            mode: Mode::startup(BBRv2NetworkModel::new(&params)),
+            mode: Mode::startup(BBRv2NetworkModel::new(&params, smoothed_rtt)),
             cwnd,
             pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) *
                 2.885,
