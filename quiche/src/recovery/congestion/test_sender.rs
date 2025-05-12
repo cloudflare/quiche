@@ -35,7 +35,7 @@ use super::Acked;
 use super::Congestion;
 use super::RecoveryConfig;
 use super::Sent;
-use crate::CongestionControlAlgorithm;
+use crate::{CongestionControlAlgorithm, DEFAULT_INITIAL_RTT};
 
 pub(crate) struct TestSender {
     cc: Congestion,
@@ -58,7 +58,7 @@ impl TestSender {
             next_ack: 0,
             bytes_in_flight: 0,
             time: Instant::now(),
-            rtt_stats: RttStats::new(Duration::from_micros(0)),
+            rtt_stats: RttStats::new(DEFAULT_INITIAL_RTT, Duration::from_micros(0)),
             cc: Congestion::from_config(&RecoveryConfig::from_config(&cfg)),
             sent_packets: VecDeque::new(),
         }
