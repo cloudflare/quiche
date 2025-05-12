@@ -46,8 +46,8 @@ jobs:
       - name: Build QuicTLS
         if: ${{ matrix.tls-feature == 'quictls' }}
         run: |
-          git clone https://github.com/openssl/quictls
-          cd quictls
+          git clone --depth 1 https://github.com/quictls/openssl
+          cd openssl
           ./Configure --prefix="$PWD/install"
           make -j"$(nproc)"
           make install -j"$(nproc)"
