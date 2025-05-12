@@ -410,7 +410,10 @@ impl GRecovery {
 
         Some(Self {
             epochs: Default::default(),
-            rtt_stats: RttStats::new(recovery_config.max_ack_delay),
+            rtt_stats: RttStats::new(
+                recovery_config.initial_rtt,
+                recovery_config.max_ack_delay,
+            ),
             recovery_stats: RecoveryStats::default(),
             loss_timer: Default::default(),
             pto_count: 0,

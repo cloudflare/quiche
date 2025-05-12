@@ -98,6 +98,7 @@ impl std::fmt::Debug for LossDetectionTimer {
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct RecoveryConfig {
+    pub initial_rtt: Duration,
     pub max_send_udp_payload_size: usize,
     pub max_ack_delay: Duration,
     pub cc_algorithm: CongestionControlAlgorithm,
@@ -111,6 +112,7 @@ pub struct RecoveryConfig {
 impl RecoveryConfig {
     pub fn from_config(config: &Config) -> Self {
         Self {
+            initial_rtt: config.initial_rtt,
             max_send_udp_payload_size: config.max_send_udp_payload_size,
             max_ack_delay: Duration::ZERO,
             cc_algorithm: config.cc_algorithm,

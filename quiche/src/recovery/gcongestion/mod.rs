@@ -37,7 +37,6 @@ pub use self::recovery::GRecovery;
 use crate::recovery::bandwidth::Bandwidth;
 
 use crate::recovery::rtt::RttStats;
-use crate::recovery::rtt::INITIAL_RTT;
 use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryStats;
 
@@ -69,7 +68,7 @@ impl Congestion {
             initial_tcp_congestion_window,
             max_congestion_window,
             recovery_config.max_send_udp_payload_size,
-            INITIAL_RTT,
+            recovery_config.initial_rtt,
             recovery_config.custom_bbr_params.as_ref(),
         ))
     }

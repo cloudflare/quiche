@@ -25,6 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use debug_panic::debug_panic;
+use std::time::Duration;
 use std::time::Instant;
 
 use self::recovery::Acked;
@@ -122,6 +123,8 @@ pub struct Congestion {
 
     pub(crate) delivery_rate: delivery_rate::Rate,
 
+    initial_rtt: Duration,
+
     /// Initial congestion window size in terms of packet count.
     pub(crate) initial_congestion_window_packets: usize,
 
@@ -153,6 +156,8 @@ impl Congestion {
             app_limited: false,
 
             lost_count: 0,
+
+            initial_rtt: recovery_config.initial_rtt,
 
             initial_congestion_window_packets: recovery_config
                 .initial_congestion_window_packets,
