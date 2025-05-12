@@ -111,6 +111,7 @@ pub fn connect(
 
     config.set_application_protos(&conn_args.alpns).unwrap();
 
+    config.set_initial_rtt(conn_args.initial_rtt);
     config.set_max_idle_timeout(conn_args.idle_timeout);
     config.set_max_recv_udp_payload_size(MAX_DATAGRAM_SIZE);
     config.set_max_send_udp_payload_size(MAX_DATAGRAM_SIZE);
