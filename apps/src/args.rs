@@ -25,6 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::common::alpns;
+use std::time::Duration;
 
 pub trait Args {
     fn with_docopt(docopt: &docopt::Docopt) -> Self;
@@ -53,6 +54,7 @@ pub struct CommonArgs {
     pub max_field_section_size: Option<u64>,
     pub qpack_max_table_capacity: Option<u64>,
     pub qpack_blocked_streams: Option<u64>,
+    pub initial_rtt: Duration,
     pub initial_cwnd_packets: u64,
 }
 
@@ -91,8 +93,9 @@ impl Args for CommonArgs {
         let (alpns, dgrams_enabled) = match (http_version, dgram_proto) {
             ("HTTP/0.9", "none") => (alpns::HTTP_09.to_vec(), false),
 
-            ("HTTP/0.9", _) =>
-                panic!("Unsupported HTTP version and DATAGRAM protocol."),
+            ("HTTP/0.9", _) => {
+                panic!("Unsupported HTTP version and DATAGRAM protocol.")
+            },
 
             ("HTTP/3", "none") => (alpns::HTTP_3.to_vec(), false),
 
@@ -186,6 +189,10 @@ impl Args for CommonArgs {
                 None
             };
 
+        let initial_rtt_millis =
+            args.get_str("--initial-rtt").parse::<u64>().unwrap();
+        let initial_rtt = Duration::from_millis(initial_rtt_millis);
+
         let initial_cwnd_packets = args
             .get_str("--initial-cwnd-packets")
             .parse::<u64>()
@@ -213,6 +220,7 @@ impl Args for CommonArgs {
             max_field_section_size,
             qpack_max_table_capacity,
             qpack_blocked_streams,
+            initial_rtt,
             initial_cwnd_packets,
         }
     }
@@ -242,6 +250,7 @@ impl Default for CommonArgs {
             max_field_section_size: None,
             qpack_max_table_capacity: None,
             qpack_blocked_streams: None,
+            initial_rtt: Duration::from_millis(333),
             initial_cwnd_packets: 10,
         }
     }
@@ -288,6 +297,7 @@ Options:
   --qpack-blocked-streams STREAMS   Limit of blocked streams while decoding. Any value other that 0 is currently unsupported.
   --session-file PATH      File used to cache a TLS session for resumption.
   --source-port PORT       Source port to use when connecting to the server [default: 0].
+  --initial-rtt MILLIS     The initial RTT in milliseconds [default: 333].
   --initial-cwnd-packets PACKETS   The initial congestion window size in terms of packet count [default: 10].
   -h --help                Show this screen.
 ";
@@ -463,6 +473,7 @@ Options:
   --qpack-blocked-streams STREAMS   Limit of streams that can be blocked while decoding. Any value other that 0 is currently unsupported.
   --disable-gso               Disable GSO (linux only).
   --disable-pacing            Disable pacing (linux only).
+  --initial-rtt MILLIS     The initial RTT in milliseconds [default: 333].
   --initial-cwnd-packets PACKETS      The initial congestion window size in terms of packet count [default: 10].
   -h --help                   Show this screen.
 ";
