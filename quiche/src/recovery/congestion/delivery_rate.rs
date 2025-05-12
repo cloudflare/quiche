@@ -484,6 +484,10 @@ mod tests {
         assert!(!r.congestion.delivery_rate.sample_is_app_limited());
     }
 
+    // THIS TEST doesn't check anything since the `app_limited` and
+    // `sample_is_app_limited` values are the same prior to ACKs.
+    // Additionally, ACKing fewer packets also doesn't make the test fail (the
+    // comment "all acked" at the bottom implies that was important).
     #[test]
     fn app_limited_check() {
         let config = Config::new(0xbabababa).unwrap();
@@ -494,24 +498,7 @@ mod tests {
 
         // Send 5 packets.
         for pn in 0..5 {
-            let pkt = Sent {
-                pkt_num: pn,
-                frames: smallvec![],
-                time_sent: now,
-                time_acked: None,
-                time_lost: None,
-                size: mss,
-                ack_eliciting: true,
-                in_flight: true,
-                delivered: 0,
-                delivered_time: now,
-                first_sent_time: now,
-                is_app_limited: false,
-                has_data: false,
-                tx_in_flight: 0,
-                lost: 0,
-                pmtud: false,
-            };
+            let pkt = testing::helper_packet_sent(pn, now, mss);
 
             r.on_packet_sent(
                 pkt,
@@ -522,12 +509,15 @@ mod tests {
             );
         }
 
+        // THIS IS ALSO THE STATE prior to changes.
+        assert!(r.app_limited());
+        assert!(!r.congestion.delivery_rate.sample_is_app_limited());
+
         let rtt = Duration::from_millis(50);
         let now = now + rtt;
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(0..5);
-
+        acked.insert(0..3);
         assert_eq!(
             r.on_ack_received(
                 &acked,
@@ -540,14 +530,51 @@ mod tests {
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
-                acked_bytes: mss * 5,
+                acked_bytes: mss * 3,
                 spurious_losses: 0,
             },
         );
 
+        // STATE doesnt change
         assert!(r.app_limited());
         // Rate sample is not app limited (all acked).
         assert!(!r.congestion.delivery_rate.sample_is_app_limited());
         assert_eq!(r.congestion.delivery_rate.sample_rtt(), rtt);
+    }
+
+    fn helper_send_and_ack_packets(
+        recovery: &mut LegacyRecovery, range: Range<u64>, now: Instant,
+        rtt: Duration, mss: usize,
+    ) {
+        for pn in range.clone() {
+            let pkt = testing::helper_packet_sent(pn, now, mss);
+            recovery.on_packet_sent(
+                pkt,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        let packet_count = range.clone().count();
+
+        // Ack packets, which generates a new delivery_rate
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(range);
+        let ack_outcome = recovery.on_ack_received(
+            &acked,
+            25,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now + rtt,
+            "",
+        );
+        assert_eq!(ack_outcome, OnAckReceivedOutcome {
+            lost_packets: 0,
+            lost_bytes: 0,
+            acked_bytes: mss * packet_count,
+            spurious_losses: 0,
+        });
     }
 }
