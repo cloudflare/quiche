@@ -44,7 +44,7 @@ use crate::StreamIdAllocator;
 
 use std::cell::RefCell;
 
-use quiche;
+use crate::quiche;
 
 use self::stream::prompt_fin_stream;
 use self::wait::prompt_wait;

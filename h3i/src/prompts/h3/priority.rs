@@ -32,7 +32,7 @@ use super::stream::prompt_fin_stream;
 use crate::actions::h3::Action;
 use crate::prompts::h3;
 
-use quiche;
+use crate::quiche;
 
 const REQUEST: &str = "request";
 const PUSH: &str = "push";
