@@ -886,6 +886,7 @@ impl RecoveryOps for GRecovery {
         )
     }
 
+    // FIXME only used by gcongestion
     fn on_app_limited(&mut self) {
         self.pacer.on_app_limited(self.bytes_in_flight)
     }
@@ -941,10 +942,12 @@ impl RecoveryOps for GRecovery {
         self.pacer.is_app_limited(self.bytes_in_flight)
     }
 
+    // FIXME only used by congestion
     fn update_app_limited(&mut self, _v: bool) {
         // TODO
     }
 
+    // FIXME only used by congestion
     fn delivery_rate_update_app_limited(&mut self, _v: bool) {
         // TODO
     }

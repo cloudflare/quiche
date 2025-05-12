@@ -900,6 +900,7 @@ impl RecoveryOps for LegacyRecovery {
         self.detect_lost_packets(epoch, now, "")
     }
 
+    // FIXME only used by gcongestion
     fn on_app_limited(&mut self) {
         // Not implemented for legacy recovery, update_app_limited and
         // delivery_rate_update_app_limited used instead.
@@ -911,13 +912,15 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn update_app_limited(&mut self, v: bool) {
-        self.congestion.app_limited = v;
+        self.congestion.update_app_limited(v);
     }
 
+    // FIXME only used by congestion
     fn delivery_rate_update_app_limited(&mut self, v: bool) {
         self.congestion.delivery_rate.update_app_limited(v);
     }
 
+    // FIXME only used by congestion
     fn update_max_ack_delay(&mut self, max_ack_delay: Duration) {
         self.rtt_stats.max_ack_delay = max_ack_delay;
     }
