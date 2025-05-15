@@ -26,6 +26,8 @@
 
 use std::ops::Deref;
 use std::sync::atomic::AtomicI64;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -86,21 +88,26 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug)]
 pub struct QuicAuditStats {
-    /// A transport-level connection error code received from the client
+    /// A transport-level connection error code received from the client.
     recvd_conn_close_transport_error_code: AtomicI64,
-    /// A transport-level connection error code sent to the client
+    /// A transport-level connection error code sent to the client.
     sent_conn_close_transport_error_code: AtomicI64,
-    /// An application-level connection error code received from the client
+    /// An application-level connection error code received from the client.
     recvd_conn_close_application_error_code: AtomicI64,
-    /// An application-level connection error code sent to the client
+    /// An application-level connection error code sent to the client.
     sent_conn_close_application_error_code: AtomicI64,
-    /// Time taken for the QUIC handshake in microseconds
+    /// Time taken for the QUIC handshake in microseconds.
     transport_handshake_duration_us: AtomicI64,
     /// The start time of the handshake.
     transport_handshake_start: Arc<RwLock<Option<SystemTime>>>,
     /// The reason the QUIC connection was closed
     connection_close_reason: RwLock<Option<BoxError>>,
-    /// The server's chosen QUIC connection ID
+    /// Max recorded bandwidth.
+    max_bandwidth: AtomicU64,
+    /// Loss at max recorded bandwidth.
+    max_loss_pct: AtomicU8,
+    /// The server's chosen QUIC connection ID.
+    ///
     /// The QUIC connection ID is presently an array of 20 bytes (160 bits)
     pub quic_connection_id: Vec<u8>,
 }
@@ -116,6 +123,8 @@ impl QuicAuditStats {
             transport_handshake_duration_us: AtomicI64::new(-1),
             transport_handshake_start: Arc::new(RwLock::new(None)),
             connection_close_reason: RwLock::new(None),
+            max_bandwidth: AtomicU64::new(0),
+            max_loss_pct: AtomicU8::new(0),
             quic_connection_id,
         }
     }
@@ -208,6 +217,26 @@ impl QuicAuditStats {
     #[inline]
     pub fn set_connection_close_reason(&self, error: BoxError) {
         *self.connection_close_reason.write().unwrap() = Some(error);
+    }
+
+    #[inline]
+    pub fn set_max_bandwidth(&self, max_bandwidth: u64) {
+        self.max_bandwidth.store(max_bandwidth, Ordering::Release)
+    }
+
+    #[inline]
+    pub fn max_bandwidth(&self) -> u64 {
+        self.max_bandwidth.load(Ordering::Acquire)
+    }
+
+    #[inline]
+    pub fn set_max_loss_pct(&self, max_loss_pct: u8) {
+        self.max_loss_pct.store(max_loss_pct, Ordering::Release)
+    }
+
+    #[inline]
+    pub fn max_loss_pct(&self) -> u8 {
+        self.max_loss_pct.load(Ordering::Acquire)
     }
 }
 
