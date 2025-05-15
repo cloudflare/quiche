@@ -74,10 +74,15 @@ triomphe = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+clap = { version = "4.5.40", features = ["derive"] }
+env_logger = { workspace = true }
 h3i = { workspace = true }
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
 regex = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["time", "test-util"] }
+tokio = { workspace = true, features = ["time", "test-util", "rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
