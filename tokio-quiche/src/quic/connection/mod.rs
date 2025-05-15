@@ -143,6 +143,7 @@ impl AsSocketStats for QuicConnectionStats {
                 .as_ref()
                 .map(|p| p.delivery_rate)
                 .unwrap_or_default(),
+            startup_exit_reason: self.stats.startup_exit_reason.map(|s| s.into()),
         }
     }
 }

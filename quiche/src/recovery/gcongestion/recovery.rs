@@ -1,4 +1,5 @@
 use crate::packet;
+use crate::recovery::RecoveryStats;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -343,6 +344,8 @@ pub struct GRecovery {
 
     rtt_stats: RttStats,
 
+    recovery_stats: RecoveryStats,
+
     pub lost_count: usize,
 
     pub lost_spurious_count: usize,
@@ -389,6 +392,7 @@ impl GRecovery {
         Some(Self {
             epochs: Default::default(),
             rtt_stats: RttStats::new(recovery_config.max_ack_delay),
+            recovery_stats: Default::default(),
             loss_timer: Default::default(),
             pto_count: 0,
 
@@ -697,6 +701,7 @@ impl RecoveryOps for GRecovery {
             &self.lost_reuse,
             self.epochs[epoch].least_unacked(),
             &self.rtt_stats,
+            &mut self.recovery_stats,
         );
 
         self.pto_count = 0;
@@ -711,6 +716,7 @@ impl RecoveryOps for GRecovery {
             lost_bytes,
             acked_bytes,
             spurious_losses,
+            startup_exit_reason: self.recovery_stats.startup_exit_reason,
         }
     }
 
@@ -735,6 +741,7 @@ impl RecoveryOps for GRecovery {
                 &self.lost_reuse,
                 self.epochs[epoch].least_unacked(),
                 &self.rtt_stats,
+                &mut self.recovery_stats,
             );
 
             self.lost_count += lost_packets;

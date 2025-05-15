@@ -412,6 +412,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: mss * 5,
                 spurious_losses: 0,
+                ..Default::default()
             },
         );
 

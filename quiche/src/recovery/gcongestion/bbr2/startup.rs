@@ -31,10 +31,12 @@
 use std::time::Instant;
 
 use crate::recovery::gcongestion::bbr2::Params;
+use crate::recovery::RecoveryStats;
 
 use super::mode::Mode;
 use super::mode::ModeImpl;
 use super::network_model::BBRv2NetworkModel;
+use super::network_model::PersistentQueueOutcome;
 use super::Acked;
 use super::BBRv2CongestionEvent;
 use super::Limits;
@@ -55,6 +57,7 @@ impl ModeImpl for Startup {
         _acked_packets: &[Acked], _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize, params: &Params,
+        recovery_stats: &mut RecoveryStats, cwnd: usize,
     ) -> Mode {
         if self.model.full_bandwidth_reached() {
             return self.into_drain(event_time, Some(congestion_event), params);
@@ -64,26 +67,50 @@ impl ModeImpl for Startup {
             return Mode::Startup(self);
         }
 
+        // Exit startup due to bw plateau
+        let mut exit_due_to_bw_plateau = false;
+        // Exit startup due to excessive loss
+        let mut exit_due_to_excessive_loss = false;
+
         let has_bandwidth_growth =
             self.model.has_bandwidth_growth(congestion_event, params);
 
-        #[allow(clippy::absurd_extreme_comparisons)]
-        if params.max_startup_queue_rounds > 0 && !has_bandwidth_growth {
+        let check_bw_plateau =
+            params.max_startup_queue_rounds > 0 && !has_bandwidth_growth;
+        if check_bw_plateau {
             // 1.75 is less than the 2x CWND gain, but substantially more than
             // 1.25x, the minimum bandwidth increase expected during
             // STARTUP.
-            self.model.check_persistent_queue(1.75, params);
-        }
-        // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not exit
-        // upon excessive losses, if enough bandwidth growth is observed or if the
-        // sample was app limited.
-        if !congestion_event.last_packet_send_state.is_app_limited &&
-            !has_bandwidth_growth
-        {
-            self.check_excessive_losses(congestion_event, params);
+            let PersistentQueueOutcome {
+                full_bandwidth_reached,
+                rounds_with_queueing: _,
+            } = self.model.check_persistent_queue(1.75, params);
+
+            exit_due_to_bw_plateau = full_bandwidth_reached;
+        };
+
+        let check_for_excessive_loss = !congestion_event.last_packet_send_state.is_app_limited &&
+                !has_bandwidth_growth &&
+                // check for loss only if not already Bandwidth plateaued
+                !exit_due_to_bw_plateau;
+
+        if check_for_excessive_loss {
+            // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not
+            // exit upon excessive losses, if enough bandwidth growth
+            // is observed or if the sample was app limited.
+            exit_due_to_excessive_loss =
+                self.check_excessive_losses(congestion_event, params);
         }
 
-        if self.model.full_bandwidth_reached() {
+        if exit_due_to_bw_plateau {
+            recovery_stats.startup_exit_reason =
+                Some(crate::StartupExitReason::BandwidthPlateau { cwnd });
+        } else if exit_due_to_excessive_loss {
+            recovery_stats.startup_exit_reason =
+                Some(crate::StartupExitReason::Loss { cwnd });
+        }
+
+        if exit_due_to_bw_plateau || exit_due_to_excessive_loss {
             self.into_drain(event_time, Some(congestion_event), params)
         } else {
             Mode::Startup(self)
@@ -132,13 +159,9 @@ impl Startup {
 
     fn check_excessive_losses(
         &mut self, congestion_event: &mut BBRv2CongestionEvent, params: &Params,
-    ) {
-        if self.model.full_bandwidth_reached() {
-            return;
-        }
-
+    ) -> bool {
         // At the end of a round trip. Check if loss is too high in this round.
-        if self.model.is_inflight_too_high(
+        if self.model.is_loss_too_high(
             congestion_event,
             params.startup_full_loss_count,
             params,
@@ -152,6 +175,10 @@ impl Startup {
 
             self.model.set_inflight_hi(new_inflight_hi);
             self.model.set_full_bandwidth_reached();
+
+            true
+        } else {
+            false
         }
     }
 }
