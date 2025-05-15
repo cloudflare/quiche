@@ -195,7 +195,9 @@ where
             let mut socket = s.try_into()?;
             #[cfg(target_os = "linux")]
             socket.apply_max_capabilities(
-                params.settings.max_send_udp_payload_size,
+                // TODO interesting.
+                //params.settings.max_send_udp_payload_size,
+                1400
             );
             Ok(socket)
         })

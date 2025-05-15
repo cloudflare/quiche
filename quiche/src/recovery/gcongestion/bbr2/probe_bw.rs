@@ -77,7 +77,7 @@ impl ModeImpl for ProbeBW {
                 self.enter_probe_refill(self.cycle.probe_up_rounds, now),
             super::mode::CyclePhase::Up | super::mode::CyclePhase::Down => {},
         }
-        println!("Enter ProbeBW");
+        println!("Enter ProbeBW {self:#?}");
     }
 
     fn on_congestion_event(
@@ -181,7 +181,7 @@ impl ModeImpl for ProbeBW {
         &mut self, _now: Instant,
         _congestion_event: Option<&BBRv2CongestionEvent>,
     ) {
-        println!("Leave ProbeBW");
+        println!("Leave ProbeBW {self:#?}");
     }
 }
 
@@ -194,6 +194,8 @@ impl ProbeBW {
         &mut self, probed_too_high: bool, stopped_risky_probe: bool,
         now: Instant, params: &Params,
     ) {
+        println!("enter_probe_down {probed_too_high} {stopped_risky_probe}");
+
         self.on_switch_cycle_phase(CyclePhase::Down);
 
         let cycle = &mut self.cycle;
@@ -433,6 +435,7 @@ impl ProbeBW {
         }
 
         if is_risky || is_queuing {
+            println!("down {is_risky} {is_queuing}");
             self.enter_probe_down(
                 false,
                 is_risky,

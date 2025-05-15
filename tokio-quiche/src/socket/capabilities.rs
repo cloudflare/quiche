@@ -344,7 +344,7 @@ impl SocketCapabilities {
         S: AsFd,
     {
         let mut b = SocketCapabilitiesBuilder::new(socket);
-        let _ = b.gso(max_send_udp_payload_size);
+        let _ = b.gso(1400);
         let _ = b.check_udp_drop();
         let _ = b.txtime();
         #[cfg(feature = "perf-quic-listener-metrics")]

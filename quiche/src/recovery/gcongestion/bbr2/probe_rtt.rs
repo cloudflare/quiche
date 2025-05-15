@@ -134,13 +134,13 @@ impl ModeImpl for ProbeRTT {
         self.model.set_pacing_gain(1.0);
         self.model.set_cwnd_gain(1.0);
         self.exit_time = None;
-        println!("Enter ProbeRTT");
+        println!("Enter ProbeRTT {self:#?}");
     }
 
     fn leave(
         &mut self, _now: Instant,
         _congestion_event: Option<&BBRv2CongestionEvent>,
     ) {
-        println!("Leave ProbeRTT");
+        println!("Leave ProbeRTT {self:#?}");
     }
 }
