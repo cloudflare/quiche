@@ -1,0 +1,1 @@
+searchState.loadedDescShard("quiche_server", 0, "Generate a stateless retry token.\nSet SO_TXTIME socket option.\nValidates a stateless retry token.")

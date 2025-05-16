@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["HandshakeError","QuicCommand"],"fn":["connect","connect_with_config"],"mod":["raw"],"struct":["ConnectionShutdownBehaviour","HandshakeInfo","Incoming","QuicConnectionStats","SimpleConnectionIdGenerator"],"trait":["ConnectionHook"],"type":["QuicheConnection"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["HandshakeError","QuicHandshakeStage","QuicInvalidInitialPacketError","QuicWriteError"],"struct":["H3Error","QuicError"]};
