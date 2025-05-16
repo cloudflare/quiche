@@ -403,7 +403,6 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::RawInfo;
-use recovery::StartupExitReason;
 use stream::StreamPriorityKey;
 
 use std::cmp;
@@ -18898,6 +18897,7 @@ pub use crate::recovery::BbrBwLoReductionStrategy;
 pub use crate::recovery::BbrParams;
 pub use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::RecoveryOps;
+pub use crate::recovery::StartupExitReason;
 
 pub use crate::stream::StreamIter;
 

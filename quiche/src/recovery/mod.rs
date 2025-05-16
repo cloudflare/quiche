@@ -588,17 +588,6 @@ pub enum StartupExitReason {
     },
 }
 
-impl From<StartupExitReason> for datagram_socket::StartupExitReason {
-    fn from(value: StartupExitReason) -> Self {
-        match value {
-            StartupExitReason::Loss { cwnd } =>
-                datagram_socket::StartupExitReason::Loss { cwnd },
-            StartupExitReason::BandwidthPlateau { cwnd } =>
-                datagram_socket::StartupExitReason::BandwidthPlateau { cwnd },
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
