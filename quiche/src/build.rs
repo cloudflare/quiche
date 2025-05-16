@@ -218,6 +218,7 @@ fn target_dir_path() -> std::path::PathBuf {
 fn main() {
     if cfg!(feature = "boringssl-vendored") &&
         !cfg!(feature = "boringssl-boring-crate") &&
+        !cfg!(feature = "quictls") &&
         !cfg!(feature = "openssl")
     {
         let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
@@ -261,7 +262,7 @@ fn main() {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-undefined,dynamic_lookup");
     }
 
-    #[cfg(feature = "openssl")]
+    #[cfg(any(feature = "quictls", feature = "openssl"))]
     {
         let pkgcfg = pkg_config::Config::new();
 
