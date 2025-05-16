@@ -223,6 +223,12 @@ where
 
             self.bw_estimator.update(qconn, now);
 
+            self.audit_log_stats
+                .set_max_bandwidth(self.bw_estimator.max_bandwidth);
+            self.audit_log_stats.set_max_loss_pct(
+                (self.bw_estimator.max_loss_pct * 100_f32).round() as u8,
+            );
+
             let new_deadline = min_of_some(
                 qconn.timeout_instant(),
                 self.write_state.next_release_time,
