@@ -26,8 +26,6 @@
 
 use super::*;
 
-use rtt::INITIAL_RTT;
-
 use std::time::Instant;
 
 // BBR2 Functions at Initialization.
@@ -38,7 +36,7 @@ pub fn bbr2_init(r: &mut Congestion) {
     let now = Instant::now();
 
     let bbr = &mut r.bbr2_state;
-    bbr.min_rtt = INITIAL_RTT;
+    bbr.min_rtt = r.initial_rtt;
     bbr.min_rtt_stamp = now;
     bbr.probe_rtt_done_stamp = None;
     bbr.probe_rtt_round_done = false;
