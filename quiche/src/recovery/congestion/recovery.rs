@@ -677,6 +677,8 @@ impl RecoveryOps for LegacyRecovery {
             lost_bytes,
             acked_bytes,
             spurious_losses,
+            // TODO implement
+            startup_exit_reason: None,
         }
     }
 

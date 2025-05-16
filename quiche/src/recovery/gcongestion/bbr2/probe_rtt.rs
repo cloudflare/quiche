@@ -33,6 +33,7 @@ use std::time::Instant;
 use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Acked;
 use crate::recovery::gcongestion::Lost;
+use crate::recovery::RecoveryStats;
 
 use super::mode::Cycle;
 use super::mode::Mode;
@@ -85,6 +86,7 @@ impl ModeImpl for ProbeRTT {
         _acked_packets: &[Acked], _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize, params: &Params,
+        _recovery_stats: &mut RecoveryStats, _cwnd: usize,
     ) -> Mode {
         match self.exit_time {
             None => {

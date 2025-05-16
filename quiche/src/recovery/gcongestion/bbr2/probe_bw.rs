@@ -35,12 +35,14 @@ use std::time::Instant;
 use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Acked;
 use crate::recovery::gcongestion::Lost;
+use crate::recovery::RecoveryStats;
 
 use super::mode::Cycle;
 use super::mode::CyclePhase;
 use super::mode::Mode;
 use super::mode::ModeImpl;
 use super::network_model::BBRv2NetworkModel;
+use super::network_model::PersistentQueueOutcome;
 use super::network_model::DEFAULT_MSS;
 use super::BBRv2CongestionEvent;
 use super::BwLoMode;
@@ -83,6 +85,7 @@ impl ModeImpl for ProbeBW {
         mut self, prior_in_flight: usize, event_time: Instant, _: &[Acked],
         _: &[Lost], congestion_event: &mut BBRv2CongestionEvent,
         target_bytes_inflight: usize, params: &Params,
+        _recovery_stats: &mut RecoveryStats, _cwnd: usize,
     ) -> Mode {
         if congestion_event.end_of_round_trip {
             if self.cycle.start_time != event_time {
@@ -394,11 +397,14 @@ impl ProbeBW {
         } else if self.cycle.rounds_in_phase > 0 {
             if params.max_probe_up_queue_rounds > 0 {
                 if congestion_event.end_of_round_trip {
-                    self.model
+                    let PersistentQueueOutcome {
+                        full_bandwidth_reached: _,
+                        rounds_with_queueing,
+                    } = self
+                        .model
                         .check_persistent_queue(params.full_bw_threshold, params);
-                    if self.model.rounds_with_queueing() >=
-                        params.max_probe_up_queue_rounds
-                    {
+
+                    if rounds_with_queueing >= params.max_probe_up_queue_rounds {
                         is_queuing = true;
                     }
                 }
@@ -469,7 +475,7 @@ impl ProbeBW {
         }
 
         if self.cycle.is_sample_from_probing {
-            if self.model.is_inflight_too_high(
+            if self.model.is_loss_too_high(
                 congestion_event,
                 params.probe_bw_full_loss_count,
                 params,

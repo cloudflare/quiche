@@ -59,6 +59,23 @@ pub struct SocketStats {
     pub bytes_retrans: u64,
     pub bytes_unsent: u64,
     pub delivery_rate: u64,
+    pub startup_exit_reason: Option<StartupExitReason>,
+}
+
+/// The reason a CCA exited the startup phase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StartupExitReason {
+    /// Loss
+    Loss {
+        /// The cwnd at startup exit
+        cwnd: usize,
+    },
+
+    /// Bandwidth (BBR)
+    BandwidthPlateau {
+        /// The cwnd at startup exit
+        cwnd: usize,
+    },
 }
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;

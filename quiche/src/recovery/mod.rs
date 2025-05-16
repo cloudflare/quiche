@@ -137,6 +137,7 @@ pub struct OnAckReceivedOutcome {
     pub lost_bytes: usize,
     pub acked_bytes: usize,
     pub spurious_losses: usize,
+    pub startup_exit_reason: Option<StartupExitReason>,
 }
 
 #[enum_dispatch::enum_dispatch]
@@ -566,6 +567,27 @@ impl ReleaseDecision {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct RecoveryStats {
+    pub startup_exit_reason: Option<StartupExitReason>,
+}
+
+/// The reason a CCA exited the startup phase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StartupExitReason {
+    /// Exit startup due to excessive loss
+    Loss {
+        /// The cwnd at startup exit
+        cwnd: usize,
+    },
+
+    /// Exit startup due to bandwidth plateau.
+    BandwidthPlateau {
+        /// The cwnd at startup exit
+        cwnd: usize,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -778,6 +800,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 2 * 1000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -874,6 +897,7 @@ mod tests {
                 lost_bytes: 2000,
                 acked_bytes: 2 * 1000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1046,6 +1070,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 3 * 1000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1228,6 +1253,7 @@ mod tests {
                 lost_bytes: 1000,
                 acked_bytes: 1000 * 2,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1252,6 +1278,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 1000,
                 spurious_losses: 1,
+                ..Default::default()
             }
         );
 
@@ -1354,6 +1381,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 12000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1648,6 +1676,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 2 * 1000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1735,6 +1764,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: total_bytes_sent,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
         assert_eq!(r.delivery_rate().to_bytes_per_second(), 1000);

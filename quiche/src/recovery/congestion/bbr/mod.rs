@@ -475,6 +475,7 @@ mod tests {
                 lost_bytes: 2 * mss,
                 acked_bytes: mss,
                 spurious_losses: 0,
+                ..Default::default()
             },
         );
 
@@ -547,6 +548,7 @@ mod tests {
                     lost_bytes: 0,
                     acked_bytes: mss,
                     spurious_losses: 0,
+                    ..Default::default()
                 },
             );
         }
@@ -604,6 +606,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: mss,
                 spurious_losses: 0,
+                ..Default::default()
             },
         );
 
@@ -673,6 +676,7 @@ mod tests {
                     lost_bytes: 0,
                     acked_bytes: mss,
                     spurious_losses: 0,
+                    ..Default::default()
                 },
             );
         }
@@ -749,6 +753,7 @@ mod tests {
                     lost_bytes: 0,
                     acked_bytes: mss,
                     spurious_losses: 0,
+                    ..Default::default()
                 },
             );
         }
@@ -810,6 +815,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: mss,
                 spurious_losses: 0,
+                ..Default::default()
             },
         );
 
