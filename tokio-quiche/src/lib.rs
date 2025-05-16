@@ -194,9 +194,7 @@ where
             #[cfg_attr(not(target_os = "linux"), expect(unused_mut))]
             let mut socket = s.try_into()?;
             #[cfg(target_os = "linux")]
-            socket.apply_max_capabilities(
-                params.settings.max_send_udp_payload_size,
-            );
+            socket.apply_max_capabilities();
             Ok(socket)
         })
         .collect::<io::Result<_>>()?;
