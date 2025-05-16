@@ -56,9 +56,6 @@ pub struct Rate {
 
     // Sample of rate estimation.
     rate_sample: RateSample,
-
-    // Previous sample delivery rate.
-    prev_sample_delivery_rate: Bandwidth,
 }
 
 impl Default for Rate {
@@ -79,8 +76,6 @@ impl Default for Rate {
             largest_acked: 0,
 
             rate_sample: RateSample::new(),
-
-            prev_sample_delivery_rate: Bandwidth::zero(),
         }
     }
 }
@@ -164,11 +159,14 @@ impl Rate {
                     Bandwidth::from_bytes_per_second(rate_sample_bytes_per_second)
                 };
 
-                // Generate a new sample delivery rate if either:
+                // Match the [linux] implementation and only generate a new
+                // sample delivery rate if either:
                 // - the sample was not app_limited
                 // - the new rate is higher than the previous value
+                //
+                // [linux] https://github.com/torvalds/linux/commit/eb8329e0a04db0061f714f033b4454326ba147f4
                 if !self.rate_sample.is_app_limited ||
-                    rate_sample_bandwidth > self.prev_sample_delivery_rate
+                    rate_sample_bandwidth > self.rate_sample.bandwidth
                 {
                     self.update_delivery_rate(rate_sample_bandwidth);
                 }
@@ -178,7 +176,6 @@ impl Rate {
 
     fn update_delivery_rate(&mut self, bandwidth: Bandwidth) {
         self.rate_sample.bandwidth = bandwidth;
-        self.prev_sample_delivery_rate = bandwidth;
     }
 
     pub fn update_app_limited(&mut self, v: bool) {
