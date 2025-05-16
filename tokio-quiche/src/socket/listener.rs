@@ -64,11 +64,9 @@ impl QuicListener {
     /// Tries to enable all sockopts supported by the crate for this socket.
     /// See `SocketCapabilities::apply_all_and_get_compatibility` for details.
     #[cfg(target_os = "linux")]
-    pub fn apply_max_capabilities(&mut self, max_send_udp_payload_size: usize) {
-        let capabilities = SocketCapabilities::apply_all_and_get_compatibility(
-            &self.socket,
-            max_send_udp_payload_size,
-        );
+    pub fn apply_max_capabilities(&mut self) {
+        let capabilities =
+            SocketCapabilities::apply_all_and_get_compatibility(&self.socket);
         self.capabilities = capabilities;
     }
 }

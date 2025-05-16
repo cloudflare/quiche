@@ -164,7 +164,7 @@ where
             {
                 let from = Some(incoming.local_addr).filter(|_| with_pktinfo);
                 let _ = crate::quic::io::gso::send_to(
-                    udp, to, from, send_buf, 1, 1, None,
+                    udp, to, from, send_buf, 1, None,
                 )
                 .await;
             }

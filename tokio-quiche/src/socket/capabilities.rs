@@ -140,12 +140,14 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// packets as a single entity in the kernel. Segmentation into
     /// individual packets happens in the NIC, if it supports GSO. The
     /// parameter specifies the packet size.
-    pub fn gso(&mut self, max_send_udp_payload_size: usize) -> io::Result<()> {
-        setsockopt(
-            self.socket.as_raw_fd(),
-            UdpGsoSegment,
-            &(max_send_udp_payload_size as i32),
-        )?;
+    pub fn gso(&mut self) -> io::Result<()> {
+        // We initialize GSO on the socket with the maximum possible segment size
+        // to prevent accidentally setting it too small and running into
+        // issues when increasing max_send_udp_payload_size later on.
+        //
+        // https://elixir.bootlin.com/linux/v6.14.6/source/net/ipv4/udp.c#L2998
+        // https://elixir.bootlin.com/linux/v6.14.6/source/include/vdso/limits.h#L5
+        setsockopt(self.socket.as_raw_fd(), UdpGsoSegment, &(u16::MAX as i32))?;
         self.cap.has_gso = true;
         Ok(())
     }
@@ -337,14 +339,12 @@ impl SocketCapabilities {
     /// Tries to enable all supported sockopts and returns indicators
     /// of which settings were successfully applied.
     #[cfg(target_os = "linux")]
-    pub fn apply_all_and_get_compatibility<S>(
-        socket: &S, max_send_udp_payload_size: usize,
-    ) -> Self
+    pub fn apply_all_and_get_compatibility<S>(socket: &S) -> Self
     where
         S: AsFd,
     {
         let mut b = SocketCapabilitiesBuilder::new(socket);
-        let _ = b.gso(max_send_udp_payload_size);
+        let _ = b.gso();
         let _ = b.check_udp_drop();
         let _ = b.txtime();
         #[cfg(feature = "perf-quic-listener-metrics")]
