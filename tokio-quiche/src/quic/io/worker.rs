@@ -521,7 +521,6 @@ where
                     self.write_state.send_from.filter(|_| self.cfg.with_pktinfo),
                     current_send_buf,
                     self.write_state.segment_size,
-                    self.write_state.num_pkts,
                     self.write_state.tx_time,
                 )
                 .await
