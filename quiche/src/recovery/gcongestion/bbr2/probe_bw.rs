@@ -41,6 +41,7 @@ use super::mode::CyclePhase;
 use super::mode::Mode;
 use super::mode::ModeImpl;
 use super::network_model::BBRv2NetworkModel;
+use super::network_model::PersistentQueueOutcome;
 use super::network_model::DEFAULT_MSS;
 use super::BBRv2CongestionEvent;
 use super::BwLoMode;
@@ -394,11 +395,14 @@ impl ProbeBW {
         } else if self.cycle.rounds_in_phase > 0 {
             if params.max_probe_up_queue_rounds > 0 {
                 if congestion_event.end_of_round_trip {
-                    self.model
+                    let PersistentQueueOutcome {
+                        full_bandwidth_reached: _,
+                        rounds_with_queueing,
+                    } = self
+                        .model
                         .check_persistent_queue(params.full_bw_threshold, params);
-                    if self.model.rounds_with_queueing() >=
-                        params.max_probe_up_queue_rounds
-                    {
+
+                    if rounds_with_queueing >= params.max_probe_up_queue_rounds {
                         is_queuing = true;
                     }
                 }

@@ -630,21 +630,30 @@ impl BBRv2NetworkModel {
 
     pub(super) fn check_persistent_queue(
         &mut self, target_gain: f32, params: &Params,
-    ) {
+    ) -> PersistentQueueOutcome {
+        let mut outcome = PersistentQueueOutcome {
+            full_bandwidth_reached: false,
+            rounds_with_queueing: 0,
+        };
+
         let target = self
             .bdp(self.max_bandwidth(), target_gain)
             .max(self.bdp0() + self.queueing_threshold_extra_bytes());
 
         if self.min_bytes_in_flight_in_round < target {
             self.rounds_with_queueing = 0;
-            return;
+        } else {
+            self.rounds_with_queueing += 1;
+
+            if self.rounds_with_queueing >= params.max_startup_queue_rounds {
+                self.full_bandwidth_reached = true;
+            }
         }
 
-        self.rounds_with_queueing += 1;
-        #[allow(clippy::absurd_extreme_comparisons)]
-        if self.rounds_with_queueing >= params.max_startup_queue_rounds {
-            self.full_bandwidth_reached = true;
-        }
+        outcome.full_bandwidth_reached = self.full_bandwidth_reached;
+        outcome.rounds_with_queueing = self.rounds_with_queueing;
+
+        outcome
     }
 
     pub(super) fn max_bytes_delivered_in_round(&self) -> usize {
@@ -739,8 +748,10 @@ impl BBRv2NetworkModel {
     pub(super) fn loss_events_in_round(&self) -> usize {
         self.loss_events_in_round
     }
+}
 
-    pub(super) fn rounds_with_queueing(&self) -> usize {
-        self.rounds_with_queueing
-    }
+#[must_use]
+pub(super) struct PersistentQueueOutcome {
+    pub(super) full_bandwidth_reached: bool,
+    pub(super) rounds_with_queueing: usize,
 }
