@@ -34,6 +34,7 @@ use smallvec::SmallVec;
 
 use slab::Slab;
 
+use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::Error;
 use crate::Result;
 
@@ -430,12 +431,10 @@ impl Path {
     pub fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: time::Instant,
         is_server: bool, trace_id: &str,
-    ) -> (usize, usize) {
-        let (lost_packets, lost_bytes) = self.recovery.on_loss_detection_timeout(
-            handshake_status,
-            now,
-            trace_id,
-        );
+    ) -> OnLossDetectionTimeoutOutcome {
+        let on_loss_detection_timeout_outcome = self
+            .recovery
+            .on_loss_detection_timeout(handshake_status, now, trace_id);
 
         let mut lost_probe_time = None;
         self.in_flight_challenges.retain(|(_, _, sent_time)| {
@@ -479,7 +478,7 @@ impl Path {
             }
         }
 
-        (lost_packets, lost_bytes)
+        on_loss_detection_timeout_outcome
     }
 
     pub fn reinit_recovery(

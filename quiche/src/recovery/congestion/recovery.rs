@@ -38,6 +38,7 @@ use crate::packet::Epoch;
 use crate::ranges::RangeSet;
 use crate::recovery::Bandwidth;
 use crate::recovery::HandshakeStatus;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
 
 #[cfg(feature = "qlog")]
@@ -677,23 +678,30 @@ impl RecoveryOps for LegacyRecovery {
             lost_bytes,
             acked_bytes,
             spurious_losses,
+            // TODO implement
+            startup_exit_reason: None,
         }
     }
 
     fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
-    ) -> (usize, usize) {
+    ) -> OnLossDetectionTimeoutOutcome {
         let (earliest_loss_time, epoch) = self.loss_time_and_space();
 
         if earliest_loss_time.is_some() {
             // Time threshold loss detection.
-            let loss = self.detect_lost_packets(epoch, now, trace_id);
+            let (lost_packets, lost_bytes) =
+                self.detect_lost_packets(epoch, now, trace_id);
 
             self.set_loss_detection_timer(handshake_status, now);
 
             trace!("{} {:?}", trace_id, self);
-            return loss;
+            return OnLossDetectionTimeoutOutcome {
+                lost_packets,
+                lost_bytes,
+                startup_exit_reason: None,
+            };
         }
 
         let epoch = if self.bytes_in_flight > 0 {
@@ -744,7 +752,11 @@ impl RecoveryOps for LegacyRecovery {
 
         trace!("{} {:?}", trace_id, self);
 
-        (0, 0)
+        OnLossDetectionTimeoutOutcome {
+            lost_packets: 0,
+            lost_bytes: 0,
+            startup_exit_reason: None,
+        }
     }
 
     fn on_pkt_num_space_discarded(

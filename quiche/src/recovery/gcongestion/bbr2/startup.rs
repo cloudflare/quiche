@@ -31,6 +31,9 @@
 use std::time::Instant;
 
 use crate::recovery::gcongestion::bbr2::Params;
+use crate::recovery::RecoveryStats;
+use crate::recovery::StartupExitReason;
+use crate::StartupExit;
 
 use super::mode::Mode;
 use super::mode::ModeImpl;
@@ -56,6 +59,7 @@ impl ModeImpl for Startup {
         _acked_packets: &[Acked], _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize, params: &Params,
+        recovery_stats: &mut RecoveryStats, cwnd: usize,
     ) -> Mode {
         if self.model.full_bandwidth_reached() {
             return self.into_drain(event_time, Some(congestion_event), params);
@@ -67,8 +71,10 @@ impl ModeImpl for Startup {
 
         let has_bandwidth_growth =
             self.model.has_bandwidth_growth(congestion_event, params);
-        // TODO: Check full_bandwidth_reached to determine if exit due to
-        // bandwidth plateau
+        if self.model.full_bandwidth_reached() {
+            recovery_stats.startup_exit_reason =
+                Some(StartupExit::new(cwnd, StartupExitReason::BandwidthPlateau));
+        }
 
         if params.max_startup_queue_rounds > 0 && !has_bandwidth_growth {
             // 1.75 is less than the 2x CWND gain, but substantially more than
@@ -78,9 +84,12 @@ impl ModeImpl for Startup {
                 full_bandwidth_reached,
                 rounds_with_queueing: _,
             } = self.model.check_persistent_queue(1.75, params);
-
-            // TODO: Exit due to persistent queue
-            let _exit_due_to_persistent_queue = full_bandwidth_reached;
+            if full_bandwidth_reached {
+                recovery_stats.startup_exit_reason = Some(StartupExit::new(
+                    cwnd,
+                    StartupExitReason::PersistentQueue,
+                ));
+            }
         };
 
         // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not exit
@@ -91,10 +100,12 @@ impl ModeImpl for Startup {
                 // check for excessive loss only if not exiting for other reasons
                 !self.model.full_bandwidth_reached();
 
+        #[allow(clippy::collapsible_if)]
         if check_for_excessive_loss {
-            // TODO: Exit due to excessive loss
-            let _exit_due_to_excessive_loss =
-                self.check_excessive_losses(congestion_event, params);
+            if self.check_excessive_losses(congestion_event, params) {
+                recovery_stats.startup_exit_reason =
+                    Some(StartupExit::new(cwnd, StartupExitReason::Loss));
+            }
         }
 
         if self.model.full_bandwidth_reached() {

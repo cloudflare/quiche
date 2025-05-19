@@ -403,6 +403,7 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::RawInfo;
+use recovery::OnLossDetectionTimeoutOutcome;
 use stream::StreamPriorityKey;
 
 use std::cmp;
@@ -1647,6 +1648,9 @@ where
 
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
+
+    /// The reason a CCA exited the startup phase.
+    startup_exit_reason: Option<StartupExit>,
 }
 
 /// Creates a new server-side connection.
@@ -2137,6 +2141,7 @@ impl<F: BufFactory> Connection<F> {
             stopped_stream_remote_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
+            startup_exit_reason: None,
         };
 
         if let Some(odcid) = odcid {
@@ -6323,12 +6328,20 @@ impl<F: BufFactory> Connection<F> {
                 if timer <= now {
                     trace!("{} loss detection timeout expired", self.trace_id);
 
-                    let (lost_packets, lost_bytes) = p.on_loss_detection_timeout(
+                    let OnLossDetectionTimeoutOutcome {
+                        lost_packets,
+                        lost_bytes,
+                        startup_exit_reason,
+                    } = p.on_loss_detection_timeout(
                         handshake_status,
                         now,
                         self.is_server,
                         &self.trace_id,
                     );
+                    // Record the first startup exit reason.
+                    if self.startup_exit_reason.is_none() {
+                        self.startup_exit_reason = startup_exit_reason;
+                    }
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
@@ -7013,6 +7026,7 @@ impl<F: BufFactory> Connection<F> {
             reset_stream_count_remote: self.reset_stream_remote_count,
             stopped_stream_count_remote: self.stopped_stream_remote_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
+            startup_exit_reason: self.startup_exit_reason,
         }
     }
 
@@ -7418,6 +7432,7 @@ impl<F: BufFactory> Connection<F> {
                         lost_bytes,
                         acked_bytes,
                         spurious_losses,
+                        startup_exit_reason,
                     } = p.recovery.on_ack_received(
                         &ranges,
                         ack_delay,
@@ -7426,6 +7441,11 @@ impl<F: BufFactory> Connection<F> {
                         now,
                         &self.trace_id,
                     );
+
+                    // Record the first startup exit reason.
+                    if self.startup_exit_reason.is_none() {
+                        self.startup_exit_reason = startup_exit_reason;
+                    }
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
@@ -8453,6 +8473,9 @@ pub struct Stats {
 
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
+
+    /// The reason a CCA exited the startup phase.
+    pub startup_exit_reason: Option<StartupExit>,
 }
 
 impl std::fmt::Debug for Stats {
@@ -18883,6 +18906,8 @@ pub use crate::recovery::BbrBwLoReductionStrategy;
 pub use crate::recovery::BbrParams;
 pub use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::RecoveryOps;
+pub use crate::recovery::StartupExit;
+pub use crate::recovery::StartupExitReason;
 
 pub use crate::stream::StreamIter;
 

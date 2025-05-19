@@ -514,6 +514,7 @@ mod tests {
             lost_bytes: 0,
             acked_bytes: mss * packet_count,
             spurious_losses: 0,
+            ..Default::default()
         });
     }
 }

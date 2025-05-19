@@ -137,6 +137,14 @@ pub struct OnAckReceivedOutcome {
     pub lost_bytes: usize,
     pub acked_bytes: usize,
     pub spurious_losses: usize,
+    pub startup_exit_reason: Option<StartupExit>,
+}
+
+#[derive(Debug, Default)]
+pub struct OnLossDetectionTimeoutOutcome {
+    pub lost_packets: usize,
+    pub lost_bytes: usize,
+    pub startup_exit_reason: Option<StartupExit>,
 }
 
 #[enum_dispatch::enum_dispatch]
@@ -175,7 +183,7 @@ pub trait RecoveryOps {
     fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
-    ) -> (usize, usize);
+    ) -> OnLossDetectionTimeoutOutcome;
     fn on_pkt_num_space_discarded(
         &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
         now: Instant,
@@ -566,6 +574,40 @@ impl ReleaseDecision {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct RecoveryStats {
+    pub startup_exit_reason: Option<StartupExit>,
+}
+
+/// Information about the CCA state when it exited the startup phase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StartupExit {
+    /// The congestion_window recorded at Startup exit.
+    pub cwnd: usize,
+
+    /// The reason a CCA exited the startup phase.
+    pub reason: StartupExitReason,
+}
+
+impl StartupExit {
+    fn new(cwnd: usize, reason: StartupExitReason) -> Self {
+        Self { cwnd, reason }
+    }
+}
+
+/// The reason a CCA exited the startup phase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StartupExitReason {
+    /// Exit startup due to excessive loss
+    Loss,
+
+    /// Exit startup due to bandwidth plateau.
+    BandwidthPlateau,
+
+    /// Exit startup due to persistent queue.
+    PersistentQueue,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -778,6 +820,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 2 * 1000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -874,6 +917,7 @@ mod tests {
                 lost_bytes: 2000,
                 acked_bytes: 2 * 1000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1046,6 +1090,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 3 * 1000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1228,6 +1273,7 @@ mod tests {
                 lost_bytes: 1000,
                 acked_bytes: 1000 * 2,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1252,6 +1298,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 1000,
                 spurious_losses: 1,
+                ..Default::default()
             }
         );
 
@@ -1354,6 +1401,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 12000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1648,6 +1696,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: 2 * 1000,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
 
@@ -1735,6 +1784,7 @@ mod tests {
                 lost_bytes: 0,
                 acked_bytes: total_bytes_sent,
                 spurious_losses: 0,
+                ..Default::default()
             }
         );
         assert_eq!(r.delivery_rate().to_bytes_per_second(), 1000);

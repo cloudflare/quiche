@@ -1,4 +1,6 @@
 use crate::packet;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
+use crate::recovery::RecoveryStats;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -343,6 +345,8 @@ pub struct GRecovery {
 
     rtt_stats: RttStats,
 
+    recovery_stats: RecoveryStats,
+
     pub lost_count: usize,
 
     pub lost_spurious_count: usize,
@@ -389,6 +393,7 @@ impl GRecovery {
         Some(Self {
             epochs: Default::default(),
             rtt_stats: RttStats::new(recovery_config.max_ack_delay),
+            recovery_stats: Default::default(),
             loss_timer: Default::default(),
             pto_count: 0,
 
@@ -697,6 +702,7 @@ impl RecoveryOps for GRecovery {
             &self.lost_reuse,
             self.epochs[epoch].least_unacked(),
             &self.rtt_stats,
+            &mut self.recovery_stats,
         );
 
         self.pto_count = 0;
@@ -711,13 +717,14 @@ impl RecoveryOps for GRecovery {
             lost_bytes,
             acked_bytes,
             spurious_losses,
+            startup_exit_reason: self.recovery_stats.startup_exit_reason,
         }
     }
 
     fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
-    ) -> (usize, usize) {
+    ) -> OnLossDetectionTimeoutOutcome {
         let (earliest_loss_time, epoch) = self.loss_time_and_space();
 
         if earliest_loss_time.is_some() {
@@ -735,6 +742,7 @@ impl RecoveryOps for GRecovery {
                 &self.lost_reuse,
                 self.epochs[epoch].least_unacked(),
                 &self.rtt_stats,
+                &mut self.recovery_stats,
             );
 
             self.lost_count += lost_packets;
@@ -742,7 +750,11 @@ impl RecoveryOps for GRecovery {
             self.set_loss_detection_timer(handshake_status, now);
 
             trace!("{} {:?}", trace_id, self);
-            return (lost_packets, lost_bytes);
+            return OnLossDetectionTimeoutOutcome {
+                lost_packets,
+                lost_bytes,
+                startup_exit_reason: self.recovery_stats.startup_exit_reason,
+            };
         }
 
         let epoch = if self.bytes_in_flight > 0 {
@@ -805,7 +817,11 @@ impl RecoveryOps for GRecovery {
         self.set_loss_detection_timer(handshake_status, now);
 
         trace!("{} {:?}", trace_id, self);
-        (0, 0)
+        OnLossDetectionTimeoutOutcome {
+            lost_packets: 0,
+            lost_bytes: 0,
+            startup_exit_reason: self.recovery_stats.startup_exit_reason,
+        }
     }
 
     fn on_pkt_num_space_discarded(
