@@ -114,8 +114,7 @@ impl PktInfo {
 #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 pub async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, from: Option<SocketAddr>,
-    send_buf: &[u8], segment_size: usize, num_pkts: usize,
-    tx_time: Option<Instant>,
+    send_buf: &[u8], segment_size: usize, tx_time: Option<Instant>,
 ) -> io::Result<usize> {
     // An instant with the value of zero, since [`Instant`] is backed by a version
     // of timespec this allows to extract raw values from an [`Instant`]
@@ -133,10 +132,8 @@ pub async fn send_to(
 
         let mut cmsgs: SmallVec<[ControlMessage; 3]> = SmallVec::new();
 
-        if num_pkts > 1 {
-            // Create cmsg for UDP_SEGMENT.
-            cmsgs.push(ControlMessage::UdpGsoSegments(&segment_size_u16));
-        }
+        // Create cmsg for UDP_SEGMENT.
+        cmsgs.push(ControlMessage::UdpGsoSegments(&segment_size_u16));
 
         if tx_time.is_some() {
             // Create cmsg for TXTIME.
@@ -169,8 +166,7 @@ pub async fn send_to(
 #[cfg(any(not(target_os = "linux"), feature = "fuzzing"))]
 pub(crate) async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, _from: Option<SocketAddr>,
-    send_buf: &[u8], _segment_size: usize, _num_pkts: usize,
-    _tx_time: Option<Instant>,
+    send_buf: &[u8], _segment_size: usize, _tx_time: Option<Instant>,
 ) -> io::Result<usize> {
     socket.send_to(send_buf, to).await
 }

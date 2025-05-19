@@ -113,15 +113,13 @@ where
     /// FD. See `SocketCapabilities::apply_all_and_get_compatibility` for
     /// details.
     #[cfg(target_os = "linux")]
-    pub fn apply_max_capabilities(&mut self, max_send_udp_payload_size: usize) {
+    pub fn apply_max_capabilities(&mut self) {
         let Some(socket) = self.as_udp_socket() else {
             return;
         };
 
-        let capabilities = SocketCapabilities::apply_all_and_get_compatibility(
-            socket,
-            max_send_udp_payload_size,
-        );
+        let capabilities =
+            SocketCapabilities::apply_all_and_get_compatibility(socket);
         self.capabilities = capabilities;
     }
 }
