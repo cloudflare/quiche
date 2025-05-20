@@ -403,6 +403,7 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::RawInfo;
+use recovery::OnLossDetectionTimeoutOutcome;
 use stream::StreamPriorityKey;
 
 use std::cmp;
@@ -6323,7 +6324,10 @@ impl<F: BufFactory> Connection<F> {
                 if timer <= now {
                     trace!("{} loss detection timeout expired", self.trace_id);
 
-                    let (lost_packets, lost_bytes) = p.on_loss_detection_timeout(
+                    let OnLossDetectionTimeoutOutcome {
+                        lost_packets,
+                        lost_bytes,
+                    } = p.on_loss_detection_timeout(
                         handshake_status,
                         now,
                         self.is_server,

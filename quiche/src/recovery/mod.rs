@@ -139,6 +139,12 @@ pub struct OnAckReceivedOutcome {
     pub spurious_losses: usize,
 }
 
+#[derive(Debug, Default)]
+pub struct OnLossDetectionTimeoutOutcome {
+    pub lost_packets: usize,
+    pub lost_bytes: usize,
+}
+
 #[enum_dispatch::enum_dispatch]
 /// Api for the Recovery implementation
 pub trait RecoveryOps {
@@ -175,7 +181,7 @@ pub trait RecoveryOps {
     fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
-    ) -> (usize, usize);
+    ) -> OnLossDetectionTimeoutOutcome;
     fn on_pkt_num_space_discarded(
         &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
         now: Instant,

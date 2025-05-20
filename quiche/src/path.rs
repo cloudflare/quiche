@@ -41,6 +41,7 @@ use crate::StartupExit;
 use crate::pmtud;
 use crate::recovery;
 use crate::recovery::HandshakeStatus;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
 
 /// The different states of the path validation.
@@ -431,8 +432,8 @@ impl Path {
     pub fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: time::Instant,
         is_server: bool, trace_id: &str,
-    ) -> (usize, usize) {
-        let (lost_packets, lost_bytes) = self.recovery.on_loss_detection_timeout(
+    ) -> OnLossDetectionTimeoutOutcome {
+        let outcome = self.recovery.on_loss_detection_timeout(
             handshake_status,
             now,
             trace_id,
@@ -480,7 +481,7 @@ impl Path {
             }
         }
 
-        (lost_packets, lost_bytes)
+        outcome
     }
 
     pub fn reinit_recovery(
