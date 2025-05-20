@@ -437,6 +437,9 @@ pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
 /// The minimum length of Initial packets sent by a client.
 pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
 
+/// The default initial RTT.
+const DEFAULT_INITIAL_RTT: Duration = Duration::from_millis(333);
+
 #[cfg(not(feature = "fuzzing"))]
 const PAYLOAD_MIN_LEN: usize = 4;
 
@@ -1101,6 +1104,13 @@ impl Config {
     /// The default value is `1`.
     pub fn set_send_capacity_factor(&mut self, v: f64) {
         self.tx_cap_factor = v;
+    }
+
+    /// Sets the connection's initial RTT.
+    ///
+    /// The default value is `333`.
+    pub fn set_initial_rtt(&mut self, v: Duration) {
+        self.local_transport_params.initial_rtt = v;
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
@@ -8583,6 +8593,8 @@ impl<'a> Iterator for UnknownTransportParameterIterator<'a> {
 pub struct TransportParams {
     /// Value of Destination CID field from first Initial packet sent by client
     pub original_destination_connection_id: Option<ConnectionId<'static>>,
+    /// The initial RTT
+    pub initial_rtt: Duration,
     /// The maximum idle timeout.
     pub max_idle_timeout: u64,
     /// Token used for verifying stateless resets
@@ -8626,6 +8638,7 @@ impl Default for TransportParams {
     fn default() -> TransportParams {
         TransportParams {
             original_destination_connection_id: None,
+            initial_rtt: DEFAULT_INITIAL_RTT,
             max_idle_timeout: 0,
             stateless_reset_token: None,
             max_udp_payload_size: 65527,
@@ -9593,6 +9606,7 @@ mod tests {
         // Server encodes, client decodes.
         let tp = TransportParams {
             original_destination_connection_id: None,
+            initial_rtt: DEFAULT_INITIAL_RTT,
             max_idle_timeout: 30,
             stateless_reset_token: Some(u128::from_be_bytes([0xba; 16])),
             max_udp_payload_size: 23_421,
@@ -9624,6 +9638,7 @@ mod tests {
         // Client encodes, server decodes.
         let tp = TransportParams {
             original_destination_connection_id: None,
+            initial_rtt: DEFAULT_INITIAL_RTT,
             max_idle_timeout: 30,
             stateless_reset_token: None,
             max_udp_payload_size: 23_421,

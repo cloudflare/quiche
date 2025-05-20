@@ -24,8 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use self::rtt::INITIAL_RTT;
-
 use super::*;
 
 // BBR2 Transmit Packet Pacing Functions
@@ -35,7 +33,7 @@ use super::*;
 pub fn bbr2_init_pacing_rate(r: &mut Congestion) {
     let bbr = &mut r.bbr2_state;
 
-    let srtt = INITIAL_RTT.as_secs_f64();
+    let srtt = r.initial_rtt.as_secs_f64();
 
     // At init, cwnd is initcwnd.
     let nominal_bandwidth = r.congestion_window as f64 / srtt;
