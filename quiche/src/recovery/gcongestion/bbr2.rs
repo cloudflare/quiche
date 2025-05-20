@@ -41,6 +41,7 @@ use std::time::Instant;
 use network_model::BBRv2NetworkModel;
 
 use crate::recovery::gcongestion::Bandwidth;
+use crate::recovery::RecoveryStats;
 
 use self::mode::Mode;
 use self::mode::ModeImpl;
@@ -68,6 +69,8 @@ struct Params {
     /// trips.
     full_bw_threshold: f32,
 
+    /// The number of rounds to stay in  STARTUP before exiting due to
+    /// bandwidth plateau.
     startup_full_bw_rounds: usize,
 
     /// Number of rounds to stay in STARTUP when there's a sufficient queue that
@@ -537,6 +540,7 @@ impl CongestionControl for BBRv2 {
         &mut self, _rtt_updated: bool, prior_in_flight: usize,
         _bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
         lost_packets: &[Lost], least_unacked: u64, _rtt_stats: &RttStats,
+        recovery_stats: &mut RecoveryStats,
     ) {
         let mut congestion_event = BBRv2CongestionEvent::new(
             event_time,
@@ -563,6 +567,8 @@ impl CongestionControl for BBRv2 {
                 &mut congestion_event,
                 self.target_bytes_inflight(),
                 &self.params,
+                recovery_stats,
+                self.get_congestion_window(),
             )
         {
             mode_changes_allowed -= 1;

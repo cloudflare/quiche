@@ -18883,6 +18883,8 @@ pub use crate::recovery::BbrBwLoReductionStrategy;
 pub use crate::recovery::BbrParams;
 pub use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::RecoveryOps;
+pub use crate::recovery::StartupExit;
+pub use crate::recovery::StartupExitReason;
 
 pub use crate::stream::StreamIter;
 

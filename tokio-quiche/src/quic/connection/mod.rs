@@ -92,6 +92,24 @@ impl QuicConnectionStats {
             path_stats: qconn.path_stats().next(),
         }
     }
+
+    fn startup_exit_to_socket_stats(
+        value: quiche::StartupExit,
+    ) -> datagram_socket::StartupExit {
+        let reason = match value.reason {
+            quiche::StartupExitReason::Loss =>
+                datagram_socket::StartupExitReason::Loss,
+            quiche::StartupExitReason::BandwidthPlateau =>
+                datagram_socket::StartupExitReason::BandwidthPlateau,
+            quiche::StartupExitReason::PersistentQueue =>
+                datagram_socket::StartupExitReason::PersistentQueue,
+        };
+
+        datagram_socket::StartupExit {
+            cwnd: value.cwnd,
+            reason,
+        }
+    }
 }
 
 impl AsSocketStats for QuicConnectionStats {
@@ -143,6 +161,11 @@ impl AsSocketStats for QuicConnectionStats {
                 .as_ref()
                 .map(|p| p.delivery_rate)
                 .unwrap_or_default(),
+            startup_exit: self
+                .path_stats
+                .as_ref()
+                .and_then(|p| p.startup_exit)
+                .map(QuicConnectionStats::startup_exit_to_socket_stats),
         }
     }
 }

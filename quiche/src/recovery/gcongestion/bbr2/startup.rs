@@ -31,6 +31,9 @@
 use std::time::Instant;
 
 use crate::recovery::gcongestion::bbr2::Params;
+use crate::recovery::RecoveryStats;
+use crate::recovery::StartupExit;
+use crate::recovery::StartupExitReason;
 
 use super::mode::Mode;
 use super::mode::ModeImpl;
@@ -55,6 +58,7 @@ impl ModeImpl for Startup {
         _acked_packets: &[Acked], _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize, params: &Params,
+        recovery_stats: &mut RecoveryStats, cwnd: usize,
     ) -> Mode {
         if self.model.full_bandwidth_reached() {
             return self.into_drain(event_time, Some(congestion_event), params);
@@ -66,21 +70,45 @@ impl ModeImpl for Startup {
 
         let has_bandwidth_growth =
             self.model.has_bandwidth_growth(congestion_event, params);
+        if self.model.full_bandwidth_reached() {
+            recovery_stats.set_startup_exit(StartupExit::new(
+                cwnd,
+                StartupExitReason::BandwidthPlateau,
+            ));
+        }
 
-        #[allow(clippy::absurd_extreme_comparisons)]
-        if params.max_startup_queue_rounds > 0 && !has_bandwidth_growth {
+        let check_persisten_queue =
+            params.max_startup_queue_rounds > 0 && !has_bandwidth_growth;
+        if check_persisten_queue {
             // 1.75 is less than the 2x CWND gain, but substantially more than
             // 1.25x, the minimum bandwidth increase expected during
             // STARTUP.
             self.model.check_persistent_queue(1.75, params);
+            if self.model.full_bandwidth_reached() {
+                recovery_stats.set_startup_exit(StartupExit::new(
+                    cwnd,
+                    StartupExitReason::PersistentQueue,
+                ));
+            }
         }
+
         // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not exit
         // upon excessive losses, if enough bandwidth growth is observed or if the
         // sample was app limited.
-        if !congestion_event.last_packet_send_state.is_app_limited &&
-            !has_bandwidth_growth
-        {
+        let check_for_excessive_loss = !congestion_event.last_packet_send_state.is_app_limited &&
+                !has_bandwidth_growth &&
+                // check for excessive loss only if not exiting for other reasons
+                !self.model.full_bandwidth_reached();
+
+        if check_for_excessive_loss {
             self.check_excessive_losses(congestion_event, params);
+
+            if self.model.full_bandwidth_reached() {
+                recovery_stats.set_startup_exit(StartupExit::new(
+                    cwnd,
+                    StartupExitReason::Loss,
+                ));
+            }
         }
 
         if self.model.full_bandwidth_reached() {
@@ -133,10 +161,6 @@ impl Startup {
     fn check_excessive_losses(
         &mut self, congestion_event: &mut BBRv2CongestionEvent, params: &Params,
     ) {
-        if self.model.full_bandwidth_reached() {
-            return;
-        }
-
         // At the end of a round trip. Check if loss is too high in this round.
         if self.model.is_inflight_too_high(
             congestion_event,

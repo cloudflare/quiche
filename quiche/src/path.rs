@@ -36,6 +36,7 @@ use slab::Slab;
 
 use crate::Error;
 use crate::Result;
+use crate::StartupExit;
 
 use crate::pmtud;
 use crate::recovery;
@@ -511,6 +512,7 @@ impl Path {
             stream_retrans_bytes: self.stream_retrans_bytes,
             pmtu: self.recovery.max_datagram_size(),
             delivery_rate: self.recovery.delivery_rate().to_bytes_per_second(),
+            startup_exit: self.recovery.startup_exit(),
         }
     }
 }
@@ -920,6 +922,9 @@ pub struct PathStats {
     /// [`SendInfo.at`]: struct.SendInfo.html#structfield.at
     /// [Pacing]: index.html#pacing
     pub delivery_rate: u64,
+
+    /// Statistics from when a CCA first exited the startup phase.
+    pub startup_exit: Option<StartupExit>,
 }
 
 impl std::fmt::Debug for PathStats {
