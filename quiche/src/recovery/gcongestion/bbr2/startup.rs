@@ -65,17 +65,14 @@ impl ModeImpl for Startup {
             return Mode::Startup(self);
         }
 
-        // Exit startup due to bw plateau
-        let mut exit_due_to_bw_plateau = false;
-        // Exit startup due to excessive loss
-        let mut exit_due_to_excessive_loss = false;
-
         let has_bandwidth_growth =
             self.model.has_bandwidth_growth(congestion_event, params);
+        // TODO: Check full_bandwidth_reached to determine if exit due to
+        // bandwidth plateau
 
-        let check_bw_plateau =
+        let check_persistent_queuing =
             params.max_startup_queue_rounds > 0 && !has_bandwidth_growth;
-        if check_bw_plateau {
+        if check_persistent_queuing {
             // 1.75 is less than the 2x CWND gain, but substantially more than
             // 1.25x, the minimum bandwidth increase expected during
             // STARTUP.
@@ -84,23 +81,25 @@ impl ModeImpl for Startup {
                 rounds_with_queueing: _,
             } = self.model.check_persistent_queue(1.75, params);
 
-            exit_due_to_bw_plateau = full_bandwidth_reached;
+            // TODO: Exit due to persistent queue
+            let _exit_due_to_persistent_queue = full_bandwidth_reached;
         };
 
+        // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not exit
+        // upon excessive losses, if enough bandwidth growth is observed
+        // or if the sample was app limited.
         let check_for_excessive_loss = !congestion_event.last_packet_send_state.is_app_limited &&
                 !has_bandwidth_growth &&
-                // check for loss only if not already Bandwidth plateaued
-                !exit_due_to_bw_plateau;
+                // check for excessive loss only if not exiting for other reasons
+                !self.model.full_bandwidth_reached();
 
         if check_for_excessive_loss {
-            // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not
-            // exit upon excessive losses, if enough bandwidth growth
-            // is observed or if the sample was app limited.
-            exit_due_to_excessive_loss =
+            // TODO: Exit due to excessive loss
+            let _exit_due_to_excessive_loss =
                 self.check_excessive_losses(congestion_event, params);
         }
 
-        if exit_due_to_bw_plateau || exit_due_to_excessive_loss {
+        if self.model.full_bandwidth_reached() {
             self.into_drain(event_time, Some(congestion_event), params)
         } else {
             Mode::Startup(self)
