@@ -611,12 +611,12 @@ impl BBRv2NetworkModel {
             return true;
         }
 
-        self.rounds_without_bandwidth_growth += 1;
+        if !congestion_event.last_packet_send_state.is_app_limited {
+            self.rounds_without_bandwidth_growth += 1;
+        }
 
         // full_bandwidth_reached is only set to true when not app-limited
-        if self.rounds_without_bandwidth_growth >= params.startup_full_bw_rounds &&
-            !congestion_event.last_packet_send_state.is_app_limited
-        {
+        if self.rounds_without_bandwidth_growth >= params.startup_full_bw_rounds {
             self.full_bandwidth_reached = true;
         }
 
