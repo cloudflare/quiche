@@ -167,52 +167,56 @@ pub(super) trait CongestionControl: Debug {
 #[repr(C)]
 #[doc(hidden)]
 pub struct BbrParams {
-    /// Control Bbr startup gain.
+    /// Controls the BBR startup gain.
     pub startup_cwnd_gain: Option<f32>,
 
-    /// Control Bbr startup pacing gain.
+    /// Controls the BBR startup pacing gain.
     pub startup_pacing_gain: Option<f32>,
 
-    /// Control Bbr full bandwidth threshold.
+    /// Controls the BBR full bandwidth threshold.
     pub full_bw_threshold: Option<f32>,
 
-    /// Control Bbr startup loss count necessary to exit startup.
+    /// Controls the BBR startup loss count necessary to exit startup.
     pub startup_full_loss_count: Option<usize>,
 
-    /// Control Bbr drain cwnd gain.
+    /// Controls the BBR drain cwnd gain.
     pub drain_cwnd_gain: Option<f32>,
 
-    /// Control Bbr drain pacing gain.
+    /// Controls the BBR drain pacing gain.
     pub drain_pacing_gain: Option<f32>,
 
-    /// Control if Bbr should respect reno coexistence.
+    /// Controls if BBR should respect Reno coexistence.
     pub enable_reno_coexistence: Option<bool>,
 
-    /// Control Bbr bandwidth probe up pacing gain.
+    /// Controls the BBR bandwidth probe up pacing gain.
     pub probe_bw_probe_up_pacing_gain: Option<f32>,
 
-    /// Control Bbr bandwidth probe down pacing gain.
+    /// Controls the BBR bandwidth probe down pacing gain.
     pub probe_bw_probe_down_pacing_gain: Option<f32>,
 
-    /// Control Bbr probe bandwidth cwnd gain.
+    /// Controls the BBR probe bandwidth cwnd gain.
     pub probe_bw_cwnd_gain: Option<f32>,
 
-    /// Control number of rounds Bbr should stay in probe up if bytes_in_flight
-    /// doesn't drop below target.
+    /// Controls the number of rounds BBR should stay in probe up if
+    /// bytes_in_flight doesn't drop below target.
     pub max_probe_up_queue_rounds: Option<usize>,
 
-    /// Control Bbr loss threshold.
+    /// Controls the BBR loss threshold.
     pub loss_threshold: Option<f32>,
 
-    /// Control if Bbr should use bytes delievered as an estimate for
+    /// Controls if BBR should use bytes delievered as an estimate for
     /// inflight_hi.
     pub use_bytes_delivered_for_inflight_hi: Option<bool>,
 
-    /// Control if Bbr should adjust startup pacing at round end.
+    /// Controls if BBR should adjust startup pacing at round end.
     pub decrease_startup_pacing_at_end_of_round: Option<bool>,
 
-    /// Control Bbr bandwidth lo reduction strategy.
+    /// Controls the BBR bandwidth lo reduction strategy.
     pub bw_lo_reduction_strategy: Option<BbrBwLoReductionStrategy>,
+
+    /// Determines whether app limited rounds with no bandwidth growth count
+    /// towards the rounds threshold to exit startup.
+    pub ignore_app_limited_for_no_bandwidth_growth: Option<bool>,
 }
 
 /// Controls BBR's bandwidth reduction strategy on congestion event.
