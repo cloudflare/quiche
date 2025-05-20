@@ -164,6 +164,10 @@ struct Params {
     overestimate_avoidance: bool,
 
     bw_lo_mode: BwLoMode,
+
+    /// Determines whether app limited rounds with no bandwidth growth count
+    /// towards the rounds threshold to exit startup.
+    ignore_app_limited_for_no_bandwidth_growth: bool,
 }
 
 impl Params {
@@ -190,6 +194,7 @@ impl Params {
         apply_override!(loss_threshold);
         apply_override!(use_bytes_delivered_for_inflight_hi);
         apply_override!(decrease_startup_pacing_at_end_of_round);
+        apply_override!(ignore_app_limited_for_no_bandwidth_growth);
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
             self.bw_lo_mode = custom_value.into();
@@ -267,6 +272,8 @@ const DEFAULT_PARAMS: Params = Params {
     overestimate_avoidance: true,
 
     bw_lo_mode: BwLoMode::InflightReduction,
+
+    ignore_app_limited_for_no_bandwidth_growth: false,
 };
 
 #[derive(Debug, PartialEq)]

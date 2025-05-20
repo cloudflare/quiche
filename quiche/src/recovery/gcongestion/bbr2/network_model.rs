@@ -182,8 +182,12 @@ pub(super) struct BBRv2NetworkModel {
     full_bandwidth_baseline: Bandwidth,
     rounds_without_bandwidth_growth: usize,
 
-    // Used by STARTUP and PROBE_UP to decide when to exit.
+    /// Used by STARTUP and PROBE_UP to decide when to exit.
     rounds_with_queueing: usize,
+
+    /// Determines whether app limited rounds with no bandwidth growth count
+    /// towards the rounds threshold to exit startup.
+    ignore_app_limited_for_no_bandwidth_growth: bool,
 }
 
 impl BBRv2NetworkModel {
@@ -224,6 +228,9 @@ impl BBRv2NetworkModel {
             full_bandwidth_baseline: Bandwidth::zero(),
             rounds_without_bandwidth_growth: 0,
             rounds_with_queueing: 0,
+
+            ignore_app_limited_for_no_bandwidth_growth: params
+                .ignore_app_limited_for_no_bandwidth_growth,
         }
     }
 
@@ -611,12 +618,17 @@ impl BBRv2NetworkModel {
             return true;
         }
 
-        if !congestion_event.last_packet_send_state.is_app_limited {
+        let ignore_round = self.ignore_app_limited_for_no_bandwidth_growth &&
+            congestion_event.last_packet_send_state.is_app_limited;
+
+        if !ignore_round {
             self.rounds_without_bandwidth_growth += 1;
         }
 
         // full_bandwidth_reached is only set to true when not app-limited
-        if self.rounds_without_bandwidth_growth >= params.startup_full_bw_rounds {
+        if self.rounds_without_bandwidth_growth >= params.startup_full_bw_rounds &&
+            !congestion_event.last_packet_send_state.is_app_limited
+        {
             self.full_bandwidth_reached = true;
         }
 
