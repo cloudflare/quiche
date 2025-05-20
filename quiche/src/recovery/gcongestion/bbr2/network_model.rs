@@ -631,11 +631,6 @@ impl BBRv2NetworkModel {
     pub(super) fn check_persistent_queue(
         &mut self, target_gain: f32, params: &Params,
     ) -> PersistentQueueOutcome {
-        let mut outcome = PersistentQueueOutcome {
-            full_bandwidth_reached: false,
-            rounds_with_queueing: 0,
-        };
-
         let target = self
             .bdp(self.max_bandwidth(), target_gain)
             .max(self.bdp0() + self.queueing_threshold_extra_bytes());
@@ -650,10 +645,10 @@ impl BBRv2NetworkModel {
             }
         }
 
-        outcome.full_bandwidth_reached = self.full_bandwidth_reached;
-        outcome.rounds_with_queueing = self.rounds_with_queueing;
-
-        outcome
+        PersistentQueueOutcome {
+            full_bandwidth_reached: self.full_bandwidth_reached,
+            rounds_with_queueing: self.rounds_with_queueing,
+        }
     }
 
     pub(super) fn max_bytes_delivered_in_round(&self) -> usize {
