@@ -32,6 +32,7 @@ use std::time::Instant;
 
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::rtt::RttStats;
+use crate::recovery::RecoveryStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
 
@@ -203,6 +204,7 @@ impl CongestionControl for Pacer {
         &mut self, rtt_updated: bool, prior_in_flight: usize,
         bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
         lost_packets: &[Lost], least_unacked: u64, rtt_stats: &RttStats,
+        recovery_stats: &mut RecoveryStats,
     ) {
         self.sender.on_congestion_event(
             rtt_updated,
@@ -213,6 +215,7 @@ impl CongestionControl for Pacer {
             lost_packets,
             least_unacked,
             rtt_stats,
+            recovery_stats,
         );
 
         if !self.enabled {

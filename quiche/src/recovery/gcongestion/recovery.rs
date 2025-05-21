@@ -23,8 +23,10 @@ use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::RangeSet;
 use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryOps;
+use crate::recovery::RecoveryStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::Sent;
+use crate::recovery::StartupExit;
 use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
@@ -343,6 +345,8 @@ pub struct GRecovery {
 
     rtt_stats: RttStats,
 
+    recovery_stats: RecoveryStats,
+
     pub lost_count: usize,
 
     pub lost_spurious_count: usize,
@@ -389,6 +393,7 @@ impl GRecovery {
         Some(Self {
             epochs: Default::default(),
             rtt_stats: RttStats::new(recovery_config.max_ack_delay),
+            recovery_stats: RecoveryStats::default(),
             loss_timer: Default::default(),
             pto_count: 0,
 
@@ -697,6 +702,7 @@ impl RecoveryOps for GRecovery {
             &self.lost_reuse,
             self.epochs[epoch].least_unacked(),
             &self.rtt_stats,
+            &mut self.recovery_stats,
         );
 
         self.pto_count = 0;
@@ -735,6 +741,7 @@ impl RecoveryOps for GRecovery {
                 &self.lost_reuse,
                 self.epochs[epoch].least_unacked(),
                 &self.rtt_stats,
+                &mut self.recovery_stats,
             );
 
             self.lost_count += lost_packets;
@@ -869,6 +876,11 @@ impl RecoveryOps for GRecovery {
     /// The most recent data delivery rate estimate.
     fn delivery_rate(&self) -> Bandwidth {
         self.pacer.bandwidth_estimate(&self.rtt_stats)
+    }
+
+    /// Statistics from when a CCA first exited the startup phase.
+    fn startup_exit(&self) -> Option<StartupExit> {
+        self.recovery_stats.startup_exit
     }
 
     fn max_datagram_size(&self) -> usize {

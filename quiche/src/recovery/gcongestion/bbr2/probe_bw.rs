@@ -35,6 +35,7 @@ use std::time::Instant;
 use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Acked;
 use crate::recovery::gcongestion::Lost;
+use crate::recovery::RecoveryStats;
 
 use super::mode::Cycle;
 use super::mode::CyclePhase;
@@ -83,6 +84,7 @@ impl ModeImpl for ProbeBW {
         mut self, prior_in_flight: usize, event_time: Instant, _: &[Acked],
         _: &[Lost], congestion_event: &mut BBRv2CongestionEvent,
         target_bytes_inflight: usize, params: &Params,
+        _recovery_stats: &mut RecoveryStats, _cwnd: usize,
     ) -> Mode {
         if congestion_event.end_of_round_trip {
             if self.cycle.start_time != event_time {

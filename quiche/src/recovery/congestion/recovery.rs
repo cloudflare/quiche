@@ -39,6 +39,7 @@ use crate::ranges::RangeSet;
 use crate::recovery::Bandwidth;
 use crate::recovery::HandshakeStatus;
 use crate::recovery::RecoveryOps;
+use crate::recovery::StartupExit;
 
 #[cfg(feature = "qlog")]
 use crate::recovery::QlogMetrics;
@@ -824,6 +825,12 @@ impl RecoveryOps for LegacyRecovery {
     /// The most recent data delivery rate estimate.
     fn delivery_rate(&self) -> Bandwidth {
         self.congestion.delivery_rate()
+    }
+
+    /// Statistics from when a CCA first exited the startup phase.
+    fn startup_exit(&self) -> Option<StartupExit> {
+        // TODO implement
+        None
     }
 
     fn max_datagram_size(&self) -> usize {

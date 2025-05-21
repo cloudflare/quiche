@@ -199,6 +199,9 @@ pub trait RecoveryOps {
     /// The most recent data delivery rate estimate.
     fn delivery_rate(&self) -> Bandwidth;
 
+    /// Statistics from when a CCA first exited the startup phase.
+    fn startup_exit(&self) -> Option<StartupExit>;
+
     fn max_datagram_size(&self) -> usize;
 
     fn pmtud_update_max_datagram_size(&mut self, new_max_datagram_size: usize);
@@ -564,6 +567,50 @@ impl ReleaseDecision {
 
         delta <= Self::EQUAL_THRESHOLD
     }
+}
+
+/// Recovery statistics
+#[derive(Default, Debug)]
+pub struct RecoveryStats {
+    startup_exit: Option<StartupExit>,
+}
+
+impl RecoveryStats {
+    // Record statistics when a CCA first exits startup.
+    pub fn set_startup_exit(&mut self, startup_exit: StartupExit) {
+        if self.startup_exit.is_none() {
+            self.startup_exit = Some(startup_exit);
+        }
+    }
+}
+
+/// Statistics from when a CCA first exited the startup phase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StartupExit {
+    /// The congestion_window recorded at Startup exit.
+    pub cwnd: usize,
+
+    /// The reason a CCA exited the startup phase.
+    pub reason: StartupExitReason,
+}
+
+impl StartupExit {
+    fn new(cwnd: usize, reason: StartupExitReason) -> Self {
+        Self { cwnd, reason }
+    }
+}
+
+/// The reason a CCA exited the startup phase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StartupExitReason {
+    /// Exit startup due to excessive loss
+    Loss,
+
+    /// Exit startup due to bandwidth plateau.
+    BandwidthPlateau,
+
+    /// Exit startup due to persistent queue.
+    PersistentQueue,
 }
 
 #[cfg(test)]
