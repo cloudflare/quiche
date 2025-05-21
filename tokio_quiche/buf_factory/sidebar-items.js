@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":["BufFactory","QuicheBuf"],"type":["PooledBuf","PooledDgram"]};
