@@ -1,4 +1,5 @@
 use crate::packet;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -723,7 +724,7 @@ impl RecoveryOps for GRecovery {
     fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: Instant,
         trace_id: &str,
-    ) -> (usize, usize) {
+    ) -> OnLossDetectionTimeoutOutcome {
         let (earliest_loss_time, epoch) = self.loss_time_and_space();
 
         if earliest_loss_time.is_some() {
@@ -749,7 +750,10 @@ impl RecoveryOps for GRecovery {
             self.set_loss_detection_timer(handshake_status, now);
 
             trace!("{} {:?}", trace_id, self);
-            return (lost_packets, lost_bytes);
+            return OnLossDetectionTimeoutOutcome {
+                lost_packets,
+                lost_bytes,
+            };
         }
 
         let epoch = if self.bytes_in_flight > 0 {
@@ -812,7 +816,10 @@ impl RecoveryOps for GRecovery {
         self.set_loss_detection_timer(handshake_status, now);
 
         trace!("{} {:?}", trace_id, self);
-        (0, 0)
+        OnLossDetectionTimeoutOutcome {
+            lost_packets: 0,
+            lost_bytes: 0,
+        }
     }
 
     fn on_pkt_num_space_discarded(
