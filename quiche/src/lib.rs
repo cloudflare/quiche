@@ -1648,6 +1648,43 @@ where
 
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
+
+    /// Data required for OpenSSL vendor
+    #[cfg(feature = "openssl")]
+    pub ossl_data: OsslQuicData,
+}
+
+/// Data required for OpenSSL vendor
+#[cfg(feature = "openssl")]
+pub struct OsslQuicData {
+    /// Data from CRYPTO frames. Data is removed from the front and placed
+    /// into `queued_data` when a full Handshake message is found
+    pub crypto_buf: Vec<u8>,
+    /// Complete Handshake messages
+    pub queued_data: VecDeque<Box<[u8]>>,
+    /// Current highest read level
+    pub read_level: crypto::Level,
+    /// Current highest write level
+    pub write_level: crypto::Level,
+    /// Local QUIC transport parameters. Empty if unset
+    pub local_transport_params: Box<[u8]>,
+    /// Peer's QUIC transport parameters. Empty if unset
+    pub peer_transport_params: Box<[u8]>,
+}
+
+#[cfg(feature = "openssl")]
+impl OsslQuicData {
+    /// Initialize a default OsslQuicData
+    pub fn new() -> OsslQuicData {
+        OsslQuicData {
+            crypto_buf: Vec::new(),
+            queued_data: VecDeque::new(),
+            read_level: crypto::Level::Initial,
+            write_level: crypto::Level::Initial,
+            local_transport_params: Vec::new().into_boxed_slice(),
+            peer_transport_params: Vec::new().into_boxed_slice(),
+        }
+    }
 }
 
 /// Creates a new server-side connection.
@@ -2138,6 +2175,9 @@ impl<F: BufFactory> Connection<F> {
             stopped_stream_remote_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
+
+            #[cfg(feature = "openssl")]
+            ossl_data: OsslQuicData::new(),
         };
 
         if let Some(odcid) = odcid {
@@ -7050,6 +7090,14 @@ impl<F: BufFactory> Connection<F> {
             &mut raw_params,
         )?;
 
+
+        #[cfg(feature = "openssl")]
+        {
+            // Local transport params must be long-lived
+            self.ossl_data.local_transport_params = raw_params.to_vec().into_boxed_slice();
+            self.handshake.set_quic_transport_params(&self.ossl_data.local_transport_params)?;
+        }
+        #[cfg(not(feature = "openssl"))]
         self.handshake.set_quic_transport_params(raw_params)?;
 
         Ok(())
@@ -7174,6 +7222,9 @@ impl<F: BufFactory> Connection<F> {
             tx_cap_factor: self.tx_cap_factor,
 
             is_server: self.is_server,
+
+            #[cfg(feature = "openssl")]
+            ossl_data: &mut self.ossl_data,
         };
 
         if self.handshake_completed {
@@ -7205,6 +7256,9 @@ impl<F: BufFactory> Connection<F> {
                 // This is potentially dangerous as the handshake hasn't been
                 // completed yet, though it's required to be able to send data
                 // in 0.5 RTT.
+                #[cfg(feature = "openssl")]
+                let raw_params = &self.ossl_data.peer_transport_params;
+                #[cfg(not(feature = "openssl"))]
                 let raw_params = self.handshake.quic_transport_params();
 
                 if !self.parsed_peer_transport_params && !raw_params.is_empty() {
@@ -7227,6 +7281,9 @@ impl<F: BufFactory> Connection<F> {
 
         self.alpn = self.handshake.alpn_protocol().to_vec();
 
+        #[cfg(feature = "openssl")]
+        let raw_params = &self.ossl_data.peer_transport_params;
+        #[cfg(not(feature = "openssl"))]
         let raw_params = self.handshake.quic_transport_params();
 
         if !self.parsed_peer_transport_params && !raw_params.is_empty() {
@@ -7567,6 +7624,9 @@ impl<F: BufFactory> Connection<F> {
 
                 while let Ok((read, _)) = stream.recv.emit(&mut crypto_buf) {
                     let recv_buf = &crypto_buf[..read];
+                    #[cfg(feature = "openssl")]
+                    self.handshake.provide_data(level, recv_buf, &mut self.ossl_data)?;
+                    #[cfg(not(feature = "openssl"))]
                     self.handshake.provide_data(level, recv_buf)?;
                 }
 
@@ -9843,9 +9903,9 @@ mod tests {
         assert_eq!(pipe.handshake(), Ok(()));
     }
 
-    // Disable this for openssl as it seems to fail for some reason. It could be
+    // Disable this for openssl/quictls as it seems to fail for some reason. It could be
     // because of the way the get_certs API differs from bssl.
-    #[cfg(not(feature = "openssl"))]
+    #[cfg(not(any(feature = "quictls", feature = "openssl")))]
     #[test]
     fn verify_client_invalid() {
         let mut server_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -10107,13 +10167,13 @@ mod tests {
     fn handshake_resumption(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
-        #[cfg(not(feature = "openssl"))]
+        #[cfg(not(any(feature = "quictls", feature = "openssl")))]
         const SESSION_TICKET_KEY: [u8; 48] = [0xa; 48];
 
         // 80-byte key(AES 256)
         // TODO: We can set the default? or query the ticket size by calling
         // the same API(SSL_CTX_set_tlsext_ticket_keys) twice to fetch the size.
-        #[cfg(feature = "openssl")]
+        #[cfg(any(feature = "quictls", feature = "openssl"))]
         const SESSION_TICKET_KEY: [u8; 80] = [0xa; 80];
 
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -10203,7 +10263,8 @@ mod tests {
         assert_eq!(pipe.server.sent_count, 1);
     }
 
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
+    // 0-RTT not supported when using openssl/quictls
+    #[cfg(not(any(feature = "quictls", feature = "openssl")))]
     #[rstest]
     fn handshake_0rtt(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -10268,7 +10329,8 @@ mod tests {
         assert_eq!(&b[..5], b"aaaaa");
     }
 
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
+    // 0-RTT not supported when using openssl/quictls
+    #[cfg(not(any(feature = "quictls", feature = "openssl")))]
     #[rstest]
     fn handshake_0rtt_reordered(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -10343,7 +10405,8 @@ mod tests {
         assert_eq!(&b[..5], b"aaaaa");
     }
 
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
+    // 0-RTT not supported when using openssl/quictls
+    #[cfg(not(any(feature = "quictls", feature = "openssl")))]
     #[rstest]
     fn handshake_0rtt_truncated(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -10558,7 +10621,8 @@ mod tests {
         assert!(pipe.server.stream_finished(4));
     }
 
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
+    // 0-RTT not supported when using openssl/quictls
+    #[cfg(not(any(feature = "quictls", feature = "openssl")))]
     #[rstest]
     fn zero_rtt(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -11902,7 +11966,8 @@ mod tests {
         );
     }
 
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
+    // 0-RTT not supported when using openssl/quictls
+    #[cfg(not(any(feature = "quictls", feature = "openssl")))]
     #[rstest]
     /// Simulates reception of an early 1-RTT packet on the server, by
     /// delaying the client's Handshake packet that completes the handshake.
@@ -15983,9 +16048,9 @@ mod tests {
         );
     }
 
-    // OpenSSL does not provide a straightforward interface to deal with custom
-    // off-load key signing.
-    #[cfg(not(feature = "openssl"))]
+    // OpenSSL/QuicTLS does not provide a straightforward interface to deal
+    // with custom off-load key signing.
+    #[cfg(not(any(feature = "quictls", feature = "openssl")))]
     #[rstest]
     fn app_close_by_server_during_handshake_private_key_failure(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
