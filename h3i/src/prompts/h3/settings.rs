@@ -34,7 +34,7 @@ use super::SuggestionResult;
 use crate::actions::h3::Action;
 use crate::prompts::h3;
 
-use quiche;
+use crate::quiche;
 
 const QPACK_MAX_TABLE_CAPACITY: &str = "QPACK_MAX_TABLE_CAPACITY";
 const MAX_FIELD_SECTION_SIZE: &str = "MAX_FIELD_SECTION_SIZE";

@@ -26,7 +26,6 @@
 
 //! Summarizes events that occurred during a connection.
 
-use quiche;
 use quiche::Connection;
 use quiche::ConnectionError;
 use quiche::PathStats;
@@ -41,6 +40,7 @@ use std::iter::FromIterator;
 use crate::frame::CloseTriggerFrame;
 use crate::frame::EnrichedHeaders;
 use crate::frame::H3iFrame;
+use crate::quiche;
 
 /// Maximum length of any serialized element's unstructured data such as reason
 /// phrase.
@@ -444,16 +444,6 @@ impl Serialize for ConnectionCloseDetails {
         state.serialize_field("timed_out", &self.timed_out)?;
         state.end()
     }
-}
-
-// Only applicable to async client
-#[doc(hidden)]
-/// A record that will be inserted into the [ConnectionSummary].
-pub enum ConnectionRecord {
-    StreamedFrame { stream_id: u64, frame: H3iFrame },
-    ConnectionStats(Stats),
-    PathStats(Vec<PathStats>),
-    Close(ConnectionCloseDetails),
 }
 
 /// A wrapper to help serialize [quiche::PathStats]
