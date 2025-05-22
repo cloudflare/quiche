@@ -875,7 +875,7 @@ impl Config {
             tls_ctx,
             application_protos: Vec::new(),
             grease: true,
-            cc_algorithm: CongestionControlAlgorithm::CUBIC,
+            cc_algorithm: CongestionControlAlgorithm::Bbr2Gcongestion,
             custom_bbr_params: None,
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
@@ -1648,6 +1648,8 @@ where
 
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
+
+    emit_stats_at: time::Instant,
 }
 
 /// Creates a new server-side connection.
@@ -2138,6 +2140,8 @@ impl<F: BufFactory> Connection<F> {
             stopped_stream_remote_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
+
+            emit_stats_at: time::Instant::now(),
         };
 
         if let Some(odcid) = odcid {
@@ -3802,6 +3806,16 @@ impl<F: BufFactory> Connection<F> {
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
         now: time::Instant,
     ) -> Result<(packet::Type, usize)> {
+        if self.is_server {
+            if now >= self.emit_stats_at {
+                let s = self.stats();
+                let ps = self.path_stats().next().unwrap();
+                println!("{:?} {:?}", s, ps);
+
+                self.emit_stats_at = now + time::Duration::from_millis(20);
+            }
+        }
+
         if out.is_empty() {
             return Err(Error::BufferTooShort);
         }

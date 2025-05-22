@@ -651,6 +651,8 @@ impl RecoveryOps for GRecovery {
         &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) -> OnAckReceivedOutcome {
+        // println!("------- on_ack gcong");
+
         let prior_in_flight = self.bytes_in_flight;
 
         let AckedDetectionResult {

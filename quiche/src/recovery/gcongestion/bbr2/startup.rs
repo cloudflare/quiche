@@ -111,6 +111,7 @@ impl ModeImpl for Startup {
             }
         }
 
+        println!("-------{:?}", self.model.full_bandwidth_reached());
         if self.model.full_bandwidth_reached() {
             self.into_drain(event_time, Some(congestion_event), params)
         } else {
