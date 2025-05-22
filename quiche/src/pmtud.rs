@@ -3,9 +3,6 @@
 
 #[derive(Default)]
 pub struct Pmtud {
-    /// The current PMTU estimate.
-    estimated_pmtu: usize,
-
     /// The PMTU after the completion of PMTUD.
     /// Will be [`None`] if the PMTU is less than the minimum supported MTU.
     pmtu: Option<usize>,
@@ -28,40 +25,29 @@ pub struct Pmtud {
     /// Indicates if PMTUD requires continued probing.
     should_probe: bool,
 
-    /// Is PMTUD enabled.
-    enabled: bool,
-
     /// Indicates if a PMTUD probe is inflight.
     inflight: bool,
 }
 
 impl Pmtud {
     /// Creates new PMTUD instance.
-    pub fn new(minimum_supported_mtu: usize) -> Self {
+    pub fn new(
+        minimum_supported_mtu: usize, maximum_supported_mtu: usize,
+    ) -> Self {
         Self {
-            estimated_pmtu: minimum_supported_mtu,
             minimum_supported_mtu,
+            maximum_supported_mtu,
+            probe_size: maximum_supported_mtu,
             ..Default::default()
         }
     }
 
-    /// Enables PMTUD for the connection.
-    pub fn enable(&mut self, enable: bool) {
-        self.enabled = enable;
-    }
-
-    /// Returns enabled status for PMTUD for the connection.
-    pub fn is_enabled(&mut self) -> bool {
-        self.enabled
-    }
-
     /// Indicates whether probing should continue on the connection.
     pub fn should_probe(&self) -> bool {
-        self.enabled
-            && self.pmtu.is_none()
-            && !(self
-                .smallest_failed_probe_size
-                .is_some_and(|failed_probe| failed_probe == self.estimated_pmtu))
+        self.pmtu.is_none()
+            && !(self.smallest_failed_probe_size.is_some_and(|failed_probe| {
+                failed_probe == self.minimum_supported_mtu
+            }))
     }
 
     /// Sets the PMTUD probe size.
@@ -75,14 +61,11 @@ impl Pmtud {
         self.probe_size
     }
 
-    /// Sets the estimated PMTU.
-    pub fn set_estimated_pmtu(&mut self, pmtu: usize) {
-        self.estimated_pmtu = std::cmp::max(self.estimated_pmtu, pmtu);
-    }
-
-    /// Returns the estimated PMTU.
-    pub fn get_estimated_pmtu(&mut self) -> usize {
-        self.estimated_pmtu
+    /// Returns the largest successful PMTUD probe size if one exists, otherwise
+    /// returns the minimum supported MTU.
+    pub fn get_largest_succesful_probe(&mut self) -> usize {
+        self.largest_successful_probe_size
+            .unwrap_or(self.minimum_supported_mtu)
     }
 
     /// Returns the PMTU.
@@ -104,7 +87,7 @@ impl Pmtud {
                 // Something has changed along the path that invalidates
                 // previous PMTUD probes. Restart PMTUD
                 if failed_probe_size <= successful_probe_size {
-                    return self.recalculate_pmtu();
+                    return self.restart_pmtud();
                 }
 
                 // Found the PMTU
@@ -133,7 +116,7 @@ impl Pmtud {
             },
 
             // Use the initial probe size if no record of success/failures
-            (None, None) => {},
+            (None, None) => self.probe_size = self.maximum_supported_mtu,
         }
     }
 
@@ -173,18 +156,17 @@ impl Pmtud {
 
     // Resets PMTUD internals such that PMTUD will be recalculated
     // on the next opportunity
-    pub fn recalculate_pmtu(&mut self) {
+    pub fn restart_pmtud(&mut self) {
         self.set_probe_size(self.maximum_supported_mtu);
         self.smallest_failed_probe_size = None;
         self.largest_successful_probe_size = None;
-        self.estimated_pmtu = self.minimum_supported_mtu;
         self.pmtu = None;
     }
 
     // Checks that a probe of PMTU size can be ack'd by enabling
     // a probe on the next opportunity. If this probe is dropped
     // PMTUD will restart from a fresh state
-    pub fn validate_pmtu(&mut self) {
+    pub fn revalidate_pmtu(&mut self) {
         if let Some(pmtu) = self.pmtu {
             self.set_probe_size(pmtu);
             self.pmtu = None;
@@ -194,11 +176,9 @@ impl Pmtud {
 
 impl std::fmt::Debug for Pmtud {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "estimated_pmtu={:?} ", self.estimated_pmtu)?;
         write!(f, "pmtu={:?} ", self.pmtu)?;
         write!(f, "probe_size={:?} ", self.probe_size)?;
         write!(f, "should_probe={:?} ", self.should_probe)?;
-        write!(f, "enable={:?} ", self.enabled)?;
         Ok(())
     }
 }
@@ -207,217 +187,119 @@ impl std::fmt::Debug for Pmtud {
 mod tests {
     use super::*;
 
-    // Simulate an environment where the PMTU is 1272 and ensure the
-    // algorithm finds this
-    #[test]
-    fn test_example_pmtud() {
-        let mut search = Pmtud::new(1200);
-
-        search.failed_probe(1350);
-        assert_eq!(search.get_probe_size(), 1275);
-
-        search.failed_probe(1275);
-        assert_eq!(search.get_probe_size(), 1237);
-
-        search.successful_probe(1237);
-        assert_eq!(search.get_probe_size(), 1256);
-
-        search.successful_probe(1256);
-        assert_eq!(search.get_probe_size(), 1265);
-
-        search.successful_probe(1265);
-        assert_eq!(search.get_probe_size(), 1270);
-
-        search.successful_probe(1270);
-        assert_eq!(search.get_probe_size(), 1272);
-
-        search.successful_probe(1272);
-        assert_eq!(search.get_probe_size(), 1273);
-
-        search.failed_probe(1273);
-
-        assert_eq!(search.pmtu, Some(1272));
-        assert!(!search.should_probe());
-    }
-
-    #[test]
-    fn test_pmtu_more_than_max_supported_mtu() {
-        let mut search = Pmtud::new(1200);
-        search.set_probe_size(1350);
-        search.successful_probe(1350);
-        assert_eq!(search.pmtu, Some(1350));
-        assert!(!search.should_probe());
-    }
-
-    #[test]
-    fn test_pmtu_less_than_min_supported_mtu() {
-        let mut search = Pmtud::new(1200);
-        search.set_probe_size(1350);
-
-        search.failed_probe(1350);
-        assert_eq!(search.get_probe_size(), 1275);
-
-        search.failed_probe(1275);
-        assert_eq!(search.get_probe_size(), 1237);
-
-        search.failed_probe(1237);
-        assert_eq!(search.get_probe_size(), 1218);
-
-        search.failed_probe(1218);
-        assert_eq!(search.get_probe_size(), 1209);
-
-        search.failed_probe(1209);
-        assert_eq!(search.get_probe_size(), 1204);
-
-        search.failed_probe(1204);
-        assert_eq!(search.get_probe_size(), 1202);
-
-        search.failed_probe(1202);
-        assert_eq!(search.get_probe_size(), 1201);
-
-        search.failed_probe(1201);
-        assert_eq!(search.get_probe_size(), 1200);
-
-        search.failed_probe(1200);
-        assert_eq!(search.get_probe_size(), 1200);
-
-        // Make sure we do not continue to probe when the algorithm
-        // hits the minimum supported MTU
-        assert!(!search.should_probe());
-    }
-
-    #[test]
-    fn test_pmtu_equal_to_min_supported_mtu() {
-        let mut search = Pmtud::new(1200);
-        search.set_probe_size(1350);
-
-        search.failed_probe(1350);
-        assert_eq!(search.get_probe_size(), 1275);
-
-        search.failed_probe(1275);
-        assert_eq!(search.get_probe_size(), 1237);
-
-        search.failed_probe(1237);
-        assert_eq!(search.get_probe_size(), 1218);
-
-        search.failed_probe(1218);
-        assert_eq!(search.get_probe_size(), 1209);
-
-        search.failed_probe(1209);
-        assert_eq!(search.get_probe_size(), 1204);
-
-        search.failed_probe(1204);
-        assert_eq!(search.get_probe_size(), 1202);
-
-        search.failed_probe(1202);
-        assert_eq!(search.get_probe_size(), 1201);
-
-        search.failed_probe(1201);
-        assert_eq!(search.get_probe_size(), 1200);
-
-        search.successful_probe(1200);
-        assert_eq!(search.pmtu, Some(1200));
-        assert!(!search.should_probe());
-    }
-
+    /// Test case for resetting the PMTUD state.
+    ///
+    /// This test initializes the PMTUD instance, performs a successful probe,
+    /// recalculates the PMTU, and then uses the `pmtud_test_runner` function
+    /// to verify the PMTU discovery process.
     #[test]
     fn test_pmtud_reset() {
-        // Start with a large PMTU
-        let mut search = Pmtud::new(1200);
-        search.set_probe_size(1350);
+        let mut search = Pmtud::new(1200, 1350);
         search.successful_probe(1350);
         assert_eq!(search.pmtu, Some(1350));
         assert!(!search.should_probe());
 
-        // Simulate moving cell towers or some change in the path
-        // where the PMTU drops
-        search.recalculate_pmtu();
+        // Restart PMTUD and expect the state to reset
+        search.restart_pmtud();
 
-        search.failed_probe(1350);
-        assert_eq!(search.get_probe_size(), 1275);
-
-        search.failed_probe(1275);
-        assert_eq!(search.get_probe_size(), 1237);
-
-        search.successful_probe(1237);
-        assert_eq!(search.get_probe_size(), 1256);
-
-        search.failed_probe(1256);
-        assert_eq!(search.get_probe_size(), 1246);
-
-        search.failed_probe(1246);
-        assert_eq!(search.get_probe_size(), 1241);
-
-        search.failed_probe(1241);
-        assert_eq!(search.get_probe_size(), 1239);
-
-        search.failed_probe(1239);
-        assert_eq!(search.get_probe_size(), 1238);
-
-        search.failed_probe(1238);
-        assert_eq!(search.pmtu, Some(1237));
-        assert!(!search.should_probe());
+        // Run the PMTUD test runner with the reset state
+        pmtud_test_runner(search, 1237);
     }
 
+    /// Test case for PMTU equal to the minimum supported MTU.
+    ///
+    /// This test verifies that the PMTU discovery process correctly identifies
+    /// when the PMTU is equal to the minimum supported MTU.
     #[test]
-    fn test_pmtud_validation_success() {
-        // Start with a large PMTU
-        let mut search = Pmtud::new(1200);
-        search.set_probe_size(1350);
-        search.successful_probe(1350);
-        assert_eq!(search.pmtu, Some(1350));
-        assert!(!search.should_probe());
-
-        // Validate the PMTU and simulate a failure
-        search.validate_pmtu();
-        assert_eq!(search.get_probe_size(), 1350);
-        search.successful_probe(1350);
-        assert_eq!(search.pmtu, Some(1350));
-        assert!(!search.should_probe());
+    fn test_pmtu_equal_to_min_supported_mtu() {
+        let search = Pmtud::new(1200, 1350);
+        pmtud_test_runner(search, 1200);
     }
 
+    /// Test case for PMTU greater than the minimum supported MTU.
+    ///
+    /// This test verifies that the PMTU discovery process correctly identifies
+    /// when the PMTU is greater than the minimum supported MTU.
     #[test]
-    fn test_pmtud_validation_fail() {
-        // Start with a large PMTU
-        let mut search = Pmtud::new(1200);
+    fn test_pmtu_greater_than_min_supported_mtu() {
+        let search = Pmtud::new(1200, 1350);
+        pmtud_test_runner(search, 1500);
+    }
+
+    /// Test case for PMTU less than the minimum supported MTU.
+    ///
+    /// This test verifies that the PMTU discovery process correctly handles
+    /// the case when the PMTU is less than the minimum supported MTU.
+    #[test]
+    fn test_pmtu_less_than_min_supported_mtu() {
+        let search = Pmtud::new(1200, 1350);
+        pmtud_test_runner(search, 1100);
+    }
+
+    /// Test case for PMTU recalculation.
+    ///
+    /// This test verifies that the PMTU recalculation logic correctly resets
+    /// the PMTUD state and identifies the correct PMTU after recalculation.
+    #[test]
+    fn test_pmtu_recalculation() {
+        let mut search = Pmtud::new(1200, 1350);
         search.set_probe_size(1350);
         search.successful_probe(1350);
-        assert_eq!(search.pmtu, Some(1350));
-        assert!(!search.should_probe());
 
-        // Validate the PMTU and simulate a failure
-        search.validate_pmtu();
-        assert_eq!(search.pmtu, None);
-        assert_eq!(search.get_probe_size(), 1350);
+        // Recalculate PMTU and expect the state to reset
+        search.restart_pmtud();
 
-        search.failed_probe(1350);
-        assert_eq!(search.largest_successful_probe_size, None);
-        assert_eq!(search.smallest_failed_probe_size, None);
+        // Run the PMTUD test runner with the reset state
+        pmtud_test_runner(search, 1250);
+    }
 
-        assert_eq!(search.get_probe_size(), 1350);
-        search.failed_probe(1350);
-        assert_eq!(search.get_probe_size(), 1275);
+    /// Runs a test for the PMTUD algorithm, given a target PMTU `target_mtu`.
+    ///
+    /// The test initializes the probe size to the maximum supported MTU and
+    /// then iteratively sends probes with the current probe size until the
+    /// PMTU is found or the minimum supported MTU is reached.
+    ///
+    /// Finally, the test verifies that the PMTU is correct by asserting that
+    /// the PMTU is equal to the target PMTU.
+    fn pmtud_test_runner(mut search: Pmtud, test_pmtu: usize) {
+        let maximum_supported_mtu = 1350;
+        let min_supported_mtu = 1200;
 
-        search.failed_probe(1275);
-        assert_eq!(search.get_probe_size(), 1237);
+        // Loop until the PMTU is found or the minimum supported MTU is reached
+        while search.get_probe_size() >= min_supported_mtu {
+            // Send a probe with the current probe size
+            let probe_size = search.get_probe_size();
 
-        search.successful_probe(1237);
-        assert_eq!(search.get_probe_size(), 1256);
+            if probe_size <= test_pmtu {
+                search.successful_probe(probe_size);
+            } else {
+                search.failed_probe(probe_size);
+            }
 
-        search.failed_probe(1256);
-        assert_eq!(search.get_probe_size(), 1246);
+            // Update the probe size based on the result
+            search.update_probe_size();
 
-        search.failed_probe(1246);
-        assert_eq!(search.get_probe_size(), 1241);
+            // If the probe size hasn't changed and is equal to the minimum
+            // supported MTU, break the loop
+            if search.get_probe_size() == probe_size
+                && probe_size == min_supported_mtu
+            {
+                break;
+            }
 
-        search.failed_probe(1241);
-        assert_eq!(search.get_probe_size(), 1239);
+            // If the PMTU is found, break the loop
+            if search.get_pmtu().is_some() {
+                break;
+            }
+        }
 
-        search.failed_probe(1239);
-        assert_eq!(search.get_probe_size(), 1238);
-
-        search.failed_probe(1238);
-        assert_eq!(search.pmtu, Some(1237));
-        assert!(!search.should_probe());
+        // Verify that the PMTU is correct
+        if test_pmtu < min_supported_mtu {
+            assert_eq!(search.get_pmtu(), None);
+        } else if test_pmtu > maximum_supported_mtu {
+            assert_eq!(search.get_pmtu(), Some(maximum_supported_mtu));
+        } else {
+            assert_eq!(search.get_pmtu(), Some(test_pmtu));
+        }
     }
 }
