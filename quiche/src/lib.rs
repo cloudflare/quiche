@@ -1958,9 +1958,15 @@ impl<F: BufFactory> Connection<F> {
             peer,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            MIN_CLIENT_INITIAL_LEN,
             true,
         );
+
+        if config.pmtud {
+            path.pmtud = Some(pmtud::Pmtud::new(
+                MIN_CLIENT_INITIAL_LEN,
+                config.max_send_udp_payload_size,
+            ));
+        }
 
         // If we did stateless retry assume the peer's address is verified.
         path.verified_peer_address = odcid.is_some();
@@ -1972,8 +1978,6 @@ impl<F: BufFactory> Connection<F> {
             path,
             config.local_transport_params.active_conn_id_limit as usize,
             is_server,
-            config.pmtud,
-            config.max_send_udp_payload_size,
         );
 
         let active_path_id = paths.get_active_path_id()?;
@@ -3289,18 +3293,16 @@ impl<F: BufFactory> Connection<F> {
                     frame::Frame::Ping {
                         mtu_probe: Some(mtu_probe),
                     } => {
-                        let pmtud_next = p.pmtud.get_current();
-                        p.pmtud.set_current(cmp::max(pmtud_next, mtu_probe));
+                        if let Some(pmtud) = p.pmtud.as_mut() {
+                            pmtud.successful_probe(mtu_probe);
+                            pmtud_probe = true;
 
-                        // Stop sending path MTU probes after successful probe.
-                        p.pmtud.should_probe(false);
-                        pmtud_probe = true;
-
-                        trace!(
-                            "{} pmtud acked; pmtu size {:?}",
-                            self.trace_id,
-                            p.pmtud.get_current()
-                        );
+                            trace!(
+                                "{} pmtud acked; pmtu size {:?}",
+                                self.trace_id,
+                                mtu_probe
+                            );
+                        }
                     },
 
                     frame::Frame::ACK { ranges, .. } => {
@@ -3392,33 +3394,36 @@ impl<F: BufFactory> Connection<F> {
 
             // Update max datagram send size with newly acked probe size.
             if pmtud_probe {
-                trace!(
-                    "{} updating pmtu {:?}",
-                    p.pmtud.get_current(),
-                    self.trace_id
-                );
+                if let Some(pmtud) = p.pmtud.as_mut() {
+                    trace!(
+                        "{} updating pmtu {:?}",
+                        self.trace_id,
+                        pmtud.get_largest_succesful_probe()
+                    );
 
-                qlog_with_type!(
-                    EventType::ConnectivityEventType(
-                        ConnectivityEventType::MtuUpdated
-                    ),
-                    self.qlog,
-                    q,
-                    {
-                        let pmtu_data = EventData::MtuUpdated(
-                            qlog::events::connectivity::MtuUpdated {
-                                old: Some(p.recovery.max_datagram_size() as u16),
-                                new: p.pmtud.get_current() as u16,
-                                done: Some(pmtud_probe),
-                            },
-                        );
+                    qlog_with_type!(
+                        EventType::ConnectivityEventType(
+                            ConnectivityEventType::MtuUpdated
+                        ),
+                        self.qlog,
+                        q,
+                        {
+                            let pmtu_data = EventData::MtuUpdated(
+                                qlog::events::connectivity::MtuUpdated {
+                                    old: Some(p.recovery.max_datagram_size() as u16),
+                                    new: pmtud.get_largest_succesful_probe() as u16,
+                                    done: Some(pmtud_probe),
+                                },
+                            );
 
-                        q.add_event_data_with_instant(pmtu_data, now).ok();
-                    }
-                );
+                            q.add_event_data_with_instant(pmtu_data, now).ok();
+                        }
+                    );
 
-                p.recovery
-                    .pmtud_update_max_datagram_size(p.pmtud.get_current());
+                    p.recovery.pmtud_update_max_datagram_size(
+                        pmtud.get_largest_succesful_probe(),
+                    );
+                }
             }
         }
 
@@ -3707,16 +3712,18 @@ impl<F: BufFactory> Connection<F> {
         let send_path = self.paths.get_mut(send_pid)?;
 
         // Update max datagram size to allow path MTU discovery probe to be sent.
-        if send_path.pmtud.get_probe_status() {
-            let size = if self.handshake_confirmed || self.handshake_done_sent {
-                send_path.pmtud.get_probe_size()
-            } else {
-                send_path.pmtud.get_current()
-            };
+        if let Some(pmtud) = send_path.pmtud.as_mut() {
+            if pmtud.should_probe() {
+                let size = if self.handshake_confirmed || self.handshake_done_sent {
+                    pmtud.get_probe_size()
+                } else {
+                    pmtud.get_largest_succesful_probe()
+                };
 
-            send_path.recovery.pmtud_update_max_datagram_size(size);
+                send_path.recovery.pmtud_update_max_datagram_size(size);
 
-            left = cmp::min(out.len(), send_path.recovery.max_datagram_size());
+                left = cmp::min(out.len(), send_path.recovery.max_datagram_size());
+            }
         }
 
         // Limit data sent by the server based on the amount of data received
@@ -3918,8 +3925,13 @@ impl<F: BufFactory> Connection<F> {
                         self.ids.mark_retire_dcid_seq(seq_num, true)?;
                     },
 
-                    frame::Frame::Ping { mtu_probe } if mtu_probe.is_some() => {
-                        p.pmtud.pmtu_probe_lost();
+                    frame::Frame::Ping {
+                        mtu_probe: Some(failed_probe),
+                    } => {
+                        if let Some(pmtud) = p.pmtud.as_mut() {
+                            trace!("pmtud probe dropped: {}", failed_probe);
+                            pmtud.failed_probe(failed_probe);
+                        }
                     },
 
                     _ => (),
@@ -3934,9 +3946,9 @@ impl<F: BufFactory> Connection<F> {
         let pkt_space = &mut self.pkt_num_spaces[epoch];
         let crypto_ctx = &mut self.crypto_ctx[epoch];
 
-        let mut left = if path.pmtud.is_enabled() {
+        let mut left = if let Some(pmtud) = path.pmtud.as_mut() {
             // Limit output buffer size by estimated path MTU.
-            cmp::min(path.pmtud.get_current(), b.cap())
+            cmp::min(pmtud.get_largest_succesful_probe(), b.cap())
         } else {
             b.cap()
         };
@@ -4137,59 +4149,59 @@ impl<F: BufFactory> Connection<F> {
 
             let pmtu_probe = active_path.should_send_pmtu_probe(
                 self.handshake_confirmed,
-                self.handshake_done_sent,
+                self.handshake_completed,
                 out_len,
                 is_closing,
                 frames.is_empty(),
             );
 
-            trace!("{} pmtud probe status {} hs_con={} hs_sent={} cwnd_avail={} out_len={} left={}", self.trace_id, pmtu_probe, self.handshake_confirmed, self.handshake_done_sent,
-                    active_path.recovery.cwnd_available(), out_len, left);
+            if pmtu_probe { 
+                if let Some(pmtud) = active_path.pmtud.as_mut() {                
+                    let probe_size = pmtud.get_probe_size();
+                    trace!(
+                        "{} sending pmtud probe pmtu_probe={} estimated_pmtu={}",
+                        self.trace_id,
+                        probe_size,
+                        pmtud.get_largest_succesful_probe(),
+                    );
 
-            if pmtu_probe {
-                trace!(
-                    "{} sending pmtud probe pmtu_probe={} next_size={} pmtu={}",
-                    self.trace_id,
-                    active_path.pmtud.get_probe_size(),
-                    active_path.pmtud.get_probe_status(),
-                    active_path.pmtud.get_current(),
-                );
+                    left = probe_size;
 
-                left = active_path.pmtud.get_probe_size();
+                    match left.checked_sub(overhead) {
+                        Some(v) => left = v,
 
-                match left.checked_sub(overhead) {
-                    Some(v) => left = v,
+                        None => {
+                            // We can't send more because there isn't enough space
+                            // available in the output buffer.
+                            //
+                            // This usually happens when we try to send a new packet
+                            // but failed because cwnd is almost full.
+                            //
+                            // In such case app_limited is set to false here to make
+                            // cwnd grow when ACK is received.
+                            active_path.recovery.update_app_limited(false);
+                            return Err(Error::Done);
+                        },
+                    }
 
-                    None => {
-                        // We can't send more because there isn't enough space
-                        // available in the output buffer.
-                        //
-                        // This usually happens when we try to send a new packet
-                        // but failed because cwnd is almost full.
-                        //
-                        // In such case app_limited is set to false here to make
-                        // cwnd grow when ACK is received.
-                        active_path.recovery.update_app_limited(false);
-                        return Err(Error::Done);
-                    },
-                }
-
-                let frame = frame::Frame::Padding {
-                    len: active_path.pmtud.get_probe_size() - overhead - 1,
-                };
-
-                if push_frame_to_pkt!(b, frames, frame, left) {
-                    let frame = frame::Frame::Ping {
-                        mtu_probe: Some(active_path.pmtud.get_probe_size()),
+                    let frame = frame::Frame::Padding {
+                        len: probe_size - overhead - 1,
                     };
 
                     if push_frame_to_pkt!(b, frames, frame, left) {
-                        ack_eliciting = true;
-                        in_flight = true;
-                    }
-                }
+                        let frame = frame::Frame::Ping {
+                            mtu_probe: Some(probe_size),
+                        };
 
-                pmtud_probe = true;
+                        if push_frame_to_pkt!(b, frames, frame, left) {
+                            ack_eliciting = true;
+                            in_flight = true;
+                        }
+                    }
+
+                    pmtud.set_inflight(true);
+                    pmtud_probe = true;
+                }
             }
 
             let path = self.paths.get_mut(send_pid)?;
@@ -5002,10 +5014,10 @@ impl<F: BufFactory> Connection<F> {
         }
 
         let active_path = self.paths.get_active_mut()?;
-        if active_path.pmtud.is_enabled() {
-            active_path
-                .recovery
-                .pmtud_update_max_datagram_size(active_path.pmtud.get_current());
+        if let Some(pmtud) = active_path.pmtud.as_mut() {
+            active_path.recovery.pmtud_update_max_datagram_size(
+                pmtud.get_largest_succesful_probe(),
+            );
         }
 
         Ok((pkt_type, written))
@@ -6892,6 +6904,40 @@ impl<F: BufFactory> Connection<F> {
         ConnectionId::from_ref(e.cid.as_ref())
     }
 
+    /// Returns the PMTU for the active path if it exists. This requires no
+    /// additonal packets to be sent but simply checks if PMTUD has completed
+    /// and has found a valid PMTU.
+    #[inline]
+    pub fn pmtu(&self) -> Option<usize> {
+        if let Ok(path) = self.paths.get_active() {
+            path.pmtud.as_ref().and_then(|pmtud| pmtud.get_pmtu())
+        } else {
+            None
+        }
+    }
+
+    /// Restarts the PMTUD process for the active path. This will send a series
+    /// of packets to probe for the PMTU within the supported MTU range.
+    #[inline]
+    pub fn restart_pmtud(&mut self) {
+        if let Ok(active_path) = self.paths.get_active_mut() {
+            if let Some(pmtud) = active_path.pmtud.as_mut() {
+                pmtud.restart_pmtud();
+            }
+        }
+    }
+
+    /// Revalidates the PMTU for the active path by sending a new probe packet
+    /// of PMTU size. If the probe is dropped PMTUD will restart and find a new valid PMTU.
+    #[inline]
+    pub fn revalidate_pmtu(&mut self) {
+        if let Ok(active_path) = self.paths.get_active_mut() {
+            if let Some(pmtud) = active_path.pmtud.as_mut() {
+                pmtud.revalidate_pmtu();
+            }
+        }
+    }
+
     /// Returns true if the connection handshake is complete.
     #[inline]
     pub fn is_established(&self) -> bool {
@@ -7130,10 +7176,17 @@ impl<F: BufFactory> Connection<F> {
 
         active_path.recovery.update_max_ack_delay(max_ack_delay);
 
-        if active_path.pmtud.get_probe_status() {
+        if active_path
+            .pmtud
+            .as_ref()
+            .map(|pmtud| pmtud.should_probe())
+            .unwrap_or(false)
+        {
             active_path.recovery.pmtud_update_max_datagram_size(
                 active_path
                     .pmtud
+                    .as_mut()
+                    .expect("PMTUD existence verified above")
                     .get_probe_size()
                     .min(peer_params.max_udp_payload_size as usize),
             );
@@ -7351,7 +7404,7 @@ impl<F: BufFactory> Connection<F> {
                 self.streams.has_stopped() ||
                 self.ids.has_new_scids() ||
                 self.ids.has_retire_dcids() ||
-                send_path.pmtud.get_probe_status() ||
+                send_path.pmtud.as_ref().is_some_and(|pmtud| pmtud.should_probe()) ||
                 send_path.needs_ack_eliciting ||
                 send_path.probing_required())
         {
@@ -8108,7 +8161,6 @@ impl<F: BufFactory> Connection<F> {
             info.from,
             &self.recovery_config,
             self.path_challenge_recv_max_queue_len,
-            MIN_CLIENT_INITIAL_LEN,
             false,
         );
 
@@ -8237,7 +8289,6 @@ impl<F: BufFactory> Connection<F> {
             peer_addr,
             &self.recovery_config,
             self.path_challenge_recv_max_queue_len,
-            MIN_CLIENT_INITIAL_LEN,
             false,
         );
         path.active_dcid_seq = Some(dcid_seq);
@@ -18805,16 +18856,27 @@ mod tests {
             .paths
             .path_id_from_addrs(&(server_addr, client_addr))
             .expect("no such path");
-
         // Check that PMTU params are configured correctly
-        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_probe_status());
+        let pmtu_param = pipe
+            .server
+            .paths
+            .get_mut(pid_1)
+            .unwrap()
+            .pmtud
+            .as_mut()
+            .unwrap();
+
+        assert!(pmtu_param.should_probe());
         assert_eq!(pmtu_param.get_probe_size(), 1350);
         assert_eq!(pipe.advance(), Ok(()));
-
+        
         for (_, p) in pipe.server.paths.iter_mut() {
-            assert_eq!(p.pmtud.get_current(), 1350);
-            assert!(!p.pmtud.get_probe_status());
+            let pmtud = p
+                .pmtud
+                .as_mut()
+                .expect("PMTUD should exist for the given config");
+            assert_eq!(pmtud.get_largest_succesful_probe(), 1350);
+            assert!(!pmtud.should_probe());
         }
     }
 
@@ -18856,22 +18918,33 @@ mod tests {
             .expect("no such path");
 
         // Check that PMTU params are configured correctly
-        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_probe_status());
+        let pmtu_param = pipe
+            .server
+            .paths
+            .get_mut(pid_1)
+            .unwrap()
+            .pmtud
+            .as_mut()
+            .unwrap();
+        assert!(pmtu_param.should_probe());
         assert_eq!(pmtu_param.get_probe_size(), 1350);
         std::thread::sleep(
-            pipe.server.paths.get_mut(pid_1).unwrap().recovery.rtt() +
-                time::Duration::from_millis(1),
+            pipe.server.paths.get_mut(pid_1).unwrap().recovery.rtt()
+                + time::Duration::from_millis(1),
         );
 
         let active_server_path = pipe.server.paths.get_active_mut().unwrap();
-        let pmtu_param = &mut active_server_path.pmtud;
+        let pmtud = active_server_path
+            .pmtud
+            .as_mut()
+            .expect("PMTUD should exist for the given config");
+
 
         // PMTU not updated since probe is not ACKed
-        assert_eq!(pmtu_param.get_current(), 1200);
+        assert_eq!(pmtud.get_largest_succesful_probe(), 1200);
 
         // Continue searching for PMTU
-        assert!(pmtu_param.get_probe_status());
+        assert!(pmtud.should_probe());
     }
 }
 
