@@ -367,19 +367,6 @@ where
                 break outcome;
             }
 
-            #[cfg(not(feature = "gcongestion"))]
-            let max_send_size = if !gcongestion_enabled {
-                // Only call qconn.send_quantum when !gcongestion_enabled.
-                tune_max_send_size(
-                    segment_size,
-                    qconn.send_quantum(),
-                    send_buf.len(),
-                )
-            } else {
-                usize::MAX
-            };
-
-            #[cfg(feature = "gcongestion")]
             let max_send_size = usize::MAX;
 
             // If segment_size is known, update the maximum of
@@ -521,15 +508,55 @@ where
                 (self.socket.as_udp_socket(), self.cfg.with_gso)
             {
                 // Only UDP supports GSO
-                send_to(
-                    udp_socket,
-                    self.cfg.peer_addr,
-                    self.write_state.send_from.filter(|_| self.cfg.with_pktinfo),
-                    current_send_buf,
-                    self.write_state.segment_size,
-                    self.write_state.tx_time,
-                )
-                .await
+                let last_packet_larger = self.write_state.bytes_written > self.write_state.num_pkts * self.write_state.segment_size;
+                if last_packet_larger {
+                    // Split the write into two sendmsg calls:
+                    // 1. The first writes the packets with size equal to the GSO segment_size.
+                    // 2. The second writes the larger last packet.
+
+                    let gso_write_len = (self.write_state.num_pkts - 1) * self.write_state.segment_size;
+                    let res1 = send_to(
+                        udp_socket,
+                        self.cfg.peer_addr,
+                        self.write_state.send_from.filter(|_| self.cfg.with_pktinfo),
+                        &current_send_buf[..gso_write_len],
+                        self.write_state.segment_size,
+                        self.write_state.tx_time,
+                    )
+                    .await;
+
+                    if res1.is_err() {
+                        res1
+                    } else {
+
+                    let last_packet_buf = &current_send_buf[gso_write_len..];
+                    let res2 = send_to(
+                        udp_socket,
+                        self.cfg.peer_addr,
+                        self.write_state.send_from.filter(|_| self.cfg.with_pktinfo),
+                        &current_send_buf[gso_write_len..],
+                        last_packet_buf.len(),
+                        self.write_state.tx_time,
+                    )
+                    .await;
+
+                    if let (Ok(bytes1), Ok(bytes2)) = (&res1, &res2) {
+                        Ok(bytes1 + bytes2)
+                    } else {
+                        res2
+                    }
+                    }
+                } else {
+                    send_to(
+                        udp_socket,
+                        self.cfg.peer_addr,
+                        self.write_state.send_from.filter(|_| self.cfg.with_pktinfo),
+                        current_send_buf,
+                        self.write_state.segment_size,
+                        self.write_state.tx_time,
+                    )
+                    .await
+                }
             } else {
                 self.socket
                     .send_to(current_send_buf, self.cfg.peer_addr)
