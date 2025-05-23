@@ -2531,6 +2531,27 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
+    /// Configures whether to do path MTU discovery.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::discover_pmtu()`].
+    ///
+    /// [`Config::discover_pmtu()`]: struct.Config.html#method.discover_pmtu
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_discover_pmtu_in_handshake(
+        ssl: &mut boring::ssl::SslRef, discover: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.pmtud = Some(discover);
+
+        Ok(())
+    }
+
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
@@ -7173,6 +7194,8 @@ impl<F: BufFactory> Connection<F> {
 
             tx_cap_factor: self.tx_cap_factor,
 
+            pmtud: None,
+
             is_server: self.is_server,
         };
 
@@ -7196,6 +7219,18 @@ impl<F: BufFactory> Connection<F> {
 
                     if ex_data.tx_cap_factor != self.tx_cap_factor {
                         self.tx_cap_factor = ex_data.tx_cap_factor;
+                    }
+
+                    if let Some(discover) = ex_data.pmtud {
+                        let path = self.paths.get_active_mut()?;
+
+                        path.pmtud.enable(discover);
+                        // It's harmless to set probe size even if we're disabling
+                        // pmtud.
+                        path.pmtud.set_probe_size(
+                            self.recovery_config.max_send_udp_payload_size,
+                        );
+                        path.pmtud.should_probe(discover);
                     }
                 }
 

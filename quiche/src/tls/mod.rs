@@ -697,6 +697,8 @@ pub struct ExData<'a> {
 
     pub tx_cap_factor: f64,
 
+    pub pmtud: Option<bool>,
+
     pub is_server: bool,
 }
 
