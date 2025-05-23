@@ -2531,6 +2531,27 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
+    /// Configures whether to do path MTU discovery.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::discover_pmtu()`].
+    ///
+    /// [`Config::discover_pmtu()`]: struct.Config.html#method.discover_pmtu
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_discover_pmtu_in_handshake(
+        ssl: &mut boring::ssl::SslRef, discover: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.pmtud = Some(discover);
+
+        Ok(())
+    }
+
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
@@ -7173,6 +7194,8 @@ impl<F: BufFactory> Connection<F> {
 
             tx_cap_factor: self.tx_cap_factor,
 
+            pmtud: None,
+
             is_server: self.is_server,
         };
 
@@ -7196,6 +7219,13 @@ impl<F: BufFactory> Connection<F> {
 
                     if ex_data.tx_cap_factor != self.tx_cap_factor {
                         self.tx_cap_factor = ex_data.tx_cap_factor;
+                    }
+
+                    if let Some(discover) = ex_data.pmtud {
+                        self.paths.set_discover_pmtu_on_existing_paths(
+                            discover,
+                            self.recovery_config.max_send_udp_payload_size,
+                        );
                     }
                 }
 
@@ -16518,7 +16548,8 @@ mod tests {
 
         const CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 30;
 
-        // Manually construct `SSlContextBuilder` for the server.
+        // Manually construct `SslContextBuilder` for the server so we can modify
+        // CWND during the handshake.
         let mut server_tls_ctx_builder =
             boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
                 .unwrap();
@@ -18872,6 +18903,221 @@ mod tests {
 
         // Continue searching for PMTU
         assert!(pmtu_param.get_probe_status());
+    }
+
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[rstest]
+    fn enable_pmtud_mid_handshake(
+        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        // Manually construct `SslContextBuilder` for the server so we can enable
+        // PMTUD during the handshake.
+        let mut server_tls_ctx_builder =
+            boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
+                .unwrap();
+        server_tls_ctx_builder
+            .set_certificate_chain_file("examples/cert.crt")
+            .unwrap();
+        server_tls_ctx_builder
+            .set_private_key_file(
+                "examples/cert.key",
+                boring::ssl::SslFiletype::PEM,
+            )
+            .unwrap();
+        server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
+            <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), true)
+                .unwrap();
+
+            Ok(())
+        });
+
+        let mut server_config = Config::with_boring_ssl_ctx_builder(
+            crate::PROTOCOL_VERSION,
+            server_tls_ctx_builder,
+        )
+        .unwrap();
+        assert_eq!(
+            server_config.set_cc_algorithm_name(cc_algorithm_name),
+            Ok(())
+        );
+
+        let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        client_config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        client_config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+
+        for config in [&mut client_config, &mut server_config] {
+            config
+                .set_application_protos(&[b"proto1", b"proto2"])
+                .unwrap();
+            config.set_initial_max_data(1000000);
+            config.set_initial_max_stream_data_bidi_local(15);
+            config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_stream_data_uni(10);
+            config.set_initial_max_streams_bidi(3);
+            config.set_initial_max_streams_uni(3);
+            config.set_max_idle_timeout(180_000);
+            config.verify_peer(false);
+            config.set_ack_delay_exponent(8);
+            config.set_max_send_udp_payload_size(1350);
+        }
+
+        let mut pipe = testing::Pipe::with_client_and_server_config(
+            &mut client_config,
+            &mut server_config,
+        )
+        .unwrap();
+
+        let pmtud_enabled = pipe
+            .server
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .is_enabled();
+        assert_eq!(pmtud_enabled, false);
+
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let pmtud_enabled = pipe
+            .server
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .is_enabled();
+        assert_eq!(pmtud_enabled, true);
+
+        let current_path_size = pipe
+            .server
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .get_current();
+        assert_eq!(current_path_size, 1200);
+
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let new_path_size = pipe
+            .server
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .get_current();
+        assert_eq!(new_path_size, 1350);
+    }
+
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[rstest]
+    fn disable_pmtud_mid_handshake(
+        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        // Manually construct `SslContextBuilder` for the server so we can enable
+        // PMTUD during the handshake.
+        let mut server_tls_ctx_builder =
+            boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
+                .unwrap();
+        server_tls_ctx_builder
+            .set_certificate_chain_file("examples/cert.crt")
+            .unwrap();
+        server_tls_ctx_builder
+            .set_private_key_file(
+                "examples/cert.key",
+                boring::ssl::SslFiletype::PEM,
+            )
+            .unwrap();
+        server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
+            <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), false)
+                .unwrap();
+
+            Ok(())
+        });
+
+        let mut server_config = Config::with_boring_ssl_ctx_builder(
+            crate::PROTOCOL_VERSION,
+            server_tls_ctx_builder,
+        )
+        .unwrap();
+        assert_eq!(
+            server_config.set_cc_algorithm_name(cc_algorithm_name),
+            Ok(())
+        );
+
+        let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        client_config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        client_config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+
+        for config in [&mut client_config, &mut server_config] {
+            config
+                .set_application_protos(&[b"proto1", b"proto2"])
+                .unwrap();
+            config.set_initial_max_data(1000000);
+            config.set_initial_max_stream_data_bidi_local(15);
+            config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_stream_data_uni(10);
+            config.set_initial_max_streams_bidi(3);
+            config.set_initial_max_streams_uni(3);
+            config.set_max_idle_timeout(180_000);
+            config.verify_peer(false);
+            config.set_ack_delay_exponent(8);
+            config.set_max_send_udp_payload_size(1350);
+            config.discover_pmtu(true);
+        }
+
+        let mut pipe = testing::Pipe::with_client_and_server_config(
+            &mut client_config,
+            &mut server_config,
+        )
+        .unwrap();
+
+        let pmtud_enabled = pipe
+            .server
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .is_enabled();
+        assert_eq!(pmtud_enabled, true);
+
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let pmtud_enabled = pipe
+            .server
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .is_enabled();
+        assert_eq!(pmtud_enabled, false);
+
+        let current_path_size = pipe
+            .server
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .get_current();
+        assert_eq!(current_path_size, 1200);
+
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let new_path_size = pipe
+            .server
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .get_current();
+        assert_eq!(new_path_size, 1200);
     }
 }
 
