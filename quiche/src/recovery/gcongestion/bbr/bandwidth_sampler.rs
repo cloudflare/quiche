@@ -171,7 +171,7 @@ struct BandwidthSample {
     /// The RTT measurement at this particular sample.  Does not correct for
     /// delayed ack time.
     rtt: Duration,
-    /// [`send_rate`] is computed from the current packet being acked('P') and
+    /// `send_rate` is computed from the current packet being acked('P') and
     /// an earlier packet that is acked before P was sent.
     send_rate: Option<Bandwidth>,
     /// States captured when the packet was sent.
@@ -202,14 +202,14 @@ struct ConnectionStateOnSentPacket {
     sent_time: Instant,
     /// Size of the packet.
     size: usize,
-    /// The value of [`total_bytes_sent_at_last_acked_packet`] at the time the
-    /// packet was sent.
+    /// The value of [`BandwidthSampler::total_bytes_sent_at_last_acked_packet`]
+    /// at the time the packet was sent.
     total_bytes_sent_at_last_acked_packet: usize,
-    /// The value of [`last_acked_packet_sent_time`] at the time the packet was
-    /// sent.
+    /// The value of [`BandwidthSampler::last_acked_packet_sent_time`] at the
+    /// time the packet was sent.
     last_acked_packet_sent_time: Instant,
-    /// The value of [`last_acked_packet_ack_time`] at the time the packet was
-    /// sent.
+    /// The value of [`BandwidthSampler::last_acked_packet_ack_time`] at the
+    /// time the packet was sent.
     last_acked_packet_ack_time: Instant,
     /// Send time states that are returned to the congestion controller when the
     /// packet is acked or lost.
@@ -243,7 +243,7 @@ struct MaxAckHeightTracker {
 pub(crate) struct CongestionEventSample {
     /// The maximum bandwidth sample from all acked packets.
     pub sample_max_bandwidth: Option<Bandwidth>,
-    /// Whether [`sample_max_bandwidth`] is from a app-limited sample.
+    /// Whether [`Self::sample_max_bandwidth`] is from a app-limited sample.
     pub sample_is_app_limited: bool,
     /// The minimum rtt sample from all acked packets.
     pub sample_rtt: Option<Duration>,

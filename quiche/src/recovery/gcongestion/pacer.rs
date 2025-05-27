@@ -72,7 +72,7 @@ pub struct Pacer {
     ideal_next_packet_send_time: ReleaseTime,
     initial_burst_size: usize,
     /// Number of unpaced packets to be sent before packets are delayed. This
-    /// token is consumed after [`burst_tokens`] ran out.
+    /// token is consumed after [`Self::burst_tokens`] ran out.
     lumpy_tokens: usize,
     /// Indicates whether pacing throttles the sending. If true, make up for
     /// lost time.
@@ -82,7 +82,7 @@ pub struct Pacer {
 impl Pacer {
     /// Create a new [`Pacer`] with and underlying [`Congestion`]
     /// implementation, and an optional throttling as specified by
-    /// [`max_pacing_rate`].
+    /// `max_pacing_rate`.
     pub(crate) fn new(
         enabled: bool, congestion: Congestion, max_pacing_rate: Option<Bandwidth>,
     ) -> Self {
