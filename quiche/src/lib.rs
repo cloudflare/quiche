@@ -5269,10 +5269,10 @@ impl<F: BufFactory> Connection<F> {
     /// provided buffer directly to the send queue if the capacity allows
     /// it.
     ///
-    /// When a partial write happens (including when [`Done`] is returned) the
-    /// remaining (unwrittent) buffer will also be returned. The application
-    /// should retry the operation once the stream is reported as writable
-    /// again.
+    /// When a partial write happens (including when [`Error::Done`] is
+    /// returned) the remaining (unwritten) buffer will also be returned.
+    /// The application should retry the operation once the stream is
+    /// reported as writable again.
     pub fn stream_send_zc(
         &mut self, stream_id: u64, buf: F::Buf, len: Option<usize>, fin: bool,
     ) -> Result<(usize, Option<F::Buf>)>

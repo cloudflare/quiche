@@ -74,7 +74,7 @@ where
     _bf: PhantomData<F>,
 }
 
-/// A trait for providing internal storage buffers for [`RangeBuf`].
+/// A trait for providing internal storage buffers for `RangeBuf`.
 /// The associated type `Buf` can be any type that dereferences to
 /// a slice, but should be fast to clone, eg. by wrapping it with an
 /// [`Arc`].

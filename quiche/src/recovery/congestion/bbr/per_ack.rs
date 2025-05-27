@@ -274,7 +274,7 @@ fn bbr_check_drain(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
 /// This is largely based on the [`bbr_packets_in_net_at_edt()`] function from
 /// Linux' BBR implementation.
 ///
-/// `bbr_packets_in_net_at_edt()`: https://elixir.bootlin.com/linux/v6.13.7/source/net/ipv4/tcp_bbr.c#L437
+/// [`bbr_packets_in_net_at_edt()`]: https://elixir.bootlin.com/linux/v6.13.7/source/net/ipv4/tcp_bbr.c#L437
 fn bbr_bytes_in_net(r: &Congestion, in_flight: usize, now: Instant) -> usize {
     let edt = r.pacer.next_time().max(now);
     let interval = edt.saturating_duration_since(now);

@@ -374,7 +374,7 @@ pub struct GRecovery {
     newly_acked: Vec<Acked>,
 
     /// A [`Vec`] that can be reused for calls of
-    /// [`detect_and_remove_lost_packets`] to avoid allocations
+    /// [`Self::detect_and_remove_lost_packets`] to avoid allocations
     lost_reuse: Vec<Lost>,
 
     pacer: Pacer,
