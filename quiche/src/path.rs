@@ -843,6 +843,19 @@ impl PathMap {
 
         Ok(())
     }
+
+    /// Configures path MTU discovery on all existing paths.
+    pub fn set_discover_pmtu_on_existing_paths(
+        &mut self, discover: bool, max_send_udp_payload_size: usize,
+    ) {
+        for (_, path) in self.paths.iter_mut() {
+            path.pmtud.enable(discover);
+            // It's harmless to modify probe size even if we're disabling
+            // pmtud.
+            path.pmtud.set_probe_size(max_send_udp_payload_size);
+            path.pmtud.should_probe(discover);
+        }
+    }
 }
 
 /// Statistics about the path of a connection.
