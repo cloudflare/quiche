@@ -37,6 +37,13 @@ use libc::c_int;
 use libc::c_uint;
 use libc::c_void;
 
+#[cfg(feature = "openssl")]
+use libc::c_uchar;
+#[cfg(feature = "openssl")]
+use libc::size_t;
+#[cfg(feature = "openssl")]
+use crate::OsslQuicData;
+
 use crate::Error;
 use crate::Result;
 
@@ -131,7 +138,7 @@ pub struct Context(*mut SSL_CTX);
 
 impl Context {
     // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // submodule (openssl / quictls / boringssl).
     pub fn new() -> Result<Context> {
         unsafe {
             let ctx_raw = SSL_CTX_new(TLS_method());
@@ -357,7 +364,7 @@ pub struct Handshake {
 
 impl Handshake {
     // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // submodule (openssl / quictls / boringssl).
     #[cfg(feature = "ffi")]
     pub unsafe fn from_ptr(ssl: *mut c_void) -> Handshake {
         Handshake::new(ssl as *mut SSL)
@@ -391,11 +398,12 @@ impl Handshake {
         Ok(())
     }
 
-    pub fn use_legacy_codepoint(&mut self, use_legacy: bool) {
+    pub fn use_legacy_codepoint(&mut self, _use_legacy: bool) {
+        #[cfg(not(feature = "openssl"))]
         unsafe {
             SSL_set_quic_use_legacy_codepoint(
                 self.as_mut_ptr(),
-                use_legacy as c_int,
+                _use_legacy as c_int,
             );
         }
     }
@@ -418,9 +426,14 @@ impl Handshake {
     }
 
     pub fn set_quic_method(&mut self) -> Result<()> {
-        map_result(unsafe {
+        #[cfg(feature = "openssl")]
+        return map_result(unsafe {
+            SSL_set_quic_tls_cbs(self.as_mut_ptr(), QTDIS.as_ptr(), ptr::null_mut())
+        });
+        #[cfg(not(feature = "openssl"))]
+        return map_result(unsafe {
             SSL_set_quic_method(self.as_mut_ptr(), &QUICHE_STREAM_METHOD)
-        })
+        });
     }
 
     pub fn set_min_proto_version(&mut self, version: u16) -> Result<()> {
@@ -453,6 +466,15 @@ impl Handshake {
     }
 
     pub fn set_quic_transport_params(&mut self, buf: &[u8]) -> Result<()> {
+        #[cfg(feature = "openssl")]
+        let rc = unsafe {
+            SSL_set_quic_tls_transport_params(
+                self.as_mut_ptr(),
+                buf.as_ptr(),
+                buf.len(),
+            )
+        };
+        #[cfg(not(feature = "openssl"))]
         let rc = unsafe {
             SSL_set_quic_transport_params(
                 self.as_mut_ptr(),
@@ -463,6 +485,7 @@ impl Handshake {
         self.map_result_ssl(rc)
     }
 
+    #[cfg(not(feature = "openssl"))]
     pub fn quic_transport_params(&self) -> &[u8] {
         let mut ptr: *const u8 = ptr::null();
         let mut len: usize = 0;
@@ -510,6 +533,35 @@ impl Handshake {
         s.to_str().ok()
     }
 
+    #[cfg(feature = "openssl")]
+    pub fn provide_data(
+        &mut self, level: crypto::Level, buf: &[u8], ossl_data: &mut OsslQuicData
+    ) -> Result<()> {
+        self.provided_data_outstanding = true;
+
+        // Level can be different than the current read, but not less
+        if level < ossl_data.read_level {
+            return Err(Error::TlsFail)
+        }
+
+        ossl_data.crypto_buf.extend_from_slice(buf);
+
+        // Split on handshake message boundaries
+        // TLS Handshake message header is 4 bytes (1-byte type and 3-byte length)
+        while ossl_data.crypto_buf.len() > 4 {
+            let len = u32::from_be_bytes([0, ossl_data.crypto_buf[1],
+                ossl_data.crypto_buf[2], ossl_data.crypto_buf[3]]) as usize;
+            if ossl_data.crypto_buf.len() < 4 + len {
+                break;
+            }
+            let next_data = ossl_data.crypto_buf.drain(..4+len).collect();
+            ossl_data.queued_data.push_back(next_data);
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "openssl"))]
     pub fn provide_data(
         &mut self, level: crypto::Level, buf: &[u8],
     ) -> Result<()> {
@@ -543,6 +595,10 @@ impl Handshake {
         self.provided_data_outstanding = false;
 
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
+        #[cfg(feature = "openssl")]
+        // When 0-RTT for OpenSSL is implemented, we must call SSL_read() here
+        let rc = 1;
+        #[cfg(not(feature = "openssl"))]
         let rc = unsafe { SSL_process_quic_post_handshake(self.as_mut_ptr()) };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
 
@@ -551,6 +607,12 @@ impl Handshake {
     }
 
     pub fn write_level(&self) -> crypto::Level {
+        #[cfg(feature = "openssl")]
+        match ExData::from_ssl_ptr(self.as_ptr()) {
+            Some(ex_data) => ex_data.ossl_data.write_level,
+            None => crypto::Level::Initial,
+        }
+        #[cfg(not(feature = "openssl"))]
         unsafe { SSL_quic_write_level(self.as_ptr()) }
     }
 
@@ -700,6 +762,9 @@ pub struct ExData<'a> {
     pub pmtud: Option<bool>,
 
     pub is_server: bool,
+
+    #[cfg(feature = "openssl")]
+    pub ossl_data: &'a mut OsslQuicData,
 }
 
 impl<'a> ExData<'a> {
@@ -867,6 +932,7 @@ extern "C" fn add_handshake_data(
     1
 }
 
+#[cfg(not(feature = "openssl"))]
 extern "C" fn flush_flight(_ssl: *mut SSL) -> c_int {
     // We don't really need to anything here since the output packets are
     // generated separately, when conn.send() is called.
@@ -986,6 +1052,9 @@ extern "C" fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
     };
 
     let handshake = Handshake::new(ssl);
+    #[cfg(feature = "openssl")]
+    let peer_params = &ex_data.ossl_data.peer_transport_params;
+    #[cfg(not(feature = "openssl"))]
     let peer_params = handshake.quic_transport_params();
 
     // Serialize session object into buffer.
@@ -1070,7 +1139,7 @@ fn log_ssl_error() {
 
 extern "C" {
     // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // submodule (openssl / quictls / boringssl).
 
     // SSL_METHOD
     fn TLS_method() -> *const SSL_METHOD;
@@ -1161,19 +1230,33 @@ extern "C" {
 
     fn SSL_set_quiet_shutdown(ssl: *mut SSL, mode: c_int);
 
+    #[cfg(not(feature = "openssl"))]
     fn SSL_set_quic_transport_params(
         ssl: *mut SSL, params: *const u8, params_len: usize,
     ) -> c_int;
 
+    #[cfg(feature = "openssl")]
+    fn SSL_set_quic_tls_transport_params(
+        s: *mut SSL, params: *const c_uchar, params_len: size_t,
+    ) -> c_int;
+
+    #[cfg(not(feature = "openssl"))]
     fn SSL_set_quic_method(
         ssl: *mut SSL, quic_method: *const SSL_QUIC_METHOD,
     ) -> c_int;
 
+    #[cfg(feature = "openssl")]
+    fn SSL_set_quic_tls_cbs(
+        s: *mut SSL, qtdis: *const OSSL_DISPATCH, arg: *mut c_void,
+    ) -> c_int;
+
+    #[cfg(not(feature = "openssl"))]
     fn SSL_set_quic_use_legacy_codepoint(ssl: *mut SSL, use_legacy: c_int);
 
     #[cfg(test)]
     fn SSL_set_options(ssl: *mut SSL, opts: u32) -> u32;
 
+    #[cfg(not(feature = "openssl"))]
     fn SSL_get_peer_quic_transport_params(
         ssl: *const SSL, out_params: *mut *const u8, out_params_len: *mut usize,
     );
@@ -1184,14 +1267,17 @@ extern "C" {
 
     fn SSL_get_servername(ssl: *const SSL, ty: c_int) -> *const c_char;
 
+    #[cfg(not(feature = "openssl"))]
     fn SSL_provide_quic_data(
         ssl: *mut SSL, level: crypto::Level, data: *const u8, len: usize,
     ) -> c_int;
 
+    #[cfg(not(feature = "openssl"))]
     fn SSL_process_quic_post_handshake(ssl: *mut SSL) -> c_int;
 
     fn SSL_do_handshake(ssl: *mut SSL) -> c_int;
 
+    #[cfg(not(feature = "openssl"))]
     fn SSL_quic_write_level(ssl: *const SSL) -> crypto::Level;
 
     fn SSL_session_reused(ssl: *const SSL) -> c_int;
@@ -1229,18 +1315,23 @@ extern "C" {
 
     fn ERR_error_string_n(err: c_uint, buf: *mut c_char, len: usize);
 
-    // OPENSSL
+    // OPENSSL / QUICTLS
     #[allow(dead_code)]
     fn OPENSSL_free(ptr: *mut c_void);
 
 }
 
-#[cfg(not(feature = "openssl"))]
+#[cfg(not(any(feature = "quictls", feature = "openssl")))]
 mod boringssl;
-#[cfg(not(feature = "openssl"))]
+#[cfg(not(any(feature = "quictls", feature = "openssl")))]
 use boringssl::*;
 
+#[cfg(feature = "quictls")]
+mod quictls;
+#[cfg(feature = "quictls")]
+use quictls::*;
+
 #[cfg(feature = "openssl")]
-mod openssl_quictls;
+mod openssl;
 #[cfg(feature = "openssl")]
-use openssl_quictls::*;
+use openssl::*;

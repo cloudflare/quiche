@@ -11,6 +11,8 @@ edition = { workspace = true }
 readme = "README.md"
 
 [features]
+default = ["boring-default"]
+
 # Forwarded quiche features for re-exports
 fuzzing = ["quiche/fuzzing"]
 quiche_internal = ["quiche/internal"]
@@ -34,13 +36,21 @@ capture_keylogs = []
 # Enable scheduling & poll duration histograms for tokio tasks.
 tokio-task-metrics = []
 
+# Default feature using BoringSSL
+boring-default = ["dep:boring", "quiche/boringssl-boring-crate", "quiche/qlog"]
+
+# Feature to use OpenSSL instead of BoringSSL
+openssl = ["dep:quiche", "quiche/qlog"]
+# Feature to use QuicTLS instead of BoringSSL
+quictls = ["dep:quiche", "quiche/qlog"]
+
 [lints.rust]
 # capture_keylogs: enable SSLKEYLOGFILE capturing for QUIC connections.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(capture_keylogs)'] }
 
 [dependencies]
 anyhow = { workspace = true }
-boring = { workspace = true }
+boring = { workspace = true, optional = true }
 buffer-pool = { workspace = true }
 crossbeam = { workspace = true, default-features = false }
 datagram-socket = { workspace = true }
@@ -53,7 +63,7 @@ ipnetwork = { workspace = true }
 log = { workspace = true }
 octets = { workspace = true }
 pin-project = { workspace = true }
-quiche = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
+quiche = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_with = { workspace = true }
 slog-scope = { workspace = true }

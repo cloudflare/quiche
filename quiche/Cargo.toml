@@ -36,6 +36,9 @@ boringssl-vendored = []
 # Use the BoringSSL library provided by the boring crate.
 boringssl-boring-crate = ["boring", "foreign-types-shared"]
 
+# Build quiche against QuicTLS instead of BoringSSL.
+quictls = ["pkg-config"]
+
 # Build quiche against OpenSSL instead of BoringSSL.
 openssl = ["pkg-config"]
 
