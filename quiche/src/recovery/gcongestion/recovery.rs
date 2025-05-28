@@ -986,7 +986,7 @@ impl RecoveryOps for GRecovery {
     #[cfg(feature = "qlog")]
     fn maybe_qlog(&mut self) -> Option<EventData> {
         let qlog_metrics = QlogMetrics {
-            min_rtt: self.rtt_stats.min_rtt().unwrap_or(Duration::MAX),
+            min_rtt: *self.rtt_stats.min_rtt,
             smoothed_rtt: self.rtt(),
             latest_rtt: self.rtt_stats.latest_rtt(),
             rttvar: self.rtt_stats.rttvar(),
