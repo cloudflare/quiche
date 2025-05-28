@@ -56,6 +56,7 @@ pub enum QuicHandshakeStage {
 pub enum QuicWriteError {
     Err,
     Partial,
+    WouldBlock,
 }
 
 /// Category of error that caused the QUIC handshake to fail.

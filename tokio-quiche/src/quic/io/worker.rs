@@ -528,6 +528,8 @@ where
                     current_send_buf,
                     self.write_state.segment_size,
                     self.write_state.tx_time,
+                    self.metrics
+                        .write_errors(labels::QuicWriteError::WouldBlock),
                 )
                 .await
             } else {

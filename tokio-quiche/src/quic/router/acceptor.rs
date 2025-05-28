@@ -149,6 +149,10 @@ where
         let socket = Arc::clone(&self.socket);
         #[cfg(target_os = "linux")]
         let with_pktinfo = self.config.with_pktinfo;
+        #[cfg(target_os = "linux")]
+        let would_block_metric = self
+            .metrics
+            .write_errors(labels::QuicWriteError::WouldBlock);
 
         spawn_with_killswitch(async move {
             let send_buf = &send_buf[..written];
@@ -170,6 +174,7 @@ where
                     send_buf,
                     send_buf.len(),
                     None,
+                    would_block_metric,
                 )
                 .await;
             }

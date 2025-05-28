@@ -28,6 +28,8 @@ use std::io;
 use std::net::SocketAddr;
 use std::time::Instant;
 
+use foundations::telemetry::metrics::Counter;
+
 #[cfg(target_os = "linux")]
 mod linux_imports {
     pub(super) use nix::sys::socket::sendmsg;
@@ -115,6 +117,7 @@ impl PktInfo {
 pub async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, from: Option<SocketAddr>,
     send_buf: &[u8], segment_size: usize, tx_time: Option<Instant>,
+    would_block_metric: Counter,
 ) -> io::Result<usize> {
     // An instant with the value of zero, since [`Instant`] is backed by a version
     // of timespec this allows to extract raw values from an [`Instant`]
@@ -156,8 +159,10 @@ pub async fn send_to(
 
         match res {
             // Wait for the socket to become writable and try again
-            Err(e) if e.kind() == ErrorKind::WouldBlock =>
-                socket.writable().await?,
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                would_block_metric.inc();
+                socket.writable().await?
+            },
             res => return res,
         }
     }
@@ -167,6 +172,7 @@ pub async fn send_to(
 pub(crate) async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, _from: Option<SocketAddr>,
     send_buf: &[u8], _segment_size: usize, _tx_time: Option<Instant>,
+    _would_block_metric: Counter,
 ) -> io::Result<usize> {
     socket.send_to(send_buf, to).await
 }
