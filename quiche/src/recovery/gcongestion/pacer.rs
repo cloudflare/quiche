@@ -115,6 +115,10 @@ impl Pacer {
 }
 
 impl CongestionControl for Pacer {
+    fn state_str(&self) -> &'static str {
+        self.sender.state_str()
+    }
+
     fn get_congestion_window(&self) -> usize {
         self.sender.get_congestion_window()
     }

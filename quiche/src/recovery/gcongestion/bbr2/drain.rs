@@ -49,6 +49,10 @@ pub(super) struct Drain {
 }
 
 impl ModeImpl for Drain {
+    fn state_str(&self) -> &'static str {
+        "bbr_drain"
+    }
+
     fn is_probing_for_bandwidth(&self) -> bool {
         false
     }

@@ -49,6 +49,10 @@ pub(super) struct Startup {
 }
 
 impl ModeImpl for Startup {
+    fn state_str(&self) -> &'static str {
+        "bbr_startup"
+    }
+
     fn is_probing_for_bandwidth(&self) -> bool {
         true
     }

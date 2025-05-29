@@ -329,6 +329,8 @@ pub(crate) struct CongestionControlOps {
 
     pub has_custom_pacing: fn() -> bool,
 
+    pub state_str: fn(r: &Congestion, now: Instant) -> &'static str,
+
     pub debug_fmt: fn(
         r: &Congestion,
         formatter: &mut std::fmt::Formatter,
