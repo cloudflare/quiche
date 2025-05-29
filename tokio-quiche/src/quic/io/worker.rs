@@ -175,7 +175,7 @@ where
 
                 // Try to clear all received packets every so often, because
                 // incoming packets contain acks, and because the
-                // recieve queue has a very limited size, once it is full incoming
+                // receive queue has a very limited size, once it is full incoming
                 // packets get stalled indefinitely
                 let mut did_recv = false;
                 while let Some(pkt) = ctx
