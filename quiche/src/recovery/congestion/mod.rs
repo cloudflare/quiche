@@ -34,8 +34,55 @@ use super::Sent;
 use crate::recovery::rtt;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::CongestionControlAlgorithm;
+use crate::StartupExit;
+use crate::StartupExitReason;
 
 pub const PACING_MULTIPLIER: f64 = 1.25;
+
+pub struct SsThresh {
+    // Current slow start threshold.  Defaults to usize::MAX which
+    // indicates we're still in the initial slow start phase.
+    ssthresh: usize,
+
+    // Information about the slow start exit, if it already happened.
+    // Set on the first call to update().
+    startup_exit: Option<StartupExit>,
+}
+
+impl Default for SsThresh {
+    fn default() -> Self {
+        Self {
+            ssthresh: usize::MAX,
+            startup_exit: None,
+        }
+    }
+}
+
+impl SsThresh {
+    fn get(&self) -> usize {
+        self.ssthresh
+    }
+
+    fn startup_exit(&self) -> Option<StartupExit> {
+        self.startup_exit
+    }
+
+    fn update(&mut self, ssthresh: usize, in_css: bool) {
+        if self.startup_exit.is_none() {
+            let reason = if in_css {
+                // Exit happened in conservative slow start, attribute
+                // the exit to persistent queues.
+                StartupExitReason::PersistentQueue
+            } else {
+                // In normal slow start, attribute the exit to loss.
+                StartupExitReason::Loss
+            };
+            self.startup_exit = Some(StartupExit::new(ssthresh, reason));
+        }
+        self.ssthresh = ssthresh;
+    }
+}
+
 pub struct Congestion {
     // Congestion control.
     pub(crate) cc_ops: &'static CongestionControlOps,
@@ -63,7 +110,7 @@ pub struct Congestion {
 
     pub(crate) congestion_window: usize,
 
-    pub(crate) ssthresh: usize,
+    pub(crate) ssthresh: SsThresh,
 
     bytes_acked_sl: usize,
 
@@ -91,7 +138,7 @@ impl Congestion {
         let mut cc = Congestion {
             congestion_window: initial_congestion_window,
 
-            ssthresh: usize::MAX,
+            ssthresh: Default::default(),
 
             bytes_acked_sl: 0,
 
@@ -183,7 +230,9 @@ impl Congestion {
             self.prr.on_packet_sent(sent_bytes);
 
             // HyStart++: Start of the round in a slow start.
-            if self.hystart.enabled() && self.congestion_window < self.ssthresh {
+            if self.hystart.enabled() &&
+                self.congestion_window < self.ssthresh.get()
+            {
                 self.hystart.start_round(pkt.pkt_num);
             }
         }
@@ -298,6 +347,56 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
                 &bbr2::BBR2
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssthresh_init() {
+        let ssthresh: SsThresh = Default::default();
+        assert_eq!(ssthresh.get(), usize::MAX);
+        assert_eq!(ssthresh.startup_exit(), None);
+    }
+
+    #[test]
+    fn ssthresh_in_css() {
+        let expected_startup_exit =
+            StartupExit::new(1000, StartupExitReason::PersistentQueue);
+        let mut ssthresh: SsThresh = Default::default();
+        ssthresh.update(1000, true);
+        assert_eq!(ssthresh.get(), 1000);
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+
+        ssthresh.update(2000, true);
+        assert_eq!(ssthresh.get(), 2000);
+        // startup_exit is only updated on the first update.
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+
+        ssthresh.update(500, false);
+        assert_eq!(ssthresh.get(), 500);
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+    }
+
+    #[test]
+    fn ssthresh_in_slow_start() {
+        let expected_startup_exit =
+            StartupExit::new(1000, StartupExitReason::Loss);
+        let mut ssthresh: SsThresh = Default::default();
+        ssthresh.update(1000, false);
+        assert_eq!(ssthresh.get(), 1000);
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+
+        ssthresh.update(2000, true);
+        assert_eq!(ssthresh.get(), 2000);
+        // startup_exit is only updated on the first update.
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+
+        ssthresh.update(500, false);
+        assert_eq!(ssthresh.get(), 500);
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
     }
 }
 

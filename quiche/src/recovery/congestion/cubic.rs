@@ -193,7 +193,7 @@ fn on_packet_acked(
         r.prr.on_packet_acked(
             packet.size,
             bytes_in_flight,
-            r.ssthresh,
+            r.ssthresh.get(),
             r.max_datagram_size,
         );
 
@@ -227,7 +227,7 @@ fn on_packet_acked(
         }
     }
 
-    if r.congestion_window < r.ssthresh {
+    if r.congestion_window < r.ssthresh.get() {
         // In Slow start, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
@@ -245,7 +245,7 @@ fn on_packet_acked(
 
         if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
-            r.ssthresh = r.congestion_window;
+            r.ssthresh.update(r.congestion_window, true);
         }
     } else {
         // Congestion avoidance.
@@ -347,10 +347,11 @@ fn congestion_event(
             r.cubic_state.w_max = r.congestion_window as f64;
         }
 
-        r.ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
-        r.ssthresh =
-            cmp::max(r.ssthresh, r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
-        r.congestion_window = r.ssthresh;
+        let ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
+        let ssthresh =
+            cmp::max(ssthresh, r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
+        r.ssthresh.update(ssthresh, r.hystart.in_css());
+        r.congestion_window = ssthresh;
 
         r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {
             0.0
@@ -375,7 +376,7 @@ fn congestion_event(
 
 fn checkpoint(r: &mut Congestion) {
     r.cubic_state.prior.congestion_window = r.congestion_window;
-    r.cubic_state.prior.ssthresh = r.ssthresh;
+    r.cubic_state.prior.ssthresh = r.ssthresh.get();
     r.cubic_state.prior.w_max = r.cubic_state.w_max;
     r.cubic_state.prior.k = r.cubic_state.k;
     r.cubic_state.prior.epoch_start = r.congestion_recovery_start_time;
@@ -393,7 +394,7 @@ fn rollback(r: &mut Congestion) -> bool {
     }
 
     r.congestion_window = r.cubic_state.prior.congestion_window;
-    r.ssthresh = r.cubic_state.prior.ssthresh;
+    r.ssthresh.update(r.cubic_state.prior.ssthresh, false);
     r.cubic_state.w_max = r.cubic_state.prior.w_max;
     r.cubic_state.k = r.cubic_state.prior.k;
     r.congestion_recovery_start_time = r.cubic_state.prior.epoch_start;
@@ -687,7 +688,7 @@ mod tests {
             sender.ack_n_packets(n_rtt_sample, size);
         }
         // Now we are in congestion avoidance.
-        assert_eq!(sender.congestion_window(), sender.ssthresh);
+        assert_eq!(sender.congestion_window(), sender.ssthresh.get());
     }
 
     #[test]

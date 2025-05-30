@@ -837,8 +837,7 @@ impl RecoveryOps for LegacyRecovery {
 
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit> {
-        // TODO implement
-        None
+        self.congestion.ssthresh.startup_exit()
     }
 
     fn max_datagram_size(&self) -> usize {
@@ -949,7 +948,7 @@ impl RecoveryOps for LegacyRecovery {
             rttvar: self.rtt_stats.rttvar,
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight as u64,
-            ssthresh: Some(self.congestion.ssthresh as u64),
+            ssthresh: Some(self.congestion.ssthresh.get() as u64),
             pacing_rate: self.congestion.pacer.rate(),
         };
 
@@ -998,7 +997,7 @@ impl std::fmt::Debug for LegacyRecovery {
         write!(f, "min_rtt={:?} ", *self.rtt_stats.min_rtt)?;
         write!(f, "rttvar={:?} ", self.rtt_stats.rttvar)?;
         write!(f, "cwnd={} ", self.cwnd())?;
-        write!(f, "ssthresh={} ", self.congestion.ssthresh)?;
+        write!(f, "ssthresh={} ", self.congestion.ssthresh.get())?;
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
         write!(f, "app_limited={} ", self.congestion.app_limited)?;
         write!(

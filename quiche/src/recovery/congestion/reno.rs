@@ -79,7 +79,7 @@ fn on_packet_acked(
         return;
     }
 
-    if r.congestion_window < r.ssthresh {
+    if r.congestion_window < r.ssthresh.get() {
         // In Slow slart, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
@@ -92,7 +92,7 @@ fn on_packet_acked(
 
         if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
-            r.ssthresh = r.congestion_window;
+            r.ssthresh.update(r.congestion_window, true);
         }
     } else {
         // Congestion avoidance.
@@ -127,7 +127,7 @@ fn congestion_event(
         r.bytes_acked_ca =
             (r.congestion_window as f64 * LOSS_REDUCTION_FACTOR) as usize;
 
-        r.ssthresh = r.congestion_window;
+        r.ssthresh.update(r.congestion_window, r.hystart.in_css());
 
         if r.hystart.in_css() {
             r.hystart.congestion_event();

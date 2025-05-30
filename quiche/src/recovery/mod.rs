@@ -944,6 +944,12 @@ mod tests {
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
+        if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
+            assert!(r.startup_exit().is_some());
+            assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
+        } else {
+            assert_eq!(r.startup_exit(), None);
+        }
     }
 
     #[rstest]
@@ -1127,6 +1133,12 @@ mod tests {
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
+        if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
+            assert!(r.startup_exit().is_some());
+            assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
+        } else {
+            assert_eq!(r.startup_exit(), None);
+        }
     }
 
     #[rstest]
@@ -1327,6 +1339,12 @@ mod tests {
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
+        if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
+            assert!(r.startup_exit().is_some());
+            assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
+        } else {
+            assert_eq!(r.startup_exit(), None);
+        }
     }
 
     #[rstest]
@@ -1572,6 +1590,7 @@ mod tests {
             r.get_packet_send_time(now) - now,
             Duration::from_secs_f64(scale_factor * 12000.0 / pacing_rate as f64)
         );
+        assert_eq!(r.startup_exit(), None);
     }
 
     #[rstest]
@@ -1738,6 +1757,7 @@ mod tests {
         assert_eq!(r.in_flight_count(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.lost_count(), 0);
+        assert_eq!(r.startup_exit(), None);
     }
 
     // Modeling delivery_rate for gcongestion is non-trivial so we only test the
@@ -1797,6 +1817,7 @@ mod tests {
             total_bytes_sent as u64 / interval.as_secs(),
             r.delivery_rate().to_bytes_per_second()
         );
+        assert_eq!(r.startup_exit(), None);
     }
 }
 
