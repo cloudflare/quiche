@@ -455,7 +455,9 @@ impl RecentAckPoints {
     }
 
     fn less_recent_point(&self) -> Option<AckPoint> {
-        self.ack_points[0].or(self.ack_points[1])
+        self.ack_points[0]
+            .filter(|ack_point| ack_point.total_bytes_acked > 0)
+            .or(self.ack_points[1])
     }
 }
 
@@ -789,7 +791,7 @@ impl BandwidthSampler {
 
         while let Some(candidate) = a0_candidates.get(1) {
             if candidate.total_bytes_acked > total_bytes_acked {
-                return Some(*candidate);
+                break;
             }
             a0_candidates.pop_front();
         }
@@ -915,11 +917,11 @@ mod bandwidth_sampler_tests {
                 self.round_trip_count,
             );
 
-            let max_bandwidth =
-                self.max_bandwidth.max(sample.sample_max_bandwidth.unwrap());
+            let sample_max_bandwidth = sample.sample_max_bandwidth.unwrap();
+            self.max_bandwidth = self.max_bandwidth.max(sample_max_bandwidth);
 
             let bandwidth_sample = BandwidthSample {
-                bandwidth: max_bandwidth,
+                bandwidth: sample_max_bandwidth,
                 rtt: sample.sample_rtt.unwrap(),
                 send_rate: None,
                 state_at_send: sample.last_packet_send_state,
@@ -1386,19 +1388,13 @@ mod bandwidth_sampler_tests {
         for i in 41..=60 {
             let sample = test_sender.ack_packet(i);
             assert!(sample.state_at_send.is_app_limited, "{i}");
-            if !overestimate_avoidance || i < 60 {
-                assert!(
-                    sample.bandwidth < expected_bandwidth * 0.7,
-                    "{} {:?} vs {:?}",
-                    i,
-                    sample.bandwidth,
-                    expected_bandwidth * 0.7
-                );
-            } else {
-                // Needs further investigation: when using overestimate_avoidance,
-                // sample.bandwidth increases 1 packet earlier than expected.
-                assert_eq!(sample.bandwidth, expected_bandwidth, "{i}");
-            }
+            assert!(
+                sample.bandwidth < expected_bandwidth * 0.7,
+                "{} {:?} vs {:?}",
+                i,
+                sample.bandwidth,
+                expected_bandwidth * 0.7
+            );
             test_sender.send_packet(i + 20, REGULAR_PACKET_SIZE, true);
             test_sender.advance_time(time_between_packets);
         }
