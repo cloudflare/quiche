@@ -692,7 +692,10 @@ where
                     }
                 },
 
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Ready(Err(e)) => {
+                    log::error!("Incoming packet router encountered recvmsg error"; "error" => e);
+                    continue;
+                },
 
                 Poll::Pending => {
                     // Check whether any connections are still active
