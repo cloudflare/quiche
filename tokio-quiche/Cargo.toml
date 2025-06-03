@@ -50,7 +50,6 @@ foundations = { workspace = true, default-features = false, features = [
 futures = { workspace = true }
 futures-util = { workspace = true }
 ipnetwork = { workspace = true }
-libc = { workspace = true }
 log = { workspace = true }
 octets = { workspace = true }
 pin-project = { workspace = true }
@@ -81,4 +80,5 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["time", "test-util"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
 nix = { workspace = true, features = ["signal"] }
