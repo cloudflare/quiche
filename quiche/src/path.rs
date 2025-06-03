@@ -516,6 +516,10 @@ impl Path {
             startup_exit: self.recovery.startup_exit(),
         }
     }
+
+    pub fn bytes_in_flight_duration(&self) -> time::Duration {
+        self.recovery.bytes_in_flight_duration()
+    }
 }
 
 /// An iterator over SocketAddr.

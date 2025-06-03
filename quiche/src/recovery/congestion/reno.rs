@@ -173,7 +173,7 @@ mod tests {
         let r = LegacyRecovery::new(&cfg);
 
         assert!(r.cwnd() > 0);
-        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
     }
 
     #[test]
