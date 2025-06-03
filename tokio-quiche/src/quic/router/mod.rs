@@ -693,15 +693,8 @@ where
                 },
 
                 Poll::Ready(Err(e)) => {
-                    // On macOS the incoming packet router should not stop on an incoming
-                    // packet marked with "fragmentation needed"
-                    if cfg!(target_os = "macos")
-                        && e.raw_os_error().is_some_and(|e| e == libc::EMSGSIZE)
-                    {
+                    log::error!("Incoming packet router encountered recvmsg error"; "error" => e);
                         continue;
-                    }
-
-                    return Poll::Ready(Err(e));
                 },
 
                 Poll::Pending => {
