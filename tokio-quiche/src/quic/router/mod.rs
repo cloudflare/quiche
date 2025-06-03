@@ -694,7 +694,7 @@ where
 
                 Poll::Ready(Err(e)) => {
                     log::error!("Incoming packet router encountered recvmsg error"; "error" => e);
-                        continue;
+                    continue;
                 },
 
                 Poll::Pending => {
