@@ -376,7 +376,7 @@ mod tests {
             r.cwnd(),
             r.max_datagram_size * cfg.initial_congestion_window_packets
         );
-        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
 
         assert_eq!(r.congestion.bbr_state.state, BBRStateMachine::Startup);
     }
@@ -481,7 +481,7 @@ mod tests {
         // Sent: 0, 1, 2, 3, 4, Acked 4.
         assert_eq!(r.cwnd(), mss * 4);
         // Stil in flight: 2, 3.
-        assert_eq!(r.bytes_in_flight, mss * 2);
+        assert_eq!(r.bytes_in_flight(), mss * 2);
     }
 
     #[test]

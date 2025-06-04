@@ -7113,7 +7113,22 @@ impl<F: BufFactory> Connection<F> {
             reset_stream_count_remote: self.reset_stream_remote_count,
             stopped_stream_count_remote: self.stopped_stream_remote_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
+            bytes_in_flight_duration: self.bytes_in_flight_duration(),
         }
+    }
+
+    /// Returns the sum of the durations when each path in the
+    /// connection was actively sending bytes or waiting for acks.
+    /// Note that this could result in a duration that is longer than
+    /// the actual connection duration in cases where multiple paths
+    /// are active for extended periods of time.  In practice only 1
+    /// path is typically active at a time.
+    /// TODO revisit computation if in the future multiple paths are
+    /// often active at the same time.
+    fn bytes_in_flight_duration(&self) -> Duration {
+        self.paths.iter().fold(Duration::ZERO, |acc, (_, path)| {
+            acc + path.bytes_in_flight_duration()
+        })
     }
 
     /// Returns reference to peer's transport parameters. Returns `None` if we
@@ -8570,6 +8585,10 @@ pub struct Stats {
 
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
+
+    /// Total duration during which this side of the connection was
+    /// actively sending bytes or waiting for those bytes to be acked.
+    pub bytes_in_flight_duration: Duration,
 }
 
 impl std::fmt::Debug for Stats {

@@ -62,6 +62,7 @@ pub struct SocketStats {
     pub bytes_unsent: u64,
     pub delivery_rate: u64,
     pub startup_exit: Option<StartupExit>,
+    pub bytes_in_flight_duration_us: u64,
 }
 
 /// Statistics from when a CCA first exited the startup phase.

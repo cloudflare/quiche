@@ -685,7 +685,7 @@ mod tests {
             r.cwnd(),
             r.max_datagram_size * r.congestion.initial_congestion_window_packets
         );
-        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Startup);
     }
@@ -755,7 +755,7 @@ mod tests {
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Startup);
         assert_eq!(r.cwnd(), cwnd_prev + mss * 5);
-        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(
             r.delivery_rate().to_bytes_per_second(),
             ((mss * 5) as f64 / rtt.as_secs_f64()) as u64
@@ -833,7 +833,7 @@ mod tests {
         assert!(r.congestion.bbr2_state.in_recovery);
 
         // Still in flight: 2, 3.
-        assert_eq!(r.bytes_in_flight, mss * 2);
+        assert_eq!(r.bytes_in_flight(), mss * 2);
 
         assert_eq!(r.congestion.bbr2_state.newly_acked_bytes, mss);
 

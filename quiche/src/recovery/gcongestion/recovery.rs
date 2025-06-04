@@ -15,6 +15,7 @@ use crate::recovery::QlogMetrics;
 
 use crate::frame;
 
+use crate::recovery::bytes_in_flight::BytesInFlight;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::CongestionControlAlgorithm;
@@ -356,7 +357,7 @@ pub struct GRecovery {
 
     time_thresh: f64,
 
-    bytes_in_flight: usize,
+    bytes_in_flight: BytesInFlight,
 
     bytes_sent: usize,
 
@@ -404,7 +405,7 @@ impl GRecovery {
             pkt_thresh: INITIAL_PACKET_THRESHOLD,
             time_thresh: INITIAL_TIME_THRESHOLD,
 
-            bytes_in_flight: 0,
+            bytes_in_flight: Default::default(),
             bytes_sent: 0,
             bytes_lost: 0,
 
@@ -446,7 +447,8 @@ impl GRecovery {
             lost,
         );
 
-        self.bytes_in_flight -= lost_bytes + pmtud_lost_bytes;
+        self.bytes_in_flight
+            .saturating_subtract(lost_bytes + pmtud_lost_bytes, now);
 
         for pkt in pmtud_lost_packets {
             self.pacer.on_packet_neutered(pkt);
@@ -477,7 +479,7 @@ impl GRecovery {
         let mut duration = self.pto() * (1 << self.pto_count);
 
         // Arm PTO from now when there are no inflight packets.
-        if self.bytes_in_flight == 0 {
+        if self.bytes_in_flight.is_zero() {
             if handshake_status.has_handshake_keys {
                 return (Some(now + duration), packet::Epoch::Handshake);
             } else {
@@ -529,7 +531,9 @@ impl GRecovery {
             return;
         }
 
-        if self.bytes_in_flight == 0 && handshake_status.peer_verified_address {
+        if self.bytes_in_flight.is_zero() &&
+            handshake_status.peer_verified_address
+        {
             self.loss_timer.clear();
             return;
         }
@@ -626,14 +630,14 @@ impl RecoveryOps for GRecovery {
         if in_flight {
             self.pacer.on_packet_sent(
                 time_sent,
-                self.bytes_in_flight,
+                self.bytes_in_flight.get(),
                 pkt_num,
                 sent_bytes,
                 pkt.has_data,
                 &self.rtt_stats,
             );
 
-            self.bytes_in_flight += sent_bytes;
+            self.bytes_in_flight.add(sent_bytes, now);
             epoch.pkts_in_flight += 1;
             self.set_loss_detection_timer(handshake_status, time_sent);
         }
@@ -651,7 +655,7 @@ impl RecoveryOps for GRecovery {
         &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) -> OnAckReceivedOutcome {
-        let prior_in_flight = self.bytes_in_flight;
+        let prior_in_flight = self.bytes_in_flight.get();
 
         let AckedDetectionResult {
             acked_bytes,
@@ -674,7 +678,7 @@ impl RecoveryOps for GRecovery {
             return OnAckReceivedOutcome::default();
         }
 
-        self.bytes_in_flight -= acked_bytes;
+        self.bytes_in_flight.saturating_subtract(acked_bytes, now);
 
         // Check if largest packet is newly acked.
         let largest_newly_acked = self.newly_acked.last().unwrap();
@@ -697,7 +701,7 @@ impl RecoveryOps for GRecovery {
         self.pacer.on_congestion_event(
             update_rtt,
             prior_in_flight,
-            self.bytes_in_flight,
+            self.bytes_in_flight.get(),
             now,
             &self.newly_acked,
             &self.lost_reuse,
@@ -728,7 +732,7 @@ impl RecoveryOps for GRecovery {
         let (earliest_loss_time, epoch) = self.loss_time_and_space();
 
         if earliest_loss_time.is_some() {
-            let prior_in_flight = self.bytes_in_flight;
+            let prior_in_flight = self.bytes_in_flight.get();
 
             let (lost_bytes, lost_packets) =
                 self.detect_and_remove_lost_packets(epoch, now);
@@ -736,7 +740,7 @@ impl RecoveryOps for GRecovery {
             self.pacer.on_congestion_event(
                 false,
                 prior_in_flight,
-                self.bytes_in_flight,
+                self.bytes_in_flight.get(),
                 now,
                 &[],
                 &self.lost_reuse,
@@ -756,7 +760,7 @@ impl RecoveryOps for GRecovery {
             };
         }
 
-        let epoch = if self.bytes_in_flight > 0 {
+        let epoch = if self.bytes_in_flight.get() > 0 {
             // Send new data if available, else retransmit old data. If neither
             // is available, send a single PING frame.
             let (_, e) = self.pto_time_and_space(handshake_status, now);
@@ -827,9 +831,8 @@ impl RecoveryOps for GRecovery {
         now: Instant,
     ) {
         let epoch = &mut self.epochs[epoch];
-        self.bytes_in_flight = self
-            .bytes_in_flight
-            .saturating_sub(epoch.discard(&mut self.pacer));
+        self.bytes_in_flight
+            .saturating_subtract(epoch.discard(&mut self.pacer), now);
         self.set_loss_detection_timer(handshake_status, now);
     }
 
@@ -856,7 +859,7 @@ impl RecoveryOps for GRecovery {
             return usize::MAX;
         }
 
-        self.cwnd().saturating_sub(self.bytes_in_flight)
+        self.cwnd().saturating_sub(self.bytes_in_flight.get())
     }
 
     fn rtt(&self) -> Duration {
@@ -907,7 +910,7 @@ impl RecoveryOps for GRecovery {
 
     // FIXME only used by gcongestion
     fn on_app_limited(&mut self) {
-        self.pacer.on_app_limited(self.bytes_in_flight)
+        self.pacer.on_app_limited(self.bytes_in_flight.get())
     }
 
     #[cfg(test)]
@@ -922,13 +925,17 @@ impl RecoveryOps for GRecovery {
 
     #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
-        self.bytes_in_flight
+        self.bytes_in_flight.get()
+    }
+
+    fn bytes_in_flight_duration(&self) -> Duration {
+        self.bytes_in_flight.get_duration()
     }
 
     #[cfg(test)]
     fn pacing_rate(&self) -> u64 {
         self.pacer
-            .pacing_rate(self.bytes_in_flight, &self.rtt_stats)
+            .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats)
             .to_bytes_per_period(Duration::from_secs(1))
     }
 
@@ -958,7 +965,7 @@ impl RecoveryOps for GRecovery {
 
     #[cfg(test)]
     fn app_limited(&self) -> bool {
-        self.pacer.is_app_limited(self.bytes_in_flight)
+        self.pacer.is_app_limited(self.bytes_in_flight.get())
     }
 
     // FIXME only used by congestion
@@ -991,7 +998,7 @@ impl RecoveryOps for GRecovery {
             latest_rtt: self.rtt_stats.latest_rtt(),
             rttvar: self.rtt_stats.rttvar(),
             cwnd: self.cwnd() as u64,
-            bytes_in_flight: self.bytes_in_flight as u64,
+            bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: self.pacer.ssthresh(),
             pacing_rate: self.delivery_rate().to_bytes_per_second(),
         };
@@ -1002,7 +1009,7 @@ impl RecoveryOps for GRecovery {
     fn send_quantum(&self) -> usize {
         let pacing_rate = self
             .pacer
-            .pacing_rate(self.bytes_in_flight, &self.rtt_stats);
+            .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats);
 
         let floor = if pacing_rate < Bandwidth::from_kbits_per_second(1200) {
             self.max_datagram_size
@@ -1021,7 +1028,7 @@ impl std::fmt::Debug for GRecovery {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "timer={:?} ", self.loss_detection_timer())?;
         write!(f, "rtt_stats={:?} ", self.rtt_stats)?;
-        write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
+        write!(f, "bytes_in_flight={} ", self.bytes_in_flight.get())?;
         write!(f, "{:?} ", self.pacer)?;
         Ok(())
     }

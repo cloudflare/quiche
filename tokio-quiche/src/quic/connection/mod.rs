@@ -166,6 +166,10 @@ impl AsSocketStats for QuicConnectionStats {
                 .as_ref()
                 .and_then(|p| p.startup_exit)
                 .map(QuicConnectionStats::startup_exit_to_socket_stats),
+            bytes_in_flight_duration_us: self
+                .stats
+                .bytes_in_flight_duration
+                .as_micros() as u64,
         }
     }
 }

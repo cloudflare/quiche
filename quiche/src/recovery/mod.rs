@@ -225,6 +225,8 @@ pub trait RecoveryOps {
     #[cfg(test)]
     fn bytes_in_flight(&self) -> usize;
 
+    fn bytes_in_flight_duration(&self) -> Duration;
+
     #[cfg(test)]
     fn in_flight_count(&self, epoch: packet::Epoch) -> usize;
 
@@ -721,6 +723,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
         assert_eq!(r.bytes_in_flight(), 1000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 1,
@@ -751,6 +754,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 2000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 2,
@@ -780,6 +784,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 3);
         assert_eq!(r.bytes_in_flight(), 3000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 3,
@@ -809,6 +814,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
         assert_eq!(r.bytes_in_flight(), 4000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         // Wait for 10ms.
         now += Duration::from_millis(10);
@@ -836,6 +842,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 2000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(10));
         assert_eq!(r.lost_count(), 0);
 
         // Wait until loss detection timer expires.
@@ -875,6 +882,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 3);
         assert_eq!(r.bytes_in_flight(), 3000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(30));
 
         let p = Sent {
             pkt_num: 5,
@@ -904,6 +912,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
         assert_eq!(r.bytes_in_flight(), 4000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(30));
         assert_eq!(r.lost_count(), 0);
 
         // Wait for 10ms.
@@ -932,6 +941,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
         assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(40));
 
         assert_eq!(r.lost_count(), 2);
 
@@ -995,6 +1005,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
         assert_eq!(r.bytes_in_flight(), 1000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 1,
@@ -1024,6 +1035,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 2000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 2,
@@ -1053,6 +1065,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 3);
         assert_eq!(r.bytes_in_flight(), 3000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 3,
@@ -1082,6 +1095,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
         assert_eq!(r.bytes_in_flight(), 4000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         // Wait for 10ms.
         now += Duration::from_millis(10);
@@ -1110,6 +1124,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 1000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(10));
         assert_eq!(r.lost_count(), 0);
 
         // Wait until loss detection timer expires.
@@ -1121,6 +1136,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_micros(11250));
 
         assert_eq!(r.lost_count(), 1);
 
@@ -1184,6 +1200,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
         assert_eq!(r.bytes_in_flight(), 1000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 1,
@@ -1213,6 +1230,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 2000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 2,
@@ -1242,6 +1260,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 3);
         assert_eq!(r.bytes_in_flight(), 3000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 3,
@@ -1271,6 +1290,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
         assert_eq!(r.bytes_in_flight(), 4000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         // Wait for 10ms.
         now += Duration::from_millis(10);
@@ -1322,6 +1342,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(20));
 
         // Spurious loss.
         assert_eq!(r.lost_count(), 1);
@@ -1393,6 +1414,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 10);
         assert_eq!(r.bytes_in_flight(), 12000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         // Next packet will be sent out immediately.
         if cc_algorithm_name != "bbr2_gcongestion" {
@@ -1430,6 +1452,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
         assert_eq!(r.rtt(), Duration::from_millis(50));
 
         // 10 MSS increased due to acks.
@@ -1465,6 +1488,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
         assert_eq!(r.bytes_in_flight(), 6000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
 
         if cc_algorithm_name != "bbr2_gcongestion" {
             // Pacing is not done during initial phase of connection.
@@ -1504,6 +1528,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 12000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
 
         // Send the fourth packet burst.
         let p = Sent {
@@ -1535,6 +1560,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 3);
         assert_eq!(r.bytes_in_flight(), 13000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
 
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
@@ -1639,6 +1665,7 @@ mod tests {
         assert_eq!(r.in_flight_count(packet::Epoch::Application), 1);
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
         assert_eq!(r.bytes_in_flight(), 1000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         let p = Sent {
             pkt_num: 1,
@@ -1725,6 +1752,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 1000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(10));
         assert_eq!(r.lost_count(), 0);
 
         // Wait until loss detection timer expires.
@@ -1737,6 +1765,7 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.in_flight_count(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_micros(11250));
         assert_eq!(r.cwnd(), match cc_algorithm_name {
             "bbr" => 14000,
             "bbr2" => 14000,
@@ -1756,6 +1785,7 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
         assert_eq!(r.in_flight_count(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_micros(11250));
         assert_eq!(r.lost_count(), 0);
         assert_eq!(r.startup_exit(), None);
     }
@@ -1822,6 +1852,7 @@ mod tests {
 }
 
 mod bandwidth;
+mod bytes_in_flight;
 mod congestion;
 mod gcongestion;
 mod rtt;

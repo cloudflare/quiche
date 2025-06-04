@@ -54,6 +54,7 @@ use qlog::events::EventData;
 
 use super::pacer;
 use super::Congestion;
+use crate::recovery::bytes_in_flight::BytesInFlight;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::LossDetectionTimer;
 use crate::recovery::OnAckReceivedOutcome;
@@ -316,7 +317,7 @@ pub struct LegacyRecovery {
 
     time_thresh: f64,
 
-    pub bytes_in_flight: usize,
+    bytes_in_flight: BytesInFlight,
 
     bytes_sent: usize,
 
@@ -353,7 +354,7 @@ impl LegacyRecovery {
 
             time_thresh: INITIAL_TIME_THRESHOLD,
 
-            bytes_in_flight: 0,
+            bytes_in_flight: Default::default(),
 
             bytes_sent: 0,
 
@@ -399,7 +400,7 @@ impl LegacyRecovery {
         let mut duration = self.pto() * 2_u32.pow(self.pto_count);
 
         // Arm PTO from now when there are no inflight packets.
-        if self.bytes_in_flight == 0 {
+        if self.bytes_in_flight.is_zero() {
             if handshake_status.has_handshake_keys {
                 return (Some(now + duration), packet::Epoch::Handshake);
             } else {
@@ -456,7 +457,9 @@ impl LegacyRecovery {
             return;
         }
 
-        if self.bytes_in_flight == 0 && handshake_status.peer_verified_address {
+        if self.bytes_in_flight.is_zero() &&
+            handshake_status.peer_verified_address
+        {
             self.loss_timer.clear();
             return;
         }
@@ -489,16 +492,18 @@ impl LegacyRecovery {
 
             (self.congestion.cc_ops.congestion_event)(
                 &mut self.congestion,
-                self.bytes_in_flight,
+                self.bytes_in_flight.get(),
                 loss.lost_bytes,
                 &pkt,
                 now,
             );
 
-            self.bytes_in_flight -= loss.lost_bytes;
+            self.bytes_in_flight
+                .saturating_subtract(loss.lost_bytes, now);
         };
 
-        self.bytes_in_flight -= loss.pmtud_lost_bytes;
+        self.bytes_in_flight
+            .saturating_subtract(loss.pmtud_lost_bytes, now);
 
         self.epochs[epoch]
             .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
@@ -567,7 +572,7 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         self.congestion.on_packet_sent(
-            self.bytes_in_flight,
+            self.bytes_in_flight.get(),
             sent_bytes,
             now,
             &mut pkt,
@@ -578,7 +583,7 @@ impl RecoveryOps for LegacyRecovery {
 
         if in_flight {
             self.epochs[epoch].in_flight_count += 1;
-            self.bytes_in_flight += sent_bytes;
+            self.bytes_in_flight.add(sent_bytes, now);
 
             self.set_loss_detection_timer(handshake_status, now);
         }
@@ -659,13 +664,13 @@ impl RecoveryOps for LegacyRecovery {
             self.detect_lost_packets(epoch, now, trace_id);
 
         self.congestion.on_packets_acked(
-            self.bytes_in_flight,
+            self.bytes_in_flight.get(),
             &mut self.newly_acked,
             &self.rtt_stats,
             now,
         );
 
-        self.bytes_in_flight -= acked_bytes;
+        self.bytes_in_flight.saturating_subtract(acked_bytes, now);
 
         self.pto_count = 0;
 
@@ -702,7 +707,7 @@ impl RecoveryOps for LegacyRecovery {
             };
         }
 
-        let epoch = if self.bytes_in_flight > 0 {
+        let epoch = if self.bytes_in_flight.get() > 0 {
             // Send new data if available, else retransmit old data. If neither
             // is available, send a single PING frame.
             let (_, e) = self.pto_time_and_space(handshake_status, now);
@@ -770,7 +775,7 @@ impl RecoveryOps for LegacyRecovery {
             })
             .fold(0, |acc, p| acc + p.size);
 
-        self.bytes_in_flight -= unacked_bytes;
+        self.bytes_in_flight.saturating_subtract(unacked_bytes, now);
 
         epoch.sent_packets.clear();
         epoch.lost_frames.clear();
@@ -806,7 +811,7 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         // Open more space (snd_cnt) for PRR when allowed.
-        self.cwnd().saturating_sub(self.bytes_in_flight) +
+        self.cwnd().saturating_sub(self.bytes_in_flight.get()) +
             self.congestion.prr.snd_cnt
     }
 
@@ -884,7 +889,11 @@ impl RecoveryOps for LegacyRecovery {
 
     #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
-        self.bytes_in_flight
+        self.bytes_in_flight.get()
+    }
+
+    fn bytes_in_flight_duration(&self) -> Duration {
+        self.bytes_in_flight.get_duration()
     }
 
     #[cfg(test)]
@@ -947,7 +956,7 @@ impl RecoveryOps for LegacyRecovery {
             latest_rtt: self.rtt_stats.latest_rtt,
             rttvar: self.rtt_stats.rttvar,
             cwnd: self.cwnd() as u64,
-            bytes_in_flight: self.bytes_in_flight as u64,
+            bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: Some(self.congestion.ssthresh.get() as u64),
             pacing_rate: self.congestion.pacer.rate(),
         };
@@ -998,7 +1007,7 @@ impl std::fmt::Debug for LegacyRecovery {
         write!(f, "rttvar={:?} ", self.rtt_stats.rttvar)?;
         write!(f, "cwnd={} ", self.cwnd())?;
         write!(f, "ssthresh={} ", self.congestion.ssthresh.get())?;
-        write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
+        write!(f, "bytes_in_flight={} ", self.bytes_in_flight.get())?;
         write!(f, "app_limited={} ", self.congestion.app_limited)?;
         write!(
             f,
