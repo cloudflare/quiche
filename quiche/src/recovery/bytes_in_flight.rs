@@ -73,6 +73,11 @@ impl BytesInFlight {
         self.bytes_in_flight
     }
 
+    /// Returns true if there are 0 bytes in flight.
+    pub(crate) fn is_zero(&self) -> bool {
+        self.bytes_in_flight == 0
+    }
+
     /// Total time during which bytes_in_flight was > 0.
     pub(crate) fn get_duration(&self) -> Duration {
         self.closed_interval_duration + self.open_interval_duration

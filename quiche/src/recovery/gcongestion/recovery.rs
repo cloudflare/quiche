@@ -479,7 +479,7 @@ impl GRecovery {
         let mut duration = self.pto() * (1 << self.pto_count);
 
         // Arm PTO from now when there are no inflight packets.
-        if self.bytes_in_flight.get() == 0 {
+        if self.bytes_in_flight.is_zero() {
             if handshake_status.has_handshake_keys {
                 return (Some(now + duration), packet::Epoch::Handshake);
             } else {
@@ -531,7 +531,7 @@ impl GRecovery {
             return;
         }
 
-        if self.bytes_in_flight.get() == 0 &&
+        if self.bytes_in_flight.is_zero() &&
             handshake_status.peer_verified_address
         {
             self.loss_timer.clear();
