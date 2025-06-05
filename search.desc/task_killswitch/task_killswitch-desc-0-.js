@@ -1,0 +1,1 @@
+searchState.loadedDescShard("task_killswitch", 0, "Triggers the killswitch, thereby scheduling all registered …\nReturns a future that resolves when all registered tasks …\nSpawns a new asynchronous task and registers it in the …")
