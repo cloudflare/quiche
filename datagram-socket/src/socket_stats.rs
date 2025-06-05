@@ -50,6 +50,7 @@ pub struct SocketStats {
     pub max_rtt_us: i64,
     pub rtt_var_us: i64,
     pub cwnd: u64,
+    pub total_pto_count: u64,
     pub packets_sent: u64,
     pub packets_recvd: u64,
     pub packets_lost: u64,
