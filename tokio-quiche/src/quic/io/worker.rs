@@ -765,6 +765,19 @@ where
     pub(crate) async fn run<A: ApplicationOverQuic>(
         mut self, mut qconn: QuicheConnection, mut ctx: ConnectionStageContext<A>,
     ) -> Closing<Tx, M, A> {
+        // Perform a single call to process_reads()/process_writes(),
+        // unconditionally, to ensure that any application data (e.g.
+        // STREAM frames or datagrams) processed by the Handshake
+        // stage are properly passed to the application.
+        if let Err(e) = self.conn_stage.on_read(true, &mut qconn, &mut ctx) {
+            return Closing {
+                params: self.into(),
+                context: ctx,
+                work_loop_result: Err(e),
+                qconn,
+            };
+        };
+
         let work_loop_result = self.work_loop(&mut qconn, &mut ctx).await;
 
         Closing {
