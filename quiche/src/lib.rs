@@ -1906,6 +1906,10 @@ const QLOG_METRICS: EventType =
     EventType::RecoveryEventType(RecoveryEventType::MetricsUpdated);
 
 #[cfg(feature = "qlog")]
+const QLOG_PACKET_LOST: EventType =
+    EventType::RecoveryEventType(RecoveryEventType::PacketLost);
+
+#[cfg(feature = "qlog")]
 const QLOG_CONNECTION_CLOSED: EventType =
     EventType::ConnectivityEventType(ConnectivityEventType::ConnectionClosed);
 
@@ -3349,6 +3353,20 @@ impl<F: BufFactory> Connection<F> {
             let recv_path = self.paths.get_mut(recv_pid)?;
             if let Some(ev_data) = recv_path.recovery.maybe_qlog() {
                 q.add_event_data_with_instant(ev_data, now).ok();
+            }
+        });
+
+        qlog_with_type!(QLOG_PACKET_LOST, self.qlog, q, {
+            let recv_path = self.paths.get_mut(recv_pid)?;
+            for (header, time_lost) in recv_path.recovery.get_lost_pkts(epoch) {
+                let ev_data =
+                    EventData::PacketLost(qlog::events::quic::PacketLost {
+                        header: Some(header),
+                        frames: None,
+                        trigger: None,
+                    });
+
+                q.add_event_data_with_instant(ev_data, time_lost).ok();
             }
         });
 
@@ -6436,6 +6454,29 @@ impl<F: BufFactory> Connection<F> {
                     qlog_with_type!(QLOG_METRICS, self.qlog, q, {
                         if let Some(ev_data) = p.recovery.maybe_qlog() {
                             q.add_event_data_with_instant(ev_data, now).ok();
+                        }
+                    });
+
+                    qlog_with_type!(QLOG_PACKET_LOST, self.qlog, q, {
+                        for epoch in [
+                            packet::Epoch::Initial,
+                            packet::Epoch::Handshake,
+                            packet::Epoch::Application,
+                        ] {
+                            for (header, time_lost) in
+                                p.recovery.get_lost_pkts(epoch)
+                            {
+                                let ev_data = EventData::PacketLost(
+                                    qlog::events::quic::PacketLost {
+                                        header: Some(header),
+                                        frames: None,
+                                        trigger: None,
+                                    },
+                                );
+
+                                q.add_event_data_with_instant(ev_data, time_lost)
+                                    .ok();
+                            }
                         }
                     });
                 }

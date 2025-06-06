@@ -50,6 +50,9 @@ use crate::packet;
 use crate::ranges;
 
 #[cfg(feature = "qlog")]
+use qlog::events;
+
+#[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
 use super::pacer;
@@ -89,6 +92,9 @@ struct RecoveryEpoch {
 
     acked_frames: Vec<frame::Frame>,
     lost_frames: Vec<frame::Frame>,
+
+    #[cfg(feature = "qlog")]
+    lost_pkts: Vec<(events::quic::PacketHeader, Instant)>,
 }
 
 struct AckedDetectionResult {
@@ -246,6 +252,28 @@ impl RecoveryEpoch {
                     largest_lost_pkt = Some(unacked.clone());
 
                     self.in_flight_count -= 1;
+
+                    #[cfg(feature = "qlog")]
+                    {
+                        // TODO: can we get the actual real packet type?
+                        let ty = match epoch {
+                            packet::Epoch::Initial =>
+                                qlog::events::quic::PacketType::Initial,
+                            packet::Epoch::Handshake =>
+                                qlog::events::quic::PacketType::Handshake,
+                            packet::Epoch::Application =>
+                                qlog::events::quic::PacketType::OneRtt,
+                        };
+                        let header = qlog::events::quic::PacketHeader::with_type(
+                            ty,
+                            Some(unacked.pkt_num),
+                            None,
+                            None,
+                            None,
+                        );
+
+                        self.lost_pkts.push((header, lost_send_time));
+                    }
 
                     trace!(
                         "{} packet {} lost on epoch {}",
@@ -531,6 +559,13 @@ impl RecoveryOps for LegacyRecovery {
         std::mem::take(&mut self.epochs[epoch].lost_frames)
     }
 
+    #[cfg(feature = "qlog")]
+    fn get_lost_pkts(
+        &mut self, epoch: packet::Epoch,
+    ) -> Vec<(events::quic::PacketHeader, Instant)> {
+        std::mem::take(&mut self.epochs[epoch].lost_pkts)
+    }
+
     fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64> {
         self.epochs[epoch].largest_acked_packet
     }
@@ -779,6 +814,8 @@ impl RecoveryOps for LegacyRecovery {
 
         epoch.sent_packets.clear();
         epoch.lost_frames.clear();
+        #[cfg(feature = "qlog")]
+        epoch.lost_pkts.clear();
         epoch.acked_frames.clear();
 
         epoch.time_of_last_ack_eliciting_packet = None;
