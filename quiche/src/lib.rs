@@ -15389,12 +15389,14 @@ mod tests {
         // Client sends Initial packet.
         let (len, _) = pipe.client.send(&mut buf).unwrap();
         assert_eq!(len, 1200);
+        assert_eq!(pipe.client.path_stats().next().unwrap().total_pto_count, 0);
 
         // Wait for PTO to expire.
         let timer = pipe.client.timeout().unwrap();
         std::thread::sleep(timer + time::Duration::from_millis(1));
 
         pipe.client.on_timeout();
+        assert_eq!(pipe.client.path_stats().next().unwrap().total_pto_count, 1);
 
         let epoch = packet::Epoch::Initial;
         assert_eq!(
@@ -15425,6 +15427,7 @@ mod tests {
         std::thread::sleep(timer + time::Duration::from_millis(1));
 
         pipe.client.on_timeout();
+        assert_eq!(pipe.client.path_stats().next().unwrap().total_pto_count, 2);
 
         assert_eq!(
             pipe.client
