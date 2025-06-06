@@ -62,6 +62,16 @@ enum AdaptUpperBoundsResult {
 }
 
 impl ModeImpl for ProbeBW {
+    fn state_str(&self) -> &'static str {
+        match self.cycle.phase {
+            CyclePhase::NotStarted => unreachable!(),
+            CyclePhase::Up => "bbr2_probe_bw_up",
+            CyclePhase::Down => "bbr2_probe_bw_down",
+            CyclePhase::Cruise => "bbr2_probe_bw_cruise",
+            CyclePhase::Refill => "bbr2_probe_bw_refill",
+        }
+    }
+
     fn enter(
         &mut self, now: Instant,
         _congestion_event: Option<&BBRv2CongestionEvent>, params: &Params,

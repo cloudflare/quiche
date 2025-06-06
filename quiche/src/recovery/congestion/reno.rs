@@ -48,6 +48,7 @@ pub(crate) static RENO: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    state_str,
     debug_fmt,
 };
 
@@ -143,6 +144,18 @@ fn rollback(_r: &mut Congestion) -> bool {
 
 fn has_custom_pacing() -> bool {
     false
+}
+
+pub fn state_str(r: &Congestion, now: Instant) -> &'static str {
+    if r.hystart.in_css() {
+        "conservative_slow_start"
+    } else if r.congestion_window < r.ssthresh.get() {
+        "slow_start"
+    } else if r.in_congestion_recovery(now) {
+        "recovery"
+    } else {
+        "congestion_avoidance"
+    }
 }
 
 fn debug_fmt(_r: &Congestion, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
