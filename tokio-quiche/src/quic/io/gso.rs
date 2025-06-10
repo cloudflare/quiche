@@ -82,7 +82,7 @@ pub(crate) enum PktInfo {
 
 #[cfg(target_os = "linux")]
 impl PktInfo {
-    fn make_cmsg(&'_ self) -> ControlMessage {
+    fn make_cmsg(&'_ self) -> ControlMessage<'_> {
         match self {
             Self::V4(pkt) => ControlMessage::Ipv4PacketInfo(pkt),
             Self::V6(pkt) => ControlMessage::Ipv6PacketInfo(pkt),

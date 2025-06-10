@@ -6948,7 +6948,7 @@ impl<F: BufFactory> Connection<F> {
     /// Note that the value returned can change throughout the connection's
     /// lifetime.
     #[inline]
-    pub fn source_id(&self) -> ConnectionId {
+    pub fn source_id(&self) -> ConnectionId<'_> {
         if let Ok(path) = self.paths.get_active() {
             if let Some(active_scid_seq) = path.active_scid_seq {
                 if let Ok(e) = self.ids.get_scid(active_scid_seq) {
@@ -6966,7 +6966,7 @@ impl<F: BufFactory> Connection<F> {
     /// An iterator is returned for all active IDs (i.e. ones that have not
     /// been explicitly retired yet).
     #[inline]
-    pub fn source_ids(&self) -> impl Iterator<Item = &ConnectionId> {
+    pub fn source_ids(&self) -> impl Iterator<Item = &ConnectionId<'_>> {
         self.ids.scids_iter()
     }
 
@@ -6975,7 +6975,7 @@ impl<F: BufFactory> Connection<F> {
     /// Note that the value returned can change throughout the connection's
     /// lifetime.
     #[inline]
-    pub fn destination_id(&self) -> ConnectionId {
+    pub fn destination_id(&self) -> ConnectionId<'_> {
         if let Ok(path) = self.paths.get_active() {
             if let Some(active_dcid_seq) = path.active_dcid_seq {
                 if let Ok(e) = self.ids.get_dcid(active_dcid_seq) {

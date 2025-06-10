@@ -601,7 +601,7 @@ impl ConnectionIdentifiers {
     }
 
     /// Returns an iterator over the source connection IDs.
-    pub fn scids_iter(&self) -> impl Iterator<Item = &ConnectionId> {
+    pub fn scids_iter(&self) -> impl Iterator<Item = &ConnectionId<'_>> {
         self.scids.iter().map(|e| &e.cid)
     }
 

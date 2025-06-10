@@ -581,17 +581,17 @@ impl<F: BufFactory> StreamMap<F> {
     }
 
     /// Creates an iterator over streams that need to send STREAM_DATA_BLOCKED.
-    pub fn blocked(&self) -> hash_map::Iter<u64, u64> {
+    pub fn blocked(&self) -> hash_map::Iter<'_, u64, u64> {
         self.blocked.iter()
     }
 
     /// Creates an iterator over streams that need to send RESET_STREAM.
-    pub fn reset(&self) -> hash_map::Iter<u64, (u64, u64)> {
+    pub fn reset(&self) -> hash_map::Iter<'_, u64, (u64, u64)> {
         self.reset.iter()
     }
 
     /// Creates an iterator over streams that need to send STOP_SENDING.
-    pub fn stopped(&self) -> hash_map::Iter<u64, u64> {
+    pub fn stopped(&self) -> hash_map::Iter<'_, u64, u64> {
         self.stopped.iter()
     }
 
