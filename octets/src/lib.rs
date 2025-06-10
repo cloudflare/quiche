@@ -481,7 +481,7 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer.
-    pub fn get_bytes(&mut self, len: usize) -> Result<Octets> {
+    pub fn get_bytes(&mut self, len: usize) -> Result<Octets<'_>> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -498,7 +498,7 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer.
-    pub fn get_bytes_mut(&mut self, len: usize) -> Result<OctetsMut> {
+    pub fn get_bytes_mut(&mut self, len: usize) -> Result<OctetsMut<'_>> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -515,7 +515,7 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned 8-bit integer prefix.
-    pub fn get_bytes_with_u8_length(&mut self) -> Result<Octets> {
+    pub fn get_bytes_with_u8_length(&mut self) -> Result<Octets<'_>> {
         let len = self.get_u8()?;
         self.get_bytes(len as usize)
     }
@@ -523,7 +523,7 @@ impl<'a> OctetsMut<'a> {
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned 16-bit integer prefix in network
     /// byte-order.
-    pub fn get_bytes_with_u16_length(&mut self) -> Result<Octets> {
+    pub fn get_bytes_with_u16_length(&mut self) -> Result<Octets<'_>> {
         let len = self.get_u16()?;
         self.get_bytes(len as usize)
     }
@@ -531,14 +531,14 @@ impl<'a> OctetsMut<'a> {
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned variable-length integer prefix
     /// in network byte-order.
-    pub fn get_bytes_with_varint_length(&mut self) -> Result<Octets> {
+    pub fn get_bytes_with_varint_length(&mut self) -> Result<Octets<'_>> {
         let len = self.get_varint()?;
         self.get_bytes(len as usize)
     }
 
     /// Reads `len` bytes from the current offset without copying and without
     /// advancing the buffer.
-    pub fn peek_bytes(&mut self, len: usize) -> Result<Octets> {
+    pub fn peek_bytes(&mut self, len: usize) -> Result<Octets<'_>> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -553,7 +553,7 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and without
     /// advancing the buffer.
-    pub fn peek_bytes_mut(&mut self, len: usize) -> Result<OctetsMut> {
+    pub fn peek_bytes_mut(&mut self, len: usize) -> Result<OctetsMut<'_>> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -587,7 +587,9 @@ impl<'a> OctetsMut<'a> {
     }
 
     /// Splits the buffer in two at the given absolute offset.
-    pub fn split_at(&mut self, off: usize) -> Result<(OctetsMut, OctetsMut)> {
+    pub fn split_at(
+        &mut self, off: usize,
+    ) -> Result<(OctetsMut<'_>, OctetsMut<'_>)> {
         if self.len() < off {
             return Err(BufferTooShortError);
         }

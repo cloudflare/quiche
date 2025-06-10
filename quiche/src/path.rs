@@ -680,13 +680,13 @@ impl PathMap {
 
     /// Returns an iterator over all existing paths.
     #[inline]
-    pub fn iter(&self) -> slab::Iter<Path> {
+    pub fn iter(&self) -> slab::Iter<'_, Path> {
         self.paths.iter()
     }
 
     /// Returns a mutable iterator over all existing paths.
     #[inline]
-    pub fn iter_mut(&mut self) -> slab::IterMut<Path> {
+    pub fn iter_mut(&mut self) -> slab::IterMut<'_, Path> {
         self.paths.iter_mut()
     }
 

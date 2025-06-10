@@ -1066,7 +1066,7 @@ impl<'a> Iterator for ConnectionIdIter<'a> {
 #[no_mangle]
 pub extern "C" fn quiche_conn_source_ids(
     conn: &Connection,
-) -> *mut ConnectionIdIter {
+) -> *mut ConnectionIdIter<'_> {
     let vec = conn.source_ids().cloned().collect();
     Box::into_raw(Box::new(ConnectionIdIter {
         cids: vec,

@@ -95,7 +95,7 @@ impl TryFrom<std::net::UdpSocket> for QuicListener {
 
 #[cfg(unix)]
 impl AsFd for QuicListener {
-    fn as_fd(&self) -> BorrowedFd {
+    fn as_fd(&self) -> BorrowedFd<'_> {
         self.socket.as_fd()
     }
 }
