@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
-  quiche:
+  quiche_nightly:
     runs-on: ubuntu-latest
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
@@ -31,10 +31,6 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
-          components: rustfmt
-
-      - name: Run cargo fmt
-        run: cargo fmt -- --check
 
       - name: Run cargo test
         run: cargo test --verbose --all-targets --features=boringssl-boring-crate,ffi,qlog
@@ -74,7 +70,6 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
-          components: rustfmt
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
@@ -88,10 +83,26 @@ jobs:
       - name: Run cargo fuzz for qpack_decode
         run: cargo fuzz run qpack_decode -- -runs=1
 
-      - name: Run cargo fmt
-        run: cargo fmt --manifest-path=fuzz/Cargo.toml -- --check
+  http3_test_nightly:
+    runs-on: ubuntu-latest
+    # Only run on "pull_request" event for external PRs. This is to avoid
+    # duplicate builds for PRs created from internal branches.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
 
-  http3_test:
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUSTTOOLCHAIN }}
+
+      - name: Run cargo test
+        run: cargo test --no-run --verbose --manifest-path=tools/http3_test/Cargo.toml
+
+  fmt:
     runs-on: ubuntu-latest
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
@@ -108,8 +119,11 @@ jobs:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
           components: rustfmt
 
-      - name: Run cargo test
-        run: cargo test --no-run --verbose --manifest-path=tools/http3_test/Cargo.toml
+      - name: Run cargo fmt - quiche
+        run: cargo fmt -- --check
 
-      - name: Run cargo fmt
+      - name: Run cargo fmt - http3_test
         run: cargo fmt --manifest-path=tools/http3_test/Cargo.toml -- --check
+
+      - name: Run cargo fmt - fuzz
+        run: cargo fmt --manifest-path=fuzz/Cargo.toml -- --check
