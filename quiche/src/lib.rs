@@ -4015,6 +4015,7 @@ impl<F: BufFactory> Connection<F> {
                     },
 
                     frame::Frame::Ping { mtu_probe } if mtu_probe.is_some() => {
+                        println!("probe lost");
                         p.pmtud.pmtu_probe_lost();
                     },
 
@@ -4283,9 +4284,11 @@ impl<F: BufFactory> Connection<F> {
                         ack_eliciting = true;
                         in_flight = true;
                     }
-                }
 
-                pmtud_probe = true;
+                    active_path.pmtud.should_probe(false);
+
+                    pmtud_probe = true;
+                }
             }
 
             let path = self.paths.get_mut(send_pid)?;
@@ -18955,23 +18958,13 @@ mod tests {
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr = testing::Pipe::client_addr();
-        let pid_1 = pipe
-            .server
-            .paths
-            .path_id_from_addrs(&(server_addr, client_addr))
-            .expect("no such path");
-
-        // Check that PMTU params are configured correctly
-        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_probe_status());
-        assert_eq!(pmtu_param.get_probe_size(), 1350);
         assert_eq!(pipe.advance(), Ok(()));
 
+        // Check that the server didn't send superfluous packets.
+        assert_eq!(pipe.server.stats().sent, 5);
+
         for (_, p) in pipe.server.paths.iter_mut() {
-            assert_eq!(p.pmtud.get_current(), 1350);
-            assert!(!p.pmtud.get_probe_status());
+            assert_eq!(p.stats().pmtu, 1350);
         }
     }
 
@@ -19004,28 +18997,19 @@ mod tests {
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr = testing::Pipe::client_addr();
-        let pid_1 = pipe
-            .server
-            .paths
-            .path_id_from_addrs(&(server_addr, client_addr))
-            .expect("no such path");
-
-        // Check that PMTU params are configured correctly
-        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_probe_status());
-        assert_eq!(pmtu_param.get_probe_size(), 1350);
         std::thread::sleep(
-            pipe.server.paths.get_mut(pid_1).unwrap().recovery.rtt() +
+            pipe.server.timeout().unwrap() +
                 time::Duration::from_millis(1),
         );
 
-        let active_server_path = pipe.server.paths.get_active_mut().unwrap();
-        let pmtu_param = &mut active_server_path.pmtud;
+        pipe.server.on_timeout();
 
-        // PMTU not updated since probe is not ACKed
-        assert_eq!(pmtu_param.get_current(), 1200);
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let active_server_path = pipe.server.paths.get_active_mut().unwrap();
+        assert_eq!(active_server_path.stats().pmtu, 1200);
+
+        let pmtu_param = &mut active_server_path.pmtud;
 
         // Continue searching for PMTU
         assert!(pmtu_param.get_probe_status());
