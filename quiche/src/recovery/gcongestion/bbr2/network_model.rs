@@ -197,7 +197,7 @@ impl BBRv2NetworkModel {
             inflight_hi_limited_in_round: false,
             bandwidth_sampler: BandwidthSampler::new(
                 params.initial_max_ack_height_filter_window,
-                params.overestimate_avoidance,
+                params.enable_overestimate_avoidance,
             ),
             round_trip_counter: RoundTripCounter {
                 round_trip_count: 0,

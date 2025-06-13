@@ -161,7 +161,7 @@ struct Params {
     decrease_startup_pacing_at_end_of_round: bool,
 
     /// Avoid Overestimation in Bandwidth Sampler with ack aggregation
-    overestimate_avoidance: bool,
+    enable_overestimate_avoidance: bool,
 
     bw_lo_mode: BwLoMode,
 
@@ -187,6 +187,7 @@ impl Params {
         apply_override!(drain_cwnd_gain);
         apply_override!(drain_pacing_gain);
         apply_override!(enable_reno_coexistence);
+        apply_override!(enable_overestimate_avoidance);
         apply_override!(probe_bw_probe_up_pacing_gain);
         apply_override!(probe_bw_probe_down_pacing_gain);
         apply_override!(probe_bw_cwnd_gain);
@@ -269,7 +270,7 @@ const DEFAULT_PARAMS: Params = Params {
 
     decrease_startup_pacing_at_end_of_round: true,
 
-    overestimate_avoidance: true,
+    enable_overestimate_avoidance: true,
 
     bw_lo_mode: BwLoMode::InflightReduction,
 
