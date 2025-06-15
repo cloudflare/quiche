@@ -3375,7 +3375,7 @@ impl<F: BufFactory> Connection<F> {
         }
 
         // Following flag used to upgrade datagram size, if probe is successful.
-        let mut pmtud_probe = false;
+        let mut successful_pmtud_probe = false;
 
         // Process acked frames. Note that several packets from several paths
         // might have been acked by the received packet.
@@ -3385,17 +3385,17 @@ impl<F: BufFactory> Connection<F> {
                     frame::Frame::Ping {
                         mtu_probe: Some(mtu_probe),
                     } => {
-                        let pmtud_next = p.pmtud.get_current();
-                        p.pmtud.set_current(cmp::max(pmtud_next, mtu_probe));
+                        let current_mtu = p.pmtud.get_current_mtu();
+                        p.pmtud.set_current_mtu(cmp::max(current_mtu, mtu_probe));
 
                         // Stop sending path MTU probes after successful probe.
-                        p.pmtud.should_probe(false);
-                        pmtud_probe = true;
+                        p.pmtud.set_should_probe(false);
+                        successful_pmtud_probe = true;
 
                         trace!(
-                            "{} pmtud acked; pmtu size {:?}",
+                            "{} pmtud acked; current mtu: {:?}",
                             self.trace_id,
-                            p.pmtud.get_current()
+                            p.pmtud.get_current_mtu()
                         );
                     },
 
@@ -3487,10 +3487,10 @@ impl<F: BufFactory> Connection<F> {
             }
 
             // Update max datagram send size with newly acked probe size.
-            if pmtud_probe {
+            if successful_pmtud_probe {
                 trace!(
-                    "{} updating pmtu {:?}",
-                    p.pmtud.get_current(),
+                    "{} updating pmtu to {:?}",
+                    p.pmtud.get_current_mtu(),
                     self.trace_id
                 );
 
@@ -3504,8 +3504,8 @@ impl<F: BufFactory> Connection<F> {
                         let pmtu_data = EventData::MtuUpdated(
                             qlog::events::connectivity::MtuUpdated {
                                 old: Some(p.recovery.max_datagram_size() as u16),
-                                new: p.pmtud.get_current() as u16,
-                                done: Some(pmtud_probe),
+                                new: p.pmtud.get_current_mtu() as u16,
+                                done: Some(true),
                             },
                         );
 
@@ -3514,7 +3514,7 @@ impl<F: BufFactory> Connection<F> {
                 );
 
                 p.recovery
-                    .pmtud_update_max_datagram_size(p.pmtud.get_current());
+                    .pmtud_update_max_datagram_size(p.pmtud.get_current_mtu());
             }
         }
 
@@ -3803,11 +3803,11 @@ impl<F: BufFactory> Connection<F> {
         let send_path = self.paths.get_mut(send_pid)?;
 
         // Update max datagram size to allow path MTU discovery probe to be sent.
-        if send_path.pmtud.get_probe_status() {
+        if send_path.pmtud.get_should_probe() {
             let size = if self.handshake_confirmed || self.handshake_done_sent {
                 send_path.pmtud.get_probe_size()
             } else {
-                send_path.pmtud.get_current()
+                send_path.pmtud.get_current_mtu()
             };
 
             send_path.recovery.pmtud_update_max_datagram_size(size);
@@ -4032,7 +4032,7 @@ impl<F: BufFactory> Connection<F> {
 
         let mut left = if path.pmtud.is_enabled() {
             // Limit output buffer size by estimated path MTU.
-            cmp::min(path.pmtud.get_current(), b.cap())
+            cmp::min(path.pmtud.get_current_mtu(), b.cap())
         } else {
             b.cap()
         };
@@ -4139,8 +4139,7 @@ impl<F: BufFactory> Connection<F> {
 
         let mut ack_eliciting = false;
         let mut in_flight = false;
-        // Foll. flag used to upgrade datagram size, if probe successful
-        let mut pmtud_probe = false;
+        let mut is_pmtud_probe = false;
         let mut has_data = false;
 
         // Whether or not we should explicitly elicit an ACK via PING frame if we
@@ -4230,8 +4229,7 @@ impl<F: BufFactory> Connection<F> {
             // In addition, the PMTUD probe is only generated when the handshake
             // is confirmed, to avoid interfering with the handshake
             // (e.g. due to the anti-amplification limits).
-
-            let pmtu_probe = active_path.should_send_pmtu_probe(
+            let should_probe_pmtu = active_path.should_send_pmtu_probe(
                 self.handshake_confirmed,
                 self.handshake_done_sent,
                 out_len,
@@ -4239,16 +4237,13 @@ impl<F: BufFactory> Connection<F> {
                 frames.is_empty(),
             );
 
-            trace!("{} pmtud probe status {} hs_con={} hs_sent={} cwnd_avail={} out_len={} left={}", self.trace_id, pmtu_probe, self.handshake_confirmed, self.handshake_done_sent,
-                    active_path.recovery.cwnd_available(), out_len, left);
-
-            if pmtu_probe {
+            if should_probe_pmtu {
                 trace!(
-                    "{} sending pmtud probe pmtu_probe={} next_size={} pmtu={}",
+                    "{} sending pmtud probe pmtu_probe={} next_size={} current_mtu={}",
                     self.trace_id,
                     active_path.pmtud.get_probe_size(),
-                    active_path.pmtud.get_probe_status(),
-                    active_path.pmtud.get_current(),
+                    active_path.pmtud.get_should_probe(),
+                    active_path.pmtud.get_current_mtu(),
                 );
 
                 left = active_path.pmtud.get_probe_size();
@@ -4285,7 +4280,7 @@ impl<F: BufFactory> Connection<F> {
                     }
                 }
 
-                pmtud_probe = true;
+                is_pmtud_probe = true;
             }
 
             let path = self.paths.get_mut(send_pid)?;
@@ -4883,7 +4878,7 @@ impl<F: BufFactory> Connection<F> {
             }
         }
 
-        if ack_eliciting && !pmtud_probe {
+        if ack_eliciting && !is_pmtud_probe {
             path.needs_ack_eliciting = false;
             path.recovery.ping_sent(epoch);
         }
@@ -5034,7 +5029,7 @@ impl<F: BufFactory> Connection<F> {
             tx_in_flight: 0,
             lost: 0,
             has_data: sent_pkt_has_data,
-            pmtud: pmtud_probe,
+            is_pmtud_probe,
         };
 
         if in_flight && is_app_limited {
@@ -5099,9 +5094,9 @@ impl<F: BufFactory> Connection<F> {
 
         let active_path = self.paths.get_active_mut()?;
         if active_path.pmtud.is_enabled() {
-            active_path
-                .recovery
-                .pmtud_update_max_datagram_size(active_path.pmtud.get_current());
+            active_path.recovery.pmtud_update_max_datagram_size(
+                active_path.pmtud.get_current_mtu(),
+            );
         }
 
         Ok((pkt_type, written))
@@ -7234,7 +7229,7 @@ impl<F: BufFactory> Connection<F> {
 
         active_path.recovery.update_max_ack_delay(max_ack_delay);
 
-        if active_path.pmtud.get_probe_status() {
+        if active_path.pmtud.get_should_probe() {
             active_path.recovery.pmtud_update_max_datagram_size(
                 active_path
                     .pmtud
@@ -7479,7 +7474,7 @@ impl<F: BufFactory> Connection<F> {
                 self.streams.has_stopped() ||
                 self.ids.has_new_scids() ||
                 self.ids.has_retire_dcids() ||
-                send_path.pmtud.get_probe_status() ||
+                send_path.pmtud.get_should_probe() ||
                 send_path.needs_ack_eliciting ||
                 send_path.probing_required())
         {
@@ -9712,7 +9707,7 @@ pub mod testing {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         }
     }
 }
@@ -18968,13 +18963,13 @@ mod tests {
 
         // Check that PMTU params are configured correctly
         let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_probe_status());
+        assert!(pmtu_param.get_should_probe());
         assert_eq!(pmtu_param.get_probe_size(), 1350);
         assert_eq!(pipe.advance(), Ok(()));
 
         for (_, p) in pipe.server.paths.iter_mut() {
-            assert_eq!(p.pmtud.get_current(), 1350);
-            assert!(!p.pmtud.get_probe_status());
+            assert_eq!(p.pmtud.get_current_mtu(), 1350);
+            assert!(!p.pmtud.get_should_probe());
         }
     }
 
@@ -19017,7 +19012,7 @@ mod tests {
 
         // Check that PMTU params are configured correctly
         let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_probe_status());
+        assert!(pmtu_param.get_should_probe());
         assert_eq!(pmtu_param.get_probe_size(), 1350);
         std::thread::sleep(
             pipe.server.paths.get_mut(pid_1).unwrap().recovery.rtt() +
@@ -19028,10 +19023,10 @@ mod tests {
         let pmtu_param = &mut active_server_path.pmtud;
 
         // PMTU not updated since probe is not ACKed
-        assert_eq!(pmtu_param.get_current(), 1200);
+        assert_eq!(pmtu_param.get_current_mtu(), 1200);
 
         // Continue searching for PMTU
-        assert!(pmtu_param.get_probe_status());
+        assert!(pmtu_param.get_should_probe());
     }
 
     #[cfg(feature = "boringssl-boring-crate")]
@@ -19100,45 +19095,19 @@ mod tests {
         )
         .unwrap();
 
-        let pmtud_enabled = pipe
-            .server
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .pmtud
-            .is_enabled();
-        assert_eq!(pmtud_enabled, false);
+        let active_path = pipe.server.paths.get_active_mut().unwrap();
+        assert!(!active_path.pmtud.is_enabled());
 
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let pmtud_enabled = pipe
-            .server
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .pmtud
-            .is_enabled();
-        assert_eq!(pmtud_enabled, true);
-
-        let current_path_size = pipe
-            .server
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .pmtud
-            .get_current();
-        assert_eq!(current_path_size, 1200);
+        let active_path = pipe.server.paths.get_active_mut().unwrap();
+        assert!(active_path.pmtud.is_enabled());
+        assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
 
         assert_eq!(pipe.advance(), Ok(()));
 
-        let new_path_size = pipe
-            .server
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .pmtud
-            .get_current();
-        assert_eq!(new_path_size, 1350);
+        let active_path = pipe.server.paths.get_active_mut().unwrap();
+        assert_eq!(active_path.pmtud.get_current_mtu(), 1350);
     }
 
     #[cfg(feature = "boringssl-boring-crate")]
@@ -19208,45 +19177,19 @@ mod tests {
         )
         .unwrap();
 
-        let pmtud_enabled = pipe
-            .server
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .pmtud
-            .is_enabled();
-        assert_eq!(pmtud_enabled, true);
+        let active_path = pipe.server.paths.get_active_mut().unwrap();
+        assert!(active_path.pmtud.is_enabled());
 
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let pmtud_enabled = pipe
-            .server
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .pmtud
-            .is_enabled();
-        assert_eq!(pmtud_enabled, false);
-
-        let current_path_size = pipe
-            .server
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .pmtud
-            .get_current();
-        assert_eq!(current_path_size, 1200);
+        let active_path = pipe.server.paths.get_active_mut().unwrap();
+        assert!(!active_path.pmtud.is_enabled());
+        assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
 
         assert_eq!(pipe.advance(), Ok(()));
 
-        let new_path_size = pipe
-            .server
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .pmtud
-            .get_current();
-        assert_eq!(new_path_size, 1200);
+        let active_path = pipe.server.paths.get_active_mut().unwrap();
+        assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
     }
 }
 

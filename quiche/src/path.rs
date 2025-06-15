@@ -357,10 +357,10 @@ impl Path {
         is_closing: bool, frames_empty: bool,
     ) -> bool {
         (hs_confirmed && hs_done) &&
-            self.pmtud.get_probe_size() > self.pmtud.get_current() &&
+            self.pmtud.get_probe_size() > self.pmtud.get_current_mtu() &&
             self.recovery.cwnd_available() > self.pmtud.get_probe_size() &&
             out_len >= self.pmtud.get_probe_size() &&
-            self.pmtud.get_probe_status() &&
+            self.pmtud.get_should_probe() &&
             !is_closing &&
             frames_empty
     }
@@ -599,7 +599,7 @@ impl PathMap {
         // Enable path MTU Discovery and start probing with the largest datagram
         // size.
         if enable_pmtud {
-            initial_path.pmtud.should_probe(enable_pmtud);
+            initial_path.pmtud.set_should_probe(enable_pmtud);
             initial_path.pmtud.set_probe_size(max_send_udp_payload_size);
             initial_path.pmtud.enable(enable_pmtud);
         }
@@ -870,7 +870,7 @@ impl PathMap {
             // It's harmless to modify probe size even if we're disabling
             // pmtud.
             path.pmtud.set_probe_size(max_send_udp_payload_size);
-            path.pmtud.should_probe(discover);
+            path.pmtud.set_should_probe(discover);
         }
     }
 }
