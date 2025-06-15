@@ -58,7 +58,7 @@ enum SentStatus {
         ack_eliciting: bool,
         in_flight: bool,
         has_data: bool,
-        pmtud: bool,
+        is_pmtud_probe: bool,
         sent_bytes: usize,
         frames: SmallVec<[frame::Frame; 1]>,
     },
@@ -270,7 +270,7 @@ impl RecoveryEpoch {
                         in_flight,
                         sent_bytes,
                         frames,
-                        pmtud,
+                        is_pmtud_probe,
                         ..
                     } = status.lose()
                     {
@@ -279,7 +279,7 @@ impl RecoveryEpoch {
                         if in_flight {
                             self.pkts_in_flight -= 1;
 
-                            if pmtud {
+                            if is_pmtud_probe {
                                 pmtud_lost_bytes += sent_bytes;
                                 pmtud_lost_packets.push(*pkt_num);
                                 // Do not track PMTUD probes losses
@@ -601,8 +601,9 @@ impl RecoveryOps for GRecovery {
 
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
-        let sent_bytes = pkt.size;
+        let is_pmtud_probe = pkt.is_pmtud_probe;
         let pkt_num = pkt.pkt_num;
+        let sent_bytes = pkt.size;
 
         if let Some(SentPacket { pkt_num, .. }) = epoch.sent_packets.back() {
             assert!(*pkt_num < pkt.pkt_num, "Packet numbers must increase");
@@ -612,7 +613,7 @@ impl RecoveryOps for GRecovery {
             time_sent,
             ack_eliciting,
             in_flight,
-            pmtud: pkt.pmtud,
+            is_pmtud_probe,
             has_data: pkt.has_data,
             sent_bytes,
             frames: pkt.frames,
