@@ -198,6 +198,7 @@ impl BBRv2NetworkModel {
             bandwidth_sampler: BandwidthSampler::new(
                 params.initial_max_ack_height_filter_window,
                 params.enable_overestimate_avoidance,
+                params.choose_a0_point_fix,
             ),
             round_trip_counter: RoundTripCounter {
                 round_trip_count: 0,

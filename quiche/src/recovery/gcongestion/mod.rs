@@ -192,6 +192,10 @@ pub struct BbrParams {
     /// attempts to avoid overestimating bandwidth on ack compression.
     pub enable_overestimate_avoidance: Option<bool>,
 
+    /// Controls if BBR should enable a possible fix in Bandwidth
+    /// Sampler that attempts to bandwidth over estimation avoidance.
+    pub choose_a0_point_fix: Option<bool>,
+
     /// Controls the BBR bandwidth probe up pacing gain.
     pub probe_bw_probe_up_pacing_gain: Option<f32>,
 
