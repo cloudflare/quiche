@@ -188,6 +188,10 @@ pub struct BbrParams {
     /// Controls if BBR should respect Reno coexistence.
     pub enable_reno_coexistence: Option<bool>,
 
+    /// Controls if BBR should enable code in Bandwidth Sampler that
+    /// attempts to avoid overestimating bandwidth on ack compression.
+    pub enable_overestimate_avoidance: Option<bool>,
+
     /// Controls the BBR bandwidth probe up pacing gain.
     pub probe_bw_probe_up_pacing_gain: Option<f32>,
 
