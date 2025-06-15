@@ -81,7 +81,7 @@ impl TestSender {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         self.cc.on_packet_sent(

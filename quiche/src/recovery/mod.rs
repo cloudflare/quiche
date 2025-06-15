@@ -351,7 +351,7 @@ pub struct Sent {
 
     pub has_data: bool,
 
-    pub pmtud: bool,
+    pub is_pmtud_probe: bool,
 }
 
 impl std::fmt::Debug for Sent {
@@ -366,7 +366,7 @@ impl std::fmt::Debug for Sent {
         write!(f, "tx_in_flight={} ", self.tx_in_flight)?;
         write!(f, "lost={} ", self.lost)?;
         write!(f, "has_data={} ", self.has_data)?;
-        write!(f, "pmtud={}", self.pmtud)?;
+        write!(f, "is_pmtud_probe={}", self.is_pmtud_probe)?;
 
         Ok(())
     }
@@ -710,7 +710,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -741,7 +741,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -772,7 +772,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -802,7 +802,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -870,7 +870,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -900,7 +900,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -993,7 +993,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1023,7 +1023,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1053,7 +1053,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1083,7 +1083,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1188,7 +1188,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1218,7 +1218,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1248,7 +1248,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1278,7 +1278,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1400,7 +1400,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: true,
-                pmtud: false,
+                is_pmtud_probe: false,
             };
 
             r.on_packet_sent(
@@ -1475,7 +1475,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: true,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1515,7 +1515,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: true,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1547,7 +1547,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: true,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1651,7 +1651,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1683,7 +1683,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: true,
+            is_pmtud_probe: true,
         };
 
         r.on_packet_sent(
@@ -1712,7 +1712,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
