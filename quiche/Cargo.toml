@@ -15,12 +15,6 @@ include = [
   "/*.md",
   "/*.toml",
   "/COPYING",
-  "/deps/boringssl/**/*.[chS]",
-  "/deps/boringssl/**/*.asm",
-  "/deps/boringssl/src/**/*.cc",
-  "/deps/boringssl/**/CMakeLists.txt",
-  "/deps/boringssl/**/sources.cmake",
-  "/deps/boringssl/LICENSE",
   "/examples",
   "/include",
   "/quiche.svg",
@@ -28,10 +22,7 @@ include = [
 ]
 
 [features]
-default = ["boringssl-vendored"]
-
-# Build the vendored BoringSSL library.
-boringssl-vendored = []
+default = ["boringssl-boring-crate"]
 
 # Use the BoringSSL library provided by the boring crate.
 boringssl-boring-crate = ["boring", "foreign-types-shared"]
@@ -64,7 +55,6 @@ features = ["boringssl-boring-crate", "qlog"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [build-dependencies]
-cmake = "0.1"
 pkg-config = { version = "0.3", optional = true }
 cdylib-link-lines = { version = "0.1", optional = true }
 
