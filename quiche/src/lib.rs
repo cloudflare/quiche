@@ -3820,7 +3820,7 @@ impl<F: BufFactory> Connection<F> {
 
         // Update max datagram size to allow path MTU discovery probe to be sent.
         if send_path.pmtud.get_should_probe() {
-            let size = if self.handshake_confirmed || self.handshake_done_sent {
+            let size = if self.handshake_confirmed || self.handshake_completed {
                 send_path.pmtud.get_probe_size()
             } else {
                 send_path.pmtud.get_current_mtu()
@@ -4253,7 +4253,7 @@ impl<F: BufFactory> Connection<F> {
             // (e.g. due to the anti-amplification limits).
             let should_probe_pmtu = active_path.should_send_pmtu_probe(
                 self.handshake_confirmed,
-                self.handshake_done_sent,
+                self.handshake_completed,
                 out_len,
                 is_closing,
                 frames.is_empty(),
@@ -4302,6 +4302,9 @@ impl<F: BufFactory> Connection<F> {
                     }
                 }
 
+                // Reset probe flag after sending to prevent duplicate probes in a
+                // single flight.
+                active_path.pmtud.set_should_probe(false);
                 is_pmtud_probe = true;
             }
 
@@ -19331,60 +19334,45 @@ mod tests {
     }
 
     #[rstest]
-    fn successful_probe_pmtud(
+    fn pmtud_probe_success(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
         config
             .load_cert_chain_from_pem_file("examples/cert.crt")
             .unwrap();
         config
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
+        config.set_application_protos(&[b"proto1"]).unwrap();
         config.verify_peer(false);
-        config.set_initial_max_data(100000);
-        config.set_initial_max_stream_data_bidi_local(100000);
-        config.set_initial_max_stream_data_bidi_remote(100000);
-        config.set_initial_max_streams_bidi(2);
-        config.set_active_connection_id_limit(4);
-        config.set_max_send_udp_payload_size(1350);
-        config.set_max_recv_udp_payload_size(1350);
+        config.set_max_send_udp_payload_size(1400);
         config.discover_pmtu(true);
 
-        // Perform initial handshake.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr = testing::Pipe::client_addr();
-        let pid_1 = pipe
-            .server
-            .paths
-            .path_id_from_addrs(&(server_addr, client_addr))
-            .expect("no such path");
-
-        // Check that PMTU params are configured correctly
-        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_should_probe());
-        assert_eq!(pmtu_param.get_probe_size(), 1350);
+        // Send probe and let it be acknowledged
         assert_eq!(pipe.advance(), Ok(()));
 
-        for (_, p) in pipe.server.paths.iter_mut() {
-            assert_eq!(p.pmtud.get_current_mtu(), 1350);
-            assert!(!p.pmtud.get_should_probe());
-        }
+        // Verify probing is disabled after successful probe
+        let active_path = pipe.client.paths.get_active_mut().unwrap();
+        assert!(!active_path.pmtud.get_should_probe());
+
+        // Verify MTU was updated
+        let current_mtu = active_path.pmtud.get_current_mtu();
+        assert_eq!(current_mtu, 1400);
     }
 
     #[rstest]
-    fn pmtud_probe_loss(
+    /// This test verifies that multiple send() calls after handshake completion
+    /// only generate one PMTUD probe packet, not multiple identical probes.
+    fn pmtud_no_duplicate_probes(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
         config
             .load_cert_chain_from_pem_file("examples/cert.crt")
             .unwrap();
@@ -19395,44 +19383,122 @@ mod tests {
             .set_application_protos(&[b"proto1", b"proto2"])
             .unwrap();
         config.verify_peer(false);
-        config.set_initial_max_data(100000);
-        config.set_initial_max_stream_data_bidi_local(100000);
-        config.set_initial_max_stream_data_bidi_remote(100000);
-        config.set_initial_max_streams_bidi(2);
-        config.set_active_connection_id_limit(4);
-        config.set_max_send_udp_payload_size(1350);
-        config.set_max_recv_udp_payload_size(1250);
+        config.set_max_send_udp_payload_size(1400);
         config.discover_pmtu(true);
 
-        // Perform initial handshake.
         let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr = testing::Pipe::client_addr();
-        let pid_1 = pipe
-            .server
-            .paths
-            .path_id_from_addrs(&(server_addr, client_addr))
-            .expect("no such path");
+        // Verify PMTUD is enabled and ready to probe
+        let active_path = pipe.client.paths.get_active_mut().unwrap();
+        assert!(active_path.pmtud.is_enabled());
+        assert!(active_path.pmtud.get_should_probe());
+        let initial_probe_size = active_path.pmtud.get_probe_size();
+        assert_eq!(initial_probe_size, 1400);
 
-        // Check that PMTU params are configured correctly
-        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_should_probe());
-        assert_eq!(pmtu_param.get_probe_size(), 1350);
-        std::thread::sleep(
-            pipe.server.paths.get_mut(pid_1).unwrap().recovery.rtt() +
-                time::Duration::from_millis(1),
-        );
+        let mut frames: Vec<frame::Frame> = Vec::new();
+        for _ in 0..2 {
+            let mut buf = [0; 1400];
+            let (len, _) = pipe.client.send(&mut buf).unwrap();
+            frames.append(
+                testing::decode_pkt(&mut pipe.server, &mut buf[..len])
+                    .unwrap()
+                    .as_mut(),
+            );
+        }
 
-        let active_server_path = pipe.server.paths.get_active_mut().unwrap();
-        let pmtu_param = &mut active_server_path.pmtud;
+        assert_eq!(frames.len(), 3);
+        assert!(matches!(frames[0], frame::Frame::ACK { .. }));
+        assert!(matches!(frames[1], frame::Frame::Padding { .. }));
+        assert!(matches!(frames[2], frame::Frame::Ping { .. }));
 
-        // PMTU not updated since probe is not ACKed
-        assert_eq!(pmtu_param.get_current_mtu(), 1200);
+        let mut buf = [0; 1400];
+        assert_eq!(pipe.client.send(&mut buf).unwrap_err(), Error::Done);
 
-        // Continue searching for PMTU
-        assert!(pmtu_param.get_should_probe());
+        // Verify probe flag was reset after sending
+        let active_path = pipe.client.paths.get_active_mut().unwrap();
+        assert!(!active_path.pmtud.get_should_probe());
+    }
+
+    #[rstest]
+    /// Test that PMTUD retries with smaller probe size after loss
+    fn pmtud_probe_retry_after_loss(
+        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"proto1"]).unwrap();
+        config.verify_peer(false);
+        config.set_max_send_udp_payload_size(1400);
+        config.discover_pmtu(true);
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        // Get initial probe size
+        let active_path = pipe.client.paths.get_active_mut().unwrap();
+        let initial_probe_size = active_path.pmtud.get_probe_size();
+        assert_eq!(initial_probe_size, 1400);
+
+        // Send first probe
+        let mut out = [0; 4096];
+        // ACK frame
+        let _ = pipe.client.send(&mut out).unwrap();
+        // PING + PADDING frames
+        let (len, _) = pipe.client.send(&mut out).unwrap();
+        assert_eq!(len, 1400);
+
+        // Verify probe flag was reset after sending
+        let active_path = pipe.client.paths.get_active_mut().unwrap();
+        assert!(!active_path.pmtud.get_should_probe());
+
+        // Simulate probe loss
+        active_path.pmtud.pmtu_probe_lost();
+
+        // Verify MTU is not updated
+        assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
+
+        // Verify probe flag is re-enabled and size is reduced
+        assert!(active_path.pmtud.get_should_probe());
+        assert_eq!(active_path.pmtud.get_probe_size(), 1300);
+
+        // Send second probe
+        let mut out = [0; 4096];
+        // PING + PADDING frames
+        let (len, _) = pipe.client.send(&mut out).unwrap();
+        assert_eq!(len, 1300);
+
+        // Verify should_probe flag gets reset
+        let active_path = pipe.client.paths.get_active_mut().unwrap();
+        assert!(!active_path.pmtud.get_should_probe());
+
+        // Simulate second probe loss
+        active_path.pmtud.pmtu_probe_lost();
+
+        // Verify MTU is not updated
+        assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
+
+        // Verify probe flag is re-enabled and probe size is reduced
+        assert!(active_path.pmtud.get_should_probe());
+        // Third probe should be 1250 bytes which is halfway between 1200 and the
+        // second probe size=1300.
+        assert_eq!(active_path.pmtud.get_probe_size(), 1250);
+
+        // Make the third probe succeed
+        assert_eq!(pipe.advance(), Ok(()));
+
+        let active_path = pipe.client.paths.get_active_mut().unwrap();
+        // MTU should finally update
+        assert_eq!(active_path.pmtud.get_current_mtu(), 1250);
+
+        // Verify should_probe gets reset
+        assert!(!active_path.pmtud.get_should_probe());
     }
 
     #[cfg(feature = "boringssl-boring-crate")]
