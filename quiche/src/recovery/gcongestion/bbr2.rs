@@ -163,6 +163,11 @@ struct Params {
     /// Avoid Overestimation in Bandwidth Sampler with ack aggregation
     enable_overestimate_avoidance: bool,
 
+    /// If true, apply the fix to A0 point selection logic so the
+    /// implementation is consistent with the behavior of the
+    /// google/quiche implementation.
+    choose_a0_point_fix: bool,
+
     bw_lo_mode: BwLoMode,
 
     /// Determines whether app limited rounds with no bandwidth growth count
@@ -188,6 +193,7 @@ impl Params {
         apply_override!(drain_pacing_gain);
         apply_override!(enable_reno_coexistence);
         apply_override!(enable_overestimate_avoidance);
+        apply_override!(choose_a0_point_fix);
         apply_override!(probe_bw_probe_up_pacing_gain);
         apply_override!(probe_bw_probe_down_pacing_gain);
         apply_override!(probe_bw_cwnd_gain);
@@ -271,6 +277,8 @@ const DEFAULT_PARAMS: Params = Params {
     decrease_startup_pacing_at_end_of_round: true,
 
     enable_overestimate_avoidance: true,
+
+    choose_a0_point_fix: false,
 
     bw_lo_mode: BwLoMode::InflightReduction,
 
