@@ -230,7 +230,7 @@ impl RecoveryEpoch {
 
                 unacked.time_lost = Some(now);
 
-                if unacked.pmtud {
+                if unacked.is_pmtud_probe {
                     pmtud_lost_bytes += unacked.size;
                     self.in_flight_count -= 1;
 
