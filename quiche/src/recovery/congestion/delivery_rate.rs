@@ -502,15 +502,17 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(range);
 
-        let ack_outcome = recovery.on_ack_received(
-            &acked,
-            25,
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-            now + rtt,
-            None,
-            "",
-        ).unwrap();
+        let ack_outcome = recovery
+            .on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now + rtt,
+                None,
+                "",
+            )
+            .unwrap();
 
         assert_eq!(ack_outcome, OnAckReceivedOutcome {
             lost_packets: 0,

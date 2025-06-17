@@ -174,6 +174,7 @@ pub trait RecoveryOps {
     );
     fn get_packet_send_time(&self, now: Instant) -> Instant;
 
+    #[allow(clippy::too_many_arguments)]
     fn on_ack_received(
         &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, skip_pn: Option<u64>,
@@ -1938,7 +1939,8 @@ mod tests {
                 now + interval,
                 None,
                 "",
-            ).unwrap(),
+            )
+            .unwrap(),
             OnAckReceivedOutcome {
                 lost_packets: 0,
                 lost_bytes: 0,
