@@ -226,6 +226,8 @@ fn main() {
             if cfg!(feature = "fuzzing") {
                 cfg.cxxflag("-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE")
                     .cxxflag("-DBORINGSSL_UNSAFE_FUZZER_MODE");
+                cfg.cflag("-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE")
+                    .cflag("-DBORINGSSL_UNSAFE_FUZZER_MODE");
             }
 
             cfg.build_target("ssl").build();
