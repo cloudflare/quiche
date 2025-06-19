@@ -20,8 +20,7 @@ jobs:
     strategy:
       matrix:
         tls-feature:
-          - "" # default, boringssl-vendored
-          - "boringssl-boring-crate"
+          - "boringssl-boring-crate" # default
           - "openssl"
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
@@ -39,7 +38,7 @@ jobs:
           components: clippy
 
       - name: Unused dependency check
-        if: ${{ matrix.tls-feature == '' }}
+        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
         uses: bnjbvr/cargo-machete@main
 
       - name: Build OpenSSL
@@ -55,28 +54,30 @@ jobs:
 
       - name: Run cargo test
         if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
-        run: cargo test --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }}
+        run: cargo test --verbose --all-targets --no-default-features --features=ffi,qlog,${{ matrix.tls-feature }}
 
-      # tokio-quiche requires the `boring` crate, so don't run its tests when
-      # building without it.
+      # quiche uses the `boring` crate by default when used as a dependency of
+      # other crates (e.g. h3i, tokio-quiche, ...), so only run quiche tests
+      # when building without it.
       - name: Run cargo test
         if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
-        run: cargo test --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }} --workspace --exclude tokio-quiche
+        run: cargo test --verbose --all-targets --no-default-features --features=ffi,qlog,${{ matrix.tls-feature }} --package quiche
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
         if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
-        run: cargo test --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }}
+        run: cargo test --verbose --doc --no-default-features --features=ffi,qlog,${{ matrix.tls-feature }}
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       #
-      # tokio-quiche requires the `boring` crate, so don't run its tests when
-      # building without it.
+      # quiche uses the `boring` crate by default when used as a dependency of
+      # other crates (e.g. h3i, tokio-quiche, ...), so only run quiche tests
+      # when building without it.
       - name: Run cargo doc test
         if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
-        run: cargo test --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }} --workspace --exclude tokio-quiche
+        run: cargo test --verbose --doc --no-default-features --features=ffi,qlog,${{ matrix.tls-feature }} --package quiche
 
       # NOTE: this is disabled as it fails when building changes that bump
       # version of local crates (e.g. when doing a `qlog` release) that have not
@@ -86,10 +87,10 @@ jobs:
       #   run: cargo package --verbose --workspace --exclude=quiche_apps --allow-dirty
 
       - name: Run cargo clippy
-        run: cargo clippy --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
+        run: cargo clippy --no-default-features --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
 
       - name: Run cargo clippy on examples
-        run: cargo clippy --examples --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
+        run: cargo clippy --examples --no-default-features --features=ffi,qlog,${{ matrix.tls-feature }} -- -D warnings
 
       - name: Run cargo doc
         run: cargo doc --no-deps --all-features --document-private-items
@@ -197,11 +198,11 @@ jobs:
 
       - name: Run cargo build
         if: endsWith(matrix.target, '-gnu')
-        run: cargo build --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog,boringssl-boring-crate
+        run: cargo build --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
 
       - name: Run cargo test
         if: endsWith(matrix.target, '-msvc')
-        run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog,boringssl-boring-crate
+        run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
 
   quiche_multiarch:
     runs-on: ubuntu-latest
