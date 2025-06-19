@@ -8,6 +8,9 @@ use std::time::Instant;
 use smallvec::SmallVec;
 
 #[cfg(feature = "qlog")]
+use qlog::events;
+
+#[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
 #[cfg(feature = "qlog")]
@@ -108,6 +111,9 @@ struct RecoveryEpoch {
     /// The largest packet number sent in the packet number space so far.
     #[allow(dead_code)]
     test_largest_sent_pkt_num_on_path: Option<u64>,
+
+    #[cfg(feature = "qlog")]
+    lost_pkts: Vec<(events::quic::PacketHeader, Instant)>,
 }
 
 struct AckedDetectionResult {
@@ -259,7 +265,7 @@ impl RecoveryEpoch {
 
     fn detect_and_remove_lost_packets(
         &mut self, loss_delay: Duration, pkt_thresh: u64, now: Instant,
-        newly_lost: &mut Vec<Lost>,
+        newly_lost: &mut Vec<Lost>, epoch: packet::Epoch,
     ) -> LossDetectionResult {
         newly_lost.clear();
         let mut lost_bytes = 0;
@@ -300,6 +306,29 @@ impl RecoveryEpoch {
                             }
 
                             lost_bytes += sent_bytes;
+                        }
+
+                        #[cfg(feature = "qlog")]
+                        {
+                            // TODO: can we get the actual real packet type?
+                            let ty = match epoch {
+                                packet::Epoch::Initial =>
+                                    qlog::events::quic::PacketType::Initial,
+                                packet::Epoch::Handshake =>
+                                    qlog::events::quic::PacketType::Handshake,
+                                packet::Epoch::Application =>
+                                    qlog::events::quic::PacketType::OneRtt,
+                            };
+                            let header =
+                                qlog::events::quic::PacketHeader::with_type(
+                                    ty,
+                                    Some(*pkt_num),
+                                    None,
+                                    None,
+                                    None,
+                                );
+
+                            self.lost_pkts.push((header, lost_send_time));
                         }
 
                         newly_lost.push(Lost {
@@ -464,6 +493,7 @@ impl GRecovery {
             self.pkt_thresh,
             now,
             lost,
+            epoch,
         );
 
         self.bytes_in_flight
@@ -586,6 +616,13 @@ impl RecoveryOps for GRecovery {
 
     fn get_lost_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
         std::mem::take(&mut self.epochs[epoch].lost_frames)
+    }
+
+    #[cfg(feature = "qlog")]
+    fn get_lost_pkts(
+        &mut self, epoch: packet::Epoch,
+    ) -> Vec<(events::quic::PacketHeader, Instant)> {
+        std::mem::take(&mut self.epochs[epoch].lost_pkts)
     }
 
     fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64> {
