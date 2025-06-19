@@ -92,7 +92,7 @@ impl Algorithm {
 
     pub const fn tag_len(self) -> usize {
         if cfg!(feature = "fuzzing") {
-            return 0;
+            return 16;
         }
 
         match self {
@@ -201,7 +201,15 @@ impl Open {
         &self, counter: u64, ad: &[u8], buf: &mut [u8],
     ) -> Result<usize> {
         if cfg!(feature = "fuzzing") {
-            return Ok(buf.len());
+            let tag_len = self.alg.tag_len();
+            let out_len = match buf.len().checked_sub(tag_len) {
+                Some(n) => n,
+                None => return Err(Error::CryptoFail),
+            };
+            if ad.len() > tag_len && buf[out_len..] == ad[..tag_len] {
+                return Err(Error::CryptoFail);
+            }
+            return Ok(out_len);
         }
 
         self.packet.open_with_u64_counter(counter, ad, buf)
@@ -285,12 +293,20 @@ impl Seal {
         extra_in: Option<&[u8]>,
     ) -> Result<usize> {
         if cfg!(feature = "fuzzing") {
+            let tag_len = self.alg.tag_len();
+
             if let Some(extra) = extra_in {
+                if in_len + tag_len + extra.len() > buf.len() {
+                    return Err(Error::CryptoFail);
+                }
                 buf[in_len..in_len + extra.len()].copy_from_slice(extra);
                 return Ok(in_len + extra.len());
             }
+            if in_len + tag_len > buf.len() {
+                return Err(Error::CryptoFail);
+            }
 
-            return Ok(in_len);
+            return Ok(in_len + tag_len);
         }
 
         self.packet
