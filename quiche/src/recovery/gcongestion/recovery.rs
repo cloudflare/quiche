@@ -381,6 +381,9 @@ pub struct GRecovery {
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
 
+    #[cfg(feature = "qlog")]
+    qlog_prev_cc_state: &'static str,
+
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
 
@@ -426,6 +429,9 @@ impl GRecovery {
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
+
+            #[cfg(feature = "qlog")]
+            qlog_prev_cc_state: "",
 
             outstanding_non_ack_eliciting: 0,
 
@@ -1028,7 +1034,12 @@ impl RecoveryOps for GRecovery {
     }
 
     #[cfg(feature = "qlog")]
-    fn maybe_qlog(&mut self) -> Option<EventData> {
+    fn state_str(&self, _now: Instant) -> &'static str {
+        self.pacer.state_str()
+    }
+
+    #[cfg(feature = "qlog")]
+    fn get_updated_qlog_event_data(&mut self) -> Option<EventData> {
         let qlog_metrics = QlogMetrics {
             min_rtt: *self.rtt_stats.min_rtt,
             smoothed_rtt: self.rtt(),
@@ -1041,6 +1052,19 @@ impl RecoveryOps for GRecovery {
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
+    }
+
+    #[cfg(feature = "qlog")]
+    fn get_updated_qlog_cc_state(
+        &mut self, now: Instant,
+    ) -> Option<&'static str> {
+        let cc_state = self.state_str(now);
+        if cc_state != self.qlog_prev_cc_state {
+            self.qlog_prev_cc_state = cc_state;
+            Some(cc_state)
+        } else {
+            None
+        }
     }
 
     fn send_quantum(&self) -> usize {

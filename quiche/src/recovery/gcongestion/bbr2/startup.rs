@@ -49,6 +49,11 @@ pub(super) struct Startup {
 }
 
 impl ModeImpl for Startup {
+    #[cfg(feature = "qlog")]
+    fn state_str(&self) -> &'static str {
+        "bbr_startup"
+    }
+
     fn is_probing_for_bandwidth(&self) -> bool {
         true
     }

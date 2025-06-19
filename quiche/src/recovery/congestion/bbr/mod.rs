@@ -44,6 +44,8 @@ pub(crate) static BBR: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    #[cfg(feature = "qlog")]
+    state_str,
     debug_fmt,
 };
 
@@ -81,12 +83,23 @@ const PACING_GAIN_CYCLE: [f64; BBR_GAIN_CYCLE_LEN] =
 const BTLBW_GROWTH_TARGET: f64 = 1.25;
 
 /// BBR Internal State Machine.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BBRStateMachine {
     Startup,
     Drain,
     ProbeBW,
     ProbeRTT,
+}
+
+impl From<BBRStateMachine> for &'static str {
+    fn from(state: BBRStateMachine) -> &'static str {
+        match state {
+            BBRStateMachine::Startup => "bbr_startup",
+            BBRStateMachine::Drain => "bbr_drain",
+            BBRStateMachine::ProbeBW => "bbr_probe_bw",
+            BBRStateMachine::ProbeRTT => "bbr_probe_rtt",
+        }
+    }
 }
 
 /// BBR Specific State Variables.
@@ -335,6 +348,11 @@ fn rollback(_r: &mut Congestion) -> bool {
 
 fn has_custom_pacing() -> bool {
     true
+}
+
+#[cfg(feature = "qlog")]
+fn state_str(r: &Congestion, _now: Instant) -> &'static str {
+    r.bbr_state.state.into()
 }
 
 fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {

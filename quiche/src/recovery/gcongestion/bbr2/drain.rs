@@ -49,6 +49,11 @@ pub(super) struct Drain {
 }
 
 impl ModeImpl for Drain {
+    #[cfg(feature = "qlog")]
+    fn state_str(&self) -> &'static str {
+        "bbr_drain"
+    }
+
     fn is_probing_for_bandwidth(&self) -> bool {
         false
     }

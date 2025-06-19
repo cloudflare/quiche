@@ -77,6 +77,11 @@ impl Congestion {
 
 #[enum_dispatch::enum_dispatch]
 pub(super) trait CongestionControl: Debug {
+    /// Returns the name of the current state of the congestion control state
+    /// machine. Used to annotate qlogs after state transitions.
+    #[cfg(feature = "qlog")]
+    fn state_str(&self) -> &'static str;
+
     /// Returns the size of the current congestion window in bytes. Note, this
     /// is not the *available* window. Some send algorithms may not use a
     /// congestion window and will return 0.

@@ -42,6 +42,8 @@ pub(crate) static BBR2: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    #[cfg(feature = "qlog")]
+    state_str,
     debug_fmt,
 };
 
@@ -141,6 +143,20 @@ enum BBR2StateMachine {
     ProbeBWREFILL,
     ProbeBWUP,
     ProbeRTT,
+}
+
+impl From<BBR2StateMachine> for &'static str {
+    fn from(state: BBR2StateMachine) -> &'static str {
+        match state {
+            BBR2StateMachine::Startup => "bbr_startup",
+            BBR2StateMachine::Drain => "bbr_drain",
+            BBR2StateMachine::ProbeBWDOWN => "bbr_probe_bw_down",
+            BBR2StateMachine::ProbeBWCRUISE => "bbr_probe_bw_cruise",
+            BBR2StateMachine::ProbeBWREFILL => "bbr_probe_bw_refill",
+            BBR2StateMachine::ProbeBWUP => "bbr_probe_bw_up",
+            BBR2StateMachine::ProbeRTT => "bbr_probe_rtt",
+        }
+    }
 }
 
 /// BBR2 Ack Phases.
@@ -615,6 +631,11 @@ fn rate_kbps(rate: u64) -> isize {
     } else {
         (rate * 8 / 1000) as isize
     }
+}
+
+#[cfg(feature = "qlog")]
+fn state_str(r: &Congestion, _now: Instant) -> &'static str {
+    r.bbr2_state.state.into()
 }
 
 fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {

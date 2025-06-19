@@ -114,6 +114,9 @@ impl Default for Cycle {
 
 #[enum_dispatch::enum_dispatch]
 pub(super) trait ModeImpl: Debug {
+    #[cfg(feature = "qlog")]
+    fn state_str(&self) -> &'static str;
+
     fn enter(
         &mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>,
         params: &Params,
@@ -245,6 +248,11 @@ impl DerefMut for Mode {
 pub(super) struct Placeholder {}
 
 impl ModeImpl for Placeholder {
+    #[cfg(feature = "qlog")]
+    fn state_str(&self) -> &'static str {
+        unreachable!()
+    }
+
     fn enter(
         &mut self, _: Instant, _: Option<&BBRv2CongestionEvent>, _params: &Params,
     ) {

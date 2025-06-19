@@ -262,7 +262,15 @@ pub trait RecoveryOps {
     fn update_max_ack_delay(&mut self, max_ack_delay: Duration);
 
     #[cfg(feature = "qlog")]
-    fn maybe_qlog(&mut self) -> Option<EventData>;
+    fn state_str(&self, now: Instant) -> &'static str;
+
+    #[cfg(feature = "qlog")]
+    fn get_updated_qlog_event_data(&mut self) -> Option<EventData>;
+
+    #[cfg(feature = "qlog")]
+    fn get_updated_qlog_cc_state(&mut self, now: Instant)
+        -> Option<&'static str>;
+
     fn send_quantum(&self) -> usize;
 
     fn get_next_release_time(&self) -> ReleaseDecision;
@@ -277,6 +285,27 @@ impl Recovery {
             Recovery::from(grecovery)
         } else {
             Recovery::from(LegacyRecovery::new_with_config(recovery_config))
+        }
+    }
+
+    #[cfg(feature = "qlog")]
+    pub fn maybe_qlog(
+        &mut self, qlog: &mut qlog::streamer::QlogStreamer, now: Instant,
+    ) {
+        if let Some(ev_data) = self.get_updated_qlog_event_data() {
+            qlog.add_event_data_with_instant(ev_data, now).ok();
+        }
+
+        if let Some(cc_state) = self.get_updated_qlog_cc_state(now) {
+            let ev_data = EventData::CongestionStateUpdated(
+                qlog::events::quic::CongestionStateUpdated {
+                    old: None,
+                    new: cc_state.to_string(),
+                    trigger: None,
+                },
+            );
+
+            qlog.add_event_data_with_instant(ev_data, now).ok();
         }
     }
 
