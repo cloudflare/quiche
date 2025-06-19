@@ -49,6 +49,7 @@ pub(super) struct Startup {
 }
 
 impl ModeImpl for Startup {
+    #[cfg(feature = "qlog")]
     fn state_str(&self) -> &'static str {
         "bbr_startup"
     }

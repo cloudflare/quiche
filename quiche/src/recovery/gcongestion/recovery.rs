@@ -1033,6 +1033,7 @@ impl RecoveryOps for GRecovery {
         true
     }
 
+    #[cfg(feature = "qlog")]
     fn state_str(&self, _now: Instant) -> &'static str {
         self.pacer.state_str()
     }

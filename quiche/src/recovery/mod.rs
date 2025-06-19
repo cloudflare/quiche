@@ -261,6 +261,7 @@ pub trait RecoveryOps {
 
     fn update_max_ack_delay(&mut self, max_ack_delay: Duration);
 
+    #[cfg(feature = "qlog")]
     fn state_str(&self, now: Instant) -> &'static str;
 
     #[cfg(feature = "qlog")]

@@ -62,6 +62,7 @@ enum AdaptUpperBoundsResult {
 }
 
 impl ModeImpl for ProbeBW {
+    #[cfg(feature = "qlog")]
     fn state_str(&self) -> &'static str {
         match self.cycle.phase {
             CyclePhase::NotStarted => unreachable!(),

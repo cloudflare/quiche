@@ -115,6 +115,7 @@ impl Pacer {
 }
 
 impl CongestionControl for Pacer {
+    #[cfg(feature = "qlog")]
     fn state_str(&self) -> &'static str {
         self.sender.state_str()
     }

@@ -77,6 +77,7 @@ impl ProbeRTT {
 }
 
 impl ModeImpl for ProbeRTT {
+    #[cfg(feature = "qlog")]
     fn state_str(&self) -> &'static str {
         "bbr_probe_rtt"
     }

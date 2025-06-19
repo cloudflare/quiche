@@ -329,6 +329,7 @@ pub(crate) struct CongestionControlOps {
 
     pub has_custom_pacing: fn() -> bool,
 
+    #[cfg(feature = "qlog")]
     pub state_str: fn(r: &Congestion, now: Instant) -> &'static str,
 
     pub debug_fmt: fn(

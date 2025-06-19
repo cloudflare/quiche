@@ -48,6 +48,7 @@ pub(crate) static RENO: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    #[cfg(feature = "qlog")]
     state_str,
     debug_fmt,
 };
@@ -146,6 +147,7 @@ fn has_custom_pacing() -> bool {
     false
 }
 
+#[cfg(feature = "qlog")]
 pub fn state_str(r: &Congestion, now: Instant) -> &'static str {
     if r.hystart.in_css() {
         "conservative_slow_start"

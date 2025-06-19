@@ -49,6 +49,7 @@ pub(super) struct Drain {
 }
 
 impl ModeImpl for Drain {
+    #[cfg(feature = "qlog")]
     fn state_str(&self) -> &'static str {
         "bbr_drain"
     }

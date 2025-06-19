@@ -44,6 +44,7 @@ pub(crate) static BBR: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    #[cfg(feature = "qlog")]
     state_str,
     debug_fmt,
 };
@@ -349,6 +350,7 @@ fn has_custom_pacing() -> bool {
     true
 }
 
+#[cfg(feature = "qlog")]
 fn state_str(r: &Congestion, _now: Instant) -> &'static str {
     r.bbr_state.state.into()
 }
