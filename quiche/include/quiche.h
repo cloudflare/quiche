@@ -136,11 +136,18 @@ enum quiche_error {
     QUICHE_ERR_OPTIMISTIC_ACK_DETECTED = -22,
 };
 
-// Returns a human readable string with the quiche version number.
+// Returns a human readable null-terminated string with the quiche version number.
 const char *quiche_version(void);
 
-// Enables logging. |cb| will be called with log messages
+// Returns a human readable sliced string with the quiche version number.
+void quiche_version_sliced(const char **version, size_t *version_len);
+
+// Enables logging. |cb| will be called with null-terminated log messages
 int quiche_enable_debug_logging(void (*cb)(const char *line, void *argp),
+                                void *argp);
+
+// Enables logging. |cb| will be called with sliced log messages
+int quiche_enable_debug_logging_sliced(void (*cb)(const char *line, size_t line_len, void *argp),
                                 void *argp);
 
 // Stores configuration shared between multiple connections.
@@ -153,17 +160,33 @@ quiche_config *quiche_config_new(uint32_t version);
 int quiche_config_load_cert_chain_from_pem_file(quiche_config *config,
                                                 const char *path);
 
+// Configures the given certificate chain.
+int quiche_config_load_cert_chain_from_pem_file_sliced(quiche_config *config,
+                                                const char *path, size_t path_len);
+
 // Configures the given private key.
 int quiche_config_load_priv_key_from_pem_file(quiche_config *config,
                                               const char *path);
+
+// Configures the given private key.
+int quiche_config_load_priv_key_from_pem_file_sliced(quiche_config *config,
+                                              const char *path, size_t path_len);
 
 // Specifies a file where trusted CA certificates are stored for the purposes of certificate verification.
 int quiche_config_load_verify_locations_from_file(quiche_config *config,
                                                   const char *path);
 
+// Specifies a file where trusted CA certificates are stored for the purposes of certificate verification.
+int quiche_config_load_verify_locations_from_file_sliced(quiche_config *config,
+                                                  const char *path, size_t path_len);
+
 // Specifies a directory where trusted CA certificates are stored for the purposes of certificate verification.
 int quiche_config_load_verify_locations_from_directory(quiche_config *config,
                                                        const char *path);
+
+// Specifies a directory where trusted CA certificates are stored for the purposes of certificate verification.
+int quiche_config_load_verify_locations_from_directory_sliced(quiche_config *config,
+                                                       const char *path, size_t path_len);
 
 // Configures whether to verify the peer's certificate.
 void quiche_config_verify_peer(quiche_config *config, bool v);
@@ -225,8 +248,11 @@ void quiche_config_set_max_ack_delay(quiche_config *config, uint64_t v);
 // Sets the `disable_active_migration` transport parameter.
 void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 
-// Sets the congestion control algorithm used by string.
+// Sets the congestion control algorithm used with a null-terminated string.
 int quiche_config_set_cc_algorithm_name(quiche_config *config, const char *algo);
+
+// Sets the congestion control algorithm used with a sliced string.
+int quiche_config_set_cc_algorithm_name_sliced(quiche_config *config, const char *algo, size_t algo_len);
 
 // Sets the initial cwnd for the connection in terms of packet count.
 void quiche_config_set_initial_congestion_window_packets(quiche_config *config, size_t packets);
@@ -301,6 +327,13 @@ quiche_conn *quiche_connect(const char *server_name,
                             const struct sockaddr *peer, socklen_t peer_len,
                             quiche_config *config);
 
+// Creates a new client-side connection.
+quiche_conn *quiche_connect_sliced(const char *server_name, size_t server_name_len,
+                            const uint8_t *scid, size_t scid_len,
+                            const struct sockaddr *local, socklen_t local_len,
+                            const struct sockaddr *peer, socklen_t peer_len,
+                            quiche_config *config);
+
 // Writes a version negotiation packet.
 ssize_t quiche_negotiate_version(const uint8_t *scid, size_t scid_len,
                                  const uint8_t *dcid, size_t dcid_len,
@@ -323,19 +356,30 @@ quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const quiche_config *config, void *ssl,
                                       bool is_server);
 
-// Enables keylog to the specified file path. Returns true on success.
+// Enables keylog to the specified null-terminated file path. Returns true on success.
 bool quiche_conn_set_keylog_path(quiche_conn *conn, const char *path);
+
+// Enables keylog to the specified sliced file path. Returns true on success.
+bool quiche_conn_set_keylog_path_sliced(quiche_conn *conn, const char *path, size_t path_len);
 
 // Enables keylog to the specified file descriptor. Unix only.
 void quiche_conn_set_keylog_fd(quiche_conn *conn, int fd);
 
-// Enables qlog to the specified file path. Returns true on success.
+// Enables qlog to the specified null-terminated file path. Returns true on success.
 bool quiche_conn_set_qlog_path(quiche_conn *conn, const char *path,
                           const char *log_title, const char *log_desc);
+
+// Enables qlog to the specified sliced file path. Returns true on success.
+bool quiche_conn_set_qlog_path_sliced(quiche_conn *conn, const char *path, size_t path_len,
+                          const char *log_title, size_t log_title_len, const char *log_desc, size_t log_desc_len);
 
 // Enables qlog to the specified file descriptor. Unix only.
 void quiche_conn_set_qlog_fd(quiche_conn *conn, int fd, const char *log_title,
                              const char *log_desc);
+
+// Enables qlog to the specified file descriptor. Unix only.
+void quiche_conn_set_qlog_fd_sliced(quiche_conn *conn, int fd, const char *log_title, size_t log_title_len,
+                             const char *log_desc, size_t log_desc_len);
 
 // Configures the given session for resumption.
 int quiche_conn_set_session(quiche_conn *conn, const uint8_t *buf, size_t buf_len);
@@ -465,7 +509,7 @@ void quiche_conn_on_timeout(quiche_conn *conn);
 int quiche_conn_close(quiche_conn *conn, bool app, uint64_t err,
                       const uint8_t *reason, size_t reason_len);
 
-// Returns a string uniquely representing the connection.
+// Returns a sliced string uniquely representing the connection.
 void quiche_conn_trace_id(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns the source connection ID.
