@@ -4285,9 +4285,12 @@ impl<F: BufFactory> Connection<F> {
                     },
                 }
 
-                let frame = frame::Frame::Padding {
-                    len: active_path.pmtud.get_probe_size() - overhead - 1,
-                };
+                let pmtud_padding: usize = active_path
+                    .pmtud
+                    .get_probe_size()
+                    .saturating_sub(overhead + 1);
+
+                let frame = frame::Frame::Padding { len: pmtud_padding };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     let frame = frame::Frame::Ping {
