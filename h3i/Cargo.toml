@@ -1,6 +1,6 @@
 [package]
 name = "h3i"
-version = "0.4.1"
+version = "0.5.0"
 authors = [
   "Lucas Pardue <lucas@lucaspardue.com>",
   "Evan Rittenhouse <evanrittenhouse@gmail.com>",
