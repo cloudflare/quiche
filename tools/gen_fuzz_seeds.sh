@@ -28,9 +28,13 @@ RUST_LOG=trace target/debug/quiche-client --no-verify https://127.0.0.1:4433 --d
 # Combine client-received packets into client's seed.
 cat $CLIENT_DIR/*.pkt > fuzz/corpus/packet_recv_client/seed
 
-# Combine server-received packets into client's seed.
+# Combine server-received packets into server's seed.
 cat $SERVER_DIR/*.pkt > fuzz/corpus/packet_recv_server/seed
+
+# Combine server-received packets with "fuzz" delimit into server's seed for multiple packets.
+ls $SERVER_DIR/*.pkt | while read i; do cat $i; echo -n fuzz; done > fuzz/corpus/packets_recv_server/seed
 
 # Minimize fuzz corpora.
 cargo +nightly fuzz cmin -Oa packet_recv_client
 cargo +nightly fuzz cmin -Oa packet_recv_server
+cargo +nightly fuzz cmin -Oa packets_recv_server

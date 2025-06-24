@@ -1,0 +1,14 @@
+project: protocols/quiche
+
+target: packets-recv-server-libfuzzer
+
+image: ${MAYHEM_DOCKER_REGISTRY}/protocols/quiche-libfuzzer:latest
+
+advanced_triage: false
+
+cmds:
+  - cmd: /home/mayhem/packets_recv_server
+    libfuzzer: true
+    sanitizer: true
+    timeout: 5
+    env: {QUICHE_FUZZ_CRT: /home/mayhem/cert.crt, QUICHE_FUZZ_KEY: /home/mayhem/cert.key}
