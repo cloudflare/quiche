@@ -36,6 +36,8 @@ docker-publish:
 build-fuzz:
 	cargo +nightly fuzz build --release --debug-assertions packet_recv_client
 	cargo +nightly fuzz build --release --debug-assertions packet_recv_server
+	cargo +nightly fuzz build --release --debug-assertions packets_recv_server
+	cargo +nightly fuzz build --release --debug-assertions packets_posths_server
 	cargo +nightly fuzz build --release --debug-assertions qpack_decode
 
 # build fuzzing image
