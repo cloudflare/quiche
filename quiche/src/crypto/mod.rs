@@ -206,7 +206,7 @@ impl Open {
                 Some(n) => n,
                 None => return Err(Error::CryptoFail),
             };
-            if ad.len() > tag_len && &buf[out_len..] ==  &ad[..tag_len] {
+            if ad.len() > tag_len && &buf[out_len..] == &ad[..tag_len] {
                 return Err(Error::CryptoFail);
             }
             return Ok(out_len);
