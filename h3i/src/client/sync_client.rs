@@ -179,10 +179,7 @@ pub fn connect(
     }
 
     log::info!(
-        "connecting to {:} from {:} with scid {:?}",
-        peer_addr,
-        local_addr,
-        scid,
+        "connecting to {peer_addr:} from {local_addr:} with scid {scid:?}",
     );
 
     let mut app_proto_selected = false;
@@ -233,7 +230,7 @@ pub fn connect(
             _ => None,
         };
 
-        log::debug!("actual sleep is {:?}", actual_sleep);
+        log::debug!("actual sleep is {actual_sleep:?}");
         poll.poll(&mut events, actual_sleep).unwrap();
 
         // If the event loop reported no events, run a belt and braces check on
@@ -281,7 +278,7 @@ pub fn connect(
                     Ok(v) => v,
 
                     Err(e) => {
-                        log::debug!("{}: recv failed: {:?}", local_addr, e);
+                        log::debug!("{local_addr}: recv failed: {e:?}");
                         continue 'read;
                     },
                 };
@@ -389,10 +386,7 @@ pub fn connect(
 
                         Err(e) => {
                             log::error!(
-                                "{} -> {}: send failed: {:?}",
-                                local_addr,
-                                peer_addr,
-                                e
+                                "{local_addr} -> {peer_addr}: send failed: {e:?}"
                             );
 
                             conn.close(false, 0x1, b"fail").ok();
@@ -465,8 +459,7 @@ fn check_duration_and_do_actions(
                 // We could in theory check quiche's idle_timeout value if
                 // it was public.
                 log::info!(
-                    "waiting for {:?} before executing more actions",
-                    idle_wait
+                    "waiting for {idle_wait:?} before executing more actions"
                 );
             }
         },
@@ -513,8 +506,7 @@ where
 {
     if !waiting_for.is_empty() {
         log::debug!(
-            "won't fire an action due to waiting for responses: {:?}",
-            waiting_for
+            "won't fire an action due to waiting for responses: {waiting_for:?}"
         );
         return None;
     }
@@ -527,8 +519,7 @@ where
                 WaitType::WaitDuration(period) => return Some(*period),
                 WaitType::StreamEvent(response) => {
                     log::info!(
-                        "waiting for {:?} before executing more actions",
-                        response
+                        "waiting for {response:?} before executing more actions"
                     );
                     waiting_for.add_wait(response);
                     return None;

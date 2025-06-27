@@ -8571,7 +8571,7 @@ fn drop_pkt_on_err(
         return e;
     }
 
-    trace!("{} dropped invalid packet", trace_id);
+    trace!("{trace_id} dropped invalid packet");
 
     // Ignore other invalid packets that haven't been authenticated to prevent
     // man-in-the-middle and man-on-the-side attacks.
@@ -12292,7 +12292,7 @@ mod tests {
         match frames.first() {
             Some(frame::Frame::ACK { .. }) => (),
 
-            f => panic!("expected ACK frame, got {:?}", f),
+            f => panic!("expected ACK frame, got {f:?}"),
         };
 
         let mut r = pipe.server.writable();
@@ -14566,12 +14566,10 @@ mod tests {
             pipe.client.stream_send(0, &send_buf1, false),
             if cc_algorithm_name == "cubic" {
                 Ok(12000)
+            } else if cfg!(feature = "openssl") {
+                Ok(12345)
             } else {
-                if cfg!(feature = "openssl") {
-                    Ok(12345)
-                } else {
-                    Ok(12299)
-                }
+                Ok(12299)
             }
         );
 
@@ -14645,12 +14643,10 @@ mod tests {
             pipe.client.stream_send(0, &send_buf1, false),
             if cc_algorithm_name == "cubic" {
                 Ok(12000)
+            } else if cfg!(feature = "openssl") {
+                Ok(12345)
             } else {
-                if cfg!(feature = "openssl") {
-                    Ok(12345)
-                } else {
-                    Ok(12299)
-                }
+                Ok(12299)
             }
         );
 
@@ -16888,12 +16884,10 @@ mod tests {
                 .cwnd(),
             if cc_algorithm_name == "cubic" {
                 12000
+            } else if cfg!(feature = "openssl") {
+                13437
             } else {
-                if cfg!(feature = "openssl") {
-                    13437
-                } else {
-                    13421
-                }
+                13421
             },
         );
     }
@@ -16954,12 +16948,10 @@ mod tests {
             pipe.server.tx_cap,
             if cc_algorithm_name == "cubic" {
                 12000
+            } else if cfg!(feature = "openssl") {
+                13959
             } else {
-                if cfg!(feature = "openssl") {
-                    13959
-                } else {
-                    13873
-                }
+                13873
             }
         );
 
@@ -16969,12 +16961,10 @@ mod tests {
             pipe.server.stream_send(8, &buf[..5000], false),
             if cc_algorithm_name == "cubic" {
                 Ok(2000)
+            } else if cfg!(feature = "openssl") {
+                Ok(3959)
             } else {
-                if cfg!(feature = "openssl") {
-                    Ok(3959)
-                } else {
-                    Ok(3873)
-                }
+                Ok(3873)
             }
         );
 
@@ -19205,7 +19195,7 @@ mod tests {
         match frames.first() {
             Some(frame::Frame::ACK { .. }) => (),
 
-            f => panic!("expected ACK frame, got {:?}", f),
+            f => panic!("expected ACK frame, got {f:?}"),
         };
 
         assert_eq!(pipe.server.streams.len(), 9);

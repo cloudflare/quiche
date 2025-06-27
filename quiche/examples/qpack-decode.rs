@@ -69,7 +69,7 @@ fn main() {
             break;
         }
 
-        debug!("Got stream={} len={}", stream_id, len);
+        debug!("Got stream={stream_id} len={len}");
 
         if stream_id == 0 {
             dec.control(&mut data[..len]).unwrap();

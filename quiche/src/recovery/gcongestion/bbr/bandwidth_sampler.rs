@@ -976,18 +976,17 @@ mod bandwidth_sampler_tests {
             &mut self, acked: &[u64], lost: &[u64],
         ) -> CongestionEventSample {
             let acked = acked
-                .into_iter()
+                .iter()
                 .map(|pkt| {
                     let acked_size = self.get_packet_size(*pkt);
                     self.bytes_in_flight -= acked_size;
 
-                    let acked = self.make_acked_packet(*pkt);
-                    acked
+                    self.make_acked_packet(*pkt)
                 })
                 .collect::<Vec<_>>();
 
             let lost = lost
-                .into_iter()
+                .iter()
                 .map(|pkt| {
                     let lost = self.make_lost_packet(*pkt);
                     self.bytes_in_flight -= lost.bytes_lost;
@@ -1070,7 +1069,7 @@ mod bandwidth_sampler_tests {
 
         // Send packets at the exponentially decreasing bandwidth.
         for i in 20..25 {
-            time_between_packets = time_between_packets * 2;
+            time_between_packets *= 2;
             expected_bandwidth = expected_bandwidth * 0.5;
 
             test_sender.send_packet(i, REGULAR_PACKET_SIZE, true);
@@ -1105,23 +1104,17 @@ mod bandwidth_sampler_tests {
 
         // Ack packet 1.
         let send_time_state = test_sender.ack_packet(1).state_at_send;
-        assert_eq!(REGULAR_PACKET_SIZE * 1, send_time_state.total_bytes_sent);
+        assert_eq!(REGULAR_PACKET_SIZE, send_time_state.total_bytes_sent);
         assert_eq!(0, send_time_state.total_bytes_acked);
         assert_eq!(0, send_time_state.total_bytes_lost);
-        assert_eq!(
-            REGULAR_PACKET_SIZE * 1,
-            test_sender.sampler.total_bytes_acked
-        );
+        assert_eq!(REGULAR_PACKET_SIZE, test_sender.sampler.total_bytes_acked);
 
         // Lose packet 2.
         let send_time_state = test_sender.lose_packet(2);
         assert_eq!(REGULAR_PACKET_SIZE * 2, send_time_state.total_bytes_sent);
         assert_eq!(0, send_time_state.total_bytes_acked);
         assert_eq!(0, send_time_state.total_bytes_lost);
-        assert_eq!(
-            REGULAR_PACKET_SIZE * 1,
-            test_sender.sampler.total_bytes_lost
-        );
+        assert_eq!(REGULAR_PACKET_SIZE, test_sender.sampler.total_bytes_lost);
 
         // Lose packet 3.
         let send_time_state = test_sender.lose_packet(3);
@@ -1166,7 +1159,7 @@ mod bandwidth_sampler_tests {
                 assert_eq!(0, send_time_state.total_bytes_lost);
             } else {
                 assert_eq!(
-                    REGULAR_PACKET_SIZE * 1,
+                    REGULAR_PACKET_SIZE,
                     send_time_state.total_bytes_acked
                 );
                 assert_eq!(
@@ -1781,7 +1774,7 @@ mod max_ack_height_tracker_tests {
             // The total duration of aggregation time and quiet period.
             let total_duration = Duration::from_micros(
                 (aggregation_bytes as u64 * 8 * 1000000) /
-                    self.bandwidth.to_bits_per_second() as u64,
+                    self.bandwidth.to_bits_per_second(),
             );
 
             assert_eq!(aggregation_bytes as u64, self.bandwidth * total_duration);
@@ -1810,7 +1803,7 @@ mod max_ack_height_tracker_tests {
                 } else {
                     assert!(last_extra_acked < extra_acked);
                 }
-                self.now = self.now + time_between_acks;
+                self.now += time_between_acks;
                 last_extra_acked = extra_acked;
             }
 
