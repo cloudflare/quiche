@@ -300,7 +300,7 @@ impl std::fmt::Debug for FrameParser {
             self.stream_id, self.ty, self.len,
         );
 
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

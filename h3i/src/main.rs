@@ -55,7 +55,7 @@ fn main() -> Result<(), ClientError> {
         Ok(v) => v,
 
         Err(e) => {
-            log::error!("Error loading configuration, exiting: {}", e);
+            log::error!("Error loading configuration, exiting: {e}");
             return Err(ClientError::Other("Invalid configuration".into()));
         },
     };
@@ -213,55 +213,55 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         .value_of("idle-timeout")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("idle-timeout input error {}", e))?;
+        .map_err(|e| format!("idle-timeout input error {e}"))?;
 
     let max_data = matches
         .value_of("max-data")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-data input error {}", e))?;
+        .map_err(|e| format!("max-data input error {e}"))?;
 
     let max_stream_data_bidi_local = matches
         .value_of("max-stream-data-bidi-local")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-stream-data-bidi-local input error {}", e))?;
+        .map_err(|e| format!("max-stream-data-bidi-local input error {e}"))?;
 
     let max_stream_data_bidi_remote = matches
         .value_of("max-stream-data-bidi-remote")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-stream-data-bidi-remote input error {}", e))?;
+        .map_err(|e| format!("max-stream-data-bidi-remote input error {e}"))?;
 
     let max_stream_data_uni = matches
         .value_of("max-stream-data-uni")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-stream-data-uni input error {}", e))?;
+        .map_err(|e| format!("max-stream-data-uni input error {e}"))?;
 
     let max_streams_bidi = matches
         .value_of("max-streams-bidi")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-streams-bidi input error {}", e))?;
+        .map_err(|e| format!("max-streams-bidi input error {e}"))?;
 
     let max_streams_uni = matches
         .value_of("max-streams-uni")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-streams-uni input error {}", e))?;
+        .map_err(|e| format!("max-streams-uni input error {e}"))?;
 
     let max_window = matches
         .value_of("max-window")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-window input error {}", e))?;
+        .map_err(|e| format!("max-window input error {e}"))?;
 
     let max_stream_window = matches
         .value_of("max-stream-window")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-stream-window input error {}", e))?;
+        .map_err(|e| format!("max-stream-window input error {e}"))?;
 
     let qlog_actions_output = !matches.is_present("no-qlog-actions-output");
     let qlog_input = matches.value_of("qlog-input").and_then(|q| {
@@ -398,15 +398,13 @@ pub fn make_qlog_writer() -> std::io::BufWriter<std::fs::File> {
     );
     path.push(filename.clone());
 
-    log::info!("Session will be recorded to {}", filename);
+    log::info!("Session will be recorded to {filename}");
 
     match std::fs::File::create(&path) {
         Ok(f) => std::io::BufWriter::new(f),
 
-        Err(e) => panic!(
-            "Error creating qlog file attempted path was {:?}: {}",
-            path, e
-        ),
+        Err(e) =>
+            panic!("Error creating qlog file attempted path was {path:?}: {e}"),
     }
 }
 

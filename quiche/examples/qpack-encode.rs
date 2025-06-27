@@ -63,7 +63,7 @@ fn main() {
 
             let len = enc.encode(&headers, &mut out).unwrap();
 
-            debug!("Writing header block stream={} len={}", stream_id, len);
+            debug!("Writing header block stream={stream_id} len={len}");
 
             std::io::stdout()
                 .write_all(&stream_id.to_be_bytes())

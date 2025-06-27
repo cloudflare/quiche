@@ -83,11 +83,11 @@ async fn test_handshake_duration_ioworker() {
             });
 
             ssl_ctx_builder
-                .set_private_key_file(&TEST_KEY_FILE, SslFiletype::PEM)
+                .set_private_key_file(TEST_KEY_FILE, SslFiletype::PEM)
                 .unwrap();
 
             ssl_ctx_builder
-                .set_certificate_chain_file(&TEST_CERT_FILE)
+                .set_certificate_chain_file(TEST_CERT_FILE)
                 .unwrap();
 
             Some(ssl_ctx_builder)
