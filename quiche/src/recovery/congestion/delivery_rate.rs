@@ -259,7 +259,7 @@ mod tests {
     use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryOps;
-    use crate::testing;
+    use crate::test_utils;
     use crate::Config;
     use crate::OnAckReceivedOutcome;
     use std::ops::Range;
@@ -397,7 +397,7 @@ mod tests {
 
         // Send 2 packets.
         for pn in 0..2 {
-            let pkt = testing::helper_packet_sent(pn, now, mss);
+            let pkt = test_utils::helper_packet_sent(pn, now, mss);
 
             r.on_packet_sent(
                 pkt,
@@ -451,7 +451,7 @@ mod tests {
 
         // Send 10 packets to fill cwnd.
         for pn in 0..5 {
-            let pkt = testing::helper_packet_sent(pn, now, mss);
+            let pkt = test_utils::helper_packet_sent(pn, now, mss);
             r.on_packet_sent(
                 pkt,
                 packet::Epoch::Application,
@@ -466,7 +466,7 @@ mod tests {
         assert!(!r.congestion.delivery_rate.sample_is_app_limited());
 
         for pn in 5..10 {
-            let pkt = testing::helper_packet_sent(pn, now, mss);
+            let pkt = test_utils::helper_packet_sent(pn, now, mss);
             r.on_packet_sent(
                 pkt,
                 packet::Epoch::Application,
@@ -486,7 +486,7 @@ mod tests {
         rtt: Duration, mss: usize,
     ) {
         for pn in range.clone() {
-            let pkt = testing::helper_packet_sent(pn, now, mss);
+            let pkt = test_utils::helper_packet_sent(pn, now, mss);
             recovery.on_packet_sent(
                 pkt,
                 packet::Epoch::Application,

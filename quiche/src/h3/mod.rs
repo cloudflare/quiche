@@ -3223,7 +3223,7 @@ pub fn grease_value() -> u64 {
 pub mod testing {
     use super::*;
 
-    use crate::testing;
+    use crate::test_utils;
 
     /// Session is an HTTP/3 test helper structure. It holds a client, server
     /// and pipe that allows them to communicate.
@@ -3240,7 +3240,7 @@ pub mod testing {
     /// available for any test that need to do unconventional things (such as
     /// bad behaviour that triggers errors).
     pub struct Session {
-        pub pipe: testing::Pipe,
+        pub pipe: test_utils::Pipe,
         pub client: Connection,
         pub server: Connection,
     }
@@ -3281,7 +3281,7 @@ pub mod testing {
         pub fn with_configs(
             config: &mut crate::Config, h3_config: &Config,
         ) -> Result<Session> {
-            let pipe = testing::Pipe::with_config(config)?;
+            let pipe = test_utils::Pipe::with_config(config)?;
             let client_dgram = pipe.client.dgram_enabled();
             let server_dgram = pipe.server.dgram_enabled();
             Ok(Session {
@@ -3615,14 +3615,14 @@ mod tests {
         let h3_config = Config::new().unwrap();
 
         // Perform initial handshake.
-        let mut pipe = crate::testing::Pipe::with_config(&mut config).unwrap();
+        let mut pipe = crate::test_utils::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
         // Extract session,
         let session = pipe.client.session().unwrap();
 
         // Configure session on new connection.
-        let mut pipe = crate::testing::Pipe::with_config(&mut config).unwrap();
+        let mut pipe = crate::test_utils::Pipe::with_config(&mut config).unwrap();
         assert_eq!(pipe.client.set_session(session), Ok(()));
 
         // Can't create an H3 connection until the QUIC connection is determined
@@ -5801,7 +5801,7 @@ mod tests {
     /// Ensure STREAM_DATA_BLOCKED is not emitted multiple times with the same
     /// offset when trying to send large bodies.
     fn send_body_truncation_stream_blocked() {
-        use crate::testing::decode_pkt;
+        use crate::test_utils::decode_pkt;
 
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         config
