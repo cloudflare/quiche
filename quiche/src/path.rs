@@ -34,6 +34,7 @@ use smallvec::SmallVec;
 
 use slab::Slab;
 
+use crate::Config;
 use crate::Error;
 use crate::Result;
 use crate::StartupExit;
@@ -139,8 +140,8 @@ pub struct Path {
     /// Loss recovery and congestion control state.
     pub recovery: recovery::Recovery,
 
-    /// Path MTU discovery state.
-    pub pmtud: pmtud::Pmtud,
+    /// Path MTU discovery state. None if PMTUD is disabled on the path.
+    pub pmtud: Option<pmtud::Pmtud>,
 
     /// Pending challenge data with the size of the packet containing them and
     /// when they were sent.
@@ -224,14 +225,31 @@ impl Path {
     pub fn new(
         local_addr: SocketAddr, peer_addr: SocketAddr,
         recovery_config: &recovery::RecoveryConfig,
-        path_challenge_recv_max_queue_len: usize, pmtud_init: usize,
-        is_initial: bool,
+        path_challenge_recv_max_queue_len: usize, is_initial: bool,
+        config: Option<&Config>,
     ) -> Self {
         let (state, active_scid_seq, active_dcid_seq) = if is_initial {
             (PathState::Validated, Some(0), Some(0))
         } else {
             (PathState::Unknown, None, None)
         };
+
+        let pmtud = config.and_then(|c| {
+            if c.pmtud {
+                let maximum_supported_mtu: usize = std::cmp::min(
+                    // if the max_udp_payload_size doesn't fit into a usize, then
+                    // max_send_udp_payload_size must be smaller so use that
+                    c.local_transport_params
+                        .max_udp_payload_size
+                        .try_into()
+                        .unwrap_or(c.max_send_udp_payload_size),
+                    c.max_send_udp_payload_size,
+                );
+                Some(pmtud::Pmtud::new(maximum_supported_mtu))
+            } else {
+                None
+            }
+        });
 
         Self {
             local_addr,
@@ -241,7 +259,7 @@ impl Path {
             state,
             active: false,
             recovery: recovery::Recovery::new_with_config(recovery_config),
-            pmtud: pmtud::Pmtud::new(pmtud_init),
+            pmtud,
             in_flight_challenges: VecDeque::new(),
             max_challenge_size: 0,
             probing_lost: 0,
@@ -356,11 +374,15 @@ impl Path {
         &mut self, hs_confirmed: bool, hs_done: bool, out_len: usize,
         is_closing: bool, frames_empty: bool,
     ) -> bool {
+        let Some(pmtud) = self.pmtud.as_mut() else {
+            return false;
+        };
+
         (hs_confirmed && hs_done) &&
-            self.pmtud.get_probe_size() > self.pmtud.get_current_mtu() &&
-            self.recovery.cwnd_available() > self.pmtud.get_probe_size() &&
-            out_len >= self.pmtud.get_probe_size() &&
-            self.pmtud.get_should_probe() &&
+            pmtud.get_probe_size() > pmtud.get_current_mtu() &&
+            self.recovery.cwnd_available() > pmtud.get_probe_size() &&
+            out_len >= pmtud.get_probe_size() &&
+            pmtud.should_probe() &&
             !is_closing &&
             frames_empty
     }
@@ -585,7 +607,6 @@ impl PathMap {
     /// capacity limit.
     pub fn new(
         mut initial_path: Path, max_concurrent_paths: usize, is_server: bool,
-        enable_pmtud: bool, max_send_udp_payload_size: usize,
     ) -> Self {
         let mut paths = Slab::with_capacity(1); // most connections only have one path
         let mut addrs_to_paths = BTreeMap::new();
@@ -595,14 +616,6 @@ impl PathMap {
 
         // As it is the first path, it is active by default.
         initial_path.active = true;
-
-        // Enable path MTU Discovery and start probing with the largest datagram
-        // size.
-        if enable_pmtud {
-            initial_path.pmtud.set_should_probe(enable_pmtud);
-            initial_path.pmtud.set_probe_size(max_send_udp_payload_size);
-            initial_path.pmtud.enable(enable_pmtud);
-        }
 
         let active_path_id = paths.insert(initial_path);
         addrs_to_paths.insert((local_addr, peer_addr), active_path_id);
@@ -866,11 +879,11 @@ impl PathMap {
         &mut self, discover: bool, max_send_udp_payload_size: usize,
     ) {
         for (_, path) in self.paths.iter_mut() {
-            path.pmtud.enable(discover);
-            // It's harmless to modify probe size even if we're disabling
-            // pmtud.
-            path.pmtud.set_probe_size(max_send_udp_payload_size);
-            path.pmtud.set_should_probe(discover);
+            path.pmtud = if discover {
+                Some(pmtud::Pmtud::new(max_send_udp_payload_size))
+            } else {
+                None
+            };
         }
     }
 }
@@ -1023,18 +1036,18 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             true,
+            None,
         );
-        let mut path_mgr = PathMap::new(path, 2, false, true, 1200);
+        let mut path_mgr = PathMap::new(path, 2, false);
 
         let probed_path = Path::new(
             client_addr_2,
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             false,
+            None,
         );
         path_mgr.insert_path(probed_path, false).unwrap();
 
@@ -1110,17 +1123,17 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             true,
+            None,
         );
-        let mut client_path_mgr = PathMap::new(path, 2, false, false, 1200);
+        let mut client_path_mgr = PathMap::new(path, 2, false);
         let mut server_path = Path::new(
             server_addr,
             client_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             false,
+            None,
         );
 
         let client_pid = client_path_mgr
@@ -1202,17 +1215,17 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             true,
+            None,
         );
-        let mut client_path_mgr = PathMap::new(path, 2, false, false, 1200);
+        let mut client_path_mgr = PathMap::new(path, 2, false);
         let mut server_path = Path::new(
             server_addr,
             client_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             false,
+            None,
         );
 
         let client_pid = client_path_mgr
