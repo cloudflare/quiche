@@ -1169,7 +1169,7 @@ impl PktNumWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing;
+    use crate::test_utils;
     use crate::MAX_SEND_UDP_PAYLOAD_SIZE;
 
     #[test]
@@ -2192,11 +2192,11 @@ mod tests {
 
         assert!(pkt_space.largest_tx_pkt_num.is_none());
 
-        let sent_ctx = testing::helper_packet_sent(1, now, 10);
+        let sent_ctx = test_utils::helper_packet_sent(1, now, 10);
         pkt_space.on_packet_sent(&sent_ctx);
         assert_eq!(pkt_space.largest_tx_pkt_num.unwrap(), 1);
 
-        let sent_ctx = testing::helper_packet_sent(2, now, 10);
+        let sent_ctx = test_utils::helper_packet_sent(2, now, 10);
         pkt_space.on_packet_sent(&sent_ctx);
         assert_eq!(pkt_space.largest_tx_pkt_num.unwrap(), 2);
     }

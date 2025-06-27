@@ -664,7 +664,7 @@ mod tests {
     use crate::packet;
     use crate::ranges;
     use crate::recovery::congestion::PACING_MULTIPLIER;
-    use crate::testing;
+    use crate::test_utils;
     use crate::CongestionControlAlgorithm;
     use rstest::rstest;
     use smallvec::smallvec;
@@ -1684,7 +1684,8 @@ mod tests {
         let pkt_size = 1000;
         let pkt_count = 4;
         for pkt_num in 0..pkt_count {
-            let sent = crate::testing::helper_packet_sent(pkt_num, now, pkt_size);
+            let sent =
+                crate::test_utils::helper_packet_sent(pkt_num, now, pkt_size);
             r.on_packet_sent(sent, epoch, HandshakeStatus::default(), now, "");
         }
         assert_eq!(r.sent_packets_len(epoch), pkt_count as usize);
@@ -1943,7 +1944,7 @@ mod tests {
         for pn in 0..10 {
             // Start by sending a few packets.
             let bytes = 1000;
-            let sent = testing::helper_packet_sent(pn, now, bytes);
+            let sent = test_utils::helper_packet_sent(pn, now, bytes);
             r.on_packet_sent(
                 sent,
                 packet::Epoch::Application,
