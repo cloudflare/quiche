@@ -833,8 +833,8 @@ mod tests {
         };
 
         let tls_cert_settings = TlsCertificatePaths {
-            cert: &TEST_CERT_FILE,
-            private_key: &TEST_KEY_FILE,
+            cert: TEST_CERT_FILE,
+            private_key: TEST_KEY_FILE,
             kind: crate::settings::CertificateKind::X509,
         };
 

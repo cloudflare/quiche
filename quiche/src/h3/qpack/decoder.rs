@@ -92,7 +92,7 @@ impl Decoder {
         let req_insert_count = decode_int(&mut b, 8)?;
         let base = decode_int(&mut b, 7)?;
 
-        trace!("Header count={} base={}", req_insert_count, base);
+        trace!("Header count={req_insert_count} base={base}");
 
         while b.cap() > 0 {
             let first = b.peek_u8()?;
@@ -104,7 +104,7 @@ impl Decoder {
                     let s = first & STATIC == STATIC;
                     let index = decode_int(&mut b, 6)?;
 
-                    trace!("Indexed index={} static={}", index, s);
+                    trace!("Indexed index={index} static={s}");
 
                     if !s {
                         // TODO: implement dynamic table
@@ -124,7 +124,7 @@ impl Decoder {
                 Representation::IndexedWithPostBase => {
                     let index = decode_int(&mut b, 4)?;
 
-                    trace!("Indexed With Post Base index={}", index);
+                    trace!("Indexed With Post Base index={index}");
 
                     // TODO: implement dynamic table
                     return Err(Error::InvalidHeaderValue);
@@ -146,9 +146,7 @@ impl Decoder {
                     let value = decode_str(&mut b)?;
 
                     trace!(
-                        "Literal Without Name Reference name={:?} value={:?}",
-                        name,
-                        value,
+                        "Literal Without Name Reference name={name:?} value={value:?}",
                     );
 
                     left = left
@@ -169,10 +167,7 @@ impl Decoder {
                     let value = decode_str(&mut b)?;
 
                     trace!(
-                        "Literal name_idx={} static={} value={:?}",
-                        name_idx,
-                        s,
-                        value
+                        "Literal name_idx={name_idx} static={s} value={value:?}"
                     );
 
                     if !s {

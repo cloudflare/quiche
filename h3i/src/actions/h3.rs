@@ -177,7 +177,7 @@ impl WaitingFor {
             let new_len = waits.len();
 
             if old_len != new_len {
-                log::info!("No longer waiting for {:?}", stream_event);
+                log::info!("No longer waiting for {stream_event:?}");
             }
         }
     }
@@ -185,7 +185,7 @@ impl WaitingFor {
     pub(crate) fn clear_waits_on_stream(&mut self, stream_id: u64) {
         if let Some(waits) = self.0.get_mut(&stream_id) {
             if !waits.is_empty() {
-                log::info!("Clearing all waits for stream {}", stream_id);
+                log::info!("Clearing all waits for stream {stream_id}");
                 waits.clear();
             }
         }

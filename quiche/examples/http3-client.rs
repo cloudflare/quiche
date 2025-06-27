@@ -124,10 +124,10 @@ fn main() {
             continue;
         }
 
-        panic!("send() failed: {:?}", e);
+        panic!("send() failed: {e:?}");
     }
 
-    debug!("written {}", write);
+    debug!("written {write}");
 
     let h3_config = quiche::h3::Config::new().unwrap();
 
@@ -182,11 +182,11 @@ fn main() {
                         break 'read;
                     }
 
-                    panic!("recv() failed: {:?}", e);
+                    panic!("recv() failed: {e:?}");
                 },
             };
 
-            debug!("got {} bytes", len);
+            debug!("got {len} bytes");
 
             let recv_info = quiche::RecvInfo {
                 to: local_addr,
@@ -198,12 +198,12 @@ fn main() {
                 Ok(v) => v,
 
                 Err(e) => {
-                    error!("recv failed: {:?}", e);
+                    error!("recv failed: {e:?}");
                     continue 'read;
                 },
             };
 
-            debug!("processed {} bytes", read);
+            debug!("processed {read} bytes");
         }
 
         debug!("done reading");
@@ -225,7 +225,7 @@ fn main() {
         // all requests have been sent.
         if let Some(h3_conn) = &mut http3_conn {
             if !req_sent {
-                info!("sending HTTP request {:?}", req);
+                info!("sending HTTP request {req:?}");
 
                 h3_conn.send_request(&mut conn, &req, true).unwrap();
 
@@ -250,8 +250,7 @@ fn main() {
                             http3_conn.recv_body(&mut conn, stream_id, &mut buf)
                         {
                             debug!(
-                                "got {} bytes of response data on stream {}",
-                                read, stream_id
+                                "got {read} bytes of response data on stream {stream_id}"
                             );
 
                             print!("{}", unsafe {
@@ -270,10 +269,7 @@ fn main() {
                     },
 
                     Ok((_stream_id, quiche::h3::Event::Reset(e))) => {
-                        error!(
-                            "request was reset by peer with {}, closing...",
-                            e
-                        );
+                        error!("request was reset by peer with {e}, closing...");
 
                         conn.close(true, 0x100, b"kthxbye").unwrap();
                     },
@@ -281,7 +277,7 @@ fn main() {
                     Ok((_, quiche::h3::Event::PriorityUpdate)) => unreachable!(),
 
                     Ok((goaway_id, quiche::h3::Event::GoAway)) => {
-                        info!("GOAWAY id={}", goaway_id);
+                        info!("GOAWAY id={goaway_id}");
                     },
 
                     Err(quiche::h3::Error::Done) => {
@@ -289,7 +285,7 @@ fn main() {
                     },
 
                     Err(e) => {
-                        error!("HTTP/3 processing failed: {:?}", e);
+                        error!("HTTP/3 processing failed: {e:?}");
 
                         break;
                     },
@@ -309,7 +305,7 @@ fn main() {
                 },
 
                 Err(e) => {
-                    error!("send failed: {:?}", e);
+                    error!("send failed: {e:?}");
 
                     conn.close(false, 0x1, b"fail").ok();
                     break;
@@ -322,10 +318,10 @@ fn main() {
                     break;
                 }
 
-                panic!("send() failed: {:?}", e);
+                panic!("send() failed: {e:?}");
             }
 
-            debug!("written {}", write);
+            debug!("written {write}");
         }
 
         if conn.is_closed() {

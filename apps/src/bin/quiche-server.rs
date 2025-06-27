@@ -81,7 +81,7 @@ fn main() {
                 pacing = true;
                 debug!("successfully set SO_TXTIME socket option");
             },
-            Err(e) => debug!("setsockopt failed {:?}", e),
+            Err(e) => debug!("setsockopt failed {e:?}"),
         };
     }
 
@@ -98,7 +98,7 @@ fn main() {
         detect_gso(&socket, max_datagram_size)
     };
 
-    trace!("GSO detected: {}", enable_gso);
+    trace!("GSO detected: {enable_gso}");
 
     // Create the configuration for the QUIC connections.
     let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
@@ -190,10 +190,10 @@ fn main() {
         let mut poll_res = poll.poll(&mut events, timeout);
         while let Err(e) = poll_res.as_ref() {
             if e.kind() == std::io::ErrorKind::Interrupted {
-                trace!("mio poll() call failed, retrying: {:?}", e);
+                trace!("mio poll() call failed, retrying: {e:?}");
                 poll_res = poll.poll(&mut events, timeout);
             } else {
-                panic!("mio poll() call failed fatally: {:?}", e);
+                panic!("mio poll() call failed fatally: {e:?}");
             }
         }
 
@@ -222,7 +222,7 @@ fn main() {
                         break 'read;
                     }
 
-                    panic!("recv() failed: {:?}", e);
+                    panic!("recv() failed: {e:?}");
                 },
             };
 
@@ -249,12 +249,12 @@ fn main() {
                 Ok(v) => v,
 
                 Err(e) => {
-                    error!("Parsing packet header failed: {:?}", e);
+                    error!("Parsing packet header failed: {e:?}");
                     continue 'read;
                 },
             };
 
-            trace!("got packet {:?}", hdr);
+            trace!("got packet {hdr:?}");
 
             let conn_id = if !cfg!(feature = "fuzzing") {
                 let conn_id = ring::hmac::sign(&conn_id_seed, &hdr.dcid);
@@ -290,7 +290,7 @@ fn main() {
                             break;
                         }
 
-                        panic!("send() failed: {:?}", e);
+                        panic!("send() failed: {e:?}");
                     }
                     continue 'read;
                 }
@@ -329,7 +329,7 @@ fn main() {
                                 break;
                             }
 
-                            panic!("send() failed: {:?}", e);
+                            panic!("send() failed: {e:?}");
                         }
                         continue 'read;
                     }
@@ -520,7 +520,7 @@ fn main() {
 
             // See whether source Connection IDs have been retired.
             while let Some(retired_scid) = client.conn.retired_scid_next() {
-                info!("Retiring source CID {:?}", retired_scid);
+                info!("Retiring source CID {retired_scid:?}");
                 clients_ids.remove(&retired_scid);
             }
 
@@ -606,7 +606,7 @@ fn main() {
                     break;
                 }
 
-                panic!("send_to() failed: {:?}", e);
+                panic!("send_to() failed: {e:?}");
             }
 
             trace!(

@@ -351,7 +351,7 @@ impl From<JsonEvent> for H3Actions {
                 if let Ok(wt) = wait_type {
                     actions.push(Action::Wait { wait_type: wt });
                 } else {
-                    log::debug!("couldn't create action from event: {:?}", event);
+                    log::debug!("couldn't create action from event: {event:?}");
                 }
             },
             _ => unimplemented!(),

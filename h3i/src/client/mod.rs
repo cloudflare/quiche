@@ -115,7 +115,7 @@ pub(crate) fn execute_action(
             fin_stream,
             frame,
         } => {
-            log::info!("frame tx id={} frame={:?}", stream_id, frame);
+            log::info!("frame tx id={stream_id} frame={frame:?}");
 
             // TODO: make serialization smarter
             let mut d = [42; 9999];
@@ -166,11 +166,7 @@ pub(crate) fn execute_action(
             frame,
             ..
         } => {
-            log::info!(
-                "headers frame tx stream={} hdrs={:?}",
-                stream_id,
-                headers
-            );
+            log::info!("headers frame tx stream={stream_id} hdrs={headers:?}");
 
             // TODO: make serialization smarter
             let mut d = [42; 9999];
@@ -216,10 +212,7 @@ pub(crate) fn execute_action(
             stream_type,
         } => {
             log::info!(
-                "open uni stream_id={} ty={} fin={}",
-                stream_id,
-                stream_type,
-                fin_stream
+                "open uni stream_id={stream_id} ty={stream_type} fin={fin_stream}"
             );
 
             let mut d = [42; 8];
@@ -258,16 +251,14 @@ pub(crate) fn execute_action(
             error_code,
         } => {
             log::info!(
-                "reset_stream stream_id={} error_code={}",
-                stream_id,
-                error_code
+                "reset_stream stream_id={stream_id} error_code={error_code}"
             );
             if let Err(e) = conn.stream_shutdown(
                 *stream_id,
                 quiche::Shutdown::Write,
                 *error_code,
             ) {
-                log::error!("can't send reset_stream: {}", e);
+                log::error!("can't send reset_stream: {e}");
                 // Clients can't reset streams they don't own. If we attempt to do
                 // this, stream_shutdown would fail, and we
                 // shouldn't create a parser.
@@ -284,9 +275,7 @@ pub(crate) fn execute_action(
             error_code,
         } => {
             log::info!(
-                "stop_sending stream id={} error_code={}",
-                stream_id,
-                error_code
+                "stop_sending stream id={stream_id} error_code={error_code}"
             );
 
             if let Err(e) = conn.stream_shutdown(
@@ -294,7 +283,7 @@ pub(crate) fn execute_action(
                 quiche::Shutdown::Read,
                 *error_code,
             ) {
-                log::error!("can't send stop_sending: {}", e);
+                log::error!("can't send stop_sending: {e}");
             }
 
             // A `STOP_SENDING` should elicit a `RESET_STREAM` in response, which
@@ -342,7 +331,7 @@ pub(crate) fn parse_streams<C: Client>(
             match stream_parse_result {
                 Ok(FrameParseResult::FrameParsed { h3i_frame, fin }) => {
                     if let H3iFrame::Headers(ref headers) = h3i_frame {
-                        log::info!("hdrs={:?}", headers);
+                        log::info!("hdrs={headers:?}");
                     }
 
                     handle_response_frame(
@@ -370,7 +359,7 @@ pub(crate) fn parse_streams<C: Client>(
                             error_code,
                         });
 
-                        log::info!("received reset stream: {:?}", frame);
+                        log::info!("received reset stream: {frame:?}");
                         handle_response_frame(
                             client,
                             None,
@@ -400,7 +389,7 @@ pub(crate) fn parse_streams<C: Client>(
                                 error_code,
                             });
 
-                            log::info!("received reset stream: {:?}", frame);
+                            log::info!("received reset stream: {frame:?}");
 
                             handle_response_frame(
                                 client,

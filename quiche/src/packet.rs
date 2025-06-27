@@ -2210,7 +2210,7 @@ mod tests {
 
         assert!(skip_manager.skip_pn.is_none());
         assert!(skip_manager.skip_pn_counter.is_none());
-        assert_eq!(skip_manager.should_skip_pn(handshake_completed), false);
+        assert!(!skip_manager.should_skip_pn(handshake_completed));
 
         // Arm `skip_pn_counter`
         skip_manager.on_packet_sent(
@@ -2221,7 +2221,7 @@ mod tests {
         assert_eq!(next_pn, 0);
         assert!(skip_manager.skip_pn.is_none());
         assert!(skip_manager.skip_pn_counter.unwrap() >= MIN_SKIP_COUNTER_VALUE);
-        assert_eq!(skip_manager.should_skip_pn(handshake_completed), false);
+        assert!(!skip_manager.should_skip_pn(handshake_completed));
 
         // `should_skip_pn()` should be true once the counter expires
         while skip_manager.skip_pn_counter.unwrap() > 0 {
@@ -2237,13 +2237,13 @@ mod tests {
         assert!(next_pn >= MIN_SKIP_COUNTER_VALUE);
         assert!(skip_manager.skip_pn.is_none());
         assert_eq!(skip_manager.skip_pn_counter.unwrap(), 0);
-        assert_eq!(skip_manager.should_skip_pn(handshake_completed), true);
+        assert!(skip_manager.should_skip_pn(handshake_completed));
 
         // skip the next pkt_num
         skip_manager.set_skip_pn(Some(next_pn));
         assert_eq!(skip_manager.skip_pn.unwrap(), next_pn);
         assert!(skip_manager.skip_pn_counter.is_none());
-        assert_eq!(skip_manager.should_skip_pn(handshake_completed), false);
+        assert!(!skip_manager.should_skip_pn(handshake_completed));
     }
 
     #[test]
@@ -2311,10 +2311,10 @@ mod tests {
 
         let mut handshake_completed = false;
         // Don't skip since handshake is not complete
-        assert_eq!(skip_manager.should_skip_pn(handshake_completed), false);
+        assert!(!skip_manager.should_skip_pn(handshake_completed));
 
         handshake_completed = true;
         // Skip pn after handshake complete
-        assert_eq!(skip_manager.should_skip_pn(handshake_completed), true);
+        assert!(skip_manager.should_skip_pn(handshake_completed));
     }
 }

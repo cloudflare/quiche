@@ -627,7 +627,7 @@ impl RecoveryOps for LegacyRecovery {
 
         self.epochs[epoch].sent_packets.push_back(pkt);
 
-        trace!("{} {:?}", trace_id, self);
+        trace!("{trace_id} {self:?}");
     }
 
     fn get_packet_send_time(&self, _now: Instant) -> Instant {
@@ -736,7 +736,7 @@ impl RecoveryOps for LegacyRecovery {
 
             self.set_loss_detection_timer(handshake_status, now);
 
-            trace!("{} {:?}", trace_id, self);
+            trace!("{trace_id} {self:?}");
             return OnLossDetectionTimeoutOutcome {
                 lost_packets,
                 lost_bytes,
@@ -789,7 +789,7 @@ impl RecoveryOps for LegacyRecovery {
 
         self.set_loss_detection_timer(handshake_status, now);
 
-        trace!("{} {:?}", trace_id, self);
+        trace!("{trace_id} {self:?}");
 
         OnLossDetectionTimeoutOutcome {
             lost_packets: 0,

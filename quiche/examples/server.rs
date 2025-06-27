@@ -147,11 +147,11 @@ fn main() {
                         break 'read;
                     }
 
-                    panic!("recv() failed: {:?}", e);
+                    panic!("recv() failed: {e:?}");
                 },
             };
 
-            debug!("got {} bytes", len);
+            debug!("got {len} bytes");
 
             let pkt_buf = &mut buf[..len];
 
@@ -163,12 +163,12 @@ fn main() {
                 Ok(v) => v,
 
                 Err(e) => {
-                    error!("Parsing packet header failed: {:?}", e);
+                    error!("Parsing packet header failed: {e:?}");
                     continue 'read;
                 },
             };
 
-            trace!("got packet {:?}", hdr);
+            trace!("got packet {hdr:?}");
 
             let conn_id = ring::hmac::sign(&conn_id_seed, &hdr.dcid);
             let conn_id = &conn_id.as_ref()[..quiche::MAX_CONN_ID_LEN];
@@ -199,7 +199,7 @@ fn main() {
                             break;
                         }
 
-                        panic!("send() failed: {:?}", e);
+                        panic!("send() failed: {e:?}");
                     }
                     continue 'read;
                 }
@@ -236,7 +236,7 @@ fn main() {
                             break;
                         }
 
-                        panic!("send() failed: {:?}", e);
+                        panic!("send() failed: {e:?}");
                     }
                     continue 'read;
                 }
@@ -363,7 +363,7 @@ fn main() {
                         break;
                     }
 
-                    panic!("send() failed: {:?}", e);
+                    panic!("send() failed: {e:?}");
                 }
 
                 debug!("{} written {} bytes", client.conn.trace_id(), write);

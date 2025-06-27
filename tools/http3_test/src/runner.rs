@@ -62,7 +62,7 @@ pub fn run(
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
-    info!("connecting to {:}", peer_addr);
+    info!("connecting to {peer_addr:}");
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
     // server address. This is needed on macOS and BSD variants that don't
@@ -142,7 +142,7 @@ pub fn run(
         return Err(Http3TestError::Other(format!("send() failed: {e:?}")));
     }
 
-    debug!("written {}", write);
+    debug!("written {write}");
 
     let req_start = std::time::Instant::now();
 
@@ -182,7 +182,7 @@ pub fn run(
                 },
             };
 
-            debug!("got {} bytes", len);
+            debug!("got {len} bytes");
 
             let recv_info = quiche::RecvInfo {
                 from,
@@ -199,12 +199,12 @@ pub fn run(
                 },
 
                 Err(e) => {
-                    error!("recv failed: {:?}", e);
+                    error!("recv failed: {e:?}");
                     break 'read;
                 },
             };
 
-            debug!("processed {} bytes", read);
+            debug!("processed {read} bytes");
         }
 
         if conn.is_closed() {
@@ -278,8 +278,7 @@ pub fn run(
                             http3_conn.recv_body(&mut conn, stream_id, &mut buf)
                         {
                             info!(
-                                "got {} bytes of response data on stream {}",
-                                read, stream_id
+                                "got {read} bytes of response data on stream {stream_id}"
                             );
 
                             test.add_response_body(stream_id, &buf, read);
@@ -289,10 +288,7 @@ pub fn run(
                     Ok((_stream_id, quiche::h3::Event::Finished)) => {
                         reqs_complete += 1;
 
-                        info!(
-                            "{}/{} responses received",
-                            reqs_complete, reqs_count
-                        );
+                        info!("{reqs_complete}/{reqs_count} responses received");
 
                         if reqs_complete == reqs_count {
                             info!(
@@ -332,7 +328,7 @@ pub fn run(
                     Ok((stream_id, quiche::h3::Event::Reset(e))) => {
                         reqs_complete += 1;
 
-                        info!("request was reset by peer with {}", e);
+                        info!("request was reset by peer with {e}");
                         test.set_reset_stream_error(stream_id, e);
 
                         if reqs_complete == reqs_count {
@@ -369,7 +365,7 @@ pub fn run(
                     },
 
                     Err(e) => {
-                        error!("HTTP/3 processing failed: {:?}", e);
+                        error!("HTTP/3 processing failed: {e:?}");
 
                         break;
                     },
@@ -389,7 +385,7 @@ pub fn run(
                 },
 
                 Err(e) => {
-                    error!("send failed: {:?}", e);
+                    error!("send failed: {e:?}");
                     conn.close(false, 0x1, b"fail").ok();
                     break;
                 },
@@ -406,7 +402,7 @@ pub fn run(
                 )));
             }
 
-            debug!("written {}", write);
+            debug!("written {write}");
         }
 
         if conn.is_closed() {

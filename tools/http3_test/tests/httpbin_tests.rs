@@ -691,7 +691,7 @@ mod httpbin_tests {
         // via the EXTRA_HEADERS environment variable.
         if let Some(headers) = &extra_headers() {
             for (name, val) in headers {
-                println!("{}: {}", name, val);
+                println!("{name}: {val}");
                 reqs[0].hdrs.push(Header::new(
                     name.as_bytes(),
                     val.as_str().unwrap().as_bytes(),
@@ -989,15 +989,13 @@ mod httpbin_tests {
                             assert_eq!(
                                 headers.get(name),
                                 Some(&String::from(expected_value)),
-                                "Header '{}' doesn't match",
-                                name
+                                "Header '{name}' doesn't match"
                             );
                         } else {
                             assert_eq!(
                                 headers.get(name),
                                 None,
-                                "Header '{}' exists",
-                                name
+                                "Header '{name}' exists"
                             );
                         }
                     }
@@ -1273,8 +1271,7 @@ mod httpbin_tests {
 
             let mut url = endpoint(Some("drip"));
             url.set_query(Some(&format!(
-                "duration={}&numbytes=5&code=200",
-                duration
+                "duration={duration}&numbytes=5&code=200"
             )));
 
             reqs.push(Http3Req::new("GET", &url, None, expect_hdrs));

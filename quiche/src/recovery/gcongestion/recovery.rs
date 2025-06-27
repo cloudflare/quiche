@@ -230,7 +230,7 @@ impl RecoveryEpoch {
 
                             has_ack_eliciting |= ack_eliciting;
 
-                            trace!("{} packet newly acked {}", trace_id, pkt_num);
+                            trace!("{trace_id} packet newly acked {pkt_num}");
                         },
 
                         SentStatus::Acked => {},
@@ -671,7 +671,7 @@ impl RecoveryOps for GRecovery {
 
         self.bytes_sent += sent_bytes;
 
-        trace!("{} {:?}", trace_id, self);
+        trace!("{trace_id} {self:?}");
     }
 
     fn get_packet_send_time(&self, now: Instant) -> Instant {
@@ -753,7 +753,7 @@ impl RecoveryOps for GRecovery {
 
         self.set_loss_detection_timer(handshake_status, now);
 
-        trace!("{} {:?}", trace_id, self);
+        trace!("{trace_id} {self:?}");
 
         Ok(OnAckReceivedOutcome {
             lost_packets,
@@ -791,7 +791,7 @@ impl RecoveryOps for GRecovery {
 
             self.set_loss_detection_timer(handshake_status, now);
 
-            trace!("{} {:?}", trace_id, self);
+            trace!("{trace_id} {self:?}");
             return OnLossDetectionTimeoutOutcome {
                 lost_packets,
                 lost_bytes,
@@ -857,7 +857,7 @@ impl RecoveryOps for GRecovery {
 
         self.set_loss_detection_timer(handshake_status, now);
 
-        trace!("{} {:?}", trace_id, self);
+        trace!("{trace_id} {self:?}");
         OnLossDetectionTimeoutOutcome {
             lost_packets: 0,
             lost_bytes: 0,

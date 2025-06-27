@@ -176,7 +176,7 @@ impl Prompter {
             QUIT => return PromptOutcome::Clear,
 
             _ => {
-                println!("error: unknown action {}", action);
+                println!("error: unknown action {action}");
                 return PromptOutcome::Repeat;
             },
         };
@@ -210,7 +210,7 @@ impl Prompter {
                 Err(inquire::InquireError::OperationInterrupted) =>
                     return actions,
                 Err(e) => {
-                    println!("Unexpected error while determining action: {}", e);
+                    println!("Unexpected error while determining action: {e}");
                     return actions;
                 },
             };
@@ -231,7 +231,7 @@ fn handle_action_loop_error(err: InquireError) -> bool {
         inquire::InquireError::OperationInterrupted => false,
 
         _ => {
-            println!("Unexpected error: {}", err);
+            println!("Unexpected error: {err}");
             true
         },
     }
@@ -482,8 +482,7 @@ fn validate_wait_period(period: &str) -> SuggestionResult<Validation> {
                 CONNECTION_IDLE_TIMEOUT.with(|v| *v.borrow());
             if v >= local_conn_timeout {
                 return Ok(Validation::Invalid(ErrorMessage::Custom(format!(
-                    "wait time >= local connection idle timeout {}",
-                    local_conn_timeout
+                    "wait time >= local connection idle timeout {local_conn_timeout}"
                 ))));
             }
         },
