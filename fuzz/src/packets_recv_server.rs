@@ -33,10 +33,10 @@ impl<'a> Iterator for PktIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.data.len() {
             let start = self.index;
-            if self.index+4 <= self.data.len() {
-                for i in self.index..self.data.len()-4 {
-                    if &self.data[i..i+4] == b"fuzz" {
-                        self.index = i+4;
+            if self.index + 4 <= self.data.len() {
+                for i in self.index..self.data.len() - 4 {
+                    if &self.data[i..i + 4] == b"fuzz" {
+                        self.index = i + 4;
                         return Some(&self.data[start..i]);
                     }
                 }
@@ -63,13 +63,15 @@ extern "C" {
 }
 
 fuzz_target!(|data: &[u8]| {
-    unsafe { RAND_reset_for_fuzzing(); }
+    unsafe {
+        RAND_reset_for_fuzzing();
+    }
     let from: SocketAddr = "127.0.0.1:1234".parse().unwrap();
     let to: SocketAddr = "127.0.0.1:4321".parse().unwrap();
 
     LOG_INIT.call_once(|| env_logger::builder().format_timestamp_nanos().init());
 
-    let packets = PktsData{data: data};
+    let packets = PktsData { data };
 
     let config = CONFIG.get_or_init(|| {
         let crt_path = std::env::var("QUICHE_FUZZ_CRT")
@@ -130,15 +132,13 @@ fuzz_target!(|data: &[u8]| {
                     )) => {
                         let mut headers = list.into_iter();
                         // Look for the request's method.
-                        let method =
-                            headers.find(|h| h.name() == b":method");
+                        let method = headers.find(|h| h.name() == b":method");
                         if method.is_none() {
                             break;
                         }
                         let method = method.unwrap();
                         // Look for the request's path.
-                        let path =
-                            headers.find(|h| h.name() == b":path");
+                        let path = headers.find(|h| h.name() == b":path");
                         if path.is_none() {
                             break;
                         }
