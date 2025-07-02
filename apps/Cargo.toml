@@ -29,7 +29,7 @@ bytes = "1.10.1"
 clap = { version = "4.5.40", features = ["derive"] }
 docopt = "1"
 env_logger = { workspace = true }
-futures.workspace = true
+futures = { workspace = true }
 futures-util = "0.3"
 http = "1"
 http-body = "1"
