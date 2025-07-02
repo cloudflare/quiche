@@ -28,6 +28,7 @@
 extern crate log;
 
 pub mod args;
+pub mod async_http3_server;
 pub mod client;
 pub mod common;
 pub mod sendto;

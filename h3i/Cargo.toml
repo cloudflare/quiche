@@ -6,7 +6,7 @@ authors = [
   "Evan Rittenhouse <evanrittenhouse@gmail.com>",
 ]
 description = "Low-level HTTP/3 debugging and testing"
-rust-version = "1.82"
+rust-version = "1.83"
 edition = { workspace = true }
 repository = { workspace = true }
 license = { workspace = true }

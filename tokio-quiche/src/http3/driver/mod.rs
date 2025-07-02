@@ -174,7 +174,6 @@ type H3ConnectionResult<T> = Result<T, H3ConnectionError>;
 ///
 /// `recv` is used to read the message body, while `send` is used to transmit
 /// data back to the peer.
-#[derive(Debug)]
 pub struct IncomingH3Headers {
     /// Stream ID of the frame.
     pub stream_id: u64,
@@ -190,6 +189,17 @@ pub struct IncomingH3Headers {
     pub read_fin: bool,
     /// Handle to the [`H3AuditStats`] for the message's stream.
     pub h3_audit_stats: Arc<H3AuditStats>,
+}
+
+impl fmt::Debug for IncomingH3Headers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IncomingH3Headers")
+            .field("stream_id", &self.stream_id)
+            .field("headers", &self.headers)
+            .field("read_fin", &self.read_fin)
+            .field("h3_audit_stats", &self.h3_audit_stats)
+            .finish()
+    }
 }
 
 /// [`H3Event`]s are produced by an [H3Driver] to describe HTTP/3 state updates.
