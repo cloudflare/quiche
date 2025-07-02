@@ -17,7 +17,6 @@ use http::HeaderValue;
 use http::Request;
 use http::Response;
 use http::Uri;
-use log;
 use quiche::h3::Header;
 use quiche::h3::NameValue;
 use std::sync::Arc;
@@ -184,7 +183,7 @@ where
 /// This isn't complete or robust by any means.
 fn convert_headers(
     headers: Vec<Header>,
-) -> Result<(uri::Builder, request::Builder)> {
+) -> QuicResult<(uri::Builder, request::Builder)> {
     let mut req_builder = Request::builder();
     let mut uri_builder = Uri::builder();
 

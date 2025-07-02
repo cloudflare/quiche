@@ -6,7 +6,6 @@ use http_body::Body;
 use http_body::Frame;
 use http_body::SizeHint;
 use http_body_util::BodyDataStream;
-use log;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::task::Context;
@@ -15,7 +14,7 @@ use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::OutboundFrame;
 use tokio_quiche::http3::driver::OutboundFrameSender;
 
-const STREAM_BYTES: &'static str = "/stream-bytes/";
+const STREAM_BYTES: &str = "/stream-bytes/";
 
 /// An extremely simply response body, for example purposes only.
 pub struct ExampleBody {
@@ -40,7 +39,6 @@ impl ExampleBody {
         let size = if req_path.starts_with(STREAM_BYTES) {
             req_path
                 .split("/")
-                .into_iter()
                 .last()
                 .and_then(|last| last.parse::<usize>().ok())
                 .unwrap_or(0)

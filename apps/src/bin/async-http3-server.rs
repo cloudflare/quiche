@@ -18,7 +18,7 @@ use tokio_quiche::ConnectionParams;
 use tokio_quiche::ServerH3Driver;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     env_logger::builder().format_timestamp_nanos().init();
 
     // Create listening socket. Note that we use `ConnectionParams::new_server()`
@@ -40,7 +40,8 @@ async fn main() -> Result<()> {
         ),
         SimpleConnectionIdGenerator,
         DefaultMetrics,
-    )?;
+    )
+    .expect("can't make listener");
 
     // Pull connections off the socket and serve them.
     let accepted_connection_stream = &mut listeners[0];
@@ -54,7 +55,7 @@ async fn main() -> Result<()> {
         // Start the driver. This will execute the handshake under the hood, which
         // lets us start receiving ServerH3Events without needing to do
         // anything extra after this future resolves.
-        conn?.start(driver);
+        conn.expect("socket dropped").start(driver);
 
         // Spawn a task to process the new connection.
         tokio::spawn(async move {
@@ -65,6 +66,4 @@ async fn main() -> Result<()> {
                 .await;
         });
     }
-
-    Ok(())
 }
