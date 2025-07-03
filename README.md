@@ -44,7 +44,9 @@ Getting Started
 ### Command-line apps
 
 Before diving into the quiche API, here are a few examples on how to use the
-quiche tools provided as part of the [quiche-apps](apps/) crate.
+quiche tools provided as part of the [quiche-apps](apps/) crate. These are not
+suitable for production environments; see [disclaimers and
+notes](#disclaimers-and-notes).
 
 After cloning the project according to the command mentioned in the [building](#building) section, the client can be run as follows:
 
@@ -448,6 +450,15 @@ Provides a server and client installed in /usr/local/bin.
 **cloudflare/quiche-qns**
 
 Provides the script to test quiche within the [quic-interop-runner](https://github.com/marten-seemann/quic-interop-runner).
+
+Disclaimers and Notes
+---------
+
+⚠️ This repository includes a number of example client and server example
+applications that are provided to demonstrate simple usage of the quiche library
+API. They are not intended to be used in production environments; no
+performance, security or reliability guarantees are provided.
+
 
 Copyright
 ---------
