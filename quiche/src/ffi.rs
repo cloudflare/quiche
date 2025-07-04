@@ -135,7 +135,7 @@ impl log::Log for Logger {
                 let line = format!("{}: {}\0", record.target(), record.args());
                 (cb)(line.as_ptr(), self.argp.load(atomic::Ordering::Relaxed));
             },
-    
+
             LogCB::Sliced(cb) => {
                 let line = format!("{}: {}", record.target(), record.args());
                 (cb)(
