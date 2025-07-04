@@ -36,13 +36,14 @@ pub enum H3Owner {
     Remote,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum H3StreamType {
     Request,
     Control,
     Push,
     Reserved,
+    #[default]
     Unknown,
     QpackEncode,
     QpackDecode,
@@ -177,6 +178,15 @@ pub enum Http3Frame {
     },
 }
 
+impl Default for Http3Frame {
+    fn default() -> Self {
+        Self::Unknown {
+            frame_type_value: 0,
+            raw: None,
+        }
+    }
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct H3ParametersSet {
@@ -205,7 +215,7 @@ pub struct H3ParametersRestored {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct H3StreamTypeSet {
     pub owner: Option<H3Owner>,
     pub stream_id: u64,
@@ -215,7 +225,7 @@ pub struct H3StreamTypeSet {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct H3FrameCreated {
     pub stream_id: u64,
     pub length: Option<u64>,
@@ -225,7 +235,7 @@ pub struct H3FrameCreated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct H3FrameParsed {
     pub stream_id: u64,
     pub length: Option<u64>,

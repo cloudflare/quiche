@@ -24,9 +24,11 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::cmp;
+
 use super::*;
 use crate::rand;
-use crate::recovery;
+use crate::recovery::MINIMUM_WINDOW_PACKETS;
 
 /// 1.2Mbps in bytes/sec
 const PACING_RATE_1_2MBPS: u64 = 1200 * 1000 / 8;
@@ -426,8 +428,9 @@ fn bbr2_adapt_upper_bounds(r: &mut Congestion, now: Instant) {
         }
 
         // TODO: what's rs.bw???
-        if r.delivery_rate() > r.bbr2_state.bw_hi {
-            r.bbr2_state.bw_hi = r.delivery_rate();
+        let delivery_rate = r.delivery_rate().to_bytes_per_second();
+        if delivery_rate > r.bbr2_state.bw_hi {
+            r.bbr2_state.bw_hi = delivery_rate;
         }
 
         if r.bbr2_state.state == BBR2StateMachine::ProbeBWUP {
@@ -567,7 +570,7 @@ fn bbr2_start_round(r: &mut Congestion) {
 pub fn bbr2_update_max_bw(r: &mut Congestion, packet: &Acked) {
     bbr2_update_round(r, packet);
 
-    if r.delivery_rate() >= r.bbr2_state.max_bw ||
+    if r.delivery_rate().to_bytes_per_second() >= r.bbr2_state.max_bw ||
         !r.delivery_rate.sample_is_app_limited()
     {
         let max_bw_filter_len = r
@@ -579,7 +582,7 @@ pub fn bbr2_update_max_bw(r: &mut Congestion, packet: &Acked) {
             max_bw_filter_len,
             r.bbr2_state.start_time +
                 Duration::from_secs(r.bbr2_state.cycle_count),
-            r.delivery_rate(),
+            r.delivery_rate().to_bytes_per_second(),
         );
     }
 }
@@ -712,7 +715,7 @@ fn bbr2_modulate_cwnd_for_recovery(r: &mut Congestion, in_flight: usize) {
         r.congestion_window = r
             .congestion_window
             .saturating_sub(lost_bytes)
-            .max(r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS);
+            .max(r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
     }
 
     if r.bbr2_state.packet_conservation {

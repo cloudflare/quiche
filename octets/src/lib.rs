@@ -52,6 +52,14 @@ impl std::error::Error for BufferTooShortError {
     }
 }
 
+/// Helper macro that asserts at compile time. It requires that
+/// `cond` is a const expression.
+macro_rules! static_assert {
+    ($cond:expr) => {{
+        const _: () = assert!($cond);
+    }};
+}
+
 macro_rules! peek_u {
     ($b:expr, $ty:ty, $len:expr) => {{
         let len = $len;
@@ -61,6 +69,7 @@ macro_rules! peek_u {
             return Err(BufferTooShortError);
         }
 
+        static_assert!($len <= mem::size_of::<$ty>());
         let mut out: $ty = 0;
         unsafe {
             let dst = &mut out as *mut $ty as *mut u8;
@@ -95,6 +104,7 @@ macro_rules! put_u {
 
         let dst = &mut $b.buf[$b.off..($b.off + len)];
 
+        static_assert!($len <= mem::size_of::<$ty>());
         unsafe {
             let src = &<$ty>::to_be(v) as *const $ty as *const u8;
             let off = (mem::size_of::<$ty>() - len) as isize;
@@ -471,7 +481,7 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer.
-    pub fn get_bytes(&mut self, len: usize) -> Result<Octets> {
+    pub fn get_bytes(&mut self, len: usize) -> Result<Octets<'_>> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -488,7 +498,7 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer.
-    pub fn get_bytes_mut(&mut self, len: usize) -> Result<OctetsMut> {
+    pub fn get_bytes_mut(&mut self, len: usize) -> Result<OctetsMut<'_>> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -505,7 +515,7 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned 8-bit integer prefix.
-    pub fn get_bytes_with_u8_length(&mut self) -> Result<Octets> {
+    pub fn get_bytes_with_u8_length(&mut self) -> Result<Octets<'_>> {
         let len = self.get_u8()?;
         self.get_bytes(len as usize)
     }
@@ -513,7 +523,7 @@ impl<'a> OctetsMut<'a> {
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned 16-bit integer prefix in network
     /// byte-order.
-    pub fn get_bytes_with_u16_length(&mut self) -> Result<Octets> {
+    pub fn get_bytes_with_u16_length(&mut self) -> Result<Octets<'_>> {
         let len = self.get_u16()?;
         self.get_bytes(len as usize)
     }
@@ -521,14 +531,14 @@ impl<'a> OctetsMut<'a> {
     /// Reads `len` bytes from the current offset without copying and advances
     /// the buffer, where `len` is an unsigned variable-length integer prefix
     /// in network byte-order.
-    pub fn get_bytes_with_varint_length(&mut self) -> Result<Octets> {
+    pub fn get_bytes_with_varint_length(&mut self) -> Result<Octets<'_>> {
         let len = self.get_varint()?;
         self.get_bytes(len as usize)
     }
 
     /// Reads `len` bytes from the current offset without copying and without
     /// advancing the buffer.
-    pub fn peek_bytes(&mut self, len: usize) -> Result<Octets> {
+    pub fn peek_bytes(&mut self, len: usize) -> Result<Octets<'_>> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -543,7 +553,7 @@ impl<'a> OctetsMut<'a> {
 
     /// Reads `len` bytes from the current offset without copying and without
     /// advancing the buffer.
-    pub fn peek_bytes_mut(&mut self, len: usize) -> Result<OctetsMut> {
+    pub fn peek_bytes_mut(&mut self, len: usize) -> Result<OctetsMut<'_>> {
         if self.cap() < len {
             return Err(BufferTooShortError);
         }
@@ -577,7 +587,9 @@ impl<'a> OctetsMut<'a> {
     }
 
     /// Splits the buffer in two at the given absolute offset.
-    pub fn split_at(&mut self, off: usize) -> Result<(OctetsMut, OctetsMut)> {
+    pub fn split_at(
+        &mut self, off: usize,
+    ) -> Result<(OctetsMut<'_>, OctetsMut<'_>)> {
         if self.len() < off {
             return Err(BufferTooShortError);
         }
@@ -688,6 +700,25 @@ pub const fn varint_parse_len(first: u8) -> usize {
         2 => 4,
         3 => 8,
         _ => unreachable!(),
+    }
+}
+
+/// The functions in this mod test the compile time assertions in the
+/// `put_u` and `peek_u` macros. If you compile this crate with
+/// `--cfg test_invalid_len_compilation_fail`, e.g., by using
+/// `cargo rustc  -- --cfg test_invalid_len_compilation_fail`
+/// You will get two compiler errors
+#[cfg(test_invalid_len_compilation_fail)]
+pub mod fails_to_compile {
+    use super::*;
+    pub fn peek_invalid_fails_to_compile(b: &mut Octets) -> Result<u8> {
+        peek_u!(b, u8, 2)
+    }
+
+    pub fn put_invalid_fails_to_compile<'a>(
+        b: &'a mut OctetsMut, v: u8,
+    ) -> Result<&'a mut [u8]> {
+        put_u!(b, u8, v, 2)
     }
 }
 

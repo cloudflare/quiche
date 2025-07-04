@@ -36,10 +36,13 @@ use slab::Slab;
 
 use crate::Error;
 use crate::Result;
+use crate::StartupExit;
 
 use crate::pmtud;
 use crate::recovery;
 use crate::recovery::HandshakeStatus;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
+use crate::recovery::RecoveryOps;
 
 /// The different states of the path validation.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -167,6 +170,20 @@ pub struct Path {
     /// Total number of packets sent with data retransmitted from this path.
     pub retrans_count: usize,
 
+    /// Total number of times PTO (probe timeout) fired.
+    ///
+    /// Loss usually happens in a burst so the number of packets lost will
+    /// depend on the volume of inflight packets at the time of loss (which
+    /// can be arbitrary). PTO count measures the number of loss events and
+    /// provides a normalized loss metric.
+    pub total_pto_count: usize,
+
+    /// Number of DATAGRAM frames sent on this path.
+    pub dgram_sent_count: usize,
+
+    /// Number of DATAGRAM frames received on this path.
+    pub dgram_recv_count: usize,
+
     /// Total number of sent bytes over this path.
     pub sent_bytes: u64,
 
@@ -236,6 +253,9 @@ impl Path {
             sent_count: 0,
             recv_count: 0,
             retrans_count: 0,
+            total_pto_count: 0,
+            dgram_sent_count: 0,
+            dgram_recv_count: 0,
             sent_bytes: 0,
             recv_bytes: 0,
             stream_retrans_bytes: 0,
@@ -337,10 +357,10 @@ impl Path {
         is_closing: bool, frames_empty: bool,
     ) -> bool {
         (hs_confirmed && hs_done) &&
-            self.pmtud.get_probe_size() > self.pmtud.get_current() &&
+            self.pmtud.get_probe_size() > self.pmtud.get_current_mtu() &&
             self.recovery.cwnd_available() > self.pmtud.get_probe_size() &&
             out_len >= self.pmtud.get_probe_size() &&
-            self.pmtud.get_probe_status() &&
+            self.pmtud.get_should_probe() &&
             !is_closing &&
             frames_empty
     }
@@ -421,8 +441,8 @@ impl Path {
     pub fn on_loss_detection_timeout(
         &mut self, handshake_status: HandshakeStatus, now: time::Instant,
         is_server: bool, trace_id: &str,
-    ) -> (usize, usize) {
-        let (lost_packets, lost_bytes) = self.recovery.on_loss_detection_timeout(
+    ) -> OnLossDetectionTimeoutOutcome {
+        let outcome = self.recovery.on_loss_detection_timeout(
             handshake_status,
             now,
             trace_id,
@@ -470,7 +490,16 @@ impl Path {
             }
         }
 
-        (lost_packets, lost_bytes)
+        // Track PTO timeout event
+        self.total_pto_count += 1;
+
+        outcome
+    }
+
+    pub fn reinit_recovery(
+        &mut self, recovery_config: &recovery::RecoveryConfig,
+    ) {
+        self.recovery = recovery::Recovery::new_with_config(recovery_config)
     }
 
     pub fn stats(&self) -> PathStats {
@@ -483,17 +512,26 @@ impl Path {
             sent: self.sent_count,
             lost: self.recovery.lost_count(),
             retrans: self.retrans_count,
+            total_pto_count: self.total_pto_count,
+            dgram_recv: self.dgram_recv_count,
+            dgram_sent: self.dgram_sent_count,
             rtt: self.recovery.rtt(),
             min_rtt: self.recovery.min_rtt(),
+            max_rtt: self.recovery.max_rtt(),
             rttvar: self.recovery.rttvar(),
             cwnd: self.recovery.cwnd(),
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
-            lost_bytes: self.recovery.bytes_lost,
+            lost_bytes: self.recovery.bytes_lost(),
             stream_retrans_bytes: self.stream_retrans_bytes,
             pmtu: self.recovery.max_datagram_size(),
-            delivery_rate: self.recovery.delivery_rate(),
+            delivery_rate: self.recovery.delivery_rate().to_bytes_per_second(),
+            startup_exit: self.recovery.startup_exit(),
         }
+    }
+
+    pub fn bytes_in_flight_duration(&self) -> time::Duration {
+        self.recovery.bytes_in_flight_duration()
     }
 }
 
@@ -561,7 +599,7 @@ impl PathMap {
         // Enable path MTU Discovery and start probing with the largest datagram
         // size.
         if enable_pmtud {
-            initial_path.pmtud.should_probe(enable_pmtud);
+            initial_path.pmtud.set_should_probe(enable_pmtud);
             initial_path.pmtud.set_probe_size(max_send_udp_payload_size);
             initial_path.pmtud.enable(enable_pmtud);
         }
@@ -642,13 +680,13 @@ impl PathMap {
 
     /// Returns an iterator over all existing paths.
     #[inline]
-    pub fn iter(&self) -> slab::Iter<Path> {
+    pub fn iter(&self) -> slab::Iter<'_, Path> {
         self.paths.iter()
     }
 
     /// Returns a mutable iterator over all existing paths.
     #[inline]
-    pub fn iter_mut(&mut self) -> slab::IterMut<Path> {
+    pub fn iter_mut(&mut self) -> slab::IterMut<'_, Path> {
         self.paths.iter_mut()
     }
 
@@ -822,6 +860,19 @@ impl PathMap {
 
         Ok(())
     }
+
+    /// Configures path MTU discovery on all existing paths.
+    pub fn set_discover_pmtu_on_existing_paths(
+        &mut self, discover: bool, max_send_udp_payload_size: usize,
+    ) {
+        for (_, path) in self.paths.iter_mut() {
+            path.pmtud.enable(discover);
+            // It's harmless to modify probe size even if we're disabling
+            // pmtud.
+            path.pmtud.set_probe_size(max_send_udp_payload_size);
+            path.pmtud.set_should_probe(discover);
+        }
+    }
 }
 
 /// Statistics about the path of a connection.
@@ -856,11 +907,28 @@ pub struct PathStats {
     /// The number of sent QUIC packets with retransmitted data.
     pub retrans: usize,
 
+    /// The number of times PTO (probe timeout) fired.
+    ///
+    /// Loss usually happens in a burst so the number of packets lost will
+    /// depend on the volume of inflight packets at the time of loss (which
+    /// can be arbitrary). PTO count measures the number of loss events and
+    /// provides a normalized loss metric.
+    pub total_pto_count: usize,
+
+    /// The number of DATAGRAM frames received.
+    pub dgram_recv: usize,
+
+    /// The number of DATAGRAM frames sent.
+    pub dgram_sent: usize,
+
     /// The estimated round-trip time of the connection.
     pub rtt: time::Duration,
 
     /// The minimum round-trip time observed.
     pub min_rtt: Option<time::Duration>,
+
+    /// The maximum round-trip time observed.
+    pub max_rtt: Option<time::Duration>,
 
     /// The estimated round-trip time variation in samples using a mean
     /// variation.
@@ -893,6 +961,9 @@ pub struct PathStats {
     /// [`SendInfo.at`]: struct.SendInfo.html#structfield.at
     /// [Pacing]: index.html#pacing
     pub delivery_rate: u64,
+
+    /// Statistics from when a CCA first exited the startup phase.
+    pub startup_exit: Option<StartupExit>,
 }
 
 impl std::fmt::Debug for PathStats {

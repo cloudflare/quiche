@@ -33,7 +33,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use quiche;
+use crate::quiche;
 use quiche::h3::frame::Frame;
 use quiche::h3::Header;
 use quiche::ConnectionError;
@@ -42,6 +42,7 @@ use serde::Serialize;
 use serde_with::serde_as;
 
 use crate::encode_header_block;
+use crate::encode_header_block_literal;
 
 /// An action which the HTTP/3 client should take.
 ///
@@ -62,6 +63,7 @@ pub enum Action {
     SendHeadersFrame {
         stream_id: u64,
         fin_stream: bool,
+        literal_headers: bool,
         headers: Vec<Header>,
         frame: Frame,
     },
@@ -106,18 +108,26 @@ pub enum Action {
 }
 
 /// Configure the wait behavior for a connection.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(untagged)]
 #[serde_as]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WaitType {
     /// Wait for a time before firing the next action
-    #[serde_as(as = "DurationMilliSeconds<f64>")]
-    WaitDuration(Duration),
+    #[serde(rename = "duration")]
+    WaitDuration(
+        #[serde_as(as = "serde_with::DurationMilliSecondsWithFrac<f64>")]
+        Duration,
+    ),
     /// Wait for some form of a response before firing the next action. This can
     /// be superseded in several cases:
-    /// 1. The peer resets the spcified stream.
+    /// 1. The peer resets the specified stream.
     /// 2. The peer sends a `fin` over the specified stream
     StreamEvent(StreamEvent),
+}
+
+impl From<WaitType> for Action {
+    fn from(value: WaitType) -> Self {
+        Self::Wait { wait_type: value }
+    }
 }
 
 /// A response event, received over a stream, which will terminate the wait
@@ -167,7 +177,7 @@ impl WaitingFor {
             let new_len = waits.len();
 
             if old_len != new_len {
-                log::info!("No longer waiting for {:?}", stream_event);
+                log::info!("No longer waiting for {stream_event:?}");
             }
         }
     }
@@ -175,7 +185,7 @@ impl WaitingFor {
     pub(crate) fn clear_waits_on_stream(&mut self, stream_id: u64) {
         if let Some(waits) = self.0.get_mut(&stream_id) {
             if !waits.is_empty() {
-                log::info!("Clearing all waits for stream {}", stream_id);
+                log::info!("Clearing all waits for stream {stream_id}");
                 waits.clear();
             }
         }
@@ -193,6 +203,25 @@ pub fn send_headers_frame(
         stream_id,
         fin_stream,
         headers,
+        literal_headers: false,
+        frame: Frame::Headers { header_block },
+    }
+}
+
+/// Convenience to convert between header-related data and a
+/// [Action::SendHeadersFrame]. Unlike [`send_headers_frame`],
+/// this version encodes the headers literally as they are provided,
+/// not converting the header names to lower-case.
+pub fn send_headers_frame_literal(
+    stream_id: u64, fin_stream: bool, headers: Vec<Header>,
+) -> Action {
+    let header_block = encode_header_block_literal(&headers).unwrap();
+
+    Action::SendHeadersFrame {
+        stream_id,
+        fin_stream,
+        headers,
+        literal_headers: true,
         frame: Frame::Headers { header_block },
     }
 }

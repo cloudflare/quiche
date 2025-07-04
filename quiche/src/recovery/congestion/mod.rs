@@ -24,15 +24,65 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::str::FromStr;
+use debug_panic::debug_panic;
 use std::time::Instant;
 
-use super::rtt::RttStats;
-use super::Acked;
+use self::recovery::Acked;
+use super::bandwidth::Bandwidth;
 use super::RecoveryConfig;
 use super::Sent;
+use crate::recovery::rtt;
+use crate::recovery::rtt::RttStats;
+use crate::recovery::CongestionControlAlgorithm;
+use crate::StartupExit;
+use crate::StartupExitReason;
 
 pub const PACING_MULTIPLIER: f64 = 1.25;
+
+pub struct SsThresh {
+    // Current slow start threshold.  Defaults to usize::MAX which
+    // indicates we're still in the initial slow start phase.
+    ssthresh: usize,
+
+    // Information about the slow start exit, if it already happened.
+    // Set on the first call to update().
+    startup_exit: Option<StartupExit>,
+}
+
+impl Default for SsThresh {
+    fn default() -> Self {
+        Self {
+            ssthresh: usize::MAX,
+            startup_exit: None,
+        }
+    }
+}
+
+impl SsThresh {
+    fn get(&self) -> usize {
+        self.ssthresh
+    }
+
+    fn startup_exit(&self) -> Option<StartupExit> {
+        self.startup_exit
+    }
+
+    fn update(&mut self, ssthresh: usize, in_css: bool) {
+        if self.startup_exit.is_none() {
+            let reason = if in_css {
+                // Exit happened in conservative slow start, attribute
+                // the exit to persistent queues.
+                StartupExitReason::PersistentQueue
+            } else {
+                // In normal slow start, attribute the exit to loss.
+                StartupExitReason::Loss
+            };
+            self.startup_exit = Some(StartupExit::new(ssthresh, reason));
+        }
+        self.ssthresh = ssthresh;
+    }
+}
+
 pub struct Congestion {
     // Congestion control.
     pub(crate) cc_ops: &'static CongestionControlOps,
@@ -60,7 +110,7 @@ pub struct Congestion {
 
     pub(crate) congestion_window: usize,
 
-    pub(crate) ssthresh: usize,
+    pub(crate) ssthresh: SsThresh,
 
     bytes_acked_sl: usize,
 
@@ -88,7 +138,7 @@ impl Congestion {
         let mut cc = Congestion {
             congestion_window: initial_congestion_window,
 
-            ssthresh: usize::MAX,
+            ssthresh: Default::default(),
 
             bytes_acked_sl: 0,
 
@@ -144,7 +194,8 @@ impl Congestion {
         }
     }
 
-    pub(crate) fn delivery_rate(&self) -> u64 {
+    /// The most recent data delivery rate estimate.
+    pub(crate) fn delivery_rate(&self) -> Bandwidth {
         self.delivery_rate.sample_delivery_rate()
     }
 
@@ -179,15 +230,15 @@ impl Congestion {
             self.prr.on_packet_sent(sent_bytes);
 
             // HyStart++: Start of the round in a slow start.
-            if self.hystart.enabled() && self.congestion_window < self.ssthresh {
+            if self.hystart.enabled() &&
+                self.congestion_window < self.ssthresh.get()
+            {
                 self.hystart.start_round(pkt.pkt_num);
             }
         }
 
         // Pacing: Set the pacing rate if CC doesn't do its own.
-        if !(self.cc_ops.has_custom_pacing)() &&
-            rtt_stats.first_rtt_sample.is_some()
-        {
+        if !(self.cc_ops.has_custom_pacing)() && rtt_stats.has_first_rtt_sample {
             let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
                 rtt_stats.smoothed_rtt.as_secs_f64();
             self.set_pacing_rate(rate as u64, now);
@@ -246,41 +297,6 @@ impl Congestion {
     }
 }
 
-/// Available congestion control algorithms.
-///
-/// This enum provides currently available list of congestion control
-/// algorithms.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(C)]
-pub enum CongestionControlAlgorithm {
-    /// Reno congestion control algorithm. `reno` in a string form.
-    Reno  = 0,
-    /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC = 1,
-    /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR   = 2,
-    /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2  = 3,
-}
-
-impl FromStr for CongestionControlAlgorithm {
-    type Err = crate::Error;
-
-    /// Converts a string to `CongestionControlAlgorithm`.
-    ///
-    /// If `name` is not valid, `Error::CongestionControl` is returned.
-    fn from_str(name: &str) -> std::result::Result<Self, Self::Err> {
-        match name {
-            "reno" => Ok(CongestionControlAlgorithm::Reno),
-            "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
-            "bbr" => Ok(CongestionControlAlgorithm::BBR),
-            "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
-
-            _ => Err(crate::Error::CongestionControl),
-        }
-    }
-}
-
 pub(crate) struct CongestionControlOps {
     pub on_init: fn(r: &mut Congestion),
 
@@ -313,6 +329,9 @@ pub(crate) struct CongestionControlOps {
 
     pub has_custom_pacing: fn() -> bool,
 
+    #[cfg(feature = "qlog")]
+    pub state_str: fn(r: &Congestion, now: Instant) -> &'static str,
+
     pub debug_fmt: fn(
         r: &Congestion,
         formatter: &mut std::fmt::Formatter,
@@ -326,7 +345,61 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
             CongestionControlAlgorithm::BBR => &bbr::BBR,
             CongestionControlAlgorithm::BBR2 => &bbr2::BBR2,
+            CongestionControlAlgorithm::Bbr2Gcongestion => {
+                debug_panic!("legacy implementation, not gcongestion");
+                &bbr2::BBR2
+            },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssthresh_init() {
+        let ssthresh: SsThresh = Default::default();
+        assert_eq!(ssthresh.get(), usize::MAX);
+        assert_eq!(ssthresh.startup_exit(), None);
+    }
+
+    #[test]
+    fn ssthresh_in_css() {
+        let expected_startup_exit =
+            StartupExit::new(1000, StartupExitReason::PersistentQueue);
+        let mut ssthresh: SsThresh = Default::default();
+        ssthresh.update(1000, true);
+        assert_eq!(ssthresh.get(), 1000);
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+
+        ssthresh.update(2000, true);
+        assert_eq!(ssthresh.get(), 2000);
+        // startup_exit is only updated on the first update.
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+
+        ssthresh.update(500, false);
+        assert_eq!(ssthresh.get(), 500);
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+    }
+
+    #[test]
+    fn ssthresh_in_slow_start() {
+        let expected_startup_exit =
+            StartupExit::new(1000, StartupExitReason::Loss);
+        let mut ssthresh: SsThresh = Default::default();
+        ssthresh.update(1000, false);
+        assert_eq!(ssthresh.get(), 1000);
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+
+        ssthresh.update(2000, true);
+        assert_eq!(ssthresh.get(), 2000);
+        // startup_exit is only updated on the first update.
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+
+        ssthresh.update(500, false);
+        assert_eq!(ssthresh.get(), 500);
+        assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
     }
 }
 
@@ -337,6 +410,7 @@ mod delivery_rate;
 mod hystart;
 pub(crate) mod pacer;
 mod prr;
+pub(crate) mod recovery;
 mod reno;
 
 #[cfg(test)]

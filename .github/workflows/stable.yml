@@ -2,6 +2,10 @@ on: [push, pull_request]
 
 name: Stable
 
+permissions:
+  contents: read
+  pull-requests: write
+
 env:
   RUSTFLAGS: "-D warnings"
   RUSTTOOLCHAIN: "stable"
@@ -50,12 +54,29 @@ jobs:
           echo "LD_LIBRARY_PATH=$PWD" >> "$GITHUB_ENV"
 
       - name: Run cargo test
+        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
         run: cargo test --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }}
+
+      # tokio-quiche requires the `boring` crate, so don't run its tests when
+      # building without it.
+      - name: Run cargo test
+        if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
+        run: cargo test --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }} --workspace --exclude tokio-quiche
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
+        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
         run: cargo test --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }}
+
+      # Need to run doc tests separately.
+      # (https://github.com/rust-lang/cargo/issues/6669)
+      #
+      # tokio-quiche requires the `boring` crate, so don't run its tests when
+      # building without it.
+      - name: Run cargo doc test
+        if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
+        run: cargo test --verbose --doc --features=ffi,qlog,${{ matrix.tls-feature }} --workspace --exclude tokio-quiche
 
       # NOTE: this is disabled as it fails when building changes that bump
       # version of local crates (e.g. when doing a `qlog` release) that have not
@@ -137,7 +158,7 @@ jobs:
         run: cargo build --target=${{ matrix.target }} --verbose
 
   quiche_windows:
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
       matrix:
         target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc", "x86_64-pc-windows-gnu", "i686-pc-windows-gnu"]
@@ -155,9 +176,6 @@ jobs:
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
           targets: ${{ matrix.target }}
-
-      - name: Set default toolchain
-        run: rustup default ${{ env.RUSTTOOLCHAIN }}-${{ matrix.target }}
 
       - name: Set up MinGW for 64 bit
         if: matrix.target == 'x86_64-pc-windows-gnu'
@@ -179,11 +197,11 @@ jobs:
 
       - name: Run cargo build
         if: endsWith(matrix.target, '-gnu')
-        run: cargo build --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
+        run: cargo build --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog,boringssl-boring-crate
 
       - name: Run cargo test
         if: endsWith(matrix.target, '-msvc')
-        run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
+        run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog,boringssl-boring-crate
 
   quiche_multiarch:
     runs-on: ubuntu-latest
@@ -211,7 +229,7 @@ jobs:
         run: cargo-binstall -y cross
 
       - name: Run cargo test using cross
-        run: cross test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog
+        run: cross test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog --workspace --exclude tokio-quiche
 
   http3_test:
     runs-on: ubuntu-latest

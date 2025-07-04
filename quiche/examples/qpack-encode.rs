@@ -63,7 +63,7 @@ fn main() {
 
             let len = enc.encode(&headers, &mut out).unwrap();
 
-            debug!("Writing header block stream={} len={}", stream_id, len);
+            debug!("Writing header block stream={stream_id} len={len}");
 
             std::io::stdout()
                 .write_all(&stream_id.to_be_bytes())
@@ -81,7 +81,7 @@ fn main() {
         }
 
         let name = line.split('\t').next().unwrap();
-        let value = line.split('\t').last().unwrap();
+        let value = line.split('\t').next_back().unwrap();
 
         headers.push(h3::Header::new(name.as_bytes(), value.as_bytes()));
     }

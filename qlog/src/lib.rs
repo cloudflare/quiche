@@ -755,19 +755,12 @@ mod tests {
         let pkt_hdr = make_pkt_hdr(PacketType::Initial);
         let ev_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,
-            frames: None,
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: None,
-            supported_versions: None,
             raw: Some(RawInfo {
                 length: Some(1251),
                 payload_length: Some(1224),
                 data: None,
             }),
-            datagram_id: None,
-            send_at_time: None,
-            trigger: None,
+            ..Default::default()
         });
 
         let ev = Event::with_time(0.0, ev_data);
@@ -836,18 +829,12 @@ mod tests {
         let ev_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,
             frames: Some(frames.into()),
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: None,
-            supported_versions: None,
             raw: Some(RawInfo {
                 length: Some(1251),
                 payload_length: Some(1224),
                 data: None,
             }),
-            datagram_id: None,
-            send_at_time: None,
-            trigger: None,
+            ..Default::default()
         });
 
         let ev = Event::with_time(0.0, ev_data);
@@ -956,18 +943,12 @@ mod tests {
         let event_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,
             frames: Some(frames.into()),
-            is_coalesced: None,
-            retry_token: None,
-            stateless_reset_token: None,
-            supported_versions: None,
             raw: Some(RawInfo {
                 length: Some(1251),
                 payload_length: Some(1224),
                 data: None,
             }),
-            datagram_id: None,
-            send_at_time: None,
-            trigger: None,
+            ..Default::default()
         });
 
         let ev = Event::with_time(0.0, event_data);

@@ -601,7 +601,7 @@ impl ConnectionIdentifiers {
     }
 
     /// Returns an iterator over the source connection IDs.
-    pub fn scids_iter(&self) -> impl Iterator<Item = &ConnectionId> {
+    pub fn scids_iter(&self) -> impl Iterator<Item = &ConnectionId<'_>> {
         self.scids.iter().map(|e| &e.cid)
     }
 
@@ -828,7 +828,7 @@ impl ConnectionIdentifiers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::create_cid_and_reset_token;
+    use crate::test_utils::create_cid_and_reset_token;
 
     #[test]
     fn ids_new_scids() {

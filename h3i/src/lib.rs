@@ -85,6 +85,7 @@
 //!            fin_stream: false,
 //!            headers,
 //!            frame: Frame::Headers { header_block },
+//!            literal_headers: false,
 //!        },
 //!        Action::SendFrame {
 //!            stream_id: STREAM_ID,
@@ -114,7 +115,7 @@
 //!    // This example doesn't use close trigger frames, since we manually close the connection upon
 //!    // receiving a HEADERS frame on stream 0.
 //!    let close_trigger_frames = None;
-//!    let summary = sync_client::connect(config, &actions, close_trigger_frames);
+//!    let summary = sync_client::connect(config, actions, close_trigger_frames);
 //!
 //!    println!(
 //!        "=== received connection summary! ===\n\n{}",
@@ -156,29 +157,35 @@ use qlog::events::quic::PacketSent;
 use qlog::events::quic::PacketType;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
-pub use quiche;
+use quiche::h3::qpack::encode_int;
+use quiche::h3::qpack::encode_str;
+use quiche::h3::qpack::LITERAL;
 use quiche::h3::NameValue;
-
 use smallvec::SmallVec;
+
+#[cfg(not(feature = "async"))]
+pub use quiche;
+#[cfg(feature = "async")]
+pub use tokio_quiche::quiche;
 
 /// The ID for an HTTP/3 control stream type.
 ///
-/// See https://datatracker.ietf.org/doc/html/rfc9114#name-control-streams.
+/// See <https://datatracker.ietf.org/doc/html/rfc9114#name-control-streams>.
 pub const HTTP3_CONTROL_STREAM_TYPE_ID: u64 = 0x0;
 
 /// The ID for an HTTP/3 push stream type.
 ///
-/// See https://datatracker.ietf.org/doc/html/rfc9114#name-push-streams.
+/// See <https://datatracker.ietf.org/doc/html/rfc9114#name-push-streams>.
 pub const HTTP3_PUSH_STREAM_TYPE_ID: u64 = 0x1;
 
 /// The ID for a QPACK encoder stream type.
 ///
-/// See https://datatracker.ietf.org/doc/html/rfc9204#section-4.2-2.1.
+/// See <https://datatracker.ietf.org/doc/html/rfc9204#section-4.2-2.1>.
 pub const QPACK_ENCODER_STREAM_TYPE_ID: u64 = 0x2;
 
 /// The ID for a QPACK decoder stream type.
 ///
-/// See https://datatracker.ietf.org/doc/html/rfc9204#section-4.2-2.2.
+/// See <https://datatracker.ietf.org/doc/html/rfc9204#section-4.2-2.2>.
 pub const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;
 
 #[derive(Default)]
@@ -197,6 +204,42 @@ impl StreamIdAllocator {
     pub fn peek_next_id(&mut self) -> u64 {
         self.id
     }
+}
+
+/// Encodes a header block literally. Unlike [`encode_header_block`],
+/// this function encodes all the headers exactly as provided. This
+/// means it does not use the huffman lookup table, nor does it convert
+/// the header names to lowercase before encoding.
+fn encode_header_block_literal(
+    headers: &[quiche::h3::Header],
+) -> std::result::Result<Vec<u8>, String> {
+    // This is a combination of a modified `quiche::h3::qpack::Encoder::encode`
+    // and the [`encode_header_block`] function.
+    let headers_len = headers
+        .iter()
+        .fold(0, |acc, h| acc + h.value().len() + h.name().len() + 32);
+
+    let mut header_block = vec![0; headers_len];
+
+    let mut b = octets::OctetsMut::with_slice(&mut header_block);
+
+    // Required Insert Count.
+    encode_int(0, 0, 8, &mut b).map_err(|e| format!("{e:?}"))?;
+
+    // Base.
+    encode_int(0, 0, 7, &mut b).map_err(|e| format!("{e:?}"))?;
+
+    for h in headers {
+        encode_str::<false>(h.name(), LITERAL, 3, &mut b)
+            .map_err(|e| format!("{e:?}"))?;
+        encode_str::<false>(h.value(), 0, 7, &mut b)
+            .map_err(|e| format!("{e:?}"))?;
+    }
+
+    let len = b.off();
+
+    header_block.truncate(len);
+    Ok(header_block)
 }
 
 fn encode_header_block(
@@ -236,15 +279,8 @@ fn fake_packet_header() -> PacketHeader {
 fn fake_packet_sent(frames: Option<SmallVec<[QuicFrame; 1]>>) -> EventData {
     EventData::PacketSent(PacketSent {
         header: fake_packet_header(),
-        is_coalesced: None,
-        retry_token: None,
-        stateless_reset_token: None,
-        supported_versions: None,
-        raw: None,
-        datagram_id: None,
-        trigger: None,
-        send_at_time: None,
         frames,
+        ..Default::default()
     })
 }
 

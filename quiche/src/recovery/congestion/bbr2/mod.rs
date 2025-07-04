@@ -1,6 +1,3 @@
-// Copyright (C) 2022, Cloudflare, Inc.
-// All rights reserved.
-//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -29,8 +26,8 @@
 //! This implementation is based on the following draft:
 //! <https://tools.ietf.org/html/draft-cardwell-iccrg-bbr-congestion-control-02>
 
+use super::*;
 use crate::minmax::Minmax;
-use crate::recovery::*;
 
 use std::time::Duration;
 use std::time::Instant;
@@ -45,6 +42,8 @@ pub(crate) static BBR2: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    #[cfg(feature = "qlog")]
+    state_str,
     debug_fmt,
 };
 
@@ -144,6 +143,20 @@ enum BBR2StateMachine {
     ProbeBWREFILL,
     ProbeBWUP,
     ProbeRTT,
+}
+
+impl From<BBR2StateMachine> for &'static str {
+    fn from(state: BBR2StateMachine) -> &'static str {
+        match state {
+            BBR2StateMachine::Startup => "bbr_startup",
+            BBR2StateMachine::Drain => "bbr_drain",
+            BBR2StateMachine::ProbeBWDOWN => "bbr_probe_bw_down",
+            BBR2StateMachine::ProbeBWCRUISE => "bbr_probe_bw_cruise",
+            BBR2StateMachine::ProbeBWREFILL => "bbr_probe_bw_refill",
+            BBR2StateMachine::ProbeBWUP => "bbr_probe_bw_up",
+            BBR2StateMachine::ProbeRTT => "bbr_probe_rtt",
+        }
+    }
 }
 
 /// BBR2 Ack Phases.
@@ -620,6 +633,11 @@ fn rate_kbps(rate: u64) -> isize {
     }
 }
 
+#[cfg(feature = "qlog")]
+fn state_str(r: &Congestion, _now: Instant) -> &'static str {
+    r.bbr2_state.state.into()
+}
+
 fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     let bbr = &r.bbr2_state;
 
@@ -663,14 +681,20 @@ mod tests {
 
     use smallvec::smallvec;
 
-    use crate::recovery;
+    use crate::packet;
+    use crate::ranges;
+    use crate::recovery::congestion::recovery::LegacyRecovery;
+    use crate::recovery::HandshakeStatus;
+    use crate::recovery::RecoveryOps;
+    use crate::CongestionControlAlgorithm;
+    use crate::OnAckReceivedOutcome;
 
     #[test]
     fn bbr_init() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
-        let r = Recovery::new(&cfg);
+        let r = LegacyRecovery::new(&cfg);
 
         // on_init() is called in Connection::new(), so it need to be
         // called manually here.
@@ -679,7 +703,7 @@ mod tests {
             r.cwnd(),
             r.max_datagram_size * r.congestion.initial_congestion_window_packets
         );
-        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Startup);
     }
@@ -687,9 +711,9 @@ mod tests {
     #[test]
     fn bbr2_startup() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
-        let mut r = Recovery::new(&cfg);
+        let mut r = LegacyRecovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
 
@@ -711,7 +735,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
+                is_pmtud_probe: false,
             };
 
             r.on_packet_sent(
@@ -730,33 +754,44 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..5);
 
-        assert!(r
-            .on_ack_received(
+        assert_eq!(
+            r.on_ack_received(
                 &acked,
                 25,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
             )
-            .is_ok());
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: mss * 5,
+                spurious_losses: 0,
+            }
+        );
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Startup);
         assert_eq!(r.cwnd(), cwnd_prev + mss * 5);
-        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(
-            r.delivery_rate(),
+            r.delivery_rate().to_bytes_per_second(),
             ((mss * 5) as f64 / rtt.as_secs_f64()) as u64
         );
-        assert_eq!(r.congestion.bbr2_state.full_bw, r.delivery_rate());
+        assert_eq!(
+            r.congestion.bbr2_state.full_bw,
+            r.delivery_rate().to_bytes_per_second()
+        );
     }
 
     #[test]
     fn bbr2_congestion_event() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
-        let mut r = Recovery::new(&cfg);
+        let mut r = LegacyRecovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
 
@@ -778,7 +813,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
+                is_pmtud_probe: false,
             };
 
             r.on_packet_sent(
@@ -798,21 +833,29 @@ mod tests {
         acked.insert(4..5);
 
         // 2 acked, 2 x MSS lost.
-        assert!(r
-            .on_ack_received(
+        assert_eq!(
+            r.on_ack_received(
                 &acked,
                 25,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
             )
-            .is_ok());
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 2,
+                lost_bytes: 2 * mss,
+                acked_bytes: mss,
+                spurious_losses: 0,
+            }
+        );
 
         assert!(r.congestion.bbr2_state.in_recovery);
 
         // Still in flight: 2, 3.
-        assert_eq!(r.bytes_in_flight, mss * 2);
+        assert_eq!(r.bytes_in_flight(), mss * 2);
 
         assert_eq!(r.congestion.bbr2_state.newly_acked_bytes, mss);
 
@@ -822,9 +865,9 @@ mod tests {
     #[test]
     fn bbr2_probe_bw() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
-        let mut r = Recovery::new(&cfg);
+        let mut r = LegacyRecovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
 
@@ -848,7 +891,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
+                is_pmtud_probe: false,
             };
 
             r.on_packet_sent(
@@ -868,16 +911,24 @@ mod tests {
             let mut acked = ranges::RangeSet::default();
             acked.insert(0..pn);
 
-            assert!(r
-                .on_ack_received(
+            assert_eq!(
+                r.on_ack_received(
                     &acked,
                     25,
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
+                    None,
                     "",
                 )
-                .is_ok());
+                .unwrap(),
+                OnAckReceivedOutcome {
+                    lost_packets: 0,
+                    lost_bytes: 0,
+                    acked_bytes: mss,
+                    spurious_losses: 0,
+                }
+            );
         }
 
         // Stop at right before filled_pipe=true.
@@ -898,7 +949,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
+                is_pmtud_probe: false,
             };
 
             r.on_packet_sent(
@@ -921,16 +972,24 @@ mod tests {
         // in Drain state.
         acked.insert(0..pn - 4);
 
-        assert!(r
-            .on_ack_received(
+        assert_eq!(
+            r.on_ack_received(
                 &acked,
                 25,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
             )
-            .is_ok());
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: mss,
+                spurious_losses: 0,
+            }
+        );
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::Drain);
         assert!(r.congestion.bbr2_state.filled_pipe);
@@ -940,9 +999,9 @@ mod tests {
     #[test]
     fn bbr2_probe_rtt() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::BBR2);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::BBR2);
 
-        let mut r = Recovery::new(&cfg);
+        let mut r = LegacyRecovery::new(&cfg);
         let now = Instant::now();
         let mss = r.max_datagram_size;
 
@@ -968,7 +1027,7 @@ mod tests {
                 tx_in_flight: 0,
                 lost: 0,
                 has_data: false,
-                pmtud: false,
+                is_pmtud_probe: false,
             };
 
             r.on_packet_sent(
@@ -987,16 +1046,24 @@ mod tests {
             let mut acked = ranges::RangeSet::default();
             acked.insert(0..pn);
 
-            assert!(r
-                .on_ack_received(
+            assert_eq!(
+                r.on_ack_received(
                     &acked,
                     25,
                     packet::Epoch::Application,
                     HandshakeStatus::default(),
                     now,
+                    None,
                     "",
                 )
-                .is_ok());
+                .unwrap(),
+                OnAckReceivedOutcome {
+                    lost_packets: 0,
+                    lost_bytes: 0,
+                    acked_bytes: mss,
+                    spurious_losses: 0,
+                }
+            );
         }
 
         // Now we are in ProbeBW state.
@@ -1024,7 +1091,7 @@ mod tests {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         r.on_packet_sent(
@@ -1045,16 +1112,24 @@ mod tests {
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..pn);
 
-        assert!(r
-            .on_ack_received(
+        assert_eq!(
+            r.on_ack_received(
                 &acked,
                 25,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
                 now,
+                None,
                 "",
             )
-            .is_ok());
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: mss,
+                spurious_losses: 0,
+            }
+        );
 
         assert_eq!(r.congestion.bbr2_state.state, BBR2StateMachine::ProbeRTT);
         assert_eq!(r.congestion.bbr2_state.pacing_gain, 1.0);

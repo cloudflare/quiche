@@ -26,7 +26,6 @@
 
 //! Summarizes events that occurred during a connection.
 
-use quiche;
 use quiche::Connection;
 use quiche::ConnectionError;
 use quiche::PathStats;
@@ -41,6 +40,7 @@ use std::iter::FromIterator;
 use crate::frame::CloseTriggerFrame;
 use crate::frame::EnrichedHeaders;
 use crate::frame::H3iFrame;
+use crate::quiche;
 
 /// Maximum length of any serialized element's unstructured data such as reason
 /// phrase.
@@ -49,6 +49,12 @@ pub const MAX_SERIALIZED_BUFFER_LEN: usize = 16384;
 /// A summary of all frames received on a connection. There are some extra
 /// fields included to provide additional context into the connection's
 /// behavior.
+///
+/// ConnectionSummary implements [Serialize]. HTTP/3 frames that contain binary
+/// payload are serialized using the qlog
+/// [hexstring](https://www.ietf.org/archive/id/draft-ietf-quic-qlog-main-schema-10.html#section-1.2)
+/// format - "an even-length lowercase string of hexadecimally encoded bytes
+/// examples: 82dc, 027339, 4cdbfd9bf0"
 #[derive(Default, Debug)]
 pub struct ConnectionSummary {
     pub stream_map: StreamMap,
@@ -321,7 +327,7 @@ impl StreamMap {
 /// suites which depend heavily on h3i.
 ///
 /// The specific CONNECTION_CLOSE frame can be customized by passing a
-/// [`ConnectionError`] to [`Self::new_with_close`]. h3i will send an
+/// [`ConnectionError`] to [`Self::new_with_connection_close`]. h3i will send an
 /// application CONNECTION_CLOSE frame with error code 0x100 if this struct is
 /// constructed with the [`Self::new`] constructor.
 #[derive(Clone, Serialize, Debug)]
@@ -438,16 +444,6 @@ impl Serialize for ConnectionCloseDetails {
         state.serialize_field("timed_out", &self.timed_out)?;
         state.end()
     }
-}
-
-// Only applicable to async client
-#[doc(hidden)]
-/// A record that will be inserted into the [ConnectionSummary].
-pub enum ConnectionRecord {
-    StreamedFrame { stream_id: u64, frame: H3iFrame },
-    ConnectionStats(Stats),
-    PathStats(Vec<PathStats>),
-    Close(ConnectionCloseDetails),
 }
 
 /// A wrapper to help serialize [quiche::PathStats]

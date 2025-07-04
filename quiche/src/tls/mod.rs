@@ -30,7 +30,7 @@ use std::slice;
 
 use std::io::Write;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use libc::c_char;
 use libc::c_int;
@@ -123,9 +123,7 @@ enum ssl_private_key_result_t {
 }
 
 /// BoringSSL ex_data index for quiche connections.
-///
-/// TODO: replace with `std::sync::LazyLock` when stable.
-pub static QUICHE_EX_DATA_INDEX: Lazy<c_int> = Lazy::new(|| unsafe {
+pub static QUICHE_EX_DATA_INDEX: LazyLock<c_int> = LazyLock::new(|| unsafe {
     SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
 });
 
@@ -360,7 +358,7 @@ pub struct Handshake {
 impl Handshake {
     // Note: some vendor-specific methods are implemented by each vendor's
     // submodule (openssl-quictls / boringssl).
-    #[cfg(feature = "ffi")]
+    #[cfg(any(feature = "ffi", feature = "boringssl-boring-crate"))]
     pub unsafe fn from_ptr(ssl: *mut c_void) -> Handshake {
         Handshake::new(ssl as *mut SSL)
     }
@@ -454,12 +452,19 @@ impl Handshake {
         })
     }
 
-    pub fn set_quic_transport_params(&mut self, buf: &[u8]) -> Result<()> {
+    pub fn set_quic_transport_params(
+        &mut self, params: &crate::TransportParams, is_server: bool,
+    ) -> Result<()> {
+        let mut raw_params = [0; 128];
+
+        let raw_params =
+            crate::TransportParams::encode(params, is_server, &mut raw_params)?;
+
         let rc = unsafe {
             SSL_set_quic_transport_params(
                 self.as_mut_ptr(),
-                buf.as_ptr(),
-                buf.len(),
+                raw_params.as_ptr(),
+                raw_params.len(),
             )
         };
         self.map_result_ssl(rc)
@@ -685,7 +690,7 @@ impl Drop for Handshake {
 pub struct ExData<'a> {
     pub application_protos: &'a Vec<Vec<u8>>,
 
-    pub pkt_num_spaces: &'a mut [packet::PktNumSpace; packet::Epoch::count()],
+    pub crypto_ctx: &'a mut [packet::CryptoContext; packet::Epoch::count()],
 
     pub session: &'a mut Option<Vec<u8>>,
 
@@ -695,7 +700,33 @@ pub struct ExData<'a> {
 
     pub trace_id: &'a str,
 
+    pub local_transport_params: crate::TransportParams,
+
+    pub recovery_config: crate::recovery::RecoveryConfig,
+
+    pub tx_cap_factor: f64,
+
+    pub pmtud: Option<bool>,
+
     pub is_server: bool,
+}
+
+impl<'a> ExData<'a> {
+    fn from_ssl_ptr(ptr: *const SSL) -> Option<&'a mut Self> {
+        get_ex_data_from_ptr::<ExData>(ptr, *QUICHE_EX_DATA_INDEX)
+    }
+
+    #[cfg(feature = "boringssl-boring-crate")]
+    pub fn from_ssl_ref(ssl: &mut boring::ssl::SslRef) -> Option<&mut Self> {
+        use boring::ex_data::Index;
+
+        // SAFETY: the QUICHE_EX_DATA_INDEX index is guaranteed to be created,
+        // and the associated data is always `ExData`.
+        let idx: Index<boring::ssl::Ssl, ExData> =
+            unsafe { Index::from_raw(*QUICHE_EX_DATA_INDEX) };
+
+        ssl.ex_data_mut(idx)
+    }
 }
 
 fn get_ex_data_from_ptr<'a, T>(ptr: *const SSL, idx: c_int) -> Option<&'a mut T> {
@@ -722,8 +753,7 @@ extern "C" fn set_read_secret(
     ssl: *mut SSL, level: crypto::Level, cipher: *const SSL_CIPHER,
     secret: *const u8, secret_len: usize,
 ) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
@@ -732,14 +762,13 @@ extern "C" fn set_read_secret(
     trace!("{} set read secret lvl={:?}", ex_data.trace_id, level);
 
     let space = match level {
-        crypto::Level::Initial =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Initial],
+        crypto::Level::Initial => &mut ex_data.crypto_ctx[packet::Epoch::Initial],
         crypto::Level::ZeroRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+            &mut ex_data.crypto_ctx[packet::Epoch::Application],
         crypto::Level::Handshake =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Handshake],
+            &mut ex_data.crypto_ctx[packet::Epoch::Handshake],
         crypto::Level::OneRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+            &mut ex_data.crypto_ctx[packet::Epoch::Application],
     };
 
     let aead = match get_cipher_from_ptr(cipher) {
@@ -773,8 +802,7 @@ extern "C" fn set_write_secret(
     ssl: *mut SSL, level: crypto::Level, cipher: *const SSL_CIPHER,
     secret: *const u8, secret_len: usize,
 ) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
@@ -783,14 +811,13 @@ extern "C" fn set_write_secret(
     trace!("{} set write secret lvl={:?}", ex_data.trace_id, level);
 
     let space = match level {
-        crypto::Level::Initial =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Initial],
+        crypto::Level::Initial => &mut ex_data.crypto_ctx[packet::Epoch::Initial],
         crypto::Level::ZeroRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+            &mut ex_data.crypto_ctx[packet::Epoch::Application],
         crypto::Level::Handshake =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Handshake],
+            &mut ex_data.crypto_ctx[packet::Epoch::Handshake],
         crypto::Level::OneRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+            &mut ex_data.crypto_ctx[packet::Epoch::Application],
     };
 
     let aead = match get_cipher_from_ptr(cipher) {
@@ -818,8 +845,7 @@ extern "C" fn set_write_secret(
 extern "C" fn add_handshake_data(
     ssl: *mut SSL, level: crypto::Level, data: *const u8, len: usize,
 ) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
@@ -835,13 +861,12 @@ extern "C" fn add_handshake_data(
     let buf = unsafe { slice::from_raw_parts(data, len) };
 
     let space = match level {
-        crypto::Level::Initial =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Initial],
+        crypto::Level::Initial => &mut ex_data.crypto_ctx[packet::Epoch::Initial],
         crypto::Level::ZeroRTT => unreachable!(),
         crypto::Level::Handshake =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Handshake],
+            &mut ex_data.crypto_ctx[packet::Epoch::Handshake],
         crypto::Level::OneRTT =>
-            &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+            &mut ex_data.crypto_ctx[packet::Epoch::Application],
     };
 
     if space.crypto_stream.send.write(buf, false).is_err() {
@@ -861,8 +886,7 @@ extern "C" fn flush_flight(_ssl: *mut SSL) -> c_int {
 extern "C" fn send_alert(
     ssl: *mut SSL, level: crypto::Level, alert: u8,
 ) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
@@ -886,8 +910,7 @@ extern "C" fn send_alert(
 }
 
 extern "C" fn keylog(ssl: *const SSL, line: *const c_char) {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return,
@@ -920,8 +943,7 @@ extern "C" fn select_alpn(
     // not do that, so we need to explicitly respond with
     // SSL_TLSEXT_ERR_ALERT_FATAL in case it is needed.
     // TLS_ERROR is redefined for each vendor.
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return TLS_ERROR,
@@ -966,8 +988,7 @@ extern "C" fn select_alpn(
 }
 
 extern "C" fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
-    let ex_data = match get_ex_data_from_ptr::<ExData>(ssl, *QUICHE_EX_DATA_INDEX)
-    {
+    let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
         None => return 0,
@@ -1046,7 +1067,14 @@ fn log_ssl_error() {
         ERR_error_string_n(e, err.as_mut_ptr() as *mut c_char, err.len());
     }
 
-    trace!("{}", std::str::from_utf8(&err).unwrap());
+    let cstr = ffi::CStr::from_bytes_until_nul(&err)
+        .expect("ERR_error_string_n should write a null terminated string");
+
+    trace!(
+        "{}",
+        cstr.to_str()
+            .expect("ERR_error_string_n should create a valid UTF-8 message")
+    );
 }
 
 extern "C" {

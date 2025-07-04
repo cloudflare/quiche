@@ -44,7 +44,7 @@ use crate::StreamIdAllocator;
 
 use std::cell::RefCell;
 
-use quiche;
+use crate::quiche;
 
 use self::stream::prompt_fin_stream;
 use self::wait::prompt_wait;
@@ -80,6 +80,8 @@ thread_local! {static CONNECTION_IDLE_TIMEOUT: RefCell<u64> = const { RefCell::n
 // TODO(erittenhouse): exploring generating prompts at compile-time
 const HEADERS: &str = "headers";
 const HEADERS_NO_PSEUDO: &str = "headers_no_pseudo";
+const HEADERS_LITERAL: &str = "headers_literal";
+const HEADERS_NO_PSEUDO_LITERAL: &str = "headers_no_pseudo_literal";
 const DATA: &str = "data";
 const SETTINGS: &str = "settings";
 const PUSH_PROMISE: &str = "push_promise";
@@ -137,12 +139,19 @@ impl Prompter {
 
     fn handle_action(&mut self, action: &str) -> PromptOutcome {
         let res = match action {
-            HEADERS | HEADERS_NO_PSEUDO => {
-                let raw = action == HEADERS_NO_PSEUDO;
+            HEADERS |
+            HEADERS_NO_PSEUDO |
+            HEADERS_LITERAL |
+            HEADERS_NO_PSEUDO_LITERAL => {
+                let literal = action == HEADERS_LITERAL ||
+                    action == HEADERS_NO_PSEUDO_LITERAL;
+                let raw = action == HEADERS_NO_PSEUDO ||
+                    action == HEADERS_NO_PSEUDO_LITERAL;
                 headers::prompt_headers(
                     &mut self.bidi_sid_alloc,
                     &self.host_port,
                     raw,
+                    literal,
                 )
             },
 
@@ -167,7 +176,7 @@ impl Prompter {
             QUIT => return PromptOutcome::Clear,
 
             _ => {
-                println!("error: unknown action {}", action);
+                println!("error: unknown action {action}");
                 return PromptOutcome::Repeat;
             },
         };
@@ -201,7 +210,7 @@ impl Prompter {
                 Err(inquire::InquireError::OperationInterrupted) =>
                     return actions,
                 Err(e) => {
-                    println!("Unexpected error while determining action: {}", e);
+                    println!("Unexpected error while determining action: {e}");
                     return actions;
                 },
             };
@@ -222,7 +231,7 @@ fn handle_action_loop_error(err: InquireError) -> bool {
         inquire::InquireError::OperationInterrupted => false,
 
         _ => {
-            println!("Unexpected error: {}", err);
+            println!("Unexpected error: {err}");
             true
         },
     }
@@ -244,6 +253,8 @@ fn action_suggester(val: &str) -> SuggestionResult<Vec<String>> {
     let suggestions = [
         HEADERS,
         HEADERS_NO_PSEUDO,
+        HEADERS_LITERAL,
+        HEADERS_NO_PSEUDO_LITERAL,
         DATA,
         SETTINGS,
         GOAWAY,
@@ -471,8 +482,7 @@ fn validate_wait_period(period: &str) -> SuggestionResult<Validation> {
                 CONNECTION_IDLE_TIMEOUT.with(|v| *v.borrow());
             if v >= local_conn_timeout {
                 return Ok(Validation::Invalid(ErrorMessage::Custom(format!(
-                    "wait time >= local connection idle timeout {}",
-                    local_conn_timeout
+                    "wait time >= local connection idle timeout {local_conn_timeout}"
                 ))));
             }
         },

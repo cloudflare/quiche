@@ -31,14 +31,14 @@
 use std::cmp;
 use std::time::Instant;
 
-use crate::recovery;
-
-use crate::recovery::rtt::RttStats;
-use crate::recovery::Acked;
-use crate::recovery::Sent;
+use super::rtt::RttStats;
+use super::Acked;
+use super::Sent;
 
 use super::Congestion;
 use super::CongestionControlOps;
+use crate::recovery::LOSS_REDUCTION_FACTOR;
+use crate::recovery::MINIMUM_WINDOW_PACKETS;
 
 pub(crate) static RENO: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -48,6 +48,8 @@ pub(crate) static RENO: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    #[cfg(feature = "qlog")]
+    state_str,
     debug_fmt,
 };
 
@@ -79,7 +81,7 @@ fn on_packet_acked(
         return;
     }
 
-    if r.congestion_window < r.ssthresh {
+    if r.congestion_window < r.ssthresh.get() {
         // In Slow slart, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
@@ -92,7 +94,7 @@ fn on_packet_acked(
 
         if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
-            r.ssthresh = r.congestion_window;
+            r.ssthresh.update(r.congestion_window, true);
         }
     } else {
         // Congestion avoidance.
@@ -116,19 +118,18 @@ fn congestion_event(
     if !r.in_congestion_recovery(time_sent) {
         r.congestion_recovery_start_time = Some(now);
 
-        r.congestion_window = (r.congestion_window as f64 *
-            recovery::LOSS_REDUCTION_FACTOR)
-            as usize;
+        r.congestion_window =
+            (r.congestion_window as f64 * LOSS_REDUCTION_FACTOR) as usize;
 
         r.congestion_window = cmp::max(
             r.congestion_window,
-            r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
+            r.max_datagram_size * MINIMUM_WINDOW_PACKETS,
         );
 
-        r.bytes_acked_ca = (r.congestion_window as f64 *
-            recovery::LOSS_REDUCTION_FACTOR) as usize;
+        r.bytes_acked_ca =
+            (r.congestion_window as f64 * LOSS_REDUCTION_FACTOR) as usize;
 
-        r.ssthresh = r.congestion_window;
+        r.ssthresh.update(r.congestion_window, r.hystart.in_css());
 
         if r.hystart.in_css() {
             r.hystart.congestion_event();
@@ -146,32 +147,48 @@ fn has_custom_pacing() -> bool {
     false
 }
 
+#[cfg(feature = "qlog")]
+pub fn state_str(r: &Congestion, now: Instant) -> &'static str {
+    if r.hystart.in_css() {
+        "conservative_slow_start"
+    } else if r.congestion_window < r.ssthresh.get() {
+        "slow_start"
+    } else if r.in_congestion_recovery(now) {
+        "recovery"
+    } else {
+        "congestion_avoidance"
+    }
+}
+
 fn debug_fmt(_r: &Congestion, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::CongestionControlAlgorithm;
+
     use super::*;
 
+    use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::congestion::test_sender::TestSender;
-    use crate::recovery::Recovery;
+    use crate::recovery::RecoveryOps;
 
     use std::time::Duration;
 
     fn test_sender() -> TestSender {
-        TestSender::new(recovery::CongestionControlAlgorithm::Reno, false)
+        TestSender::new(CongestionControlAlgorithm::Reno, false)
     }
 
     #[test]
     fn reno_init() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(recovery::CongestionControlAlgorithm::Reno);
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
 
-        let r = Recovery::new(&cfg);
+        let r = LegacyRecovery::new(&cfg);
 
         assert!(r.cwnd() > 0);
-        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
     }
 
     #[test]
@@ -239,8 +256,7 @@ mod tests {
         sender.lose_n_packets(1, size, None);
 
         // After congestion event, cwnd will be reduced.
-        let cur_cwnd =
-            (prev_cwnd as f64 * recovery::LOSS_REDUCTION_FACTOR) as usize;
+        let cur_cwnd = (prev_cwnd as f64 * LOSS_REDUCTION_FACTOR) as usize;
         assert_eq!(sender.congestion_window, cur_cwnd);
 
         let rtt = Duration::from_millis(100);

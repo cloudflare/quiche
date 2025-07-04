@@ -13,9 +13,8 @@ opt-level = 3
 
 [dependencies]
 env_logger = "0.10"
+libfuzzer-sys = "0.4"
 quiche = { path = "../quiche", features = ["fuzzing"] }
-lazy_static = "1"
-libfuzzer-sys = { git = "https://github.com/rust-fuzz/libfuzzer-sys.git" }
 
 # Prevent this from interfering with workspaces
 [workspace]

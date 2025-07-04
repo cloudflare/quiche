@@ -1,5 +1,7 @@
 use super::*;
 
+use std::convert::TryFrom;
+
 use std::mem::MaybeUninit;
 
 use libc::c_int;
@@ -65,7 +67,17 @@ impl PacketKey {
         derive_pkt_key(aead, secret, &mut key)?;
         derive_pkt_iv(aead, secret, &mut iv)?;
 
-        Self::new(aead, key, iv, enc)
+        let pkt_key = Self::new(aead, key, iv, enc)?;
+
+        // Dummy seal operation to prime the AEAD context with the nonce mask.
+        //
+        // This is needed because BoringCrypto requires the first counter (i.e.
+        // packet number) to be zero, which would not be the case for packet
+        // number spaces after Initial as the same packet number sequence is
+        // shared.
+        let _ = pkt_key.seal_with_u64_counter(0, b"", &mut [0_u8; 16], 0, None);
+
+        Ok(pkt_key)
     }
 
     pub fn open_with_u64_counter(
@@ -185,38 +197,54 @@ impl HeaderProtectionKey {
         }
     }
 
-    pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5]> {
-        let mut new_mask = [0_u8; 5];
-
+    pub fn new_mask(&self, sample: &[u8]) -> Result<HeaderProtectionMask> {
         match self {
-            Self::Aes(aes_key) => unsafe {
-                AES_ecb_encrypt(
-                    sample.as_ptr(),
-                    new_mask.as_mut_ptr(),
-                    aes_key as _,
-                    1,
-                );
+            Self::Aes(aes_key) => {
+                let mut block = [0_u8; 16];
+
+                unsafe {
+                    AES_ecb_encrypt(
+                        sample.as_ptr(),
+                        block.as_mut_ptr(),
+                        aes_key as _,
+                        1,
+                    )
+                };
+
+                // Downsize the encrypted block to the size of the header
+                // protection mask.
+                //
+                // The length of the slice will always match the size of
+                // `HeaderProtectionMask` so the `unwrap()` is safe.
+                let new_mask =
+                    HeaderProtectionMask::try_from(&block[..HP_MASK_LEN])
+                        .unwrap();
+                Ok(new_mask)
             },
 
-            Self::ChaCha(key) => unsafe {
-                const PLAINTEXT: &[u8; 5] = &[0_u8; 5];
+            Self::ChaCha(key) => {
+                const PLAINTEXT: &[u8; HP_MASK_LEN] = &[0_u8; HP_MASK_LEN];
+
+                let mut new_mask = HeaderProtectionMask::default();
 
                 let counter = u32::from_le_bytes([
                     sample[0], sample[1], sample[2], sample[3],
                 ]);
 
-                CRYPTO_chacha_20(
-                    new_mask.as_mut_ptr(),
-                    PLAINTEXT.as_ptr(),
-                    PLAINTEXT.len(),
-                    key.as_ptr(),
-                    sample[std::mem::size_of::<u32>()..].as_ptr(),
-                    counter,
-                );
+                unsafe {
+                    CRYPTO_chacha_20(
+                        new_mask.as_mut_ptr(),
+                        PLAINTEXT.as_ptr(),
+                        PLAINTEXT.len(),
+                        key.as_ptr(),
+                        sample[std::mem::size_of::<u32>()..].as_ptr(),
+                        counter,
+                    );
+                };
+
+                Ok(new_mask)
             },
         }
-
-        Ok(new_mask)
     }
 }
 

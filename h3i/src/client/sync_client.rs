@@ -26,11 +26,11 @@
 
 //! Responsible for creating a [quiche::Connection] and managing I/O.
 
-use std::net::ToSocketAddrs;
 use std::slice::Iter;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::client::QUIC_VERSION;
 use crate::frame::H3iFrame;
 use crate::quiche;
 
@@ -38,7 +38,6 @@ use crate::actions::h3::Action;
 use crate::actions::h3::StreamEventType;
 use crate::actions::h3::WaitType;
 use crate::actions::h3::WaitingFor;
-use crate::client::build_quiche_connection;
 use crate::client::execute_action;
 use crate::client::parse_streams;
 use crate::client::ClientError;
@@ -46,9 +45,11 @@ use crate::client::ConnectionCloseDetails;
 use crate::client::MAX_DATAGRAM_SIZE;
 use crate::config::Config;
 
+use super::parse_args;
 use super::Client;
 use super::CloseTriggerFrames;
 use super::ConnectionSummary;
+use super::ParsedArgs;
 use super::StreamMap;
 use super::StreamParserMap;
 
@@ -77,6 +78,38 @@ impl Client for SyncClient {
     }
 }
 
+fn create_config(args: &Config, should_log_keys: bool) -> quiche::Config {
+    // Create the configuration for the QUIC connection.
+    let mut config = quiche::Config::new(QUIC_VERSION).unwrap();
+
+    config.verify_peer(args.verify_peer);
+    config.set_application_protos(&[b"h3"]).unwrap();
+    config.set_max_idle_timeout(args.idle_timeout);
+    config.set_max_recv_udp_payload_size(MAX_DATAGRAM_SIZE);
+    config.set_max_send_udp_payload_size(MAX_DATAGRAM_SIZE);
+    config.set_initial_max_data(10_000_000);
+    config
+        .set_initial_max_stream_data_bidi_local(args.max_stream_data_bidi_local);
+    config.set_initial_max_stream_data_bidi_remote(
+        args.max_stream_data_bidi_remote,
+    );
+    config.set_initial_max_stream_data_uni(args.max_stream_data_uni);
+    config.set_initial_max_streams_bidi(args.max_streams_bidi);
+    config.set_initial_max_streams_uni(args.max_streams_uni);
+    config.set_disable_active_migration(true);
+    config.set_active_connection_id_limit(0);
+
+    config.set_max_connection_window(args.max_window);
+    config.set_max_stream_window(args.max_stream_window);
+    config.grease(false);
+
+    if should_log_keys {
+        config.log_keys()
+    }
+
+    config
+}
+
 /// Connect to a server and execute provided actions.
 ///
 /// Constructs a socket and [quiche::Connection] based on the provided `args`,
@@ -88,51 +121,66 @@ impl Client for SyncClient {
 ///
 /// Returns a [ConnectionSummary] on success, [ClientError] on failure.
 pub fn connect(
-    args: Config, actions: &[Action],
+    args: Config, actions: Vec<Action>,
     close_trigger_frames: Option<CloseTriggerFrames>,
 ) -> std::result::Result<ConnectionSummary, ClientError> {
     let mut buf = [0; 65535];
     let mut out = [0; MAX_DATAGRAM_SIZE];
 
+    let ParsedArgs {
+        connect_url,
+        bind_addr,
+        peer_addr,
+    } = parse_args(&args);
+
     // Setup the event loop.
     let mut poll = mio::Poll::new().unwrap();
     let mut events = mio::Events::with_capacity(1024);
 
-    // Resolve server address.
-    let peer_addr = if let Some(addr) = &args.connect_to {
-        addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
-    } else {
-        let x = format!("https://{}", args.host_port);
-        url::Url::parse(&x)
-            .unwrap()
-            .to_socket_addrs()
-            .unwrap()
-            .next()
-            .unwrap()
-    };
-
-    // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
-    // server address. This is needed on macOS and BSD variants that don't
-    // support binding to IN6ADDR_ANY for both v4 and v6.
-    let bind_addr = match peer_addr {
-        std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
-        std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
-    };
-
     // Create the UDP socket backing the QUIC connection, and register it with
     // the event loop.
-    let mut socket =
-        mio::net::UdpSocket::bind(bind_addr.parse().unwrap()).unwrap();
+    let mut socket = mio::net::UdpSocket::bind(bind_addr).unwrap();
     poll.registry()
         .register(&mut socket, mio::Token(0), mio::Interest::READABLE)
         .unwrap();
+
+    let mut keylog = None;
+    if let Some(keylog_path) = std::env::var_os("SSLKEYLOGFILE") {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(keylog_path)
+            .unwrap();
+
+        keylog = Some(file);
+    }
+
+    let mut config = create_config(&args, keylog.is_some());
+
+    // Generate a random source connection ID for the connection.
+    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut scid);
+
+    let scid = quiche::ConnectionId::from_ref(&scid);
 
     let Ok(local_addr) = socket.local_addr() else {
         return Err(ClientError::Other("invalid socket".to_string()));
     };
 
-    let mut conn = build_quiche_connection(args, peer_addr, local_addr)
-        .map_err(|_| ClientError::HandshakeFail)?;
+    // Create a QUIC connection and initiate handshake.
+    let mut conn =
+        quiche::connect(connect_url, &scid, local_addr, peer_addr, &mut config)
+            .map_err(|e| ClientError::Other(e.to_string()))?;
+
+    if let Some(keylog) = &mut keylog {
+        if let Ok(keylog) = keylog.try_clone() {
+            conn.set_keylog(Box::new(keylog));
+        }
+    }
+
+    log::info!(
+        "connecting to {peer_addr:} from {local_addr:} with scid {scid:?}",
+    );
 
     let mut app_proto_selected = false;
 
@@ -182,7 +230,7 @@ pub fn connect(
             _ => None,
         };
 
-        log::debug!("actual sleep is {:?}", actual_sleep);
+        log::debug!("actual sleep is {actual_sleep:?}");
         poll.poll(&mut events, actual_sleep).unwrap();
 
         // If the event loop reported no events, run a belt and braces check on
@@ -230,7 +278,7 @@ pub fn connect(
                     Ok(v) => v,
 
                     Err(e) => {
-                        log::debug!("{}: recv failed: {:?}", local_addr, e);
+                        log::debug!("{local_addr}: recv failed: {e:?}");
                         continue 'read;
                     },
                 };
@@ -338,10 +386,7 @@ pub fn connect(
 
                         Err(e) => {
                             log::error!(
-                                "{} -> {}: send failed: {:?}",
-                                local_addr,
-                                peer_addr,
-                                e
+                                "{local_addr} -> {peer_addr}: send failed: {e:?}"
                             );
 
                             conn.close(false, 0x1, b"fail").ok();
@@ -414,8 +459,7 @@ fn check_duration_and_do_actions(
                 // We could in theory check quiche's idle_timeout value if
                 // it was public.
                 log::info!(
-                    "waiting for {:?} before executing more actions",
-                    idle_wait
+                    "waiting for {idle_wait:?} before executing more actions"
                 );
             }
         },
@@ -453,24 +497,6 @@ pub fn generate_cid_and_reset_token() -> (quiche::ConnectionId<'static>, u128) {
     (scid, reset_token)
 }
 
-/// Makes a buffered writer for a qlog.
-pub fn make_qlog_writer(
-    dir: &std::ffi::OsStr, role: &str, id: &str,
-) -> std::io::BufWriter<std::fs::File> {
-    let mut path = std::path::PathBuf::from(dir);
-    let filename = format!("{role}-{id}.sqlog");
-    path.push(filename);
-
-    match std::fs::File::create(&path) {
-        Ok(f) => std::io::BufWriter::new(f),
-
-        Err(e) => panic!(
-            "Error creating qlog file attempted path was {:?}: {}",
-            path, e
-        ),
-    }
-}
-
 fn handle_actions<'a, I>(
     iter: &mut I, conn: &mut quiche::Connection, waiting_for: &mut WaitingFor,
     stream_parsers: &mut StreamParserMap,
@@ -480,8 +506,7 @@ where
 {
     if !waiting_for.is_empty() {
         log::debug!(
-            "won't fire an action due to waiting for responses: {:?}",
-            waiting_for
+            "won't fire an action due to waiting for responses: {waiting_for:?}"
         );
         return None;
     }
@@ -494,8 +519,7 @@ where
                 WaitType::WaitDuration(period) => return Some(*period),
                 WaitType::StreamEvent(response) => {
                     log::info!(
-                        "waiting for {:?} before executing more actions",
-                        response
+                        "waiting for {response:?} before executing more actions"
                     );
                     waiting_for.add_wait(response);
                     return None;

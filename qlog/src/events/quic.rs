@@ -37,7 +37,7 @@ use super::Token;
 use crate::HexSlice;
 use crate::StatelessResetToken;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PacketType {
     Initial,
@@ -51,6 +51,7 @@ pub enum PacketType {
 
     Retry,
     VersionNegotiation,
+    #[default]
     Unknown,
 }
 
@@ -63,7 +64,7 @@ pub enum PacketNumberSpace {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug, Default)]
 pub struct PacketHeader {
     pub packet_type: PacketType,
     pub packet_number: Option<u64>,
@@ -347,7 +348,7 @@ pub enum AckedRanges {
     Double(Vec<(u64, u64)>),
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum QuicFrameTypeName {
     Padding,
@@ -372,6 +373,7 @@ pub enum QuicFrameTypeName {
     ApplicationClose,
     HandshakeDone,
     Datagram,
+    #[default]
     Unknown,
 }
 
@@ -526,7 +528,7 @@ pub struct PreferredAddress {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct VersionInformation {
     pub server_versions: Option<Vec<Bytes>>,
     pub client_versions: Option<Vec<Bytes>>,
@@ -534,7 +536,7 @@ pub struct VersionInformation {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct AlpnInformation {
     pub server_alpns: Option<Vec<Bytes>>,
     pub client_alpns: Option<Vec<Bytes>>,
@@ -542,7 +544,7 @@ pub struct AlpnInformation {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct TransportParametersSet {
     pub owner: Option<TransportOwner>,
 
@@ -571,10 +573,18 @@ pub struct TransportParametersSet {
     pub initial_max_streams_uni: Option<u64>,
 
     pub preferred_address: Option<PreferredAddress>,
+
+    pub unknown_parameters: Vec<UnknownTransportParameter>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct UnknownTransportParameter {
+    pub id: u64,
+    pub value: Bytes,
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct TransportParametersRestored {
     pub disable_active_migration: Option<bool>,
 
@@ -591,7 +601,7 @@ pub struct TransportParametersRestored {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct DatagramsReceived {
     pub count: Option<u16>,
 
@@ -601,7 +611,7 @@ pub struct DatagramsReceived {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct DatagramsSent {
     pub count: Option<u16>,
 
@@ -611,13 +621,13 @@ pub struct DatagramsSent {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct DatagramDropped {
     pub raw: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct PacketReceived {
     pub header: PacketHeader,
     // `frames` is defined here in the QLog schema specification. However,
@@ -640,7 +650,7 @@ pub struct PacketReceived {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct PacketSent {
     pub header: PacketHeader,
     // `frames` is defined here in the QLog schema specification. However,
@@ -665,7 +675,7 @@ pub struct PacketSent {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct PacketDropped {
     pub header: Option<PacketHeader>,
 
@@ -678,7 +688,7 @@ pub struct PacketDropped {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct PacketBuffered {
     pub header: Option<PacketHeader>,
 
@@ -689,7 +699,7 @@ pub struct PacketBuffered {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct PacketsAcked {
     pub packet_number_space: Option<PacketNumberSpace>,
     pub packet_numbers: Option<Vec<u64>>,
@@ -708,7 +718,7 @@ pub struct StreamStateUpdated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct FramesProcessed {
     pub frames: Vec<QuicFrame>,
 
@@ -716,7 +726,7 @@ pub struct FramesProcessed {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct DataMoved {
     pub stream_id: Option<u64>,
     pub offset: Option<u64>,
@@ -729,7 +739,7 @@ pub struct DataMoved {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct RecoveryParametersSet {
     pub reordering_threshold: Option<u16>,
     pub time_threshold: Option<f32>,
@@ -744,7 +754,7 @@ pub struct RecoveryParametersSet {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct MetricsUpdated {
     pub min_rtt: Option<f32>,
     pub smoothed_rtt: Option<f32>,
@@ -765,7 +775,7 @@ pub struct MetricsUpdated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct CongestionStateUpdated {
     pub old: Option<String>,
     pub new: String,
@@ -785,7 +795,7 @@ pub struct LossTimerUpdated {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct PacketLost {
     pub header: Option<PacketHeader>,
 
@@ -795,7 +805,7 @@ pub struct PacketLost {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct MarkedForRetransmit {
     pub frames: Vec<QuicFrame>,
 }

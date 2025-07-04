@@ -32,10 +32,12 @@ use std::time;
 
 use crate::Error;
 use crate::Result;
+use crate::DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS;
 
 use crate::crypto;
 use crate::rand;
 use crate::ranges;
+use crate::recovery;
 use crate::stream;
 
 const FORM_BIT: u8 = 0x80;
@@ -50,6 +52,11 @@ pub const MAX_CID_LEN: u8 = 20;
 pub const MAX_PKT_NUM_LEN: usize = 4;
 
 const SAMPLE_LEN: usize = 16;
+
+// Set the min skip skip interval to 2x the default number of initial packet
+// count.
+const MIN_SKIP_COUNTER_VALUE: u64 =
+    DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS as u64 * 2;
 
 const RETRY_AEAD_ALG: crypto::Algorithm = crypto::Algorithm::AES128_GCM;
 
@@ -562,7 +569,7 @@ pub fn pkt_num_len(pn: u64, largest_acked: u64) -> usize {
     // computes ceil of num_unacked.log2()
     let min_bits = u64::BITS - num_unacked.leading_zeros();
     // get the num len in bytes
-    ((min_bits + 7) / 8) as usize
+    min_bits.div_ceil(8) as usize
 }
 
 pub fn decrypt_hdr(
@@ -853,63 +860,67 @@ pub struct KeyUpdate {
 }
 
 pub struct PktNumSpace {
+    /// The largest packet number received.
     pub largest_rx_pkt_num: u64,
 
+    /// Time the largest packet number received.
     pub largest_rx_pkt_time: time::Instant,
 
+    /// The largest non-probing packet number.
     pub largest_rx_non_probing_pkt_num: u64,
 
+    /// The largest packet number send in the packet number space so far.
+    pub largest_tx_pkt_num: Option<u64>,
+
+    /// Range of packet numbers that we need to send an ACK for.
     pub recv_pkt_need_ack: ranges::RangeSet,
 
+    /// Tracks received packet numbers.
     pub recv_pkt_num: PktNumWindow,
 
+    /// Track if a received packet is ack eliciting.
     pub ack_elicited: bool,
-
-    pub key_update: Option<KeyUpdate>,
-
-    pub crypto_open: Option<crypto::Open>,
-    pub crypto_seal: Option<crypto::Seal>,
-
-    pub crypto_0rtt_open: Option<crypto::Open>,
-
-    pub crypto_stream: stream::Stream,
 }
 
 impl PktNumSpace {
     pub fn new() -> PktNumSpace {
         PktNumSpace {
             largest_rx_pkt_num: 0,
-
             largest_rx_pkt_time: time::Instant::now(),
-
             largest_rx_non_probing_pkt_num: 0,
-
+            largest_tx_pkt_num: None,
             recv_pkt_need_ack: ranges::RangeSet::new(crate::MAX_ACK_RANGES),
-
             recv_pkt_num: PktNumWindow::default(),
-
             ack_elicited: false,
-
-            key_update: None,
-
-            crypto_open: None,
-            crypto_seal: None,
-
-            crypto_0rtt_open: None,
-
-            crypto_stream: stream::Stream::new(
-                0, // dummy
-                u64::MAX,
-                u64::MAX,
-                true,
-                true,
-                stream::MAX_STREAM_WINDOW,
-            ),
         }
     }
 
     pub fn clear(&mut self) {
-        self.crypto_stream = stream::Stream::new(
+        self.ack_elicited = false;
+    }
+
+    pub fn ready(&self) -> bool {
+        self.ack_elicited
+    }
+
+    pub fn on_packet_sent(&mut self, sent_pkt: &recovery::Sent) {
+        // Track the largest packet number sent
+        self.largest_tx_pkt_num =
+            self.largest_tx_pkt_num.max(Some(sent_pkt.pkt_num));
+    }
+}
+
+pub struct CryptoContext {
+    pub key_update: Option<KeyUpdate>,
+    pub crypto_open: Option<crypto::Open>,
+    pub crypto_seal: Option<crypto::Seal>,
+    pub crypto_0rtt_open: Option<crypto::Open>,
+    pub crypto_stream: stream::Stream,
+}
+
+impl CryptoContext {
+    pub fn new() -> CryptoContext {
+        let crypto_stream = stream::Stream::new(
             0, // dummy
             u64::MAX,
             u64::MAX,
@@ -917,20 +928,194 @@ impl PktNumSpace {
             true,
             stream::MAX_STREAM_WINDOW,
         );
+        CryptoContext {
+            key_update: None,
+            crypto_open: None,
+            crypto_seal: None,
+            crypto_0rtt_open: None,
+            crypto_stream,
+        }
+    }
 
-        self.ack_elicited = false;
+    pub fn clear(&mut self) {
+        self.crypto_open = None;
+        self.crypto_seal = None;
+        self.crypto_stream = <stream::Stream>::new(
+            0, // dummy
+            u64::MAX,
+            u64::MAX,
+            true,
+            true,
+            stream::MAX_STREAM_WINDOW,
+        );
+    }
+
+    pub fn data_available(&self) -> bool {
+        self.crypto_stream.is_flushable()
     }
 
     pub fn crypto_overhead(&self) -> Option<usize> {
         Some(self.crypto_seal.as_ref()?.alg().tag_len())
     }
 
-    pub fn ready(&self) -> bool {
-        self.crypto_stream.is_flushable() || self.ack_elicited
-    }
-
     pub fn has_keys(&self) -> bool {
         self.crypto_open.is_some() && self.crypto_seal.is_some()
+    }
+}
+
+/// QUIC recommends skipping packet numbers to elicit a [faster ACK] or to
+/// mitigate an [optimistic ACK attack] (OACK attack). quiche currently skips
+/// packets only for the purposes of optimistic attack mitigation.
+///
+/// ## What is an Optimistic ACK attack
+/// A typical endpoint is responsible for making concurrent progress on multiple
+/// connections and needs to fairly allocate resources across those connection.
+/// In order to ensure fairness, an endpoint relies on "recovery signals" to
+/// determine the optimal sending rate per connection. For example, when a new
+/// flow joins a shared network, it might induce packet loss for other flows and
+/// cause those flows to yield bandwidth on the network. ACKs are the primary
+/// source of recovery signals for a QUIC connection.
+///
+/// The goal of an OACK attack is to mount a DDoS attack by exploiting recovery
+/// signals and causing a server to expand its sending rate. A server with an
+/// inflated sending rate would then be able to flood a shared network and
+/// cripple all other flows. The fundamental reason that makes OACK
+/// attach possible is the use of unvalidated ACK data, which is then used to
+/// modify internal state. Therefore at a high level, a mitigation should
+/// validate the incoming ACK data before use.
+///
+/// ## Optimistic ACK attack mitigation
+/// quiche follows the RFC's recommendation for mitigating an [optimistic ACK
+/// attack] by skipping packets and validating that the peer does NOT send ACKs
+/// for those skipped packets. If an ACK for a skipped packet is received, the
+/// connection is closed with a [PROTOCOL_VIOLATION] error.
+///
+/// A robust mitigation should skip packets randomly to ensure that an attacker
+/// can't predict which packet number was skipped. Skip/validation should happen
+/// "periodically" over the lifetime of the connection. Since skipping packets
+/// also elicits a faster ACK, we need to balance the skip frequency to
+/// sufficiently validate the peer without impacting other aspects of recovery.
+///
+/// A naive approach could be to skip a random packet number in the range
+/// 200-500 (pick some static range). While this might work, its not apparent if
+/// a static range is effective for all networks with varying bandwidths/RTTs.
+///
+/// Since an attacker can potentially influence the sending rate once per
+/// "round", it would be ideal to validate the peer once per round. Therefore,
+/// an ideal range seems to be one that dynamically adjusts based on packets
+/// sent per round, ie. adjust skip range based on the current CWND.
+///
+/// [faster ACK]: https://www.rfc-editor.org/rfc/rfc9002.html#section-6.2.4
+/// [optimistic ACK attack]: https://www.rfc-editor.org/rfc/rfc9000.html#section-21.4
+/// [PROTOCOL_VIOLATION]: https://www.rfc-editor.org/rfc/rfc9000#section-13.1
+pub struct PktNumManager {
+    // TODO:
+    // Defer including next_pkt_num in order to reduce the size of this patch
+    // /// Next packet number.
+    // next_pkt_num: u64,
+    /// Track if we have skipped a packet number.
+    skip_pn: Option<u64>,
+
+    /// Track when to skip the next packet number
+    ///
+    /// None indicates the counter is not armed while Some(0) indicates that the
+    /// counter has expired.
+    pub skip_pn_counter: Option<u64>,
+}
+
+impl PktNumManager {
+    pub fn new() -> Self {
+        PktNumManager {
+            skip_pn: None,
+            skip_pn_counter: None,
+        }
+    }
+
+    pub fn on_packet_sent(
+        &mut self, cwnd: usize, max_datagram_size: usize,
+        handshake_completed: bool,
+    ) {
+        // Decrement skip_pn_counter for each packet sent
+        if let Some(counter) = &mut self.skip_pn_counter {
+            *counter = counter.saturating_sub(1);
+        } else if self.should_arm_skip_counter(handshake_completed) {
+            self.arm_skip_counter(cwnd, max_datagram_size);
+        }
+    }
+
+    fn should_arm_skip_counter(&self, handshake_completed: bool) -> bool {
+        // Arm if the counter is not set
+        let counter_not_set = self.skip_pn_counter.is_none();
+        // Don't arm until we have verified the current skip_pn. Rearming the
+        // counter could result in overwriting the skip_pn before
+        // validating the current skip_pn.
+        let no_current_skip_packet = self.skip_pn.is_none();
+
+        // Skip pn only after the handshake has completed
+        counter_not_set && no_current_skip_packet && handshake_completed
+    }
+
+    pub fn should_skip_pn(&self, handshake_completed: bool) -> bool {
+        // Only skip a new packet once we have validated  the peer hasn't sent the
+        // current skip packet.  For the purposes of OACK, a skip_pn is
+        // considered validated once we receive an ACK for pn > skip_pn.
+        let no_current_skip_packet = self.skip_pn.is_none();
+        let counter_expired = match self.skip_pn_counter {
+            // Skip if counter has expired
+            Some(counter) => counter == 0,
+            // Don't skip if the counter has not been set
+            None => false,
+        };
+
+        // Skip pn only after the handshake has completed
+        counter_expired && no_current_skip_packet && handshake_completed
+    }
+
+    pub fn skip_pn(&self) -> Option<u64> {
+        self.skip_pn
+    }
+
+    pub fn set_skip_pn(&mut self, skip_pn: Option<u64>) {
+        if skip_pn.is_some() {
+            // Never overwrite skip_pn until the previous one has been verified
+            debug_assert!(self.skip_pn.is_none());
+            // The skip_pn_counter should be expired
+            debug_assert_eq!(self.skip_pn_counter.unwrap(), 0);
+        }
+
+        self.skip_pn = skip_pn;
+        // unset the counter
+        self.skip_pn_counter = None;
+    }
+
+    // Dynamically vary the skip counter based on the CWND.
+    fn arm_skip_counter(&mut self, cwnd: usize, max_datagram_size: usize) {
+        let packets_per_cwnd = (cwnd / max_datagram_size) as u64;
+        let lower = packets_per_cwnd / 2;
+        let upper = packets_per_cwnd * 2;
+        // rand_u64_uniform requires a non-zero value so add 1
+        let skip_range = upper - lower + 1;
+        let rand_skip_value = rand::rand_u64_uniform(skip_range);
+
+        // Skip calculation:
+        // skip_counter = min_skip
+        //                + lower
+        //                + rand(skip_range.lower, skip_range.upper)
+        //
+        //```
+        // c: the current packet number
+        // s: range of random packet number to skip from
+        //
+        // curr_pn
+        //  |
+        //  v               |-lower-|
+        // [c x x x x x x x x x x x s s s s s s s s s s x x]
+        //    |--min_skip---|       |---skip_range----|
+        //
+        //```
+        let skip_pn_counter = MIN_SKIP_COUNTER_VALUE + lower + rand_skip_value;
+
+        self.skip_pn_counter = Some(skip_pn_counter);
     }
 }
 
@@ -984,6 +1169,8 @@ impl PktNumWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils;
+    use crate::MAX_SEND_UDP_PAYLOAD_SIZE;
 
     #[test]
     fn retry() {
@@ -1312,9 +1499,13 @@ mod tests {
 
         let payload_len = b.get_varint().unwrap() as usize;
 
-        let (aead, _) =
-            crypto::derive_initial_key_material(dcid, hdr.version, is_server)
-                .unwrap();
+        let (aead, _) = crypto::derive_initial_key_material(
+            dcid,
+            hdr.version,
+            is_server,
+            false,
+        )
+        .unwrap();
 
         decrypt_hdr(&mut b, &mut hdr, &aead).unwrap();
         assert_eq!(hdr.pkt_num_len, expected_pn_len);
@@ -1561,9 +1752,13 @@ mod tests {
 
         b.put_bytes(header).unwrap();
 
-        let (_, aead) =
-            crypto::derive_initial_key_material(dcid, hdr.version, is_server)
-                .unwrap();
+        let (_, aead) = crypto::derive_initial_key_material(
+            dcid,
+            hdr.version,
+            is_server,
+            false,
+        )
+        .unwrap();
 
         let payload_len = frames.len();
 
@@ -1947,7 +2142,8 @@ mod tests {
         let payload_len = b.get_varint().unwrap() as usize;
 
         let (aead, _) =
-            crypto::derive_initial_key_material(b"", hdr.version, true).unwrap();
+            crypto::derive_initial_key_material(b"", hdr.version, true, false)
+                .unwrap();
 
         assert_eq!(
             decrypt_pkt(&mut b, 0, 1, payload_len, &aead),
@@ -1980,11 +2176,145 @@ mod tests {
         let payload_len = 1;
 
         let (aead, _) =
-            crypto::derive_initial_key_material(b"", hdr.version, true).unwrap();
+            crypto::derive_initial_key_material(b"", hdr.version, true, false)
+                .unwrap();
 
         assert_eq!(
             decrypt_pkt(&mut b, 0, 1, payload_len, &aead),
             Err(Error::CryptoFail)
         );
+    }
+
+    #[test]
+    fn track_largest_packet_sent() {
+        let now = time::Instant::now();
+        let mut pkt_space = PktNumSpace::new();
+
+        assert!(pkt_space.largest_tx_pkt_num.is_none());
+
+        let sent_ctx = test_utils::helper_packet_sent(1, now, 10);
+        pkt_space.on_packet_sent(&sent_ctx);
+        assert_eq!(pkt_space.largest_tx_pkt_num.unwrap(), 1);
+
+        let sent_ctx = test_utils::helper_packet_sent(2, now, 10);
+        pkt_space.on_packet_sent(&sent_ctx);
+        assert_eq!(pkt_space.largest_tx_pkt_num.unwrap(), 2);
+    }
+
+    #[test]
+    fn skip_pn() {
+        let mut skip_manager = PktNumManager::new();
+        let cwnd = 1000;
+        let handshake_completed = true;
+        let mut next_pn = 0;
+
+        assert!(skip_manager.skip_pn.is_none());
+        assert!(skip_manager.skip_pn_counter.is_none());
+        assert!(!skip_manager.should_skip_pn(handshake_completed));
+
+        // Arm `skip_pn_counter`
+        skip_manager.on_packet_sent(
+            cwnd,
+            MAX_SEND_UDP_PAYLOAD_SIZE,
+            handshake_completed,
+        );
+        assert_eq!(next_pn, 0);
+        assert!(skip_manager.skip_pn.is_none());
+        assert!(skip_manager.skip_pn_counter.unwrap() >= MIN_SKIP_COUNTER_VALUE);
+        assert!(!skip_manager.should_skip_pn(handshake_completed));
+
+        // `should_skip_pn()` should be true once the counter expires
+        while skip_manager.skip_pn_counter.unwrap() > 0 {
+            // pretend to send the next packet
+            next_pn += 1;
+
+            skip_manager.on_packet_sent(
+                cwnd,
+                MAX_SEND_UDP_PAYLOAD_SIZE,
+                handshake_completed,
+            );
+        }
+        assert!(next_pn >= MIN_SKIP_COUNTER_VALUE);
+        assert!(skip_manager.skip_pn.is_none());
+        assert_eq!(skip_manager.skip_pn_counter.unwrap(), 0);
+        assert!(skip_manager.should_skip_pn(handshake_completed));
+
+        // skip the next pkt_num
+        skip_manager.set_skip_pn(Some(next_pn));
+        assert_eq!(skip_manager.skip_pn.unwrap(), next_pn);
+        assert!(skip_manager.skip_pn_counter.is_none());
+        assert!(!skip_manager.should_skip_pn(handshake_completed));
+    }
+
+    #[test]
+    fn arm_skip_counter_only_after_verifying_prev_skip_pn() {
+        let mut skip_manager = PktNumManager::new();
+        let cwnd = 1000;
+        let handshake_completed = true;
+
+        // Set skip pn
+        skip_manager.skip_pn_counter = Some(0);
+        skip_manager.set_skip_pn(Some(42));
+        assert!(skip_manager.skip_pn.is_some());
+        assert!(skip_manager.skip_pn_counter.is_none());
+
+        // Don't arm the skip_pn_counter since its still armed (0 means
+        // expired)
+        skip_manager.on_packet_sent(
+            cwnd,
+            MAX_SEND_UDP_PAYLOAD_SIZE,
+            handshake_completed,
+        );
+        assert!(skip_manager.skip_pn.is_some());
+        assert!(skip_manager.skip_pn_counter.is_none());
+
+        // Arm the skip_pn_counter once the skip_pn has been verified
+        skip_manager.skip_pn = None;
+        skip_manager.on_packet_sent(
+            cwnd,
+            MAX_SEND_UDP_PAYLOAD_SIZE,
+            handshake_completed,
+        );
+        assert!(skip_manager.skip_pn.is_none());
+        assert!(skip_manager.skip_pn_counter.is_some());
+    }
+
+    #[test]
+    fn arm_skip_counter_only_after_handshake_complete() {
+        let mut skip_manager = PktNumManager::new();
+        let cwnd = 1000;
+        skip_manager.skip_pn_counter = None;
+
+        // Don't arm the skip_pn_counter since handshake is not complete
+        let mut handshake_completed = false;
+        skip_manager.on_packet_sent(
+            cwnd,
+            MAX_SEND_UDP_PAYLOAD_SIZE,
+            handshake_completed,
+        );
+        assert!(skip_manager.skip_pn_counter.is_none());
+
+        // Arm counter after handshake complete
+        handshake_completed = true;
+        skip_manager.on_packet_sent(
+            cwnd,
+            MAX_SEND_UDP_PAYLOAD_SIZE,
+            handshake_completed,
+        );
+        assert!(skip_manager.skip_pn_counter.is_some());
+    }
+
+    #[test]
+    fn only_skip_after_handshake_complete() {
+        let mut skip_manager = PktNumManager::new();
+        skip_manager.skip_pn_counter = Some(0);
+
+        let mut handshake_completed = false;
+        // Don't skip since handshake is not complete
+        assert!(!skip_manager.should_skip_pn(handshake_completed));
+
+        handshake_completed = true;
+        // Skip pn after handshake complete
+        assert!(skip_manager.should_skip_pn(handshake_completed));
     }
 }

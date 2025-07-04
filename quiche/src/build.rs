@@ -40,7 +40,7 @@ fn get_boringssl_platform_output_path() -> String {
         let deb_info = match &debug_env_var[..] {
             "false" => false,
             "true" => true,
-            unknown => panic!("Unknown DEBUG={} env var.", unknown),
+            unknown => panic!("Unknown DEBUG={unknown} env var."),
         };
 
         let opt_env_var = std::env::var("OPT_LEVEL")
@@ -55,7 +55,7 @@ fn get_boringssl_platform_output_path() -> String {
                     "Release"
                 },
             "s" | "z" => "MinSizeRel",
-            unknown => panic!("Unknown OPT_LEVEL={} env var.", unknown),
+            unknown => panic!("Unknown OPT_LEVEL={unknown} env var."),
         };
 
         subdir.to_string()
@@ -232,7 +232,7 @@ fn main() {
             cfg.build_target("crypto").build().display().to_string()
         });
 
-        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", bssl_dir);
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{bssl_dir}");
 
         let build_path = get_boringssl_platform_output_path();
         let mut build_dir = format!("{bssl_dir}/build/{build_path}");

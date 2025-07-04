@@ -30,11 +30,11 @@ use std::ops::DerefMut;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery::congestion::Congestion;
-use crate::recovery::rtt::RttStats;
-use crate::recovery::Acked;
-use crate::recovery::RecoveryConfig;
-use crate::recovery::Sent;
+use super::rtt::RttStats;
+use super::Acked;
+use super::Congestion;
+use super::RecoveryConfig;
+use super::Sent;
 use crate::CongestionControlAlgorithm;
 
 pub(crate) struct TestSender {
@@ -81,7 +81,7 @@ impl TestSender {
             tx_in_flight: 0,
             lost: 0,
             has_data: false,
-            pmtud: false,
+            is_pmtud_probe: false,
         };
 
         self.cc.on_packet_sent(

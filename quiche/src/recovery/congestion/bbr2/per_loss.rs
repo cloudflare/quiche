@@ -106,7 +106,9 @@ pub fn bbr2_update_latest_delivery_signals(r: &mut Congestion) {
 
     // Near start of ACK processing.
     bbr.loss_round_start = false;
-    bbr.bw_latest = bbr.bw_latest.max(r.delivery_rate.sample_delivery_rate());
+    bbr.bw_latest = bbr
+        .bw_latest
+        .max(r.delivery_rate.sample_delivery_rate().to_bytes_per_second());
     bbr.inflight_latest =
         bbr.inflight_latest.max(r.delivery_rate.sample_delivered());
 
@@ -121,7 +123,8 @@ pub fn bbr2_advance_latest_delivery_signals(r: &mut Congestion) {
 
     // Near end of ACK processing.
     if bbr.loss_round_start {
-        bbr.bw_latest = r.delivery_rate.sample_delivery_rate();
+        bbr.bw_latest =
+            r.delivery_rate.sample_delivery_rate().to_bytes_per_second();
         bbr.inflight_latest = r.delivery_rate.sample_delivered();
     }
 }

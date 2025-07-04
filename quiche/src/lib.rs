@@ -382,6 +382,7 @@
 #[macro_use]
 extern crate log;
 
+use octets::BufferTooShortError;
 #[cfg(feature = "qlog")]
 use qlog::events::connectivity::ConnectivityEventType;
 #[cfg(feature = "qlog")]
@@ -402,6 +403,7 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::RawInfo;
+use recovery::OnLossDetectionTimeoutOutcome;
 use stream::StreamPriorityKey;
 
 use std::cmp;
@@ -416,8 +418,13 @@ use std::str::FromStr;
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::time::Duration;
 
+use range_buf::DefaultBufFactory;
 use smallvec::SmallVec;
+
+use crate::recovery::OnAckReceivedOutcome;
+use crate::recovery::ReleaseDecision;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -493,6 +500,9 @@ const DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 10;
 
 // The maximum data offset that can be stored in a crypto stream.
 const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
+
+// The send capacity factor.
+const TX_CAP_FACTOR: f64 = 1.0;
 
 /// A specialized [`Result`] type for quiche operations.
 ///
@@ -575,6 +585,13 @@ pub enum Error {
 
     /// The peer sent more data in CRYPTO frames than we can buffer.
     CryptoBufferExceeded,
+
+    /// The peer sent an ACK frame with an invalid range.
+    InvalidAckRange,
+
+    /// The peer send an ACK frame for a skipped packet used for Optimistic ACK
+    /// mitigation.
+    OptimisticAckDetected,
 }
 
 /// QUIC error codes sent on the wire.
@@ -686,6 +703,8 @@ impl Error {
             Error::OutOfIdentifiers => -18,
             Error::KeyUpdate => -19,
             Error::CryptoBufferExceeded => -20,
+            Error::InvalidAckRange => -21,
+            Error::OptimisticAckDetected => -22,
         }
     }
 }
@@ -791,6 +810,7 @@ pub struct Config {
     grease: bool,
 
     cc_algorithm: CongestionControlAlgorithm,
+    custom_bbr_params: Option<BbrParams>,
     initial_congestion_window_packets: usize,
 
     pmtud: bool,
@@ -798,7 +818,10 @@ pub struct Config {
     hystart: bool,
 
     pacing: bool,
+    /// Send rate limit in Mbps
     max_pacing_rate: Option<u64>,
+
+    tx_cap_factor: f64,
 
     dgram_recv_max_queue_len: usize,
     dgram_send_max_queue_len: usize,
@@ -813,6 +836,8 @@ pub struct Config {
     max_amplification_factor: usize,
 
     disable_dcid_reuse: bool,
+
+    track_unknown_transport_params: Option<usize>,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -860,12 +885,15 @@ impl Config {
             application_protos: Vec::new(),
             grease: true,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
+            custom_bbr_params: None,
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
             pmtud: false,
             hystart: true,
             pacing: true,
             max_pacing_rate: None,
+
+            tx_cap_factor: TX_CAP_FACTOR,
 
             dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
@@ -881,6 +909,8 @@ impl Config {
             max_amplification_factor: MAX_AMPLIFICATION_FACTOR,
 
             disable_dcid_reuse: false,
+
+            track_unknown_transport_params: None,
         })
     }
 
@@ -951,14 +981,17 @@ impl Config {
 
     /// Configures whether to verify the peer's certificate.
     ///
-    /// The default value is `true` for client connections, and `false` for
-    /// server ones.
+    /// This should usually be `true` for client-side connections and `false`
+    /// for server-side ones.
     ///
-    /// Note that on the server-side, enabling verification of the peer will
-    /// trigger a certificate request and make authentication errors fatal, but
-    /// will still allow anonymous clients (i.e. clients that don't present a
-    /// certificate at all). Servers can check whether a client presented a
-    /// certificate by calling [`peer_cert()`] if they need to.
+    /// Note that by default, no verification is performed.
+    ///
+    /// Also note that on the server-side, enabling verification of the peer
+    /// will trigger a certificate request and make authentication errors
+    /// fatal, but will still allow anonymous clients (i.e. clients that
+    /// don't present a certificate at all). Servers can check whether a
+    /// client presented a certificate by calling [`peer_cert()`] if they
+    /// need to.
     ///
     /// [`peer_cert()`]: struct.Connection.html#method.peer_cert
     pub fn verify_peer(&mut self, verify: bool) {
@@ -1071,6 +1104,13 @@ impl Config {
     /// The default value is `3`.
     pub fn set_max_amplification_factor(&mut self, v: usize) {
         self.max_amplification_factor = v;
+    }
+
+    /// Sets the send capacity factor.
+    ///
+    /// The default value is `1`.
+    pub fn set_send_capacity_factor(&mut self, v: f64) {
+        self.tx_cap_factor = v;
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
@@ -1232,6 +1272,27 @@ impl Config {
         self.local_transport_params.disable_active_migration = v;
     }
 
+    /// Sets the congestion control algorithm used.
+    ///
+    /// The default value is `CongestionControlAlgorithm::CUBIC`.
+    pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
+        self.cc_algorithm = algo;
+    }
+
+    /// Sets custom BBR settings.
+    ///
+    /// This API is experimental and will be removed in the future.
+    ///
+    /// Currently this only applies if cc_algorithm is
+    /// `CongestionControlAlgorithm::Bbr2Gcongestion` is set.
+    ///
+    /// The default value is `None`.
+    #[cfg(feature = "internal")]
+    #[doc(hidden)]
+    pub fn set_custom_bbr_params(&mut self, custom_bbr_settings: BbrParams) {
+        self.custom_bbr_params = Some(custom_bbr_settings);
+    }
+
     /// Sets the congestion control algorithm used by string.
     ///
     /// The default value is `cubic`. On error `Error::CongestionControl`
@@ -1255,13 +1316,6 @@ impl Config {
     /// The default value is 10.
     pub fn set_initial_congestion_window_packets(&mut self, packets: usize) {
         self.initial_congestion_window_packets = packets;
-    }
-
-    /// Sets the congestion control algorithm used.
-    ///
-    /// The default value is `CongestionControlAlgorithm::CUBIC`.
-    pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
-        self.cc_algorithm = algo;
     }
 
     /// Configures whether to enable HyStart++.
@@ -1350,10 +1404,25 @@ impl Config {
     pub fn set_disable_dcid_reuse(&mut self, v: bool) {
         self.disable_dcid_reuse = v;
     }
+
+    /// Enables tracking unknown transport parameters.
+    ///
+    /// Specify the maximum number of bytes used to track unknown transport
+    /// parameters. The size includes the identifier and its value. If storing a
+    /// transport parameter would cause the limit to be exceeded, it is quietly
+    /// dropped.
+    ///
+    /// The default is that the feature is disabled.
+    pub fn enable_track_unknown_transport_parameters(&mut self, size: usize) {
+        self.track_unknown_transport_params = Some(size);
+    }
 }
 
 /// A QUIC connection.
-pub struct Connection {
+pub struct Connection<F = DefaultBufFactory>
+where
+    F: BufFactory,
+{
     /// QUIC wire version used for the connection.
     version: u32,
 
@@ -1366,11 +1435,23 @@ pub struct Connection {
     /// Packet number spaces.
     pkt_num_spaces: [packet::PktNumSpace; packet::Epoch::count()],
 
+    /// The crypto context.
+    crypto_ctx: [packet::CryptoContext; packet::Epoch::count()],
+
     /// Next packet number.
     next_pkt_num: u64,
 
+    // TODO
+    // combine with `next_pkt_num`
+    /// Track the packet skip context
+    pkt_num_manager: packet::PktNumManager,
+
     /// Peer's transport parameters.
     peer_transport_params: TransportParams,
+
+    /// If tracking unknown transport parameters from a peer, how much space to
+    /// use in bytes.
+    peer_transport_params_track_unknown: Option<usize>,
 
     /// Local transport parameters.
     local_transport_params: TransportParams,
@@ -1408,8 +1489,17 @@ pub struct Connection {
     /// Total number of lost packets.
     lost_count: usize,
 
+    /// Total number of lost packets that were later acked.
+    spurious_lost_count: usize,
+
     /// Total number of packets sent with data retransmitted.
     retrans_count: usize,
+
+    /// Total number of sent DATAGRAM frames.
+    dgram_sent_count: usize,
+
+    /// Total number of received DATAGRAM frames.
+    dgram_recv_count: usize,
 
     /// Total number of bytes received from the peer.
     rx_data: u64,
@@ -1423,7 +1513,10 @@ pub struct Connection {
     /// Number of stream data bytes that can be buffered.
     tx_cap: usize,
 
-    // Number of bytes buffered in the send buffer.
+    /// The send capacity factor.
+    tx_cap_factor: f64,
+
+    /// Number of bytes buffered in the send buffer.
     tx_buffered: usize,
 
     /// Total number of bytes sent to the peer.
@@ -1452,7 +1545,7 @@ pub struct Connection {
     lost_bytes: u64,
 
     /// Streams map, indexed by stream ID.
-    streams: stream::StreamMap,
+    streams: stream::StreamMap<F>,
 
     /// Peer's original destination connection ID. Used by the client to
     /// validate the server's transport parameter.
@@ -1600,6 +1693,21 @@ pub fn accept(
     Ok(conn)
 }
 
+/// Creates a new server-side connection, with a custom buffer generation
+/// method.
+///
+/// The buffers generated can be anything that can be drereferenced as a byte
+/// slice. See [`accept`] and [`BufFactory`] for more info.
+#[inline]
+pub fn accept_with_buf_factory<F: BufFactory>(
+    scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
+    peer: SocketAddr, config: &mut Config,
+) -> Result<Connection<F>> {
+    let conn = Connection::new(scid, odcid, local, peer, config, true)?;
+
+    Ok(conn)
+}
+
 /// Creates a new client-side connection.
 ///
 /// The `scid` parameter is used as the connection's source connection ID,
@@ -1623,6 +1731,25 @@ pub fn connect(
     server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection> {
+    let mut conn = Connection::new(scid, None, local, peer, config, false)?;
+
+    if let Some(server_name) = server_name {
+        conn.handshake.set_host_name(server_name)?;
+    }
+
+    Ok(conn)
+}
+
+/// Creates a new client-side connection, with a custom buffer generation
+/// method.
+///
+/// The buffers generated can be anything that can be drereferenced as a byte
+/// slice. See [`connect`] and [`BufFactory`] for more info.
+#[inline]
+pub fn connect_with_buffer_factory<F: BufFactory>(
+    server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
+    peer: SocketAddr, config: &mut Config,
+) -> Result<Connection<F>> {
     let mut conn = Connection::new(scid, None, local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
@@ -1814,11 +1941,11 @@ impl Default for QlogInfo {
     }
 }
 
-impl Connection {
+impl<F: BufFactory> Connection<F> {
     fn new(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
         peer: SocketAddr, config: &mut Config, is_server: bool,
-    ) -> Result<Connection> {
+    ) -> Result<Connection<F>> {
         let tls = config.tls_ctx.new_handshake()?;
         Connection::with_tls(scid, odcid, local, peer, config, tls, is_server)
     }
@@ -1826,7 +1953,7 @@ impl Connection {
     fn with_tls(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
         peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
-    ) -> Result<Connection> {
+    ) -> Result<Connection<F>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> =
@@ -1885,9 +2012,20 @@ impl Connection {
                 packet::PktNumSpace::new(),
             ],
 
+            crypto_ctx: [
+                packet::CryptoContext::new(),
+                packet::CryptoContext::new(),
+                packet::CryptoContext::new(),
+            ],
+
             next_pkt_num: 0,
 
+            pkt_num_manager: packet::PktNumManager::new(),
+
             peer_transport_params: TransportParams::default(),
+
+            peer_transport_params_track_unknown: config
+                .track_unknown_transport_params,
 
             local_transport_params: config.local_transport_params.clone(),
 
@@ -1907,7 +2045,10 @@ impl Connection {
             recv_count: 0,
             sent_count: 0,
             lost_count: 0,
+            spurious_lost_count: 0,
             retrans_count: 0,
+            dgram_sent_count: 0,
+            dgram_recv_count: 0,
             sent_bytes: 0,
             recv_bytes: 0,
             acked_bytes: 0,
@@ -1922,6 +2063,7 @@ impl Connection {
             almost_full: false,
 
             tx_cap: 0,
+            tx_cap_factor: config.tx_cap_factor,
 
             tx_buffered: 0,
 
@@ -2044,6 +2186,7 @@ impl Connection {
                 &dcid,
                 conn.version,
                 conn.is_server,
+                false,
             )?;
 
             let reset_token = conn.peer_transport_params.stateless_reset_token;
@@ -2053,10 +2196,8 @@ impl Connection {
                 active_path_id,
             )?;
 
-            conn.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            conn.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            conn.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
+            conn.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
 
             conn.derived_initial_secrets = true;
         }
@@ -2190,8 +2331,11 @@ impl Connection {
         let raw_params_len = b.get_u64()? as usize;
         let raw_params_bytes = b.get_bytes(raw_params_len)?;
 
-        let peer_params =
-            TransportParams::decode(raw_params_bytes.as_ref(), self.is_server)?;
+        let peer_params = TransportParams::decode(
+            raw_params_bytes.as_ref(),
+            self.is_server,
+            self.peer_transport_params_track_unknown,
+        )?;
 
         self.process_peer_transport_params(peer_params)?;
 
@@ -2209,6 +2353,294 @@ impl Connection {
         self.local_transport_params.max_idle_timeout = v;
 
         self.encode_transport_params()
+    }
+
+    /// Sets the congestion control algorithm used.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_cc_algorithm()`].
+    ///
+    /// [`Config::set_cc_algorithm()`]: struct.Config.html#method.set_cc_algorithm
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_cc_algorithm_in_handshake(
+        ssl: &mut boring::ssl::SslRef, algo: CongestionControlAlgorithm,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.cc_algorithm = algo;
+
+        Ok(())
+    }
+
+    /// Sets custom BBR settings.
+    ///
+    /// This API is experimental and will be removed in the future.
+    ///
+    /// Currently this only applies if cc_algorithm is
+    /// `CongestionControlAlgorithm::Bbr2Gcongestion` is set.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_custom_bbr_settings()`].
+    ///
+    /// [`Config::set_custom_bbr_settings()`]: struct.Config.html#method.set_custom_bbr_settings
+    #[cfg(all(feature = "boringssl-boring-crate", feature = "internal"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    #[doc(hidden)]
+    pub fn set_custom_bbr_settings_in_handshake(
+        ssl: &mut boring::ssl::SslRef, custom_bbr_params: BbrParams,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.custom_bbr_params = Some(custom_bbr_params);
+
+        Ok(())
+    }
+
+    /// Sets the congestion control algorithm used by string.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_cc_algorithm_name()`].
+    ///
+    /// [`Config::set_cc_algorithm_name()`]: struct.Config.html#method.set_cc_algorithm_name
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_cc_algorithm_name_in_handshake(
+        ssl: &mut boring::ssl::SslRef, name: &str,
+    ) -> Result<()> {
+        let cc_algo = CongestionControlAlgorithm::from_str(name)?;
+        Self::set_cc_algorithm_in_handshake(ssl, cc_algo)
+    }
+
+    /// Sets initial congestion window size in terms of packet count.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_initial_congestion_window_packets()`].
+    ///
+    /// [`Config::set_initial_congestion_window_packets()`]: struct.Config.html#method.set_initial_congestion_window_packets
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_initial_congestion_window_packets_in_handshake(
+        ssl: &mut boring::ssl::SslRef, packets: usize,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.initial_congestion_window_packets = packets;
+
+        Ok(())
+    }
+
+    /// Configures whether to enable HyStart++.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::enable_hystart()`].
+    ///
+    /// [`Config::enable_hystart()`]: struct.Config.html#method.enable_hystart
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_hystart_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.hystart = v;
+
+        Ok(())
+    }
+
+    /// Configures whether to enable pacing.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::enable_pacing()`].
+    ///
+    /// [`Config::enable_pacing()`]: struct.Config.html#method.enable_pacing
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_pacing_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.pacing = v;
+
+        Ok(())
+    }
+
+    /// Sets the max value for pacing rate.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_max_pacing_rate()`].
+    ///
+    /// [`Config::set_max_pacing_rate()`]: struct.Config.html#method.set_max_pacing_rate
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_max_pacing_rate_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: Option<u64>,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.max_pacing_rate = v;
+
+        Ok(())
+    }
+
+    /// Sets the maximum outgoing UDP payload size.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_max_send_udp_payload_size()`].
+    ///
+    /// [`Config::set_max_send_udp_payload_size()`]: struct.Config.html#method.set_max_send_udp_payload_size
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_max_send_udp_payload_size_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: usize,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.max_send_udp_payload_size = v;
+
+        Ok(())
+    }
+
+    /// Sets the send capacity factor.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_send_capacity_factor()`].
+    ///
+    /// [`Config::set_max_send_udp_payload_size()`]: struct.Config.html#method.set_send_capacity_factor
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_send_capacity_factor_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: f64,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.tx_cap_factor = v;
+
+        Ok(())
+    }
+
+    /// Configures whether to do path MTU discovery.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::discover_pmtu()`].
+    ///
+    /// [`Config::discover_pmtu()`]: struct.Config.html#method.discover_pmtu
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_discover_pmtu_in_handshake(
+        ssl: &mut boring::ssl::SslRef, discover: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.pmtud = Some(discover);
+
+        Ok(())
+    }
+
+    /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_max_idle_timeout()`].
+    ///
+    /// [`Config::set_max_idle_timeout()`]: struct.Config.html#method.set_max_idle_timeout
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_max_idle_timeout_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: u64,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.local_transport_params.max_idle_timeout = v;
+
+        Self::set_transport_parameters_in_hanshake(
+            ex_data.local_transport_params.clone(),
+            ex_data.is_server,
+            ssl,
+        )
+    }
+
+    /// Sets the `initial_max_streams_bidi` transport parameter.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_initial_max_streams_bidi()`].
+    ///
+    /// [`Config::set_initial_max_streams_bidi()`]: struct.Config.html#method.set_initial_max_streams_bidi
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_initial_max_streams_bidi_in_handshake(
+        ssl: &mut boring::ssl::SslRef, v: u64,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.local_transport_params.initial_max_streams_bidi = v;
+
+        Self::set_transport_parameters_in_hanshake(
+            ex_data.local_transport_params.clone(),
+            ex_data.is_server,
+            ssl,
+        )
+    }
+
+    #[cfg(feature = "boringssl-boring-crate")]
+    fn set_transport_parameters_in_hanshake(
+        params: TransportParams, is_server: bool, ssl: &mut boring::ssl::SslRef,
+    ) -> Result<()> {
+        use foreign_types_shared::ForeignTypeRef;
+
+        // In order to apply the new parameter to the TLS state before TPs are
+        // written into a TLS message, we need to re-encode all TPs immediately.
+        //
+        // Since we don't have direct access to the main `Connection` object, we
+        // need to re-create the `Handshake` state from the `SslRef`.
+        //
+        // SAFETY: the `Handshake` object must not be drop()ed, otherwise it
+        // would free the underlying BoringSSL structure.
+        let mut handshake =
+            unsafe { tls::Handshake::from_ptr(ssl.as_ptr() as _) };
+        handshake.set_quic_transport_params(&params, is_server)?;
+
+        // Avoid running `drop(handshake)` as that would free the underlying
+        // handshake state.
+        std::mem::forget(handshake);
+
+        Ok(())
     }
 
     /// Processes QUIC packets received from the peer.
@@ -2338,7 +2770,7 @@ impl Connection {
     fn process_undecrypted_0rtt_packets(&mut self) -> Result<()> {
         // Process previously undecryptable 0-RTT packets if the decryption key
         // is now available.
-        if self.pkt_num_spaces[packet::Epoch::Application]
+        if self.crypto_ctx[packet::Epoch::Application]
             .crypto_0rtt_open
             .is_some()
         {
@@ -2457,7 +2889,7 @@ impl Connection {
 
             // Ignore version negotiation if the version already selected is
             // listed.
-            if versions.iter().any(|&v| v == self.version) {
+            if versions.contains(&self.version) {
                 return Err(Error::Done);
             }
 
@@ -2496,6 +2928,7 @@ impl Connection {
                 &self.destination_id(),
                 self.version,
                 self.is_server,
+                true,
             )?;
 
             // Reset connection state to force sending another Initial packet.
@@ -2503,10 +2936,8 @@ impl Connection {
             self.got_peer_conn_id = false;
             self.handshake.clear()?;
 
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
 
             self.handshake
                 .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
@@ -2561,6 +2992,7 @@ impl Connection {
                 &hdr.scid,
                 self.version,
                 self.is_server,
+                true,
             )?;
 
             // Reset connection state to force sending another Initial packet.
@@ -2568,10 +3000,8 @@ impl Connection {
             self.got_peer_conn_id = false;
             self.handshake.clear()?;
 
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
 
             return Err(Error::Done);
         }
@@ -2630,12 +3060,11 @@ impl Connection {
                 &hdr.dcid,
                 self.version,
                 self.is_server,
+                false,
             )?;
 
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_open =
-                Some(aead_open);
-            self.pkt_num_spaces[packet::Epoch::Initial].crypto_seal =
-                Some(aead_seal);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
 
             self.derived_initial_secrets = true;
         }
@@ -2646,10 +3075,10 @@ impl Connection {
         // Select AEAD context used to open incoming packet.
         let aead = if hdr.ty == packet::Type::ZeroRTT {
             // Only use 0-RTT key if incoming packet is 0-RTT.
-            self.pkt_num_spaces[epoch].crypto_0rtt_open.as_ref()
+            self.crypto_ctx[epoch].crypto_0rtt_open.as_ref()
         } else {
             // Otherwise use the packet number space's main key.
-            self.pkt_num_spaces[epoch].crypto_open.as_ref()
+            self.crypto_ctx[epoch].crypto_open.as_ref()
         };
 
         // Finally, discard packet if no usable key is available.
@@ -2718,7 +3147,7 @@ impl Connection {
             hdr.key_phase != self.key_phase
         {
             // Check if this packet arrived before key update.
-            if let Some(key_update) = self.pkt_num_spaces[epoch]
+            if let Some(key_update) = self.crypto_ctx[epoch]
                 .key_update
                 .as_ref()
                 .and_then(|key_update| {
@@ -2730,12 +3159,12 @@ impl Connection {
                 trace!("{} peer-initiated key update", self.trace_id);
 
                 aead_next = Some((
-                    self.pkt_num_spaces[epoch]
+                    self.crypto_ctx[epoch]
                         .crypto_open
                         .as_ref()
                         .unwrap()
                         .derive_next_packet_key()?,
-                    self.pkt_num_spaces[epoch]
+                    self.crypto_ctx[epoch]
                         .crypto_seal
                         .as_ref()
                         .unwrap()
@@ -2782,10 +3211,10 @@ impl Connection {
         // The key update is verified once a packet is successfully decrypted
         // using the new keys.
         if let Some((open_next, seal_next)) = aead_next {
-            if !self.pkt_num_spaces[epoch]
+            if !self.crypto_ctx[epoch]
                 .key_update
                 .as_ref()
-                .map_or(true, |prev| prev.update_acked)
+                .is_none_or(|prev| prev.update_acked)
             {
                 // Peer has updated keys twice without awaiting confirmation.
                 return Err(Error::KeyUpdate);
@@ -2793,16 +3222,16 @@ impl Connection {
 
             trace!("{} key update verified", self.trace_id);
 
-            let _ = self.pkt_num_spaces[epoch].crypto_seal.replace(seal_next);
+            let _ = self.crypto_ctx[epoch].crypto_seal.replace(seal_next);
 
-            let open_prev = self.pkt_num_spaces[epoch]
+            let open_prev = self.crypto_ctx[epoch]
                 .crypto_open
                 .replace(open_next)
                 .unwrap();
 
             let recv_path = self.paths.get_mut(recv_pid)?;
 
-            self.pkt_num_spaces[epoch].key_update = Some(packet::KeyUpdate {
+            self.crypto_ctx[epoch].key_update = Some(packet::KeyUpdate {
                 crypto_open: open_prev,
                 pn_on_update: pn,
                 update_acked: false,
@@ -2820,10 +3249,8 @@ impl Connection {
                     EventData::KeyUpdated(qlog::events::security::KeyUpdated {
                         key_type:
                             qlog::events::security::KeyType::Client1RttSecret,
-                        old: None,
-                        new: String::new(),
-                        generation: None,
                         trigger: trigger.clone(),
+                        ..Default::default()
                     });
 
                 q.add_event_data_with_instant(ev_data_client, now).ok();
@@ -2832,10 +3259,8 @@ impl Connection {
                     EventData::KeyUpdated(qlog::events::security::KeyUpdated {
                         key_type:
                             qlog::events::security::KeyType::Server1RttSecret,
-                        old: None,
-                        new: String::new(),
-                        generation: None,
                         trigger,
+                        ..Default::default()
                     });
 
                 q.add_event_data_with_instant(ev_data_server, now).ok();
@@ -2929,13 +3354,8 @@ impl Connection {
                 EventData::PacketReceived(qlog::events::quic::PacketReceived {
                     header: qlog_pkt_hdr,
                     frames: Some(qlog_frames),
-                    is_coalesced: None,
-                    retry_token: None,
-                    stateless_reset_token: None,
-                    supported_versions: None,
                     raw: Some(qlog_raw_info),
-                    datagram_id: None,
-                    trigger: None,
+                    ..Default::default()
                 });
 
             q.add_event_data_with_instant(ev_data, now).ok();
@@ -2943,9 +3363,7 @@ impl Connection {
 
         qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
             let recv_path = self.paths.get_mut(recv_pid)?;
-            if let Some(ev_data) = recv_path.recovery.maybe_qlog() {
-                q.add_event_data_with_instant(ev_data, now).ok();
-            }
+            recv_path.recovery.maybe_qlog(q, now);
         });
 
         if let Some(e) = frame_processing_err {
@@ -2971,7 +3389,7 @@ impl Connection {
         }
 
         // Following flag used to upgrade datagram size, if probe is successful.
-        let mut pmtud_probe = false;
+        let mut successful_pmtud_probe = false;
 
         // Process acked frames. Note that several packets from several paths
         // might have been acked by the received packet.
@@ -2981,17 +3399,17 @@ impl Connection {
                     frame::Frame::Ping {
                         mtu_probe: Some(mtu_probe),
                     } => {
-                        let pmtud_next = p.pmtud.get_current();
-                        p.pmtud.set_current(cmp::max(pmtud_next, mtu_probe));
+                        let current_mtu = p.pmtud.get_current_mtu();
+                        p.pmtud.set_current_mtu(cmp::max(current_mtu, mtu_probe));
 
                         // Stop sending path MTU probes after successful probe.
-                        p.pmtud.should_probe(false);
-                        pmtud_probe = true;
+                        p.pmtud.set_should_probe(false);
+                        successful_pmtud_probe = true;
 
                         trace!(
-                            "{} pmtud acked; pmtu size {:?}",
+                            "{} pmtud acked; current mtu: {:?}",
                             self.trace_id,
-                            p.pmtud.get_current()
+                            p.pmtud.get_current_mtu()
                         );
                     },
 
@@ -3007,7 +3425,7 @@ impl Connection {
                     },
 
                     frame::Frame::CryptoHeader { offset, length } => {
-                        self.pkt_num_spaces[epoch]
+                        self.crypto_ctx[epoch]
                             .crypto_stream
                             .send
                             .ack_and_drop(offset, length);
@@ -3038,7 +3456,7 @@ impl Connection {
                                     length: Some(length as u64),
                                     from: Some(DataRecipient::Transport),
                                     to: Some(DataRecipient::Dropped),
-                                    raw: None,
+                                    ..Default::default()
                                 },
                             );
 
@@ -3083,10 +3501,10 @@ impl Connection {
             }
 
             // Update max datagram send size with newly acked probe size.
-            if pmtud_probe {
+            if successful_pmtud_probe {
                 trace!(
-                    "{} updating pmtu {:?}",
-                    p.pmtud.get_current(),
+                    "{} updating pmtu to {:?}",
+                    p.pmtud.get_current_mtu(),
                     self.trace_id
                 );
 
@@ -3100,8 +3518,8 @@ impl Connection {
                         let pmtu_data = EventData::MtuUpdated(
                             qlog::events::connectivity::MtuUpdated {
                                 old: Some(p.recovery.max_datagram_size() as u16),
-                                new: p.pmtud.get_current() as u16,
-                                done: Some(pmtud_probe),
+                                new: p.pmtud.get_current_mtu() as u16,
+                                done: Some(true),
                             },
                         );
 
@@ -3110,7 +3528,7 @@ impl Connection {
                 );
 
                 p.recovery
-                    .pmtud_update_max_datagram_size(p.pmtud.get_current());
+                    .pmtud_update_max_datagram_size(p.pmtud.get_current_mtu());
             }
         }
 
@@ -3399,11 +3817,11 @@ impl Connection {
         let send_path = self.paths.get_mut(send_pid)?;
 
         // Update max datagram size to allow path MTU discovery probe to be sent.
-        if send_path.pmtud.get_probe_status() {
-            let size = if self.handshake_confirmed || self.handshake_done_sent {
+        if send_path.pmtud.get_should_probe() {
+            let size = if self.handshake_confirmed || self.handshake_completed {
                 send_path.pmtud.get_probe_size()
             } else {
-                send_path.pmtud.get_current()
+                send_path.pmtud.get_current_mtu()
             };
 
             send_path.recovery.pmtud_update_max_datagram_size(size);
@@ -3484,7 +3902,7 @@ impl Connection {
             from: send_path.local_addr(),
             to: send_path.peer_addr(),
 
-            at: send_path.recovery.get_packet_send_time(),
+            at: send_path.recovery.get_packet_send_time(now),
         };
 
         Ok((done, info))
@@ -3518,13 +3936,14 @@ impl Connection {
 
         let epoch = pkt_type.to_epoch()?;
         let pkt_space = &mut self.pkt_num_spaces[epoch];
+        let crypto_ctx = &mut self.crypto_ctx[epoch];
 
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
             for lost in p.recovery.get_lost_frames(epoch) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
-                        pkt_space.crypto_stream.send.retransmit(offset, length);
+                        crypto_ctx.crypto_stream.send.retransmit(offset, length);
 
                         self.stream_retrans_bytes += length as u64;
                         p.stream_retrans_bytes += length as u64;
@@ -3623,21 +4042,28 @@ impl Connection {
         let path = self.paths.get_mut(send_pid)?;
         let flow_control = &mut self.flow_control;
         let pkt_space = &mut self.pkt_num_spaces[epoch];
+        let crypto_ctx = &mut self.crypto_ctx[epoch];
+        let pkt_num_manager = &mut self.pkt_num_manager;
 
         let mut left = if path.pmtud.is_enabled() {
             // Limit output buffer size by estimated path MTU.
-            cmp::min(path.pmtud.get_current(), b.cap())
+            cmp::min(path.pmtud.get_current_mtu(), b.cap())
         } else {
             b.cap()
         };
 
+        if pkt_num_manager.should_skip_pn(self.handshake_completed) {
+            pkt_num_manager.set_skip_pn(Some(self.next_pkt_num));
+            self.next_pkt_num += 1;
+        };
         let pn = self.next_pkt_num;
+
         let largest_acked_pkt =
             path.recovery.get_largest_acked_on_epoch(epoch).unwrap_or(0);
         let pn_len = packet::pkt_num_len(pn, largest_acked_pkt);
 
         // The AEAD overhead at the current encryption level.
-        let crypto_overhead = pkt_space.crypto_overhead().ok_or(Error::Done)?;
+        let crypto_overhead = crypto_ctx.crypto_overhead().ok_or(Error::Done)?;
 
         let dcid_seq = path.active_dcid_seq.ok_or(Error::OutOfIdentifiers)?;
 
@@ -3733,8 +4159,7 @@ impl Connection {
 
         let mut ack_eliciting = false;
         let mut in_flight = false;
-        // Foll. flag used to upgrade datagram size, if probe successful
-        let mut pmtud_probe = false;
+        let mut is_pmtud_probe = false;
         let mut has_data = false;
 
         // Whether or not we should explicitly elicit an ACK via PING frame if we
@@ -3824,25 +4249,21 @@ impl Connection {
             // In addition, the PMTUD probe is only generated when the handshake
             // is confirmed, to avoid interfering with the handshake
             // (e.g. due to the anti-amplification limits).
-
-            let pmtu_probe = active_path.should_send_pmtu_probe(
+            let should_probe_pmtu = active_path.should_send_pmtu_probe(
                 self.handshake_confirmed,
-                self.handshake_done_sent,
+                self.handshake_completed,
                 out_len,
                 is_closing,
                 frames.is_empty(),
             );
 
-            trace!("{} pmtud probe status {} hs_con={} hs_sent={} cwnd_avail={} out_len={} left={}", self.trace_id, pmtu_probe, self.handshake_confirmed, self.handshake_done_sent,
-                    active_path.recovery.cwnd_available(), out_len, left);
-
-            if pmtu_probe {
+            if should_probe_pmtu {
                 trace!(
-                    "{} sending pmtud probe pmtu_probe={} next_size={} pmtu={}",
+                    "{} sending pmtud probe pmtu_probe={} next_size={} current_mtu={}",
                     self.trace_id,
                     active_path.pmtud.get_probe_size(),
-                    active_path.pmtud.get_probe_status(),
-                    active_path.pmtud.get_current(),
+                    active_path.pmtud.get_should_probe(),
+                    active_path.pmtud.get_current_mtu(),
                 );
 
                 left = active_path.pmtud.get_probe_size();
@@ -3879,7 +4300,10 @@ impl Connection {
                     }
                 }
 
-                pmtud_probe = true;
+                // Reset probe flag after sending to prevent duplicate probes in a
+                // single flight.
+                active_path.pmtud.set_should_probe(false);
+                is_pmtud_probe = true;
             }
 
             let path = self.paths.get_mut(send_pid)?;
@@ -3914,7 +4338,7 @@ impl Connection {
                 }
             }
 
-            if let Some(key_update) = pkt_space.key_update.as_mut() {
+            if let Some(key_update) = crypto_ctx.key_update.as_mut() {
                 key_update.update_acked = true;
             }
         }
@@ -4181,12 +4605,12 @@ impl Connection {
         }
 
         // Create CRYPTO frame.
-        if pkt_space.crypto_stream.is_flushable() &&
+        if crypto_ctx.crypto_stream.is_flushable() &&
             left > frame::MAX_CRYPTO_OVERHEAD &&
             !is_closing &&
             path.active()
         {
-            let crypto_off = pkt_space.crypto_stream.send.off_front();
+            let crypto_off = crypto_ctx.crypto_stream.send.off_front();
 
             // Encode the frame.
             //
@@ -4211,7 +4635,7 @@ impl Connection {
                     b.split_at(hdr_off + hdr_len)?;
 
                 // Write stream data into the packet buffer.
-                let (len, _) = pkt_space
+                let (len, _) = crypto_ctx
                     .crypto_stream
                     .send
                     .emit(&mut crypto_payload.as_mut()[..max_len])?;
@@ -4325,6 +4749,10 @@ impl Connection {
                                     ack_eliciting = true;
                                     in_flight = true;
                                     dgram_emitted = true;
+                                    let _ =
+                                        self.dgram_sent_count.saturating_add(1);
+                                    let _ =
+                                        path.dgram_sent_count.saturating_add(1);
                                 }
                             },
 
@@ -4473,9 +4901,16 @@ impl Connection {
             }
         }
 
-        if ack_eliciting && !pmtud_probe {
+        if ack_eliciting && !is_pmtud_probe {
             path.needs_ack_eliciting = false;
             path.recovery.ping_sent(epoch);
+        }
+
+        if !has_data &&
+            !dgram_emitted &&
+            cwnd_available > frame::MAX_STREAM_OVERHEAD
+        {
+            path.recovery.on_app_limited();
         }
 
         if frames.is_empty() {
@@ -4571,21 +5006,16 @@ impl Connection {
                     EventData::PacketSent(qlog::events::quic::PacketSent {
                         header,
                         frames: Some(qlog_frames),
-                        is_coalesced: None,
-                        retry_token: None,
-                        stateless_reset_token: None,
-                        supported_versions: None,
                         raw: Some(qlog_raw_info),
-                        datagram_id: None,
                         send_at_time: Some(send_at_time),
-                        trigger: None,
+                        ..Default::default()
                     });
 
                 q.add_event_data_with_instant(ev_data, now).ok();
             }
         });
 
-        let aead = match pkt_space.crypto_seal {
+        let aead = match crypto_ctx.crypto_seal {
             Some(ref v) => v,
             None => return Err(Error::InvalidState),
         };
@@ -4599,6 +5029,12 @@ impl Connection {
             None,
             aead,
         )?;
+
+        let sent_pkt_has_data = if path.recovery.gcongestion_enabled() {
+            has_data || dgram_emitted
+        } else {
+            has_data
+        };
 
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
@@ -4615,8 +5051,8 @@ impl Connection {
             is_app_limited: false,
             tx_in_flight: 0,
             lost: 0,
-            has_data,
-            pmtud: pmtud_probe,
+            has_data: sent_pkt_has_data,
+            is_pmtud_probe,
         };
 
         if in_flight && is_app_limited {
@@ -4626,24 +5062,17 @@ impl Connection {
         self.next_pkt_num += 1;
 
         let handshake_status = recovery::HandshakeStatus {
-            has_handshake_keys: self.pkt_num_spaces[packet::Epoch::Handshake]
+            has_handshake_keys: self.crypto_ctx[packet::Epoch::Handshake]
                 .has_keys(),
             peer_verified_address: self.peer_verified_initial_address,
             completed: self.handshake_completed,
         };
 
-        path.recovery.on_packet_sent(
-            sent_pkt,
-            epoch,
-            handshake_status,
-            now,
-            &self.trace_id,
-        );
+        self.on_packet_sent(send_pid, sent_pkt, epoch, handshake_status, now)?;
 
+        let path = self.paths.get_mut(send_pid)?;
         qlog_with_type!(QLOG_METRICS, self.qlog, q, {
-            if let Some(ev_data) = path.recovery.maybe_qlog() {
-                q.add_event_data_with_instant(ev_data, now).ok();
-            }
+            path.recovery.maybe_qlog(q, now);
         });
 
         // Record sent packet size if we probe the path.
@@ -4681,12 +5110,77 @@ impl Connection {
 
         let active_path = self.paths.get_active_mut()?;
         if active_path.pmtud.is_enabled() {
-            active_path
-                .recovery
-                .pmtud_update_max_datagram_size(active_path.pmtud.get_current());
+            active_path.recovery.pmtud_update_max_datagram_size(
+                active_path.pmtud.get_current_mtu(),
+            );
         }
 
         Ok((pkt_type, written))
+    }
+
+    fn on_packet_sent(
+        &mut self, send_pid: usize, sent_pkt: recovery::Sent,
+        epoch: packet::Epoch, handshake_status: recovery::HandshakeStatus,
+        now: std::time::Instant,
+    ) -> Result<()> {
+        let path = self.paths.get_mut(send_pid)?;
+
+        // It's fine to set the skip counter based on a non-active path's values.
+        let cwnd = path.recovery.cwnd();
+        let max_datagram_size = path.recovery.max_datagram_size();
+        self.pkt_num_spaces[epoch].on_packet_sent(&sent_pkt);
+        self.pkt_num_manager.on_packet_sent(
+            cwnd,
+            max_datagram_size,
+            self.handshake_completed,
+        );
+
+        path.recovery.on_packet_sent(
+            sent_pkt,
+            epoch,
+            handshake_status,
+            now,
+            &self.trace_id,
+        );
+
+        Ok(())
+    }
+
+    /// Returns the desired send time for the next packet.
+    #[inline]
+    pub fn get_next_release_time(&self) -> Option<ReleaseDecision> {
+        Some(
+            self.paths
+                .get_active()
+                .ok()?
+                .recovery
+                .get_next_release_time(),
+        )
+    }
+
+    /// Returns whether gcongestion is enabled.
+    #[inline]
+    pub fn gcongestion_enabled(&self) -> Option<bool> {
+        Some(self.paths.get_active().ok()?.recovery.gcongestion_enabled())
+    }
+
+    /// Returns the maximum pacing into the future.
+    ///
+    /// Equals 1/8 of the smoothed RTT, but at least 1ms and not greater than
+    /// 5ms.
+    pub fn max_release_into_future(&self) -> time::Duration {
+        self.paths
+            .get_active()
+            .map(|p| p.recovery.rtt().mul_f64(0.125))
+            .unwrap_or(time::Duration::from_millis(1))
+            .max(Duration::from_millis(1))
+            .min(Duration::from_millis(5))
+    }
+
+    /// Returns whether pacing is enabled.
+    #[inline]
+    pub fn pacing_enabled(&self) -> bool {
+        self.recovery_config.pacing
     }
 
     /// Returns the size of the send quantum, in bytes.
@@ -4823,7 +5317,7 @@ impl Connection {
                 length: Some(read as u64),
                 from: Some(DataRecipient::Transport),
                 to: Some(DataRecipient::Application),
-                raw: None,
+                ..Default::default()
             });
 
             let now = time::Instant::now();
@@ -4893,6 +5387,55 @@ impl Connection {
     pub fn stream_send(
         &mut self, stream_id: u64, buf: &[u8], fin: bool,
     ) -> Result<usize> {
+        self.stream_do_send(
+            stream_id,
+            buf,
+            fin,
+            |stream: &mut stream::Stream<F>,
+             buf: &[u8],
+             cap: usize,
+             fin: bool| {
+                stream.send.write(&buf[..cap], fin).map(|v| (v, v))
+            },
+        )
+    }
+
+    /// Writes data to a stream with zero copying, instead, it appends the
+    /// provided buffer directly to the send queue if the capacity allows
+    /// it.
+    ///
+    /// When a partial write happens (including when [`Error::Done`] is
+    /// returned) the remaining (unwritten) buffer will also be returned.
+    /// The application should retry the operation once the stream is
+    /// reported as writable again.
+    pub fn stream_send_zc(
+        &mut self, stream_id: u64, buf: F::Buf, len: Option<usize>, fin: bool,
+    ) -> Result<(usize, Option<F::Buf>)>
+    where
+        F::Buf: BufSplit,
+    {
+        self.stream_do_send(
+            stream_id,
+            buf,
+            fin,
+            |stream: &mut stream::Stream<F>,
+             buf: F::Buf,
+             cap: usize,
+             fin: bool| {
+                let len = len.unwrap_or(usize::MAX).min(cap);
+                let (sent, remaining) = stream.send.append_buf(buf, len, fin)?;
+                Ok((sent, (sent, remaining)))
+            },
+        )
+    }
+
+    fn stream_do_send<B, R, SND>(
+        &mut self, stream_id: u64, buf: B, fin: bool, write_fn: SND,
+    ) -> Result<R>
+    where
+        B: AsRef<[u8]>,
+        SND: FnOnce(&mut stream::Stream<F>, B, usize, bool) -> Result<(usize, R)>,
+    {
         // We can't write on the peer's unidirectional streams.
         if !stream::is_bidi(stream_id) &&
             !stream::is_local(stream_id, self.is_server)
@@ -4900,12 +5443,14 @@ impl Connection {
             return Err(Error::InvalidStreamState(stream_id));
         }
 
+        let len = buf.as_ref().len();
+
         // Mark the connection as blocked if the connection-level flow control
         // limit doesn't let us buffer all the data.
         //
         // Note that this is separate from "send capacity" as that also takes
         // congestion control into consideration.
-        if self.max_tx_data - self.tx_data < buf.len() as u64 {
+        if self.max_tx_data - self.tx_data < len as u64 {
             self.blocked_limit = Some(self.max_tx_data);
         }
 
@@ -4928,7 +5473,7 @@ impl Connection {
         //
         // When the cap is zero, the method returns Ok(0) *only* when the passed
         // buffer is empty. We return Error::Done otherwise.
-        if cap == 0 && !buf.is_empty() {
+        if cap == 0 && len > 0 {
             if was_writable {
                 // When `stream_writable_next()` returns a stream, the writable
                 // mark is removed, but because the stream is blocked by the
@@ -4942,13 +5487,13 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let (buf, fin, blocked_by_cap) = if cap < buf.len() {
-            (&buf[..cap], false, true)
+        let (cap, fin, blocked_by_cap) = if cap < len {
+            (cap, false, true)
         } else {
-            (buf, fin, false)
+            (len, fin, false)
         };
 
-        let sent = match stream.send.write(buf, fin) {
+        let (sent, ret) = match write_fn(stream, buf, cap, fin) {
             Ok(v) => v,
 
             Err(e) => {
@@ -4964,9 +5509,9 @@ impl Connection {
 
         let writable = stream.is_writable();
 
-        let empty_fin = buf.is_empty() && fin;
+        let empty_fin = len == 0 && fin;
 
-        if sent < buf.len() {
+        if sent < cap {
             let max_off = stream.send.max_off();
 
             if stream.send.blocked_at() != Some(max_off) {
@@ -5012,14 +5557,14 @@ impl Connection {
                 length: Some(sent as u64),
                 from: Some(DataRecipient::Application),
                 to: Some(DataRecipient::Transport),
-                raw: None,
+                ..Default::default()
             });
 
             let now = time::Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
-        if sent == 0 && !buf.is_empty() {
+        if sent == 0 && cap > 0 {
             return Err(Error::Done);
         }
 
@@ -5029,7 +5574,7 @@ impl Connection {
             self.streams.insert_writable(&priority_key);
         }
 
-        Ok(sent)
+        Ok(ret)
     }
 
     /// Sets the priority for a stream.
@@ -5112,7 +5657,7 @@ impl Connection {
             return Err(Error::InvalidStreamState(stream_id));
         }
 
-        // Dont' try to reset a remote unidirectional stream.
+        // Don't try to reset a remote unidirectional stream.
         if direction == Shutdown::Write &&
             !stream::is_local(stream_id, self.is_server) &&
             !stream::is_bidi(stream_id)
@@ -5749,7 +6294,7 @@ impl Connection {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     #[inline]
-    pub fn dgram_purge_outgoing<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
+    pub fn dgram_purge_outgoing<FN: Fn(&[u8]) -> bool>(&mut self, f: FN) {
         self.dgram_send_queue.purge(f);
     }
 
@@ -5790,7 +6335,7 @@ impl Connection {
                 max_len = max_len.saturating_sub(packet::MAX_PKT_NUM_LEN);
                 // ...subtract the crypto overhead...
                 max_len = max_len.saturating_sub(
-                    self.pkt_num_spaces[packet::Epoch::Application]
+                    self.crypto_ctx[packet::Epoch::Application]
                         .crypto_overhead()?,
                 );
                 // ...clamp to what peer can support...
@@ -5836,8 +6381,7 @@ impl Connection {
                 .filter_map(|(_, p)| p.recovery.loss_detection_timer())
                 .min();
 
-            let key_update_timer = self.pkt_num_spaces
-                [packet::Epoch::Application]
+            let key_update_timer = self.crypto_ctx[packet::Epoch::Application]
                 .key_update
                 .as_ref()
                 .map(|key_update| key_update.timer);
@@ -5895,14 +6439,14 @@ impl Connection {
             }
         }
 
-        if let Some(timer) = self.pkt_num_spaces[packet::Epoch::Application]
+        if let Some(timer) = self.crypto_ctx[packet::Epoch::Application]
             .key_update
             .as_ref()
             .map(|key_update| key_update.timer)
         {
             if timer <= now {
                 // Discard previous key once key update timer expired.
-                let _ = self.pkt_num_spaces[packet::Epoch::Application]
+                let _ = self.crypto_ctx[packet::Epoch::Application]
                     .key_update
                     .take();
             }
@@ -5915,7 +6459,10 @@ impl Connection {
                 if timer <= now {
                     trace!("{} loss detection timeout expired", self.trace_id);
 
-                    let (lost_packets, lost_bytes) = p.on_loss_detection_timeout(
+                    let OnLossDetectionTimeoutOutcome {
+                        lost_packets,
+                        lost_bytes,
+                    } = p.on_loss_detection_timeout(
                         handshake_status,
                         now,
                         self.is_server,
@@ -5926,9 +6473,7 @@ impl Connection {
                     self.lost_bytes += lost_bytes as u64;
 
                     qlog_with_type!(QLOG_METRICS, self.qlog, q, {
-                        if let Some(ev_data) = p.recovery.maybe_qlog() {
-                            q.add_event_data_with_instant(ev_data, now).ok();
-                        }
+                        p.recovery.maybe_qlog(q, now);
                     });
                 }
             }
@@ -6440,7 +6985,7 @@ impl Connection {
     /// Note that the value returned can change throughout the connection's
     /// lifetime.
     #[inline]
-    pub fn source_id(&self) -> ConnectionId {
+    pub fn source_id(&self) -> ConnectionId<'_> {
         if let Ok(path) = self.paths.get_active() {
             if let Some(active_scid_seq) = path.active_scid_seq {
                 if let Ok(e) = self.ids.get_scid(active_scid_seq) {
@@ -6458,7 +7003,7 @@ impl Connection {
     /// An iterator is returned for all active IDs (i.e. ones that have not
     /// been explicitly retired yet).
     #[inline]
-    pub fn source_ids(&self) -> impl Iterator<Item = &ConnectionId> {
+    pub fn source_ids(&self) -> impl Iterator<Item = &ConnectionId<'_>> {
         self.ids.scids_iter()
     }
 
@@ -6467,7 +7012,7 @@ impl Connection {
     /// Note that the value returned can change throughout the connection's
     /// lifetime.
     #[inline]
-    pub fn destination_id(&self) -> ConnectionId {
+    pub fn destination_id(&self) -> ConnectionId<'_> {
         if let Ok(path) = self.paths.get_active() {
             if let Some(active_dcid_seq) = path.active_dcid_seq {
                 if let Ok(e) = self.ids.get_dcid(active_dcid_seq) {
@@ -6590,19 +7135,37 @@ impl Connection {
             recv: self.recv_count,
             sent: self.sent_count,
             lost: self.lost_count,
+            spurious_lost: self.spurious_lost_count,
             retrans: self.retrans_count,
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
             acked_bytes: self.acked_bytes,
             lost_bytes: self.lost_bytes,
             stream_retrans_bytes: self.stream_retrans_bytes,
+            dgram_recv: self.dgram_recv_count,
+            dgram_sent: self.dgram_sent_count,
             paths_count: self.paths.len(),
             reset_stream_count_local: self.reset_stream_local_count,
             stopped_stream_count_local: self.stopped_stream_local_count,
             reset_stream_count_remote: self.reset_stream_remote_count,
             stopped_stream_count_remote: self.stopped_stream_remote_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
+            bytes_in_flight_duration: self.bytes_in_flight_duration(),
         }
+    }
+
+    /// Returns the sum of the durations when each path in the
+    /// connection was actively sending bytes or waiting for acks.
+    /// Note that this could result in a duration that is longer than
+    /// the actual connection duration in cases where multiple paths
+    /// are active for extended periods of time.  In practice only 1
+    /// path is typically active at a time.
+    /// TODO revisit computation if in the future multiple paths are
+    /// often active at the same time.
+    fn bytes_in_flight_duration(&self) -> Duration {
+        self.paths.iter().fold(Duration::ZERO, |acc, (_, path)| {
+            acc + path.bytes_in_flight_duration()
+        })
     }
 
     /// Returns reference to peer's transport parameters. Returns `None` if we
@@ -6627,17 +7190,10 @@ impl Connection {
     }
 
     fn encode_transport_params(&mut self) -> Result<()> {
-        let mut raw_params = [0; 128];
-
-        let raw_params = TransportParams::encode(
+        self.handshake.set_quic_transport_params(
             &self.local_transport_params,
             self.is_server,
-            &mut raw_params,
-        )?;
-
-        self.handshake.set_quic_transport_params(raw_params)?;
-
-        Ok(())
+        )
     }
 
     fn parse_peer_transport_params(
@@ -6715,7 +7271,7 @@ impl Connection {
 
         active_path.recovery.update_max_ack_delay(max_ack_delay);
 
-        if active_path.pmtud.get_probe_status() {
+        if active_path.pmtud.get_should_probe() {
             active_path.recovery.pmtud_update_max_datagram_size(
                 active_path
                     .pmtud
@@ -6744,7 +7300,7 @@ impl Connection {
         let mut ex_data = tls::ExData {
             application_protos: &self.application_protos,
 
-            pkt_num_spaces: &mut self.pkt_num_spaces,
+            crypto_ctx: &mut self.crypto_ctx,
 
             session: &mut self.session,
 
@@ -6753,6 +7309,14 @@ impl Connection {
             keylog: self.keylog.as_mut(),
 
             trace_id: &self.trace_id,
+
+            local_transport_params: self.local_transport_params.clone(),
+
+            recovery_config: self.recovery_config,
+
+            tx_cap_factor: self.tx_cap_factor,
+
+            pmtud: None,
 
             is_server: self.is_server,
         };
@@ -6765,6 +7329,41 @@ impl Connection {
             Ok(_) => (),
 
             Err(Error::Done) => {
+                // Apply in-handshake configuration from callbacks before any
+                // packet has been sent.
+                if self.sent_count == 0 {
+                    if ex_data.recovery_config != self.recovery_config {
+                        if let Ok(path) = self.paths.get_active_mut() {
+                            self.recovery_config = ex_data.recovery_config;
+                            path.reinit_recovery(&self.recovery_config);
+                        }
+                    }
+
+                    if ex_data.tx_cap_factor != self.tx_cap_factor {
+                        self.tx_cap_factor = ex_data.tx_cap_factor;
+                    }
+
+                    if let Some(discover) = ex_data.pmtud {
+                        self.paths.set_discover_pmtu_on_existing_paths(
+                            discover,
+                            self.recovery_config.max_send_udp_payload_size,
+                        );
+                    }
+
+                    if ex_data.local_transport_params !=
+                        self.local_transport_params
+                    {
+                        self.streams.set_max_streams_bidi(
+                            ex_data
+                                .local_transport_params
+                                .initial_max_streams_bidi,
+                        );
+
+                        self.local_transport_params =
+                            ex_data.local_transport_params;
+                    }
+                }
+
                 // Try to parse transport parameters as soon as the first flight
                 // of handshake data is processed.
                 //
@@ -6774,8 +7373,11 @@ impl Connection {
                 let raw_params = self.handshake.quic_transport_params();
 
                 if !self.parsed_peer_transport_params && !raw_params.is_empty() {
-                    let peer_params =
-                        TransportParams::decode(raw_params, self.is_server)?;
+                    let peer_params = TransportParams::decode(
+                        raw_params,
+                        self.is_server,
+                        self.peer_transport_params_track_unknown,
+                    )?;
 
                     self.parse_peer_transport_params(peer_params)?;
                 }
@@ -6793,8 +7395,11 @@ impl Connection {
         let raw_params = self.handshake.quic_transport_params();
 
         if !self.parsed_peer_transport_params && !raw_params.is_empty() {
-            let peer_params =
-                TransportParams::decode(raw_params, self.is_server)?;
+            let peer_params = TransportParams::decode(
+                raw_params,
+                self.is_server,
+                self.peer_transport_params_track_unknown,
+            )?;
 
             self.parse_peer_transport_params(peer_params)?;
         }
@@ -6852,8 +7457,7 @@ impl Connection {
                     // Downgrade the epoch to Initial as the remote peer might
                     // not be able to decrypt handshake packets yet.
                     packet::Epoch::Handshake
-                        if self.pkt_num_spaces[packet::Epoch::Initial]
-                            .has_keys() =>
+                        if self.crypto_ctx[packet::Epoch::Initial].has_keys() =>
                         return Ok(packet::Type::Initial),
 
                     _ => (),
@@ -6866,13 +7470,16 @@ impl Connection {
         for &epoch in packet::Epoch::epochs(
             packet::Epoch::Initial..=packet::Epoch::Application,
         ) {
+            let crypto_ctx = &self.crypto_ctx[epoch];
+            let pkt_space = &self.pkt_num_spaces[epoch];
+
             // Only send packets in a space when we have the send keys for it.
-            if self.pkt_num_spaces[epoch].crypto_seal.is_none() {
+            if crypto_ctx.crypto_seal.is_none() {
                 continue;
             }
 
             // We are ready to send data for this packet number space.
-            if self.pkt_num_spaces[epoch].ready() {
+            if crypto_ctx.data_available() || pkt_space.ready() {
                 return Ok(packet::Type::from_epoch(epoch));
             }
 
@@ -6909,7 +7516,7 @@ impl Connection {
                 self.streams.has_stopped() ||
                 self.ids.has_new_scids() ||
                 self.ids.has_retire_dcids() ||
-                send_path.pmtud.get_probe_status() ||
+                send_path.pmtud.get_should_probe() ||
                 send_path.needs_ack_eliciting ||
                 send_path.probing_required())
         {
@@ -6928,7 +7535,7 @@ impl Connection {
     /// a new one otherwise.
     fn get_or_create_stream(
         &mut self, id: u64, local: bool,
-    ) -> Result<&mut stream::Stream> {
+    ) -> Result<&mut stream::Stream<F>> {
         self.streams.get_or_create(
             id,
             &self.local_transport_params,
@@ -6970,24 +7577,59 @@ impl Connection {
 
                 let is_app_limited = self.delivery_rate_check_if_app_limited();
 
+                let largest_acked = ranges.last().expect(
+                    "ACK frames should always have at least one ack range",
+                );
+
                 for (_, p) in self.paths.iter_mut() {
+                    if self.pkt_num_spaces[epoch]
+                        .largest_tx_pkt_num
+                        .is_some_and(|largest_sent| largest_sent < largest_acked)
+                    {
+                        // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
+                        // An endpoint SHOULD treat receipt of an acknowledgment
+                        // for a packet it did not send as
+                        // a connection error of type PROTOCOL_VIOLATION
+                        return Err(Error::InvalidAckRange);
+                    }
+
                     if is_app_limited {
                         p.recovery.delivery_rate_update_app_limited(true);
                     }
 
-                    let (lost_packets, lost_bytes, acked_bytes) =
-                        p.recovery.on_ack_received(
-                            &ranges,
-                            ack_delay,
-                            epoch,
-                            handshake_status,
-                            now,
-                            &self.trace_id,
-                        )?;
+                    let OnAckReceivedOutcome {
+                        lost_packets,
+                        lost_bytes,
+                        acked_bytes,
+                        spurious_losses,
+                    } = p.recovery.on_ack_received(
+                        &ranges,
+                        ack_delay,
+                        epoch,
+                        handshake_status,
+                        now,
+                        self.pkt_num_manager.skip_pn(),
+                        &self.trace_id,
+                    )?;
+
+                    let skip_pn = self.pkt_num_manager.skip_pn();
+                    let largest_acked =
+                        p.recovery.get_largest_acked_on_epoch(epoch);
+
+                    // Consider the skip_pn validated if the peer has sent an ack
+                    // for a larger pkt number.
+                    if let Some((largest_acked, skip_pn)) =
+                        largest_acked.zip(skip_pn)
+                    {
+                        if largest_acked > skip_pn {
+                            self.pkt_num_manager.set_skip_pn(None);
+                        }
+                    }
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
                     self.acked_bytes += acked_bytes as u64;
+                    self.spurious_lost_count += spurious_losses;
                 }
             },
 
@@ -7108,7 +7750,7 @@ impl Connection {
                 }
 
                 // Push the data to the stream so it can be re-ordered.
-                self.pkt_num_spaces[epoch].crypto_stream.recv.write(data)?;
+                self.crypto_ctx[epoch].crypto_stream.recv.write(data)?;
 
                 // Feed crypto data to the TLS state, if there's data
                 // available at the expected offset.
@@ -7116,7 +7758,7 @@ impl Connection {
 
                 let level = crypto::Level::from_epoch(epoch);
 
-                let stream = &mut self.pkt_num_spaces[epoch].crypto_stream;
+                let stream = &mut self.crypto_ctx[epoch].crypto_stream;
 
                 while let Ok((read, _)) = stream.recv.emit(&mut crypto_buf) {
                     let recv_buf = &crypto_buf[..read];
@@ -7418,6 +8060,13 @@ impl Connection {
                 }
 
                 self.dgram_recv_queue.push(data)?;
+
+                let _ = self.dgram_recv_count.saturating_add(1);
+                let _ = self
+                    .paths
+                    .get_mut(recv_path_id)?
+                    .dgram_recv_count
+                    .saturating_add(1);
             },
 
             frame::Frame::DatagramHeader { .. } => unreachable!(),
@@ -7428,12 +8077,11 @@ impl Connection {
 
     /// Drops the keys and recovery state for the given epoch.
     fn drop_epoch_state(&mut self, epoch: packet::Epoch, now: time::Instant) {
-        if self.pkt_num_spaces[epoch].crypto_open.is_none() {
+        let crypto_ctx = &mut self.crypto_ctx[epoch];
+        if crypto_ctx.crypto_open.is_none() {
             return;
         }
-
-        self.pkt_num_spaces[epoch].crypto_open = None;
-        self.pkt_num_spaces[epoch].crypto_seal = None;
+        crypto_ctx.clear();
         self.pkt_num_spaces[epoch].clear();
 
         let handshake_status = self.handshake_status();
@@ -7466,7 +8114,7 @@ impl Connection {
     /// Returns the idle timeout value.
     ///
     /// `None` is returned if both end-points disabled the idle timeout.
-    fn idle_timeout(&mut self) -> Option<time::Duration> {
+    fn idle_timeout(&self) -> Option<time::Duration> {
         // If the transport parameter is set to 0, then the respective endpoint
         // decided to disable the idle timeout. If both are disabled we should
         // not set any timeout.
@@ -7503,7 +8151,7 @@ impl Connection {
     /// Returns the connection's handshake status for use in loss recovery.
     fn handshake_status(&self) -> recovery::HandshakeStatus {
         recovery::HandshakeStatus {
-            has_handshake_keys: self.pkt_num_spaces[packet::Epoch::Handshake]
+            has_handshake_keys: self.crypto_ctx[packet::Epoch::Handshake]
                 .has_keys(),
 
             peer_verified_address: self.peer_verified_initial_address,
@@ -7519,8 +8167,9 @@ impl Connection {
             Err(_) => 0,
         };
 
-        self.tx_cap =
+        let cap =
             cmp::min(cwin_available, self.max_tx_data - self.tx_data) as usize;
+        self.tx_cap = (cap as f64 * self.tx_cap_factor).ceil() as usize;
     }
 
     fn delivery_rate_check_if_app_limited(&self) -> bool {
@@ -7821,10 +8470,16 @@ impl Connection {
                 },
 
                 (true, false, Some(peer_error), None) => {
-                    let (connection_code, application_code) = if peer_error.is_app {
-                        (None, Some(qlog::events::ApplicationErrorCode::Value(peer_error.error_code)))
+                    let (connection_code, application_code, trigger) = if peer_error.is_app {
+                        (None, Some(qlog::events::ApplicationErrorCode::Value(peer_error.error_code)), None)
                     } else {
-                        (Some(qlog::events::ConnectionErrorCode::Value(peer_error.error_code)), None)
+                        let trigger = if peer_error.error_code == WireErrorCode::NoError as u64 {
+                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Clean)
+                        } else {
+                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Error)
+                        };
+
+                        (Some(qlog::events::ConnectionErrorCode::Value(peer_error.error_code)), None, trigger)
                     };
 
                     qlog::events::connectivity::ConnectionClosed {
@@ -7833,15 +8488,21 @@ impl Connection {
                         application_code,
                         internal_code: None,
                         reason: Some(String::from_utf8_lossy(&peer_error.reason).to_string()),
-                        trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::Error),
+                        trigger,
                     }
                 },
 
                 (true, false, None, Some(local_error)) => {
-                    let (connection_code, application_code) = if local_error.is_app {
-                        (None, Some(qlog::events::ApplicationErrorCode::Value(local_error.error_code)))
+                    let (connection_code, application_code, trigger) = if local_error.is_app {
+                        (None, Some(qlog::events::ApplicationErrorCode::Value(local_error.error_code)), None)
                     } else {
-                        (Some(qlog::events::ConnectionErrorCode::Value(local_error.error_code)), None)
+                        let trigger = if local_error.error_code == WireErrorCode::NoError as u64 {
+                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Clean)
+                        } else {
+                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Error)
+                        };
+
+                        (Some(qlog::events::ConnectionErrorCode::Value(local_error.error_code)), None, trigger)
                     };
 
                     qlog::events::connectivity::ConnectionClosed {
@@ -7850,7 +8511,7 @@ impl Connection {
                         application_code,
                         internal_code: None,
                         reason: Some(String::from_utf8_lossy(&local_error.reason).to_string()),
-                        trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::Error),
+                        trigger,
                     }
                 },
 
@@ -7876,7 +8537,7 @@ impl Connection {
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
-impl AsMut<boring::ssl::SslRef> for Connection {
+impl<F: BufFactory> AsMut<boring::ssl::SslRef> for Connection<F> {
     fn as_mut(&mut self) -> &mut boring::ssl::SslRef {
         self.handshake.ssl_mut()
     }
@@ -7910,7 +8571,7 @@ fn drop_pkt_on_err(
         return e;
     }
 
-    trace!("{} dropped invalid packet", trace_id);
+    trace!("{trace_id} dropped invalid packet");
 
     // Ignore other invalid packets that haven't been authenticated to prevent
     // man-in-the-middle and man-on-the-side attacks.
@@ -7947,6 +8608,9 @@ pub struct Stats {
     /// The number of QUIC packets that were lost.
     pub lost: usize,
 
+    /// The number of QUIC packets that were marked as lost but later acked.
+    pub spurious_lost: usize,
+
     /// The number of sent QUIC packets with retransmitted data.
     pub retrans: usize,
 
@@ -7965,6 +8629,12 @@ pub struct Stats {
     /// The number of stream bytes retransmitted.
     pub stream_retrans_bytes: u64,
 
+    /// The number of DATAGRAM frames received.
+    pub dgram_recv: usize,
+
+    /// The number of DATAGRAM frames sent.
+    pub dgram_sent: usize,
+
     /// The number of known paths for the connection.
     pub paths_count: usize,
 
@@ -7982,6 +8652,10 @@ pub struct Stats {
 
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
+
+    /// Total duration during which this side of the connection was
+    /// actively sending bytes or waiting for those bytes to be acked.
+    pub bytes_in_flight_duration: Duration,
 }
 
 impl std::fmt::Debug for Stats {
@@ -8000,6 +8674,110 @@ impl std::fmt::Debug for Stats {
         )?;
 
         Ok(())
+    }
+}
+
+/// QUIC Unknown Transport Parameter.
+///
+/// A QUIC transport parameter that is not specifically recognized
+/// by this implementation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnknownTransportParameter<T> {
+    /// The ID of the unknown transport parameter.
+    pub id: u64,
+
+    /// Original data representing the value of the unknown transport parameter.
+    pub value: T,
+}
+
+impl<T> UnknownTransportParameter<T> {
+    /// Checks whether an unknown Transport Parameter's ID is in the reserved
+    /// space.
+    ///
+    /// See Section 18.1 in [RFC9000](https://datatracker.ietf.org/doc/html/rfc9000#name-reserved-transport-paramete).
+    pub fn is_reserved(&self) -> bool {
+        let n = (self.id - 27) / 31;
+        self.id == 31 * n + 27
+    }
+}
+
+#[cfg(feature = "qlog")]
+impl From<UnknownTransportParameter<Vec<u8>>>
+    for qlog::events::quic::UnknownTransportParameter
+{
+    fn from(value: UnknownTransportParameter<Vec<u8>>) -> Self {
+        Self {
+            id: value.id,
+            value: qlog::HexSlice::maybe_string(Some(value.value.as_slice()))
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl From<UnknownTransportParameter<&[u8]>>
+    for UnknownTransportParameter<Vec<u8>>
+{
+    // When an instance of an UnknownTransportParameter is actually
+    // stored in UnknownTransportParameters, then we make a copy
+    // of the bytes if the source is an instance of an UnknownTransportParameter
+    // whose value is not owned.
+    fn from(value: UnknownTransportParameter<&[u8]>) -> Self {
+        Self {
+            id: value.id,
+            value: value.value.to_vec(),
+        }
+    }
+}
+
+/// Track unknown transport parameters, up to a limit.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct UnknownTransportParameters {
+    /// The space remaining for storing unknown transport parameters.
+    pub capacity: usize,
+    /// The unknown transport parameters.
+    pub parameters: Vec<UnknownTransportParameter<Vec<u8>>>,
+}
+
+impl UnknownTransportParameters {
+    /// Pushes an unknown transport parameter into storage if there is space
+    /// remaining.
+    pub fn push(&mut self, new: UnknownTransportParameter<&[u8]>) -> Result<()> {
+        let new_unknown_tp_size = new.value.len() + std::mem::size_of::<u64>();
+        if new_unknown_tp_size < self.capacity {
+            self.capacity -= new_unknown_tp_size;
+            self.parameters.push(new.into());
+            Ok(())
+        } else {
+            Err(BufferTooShortError.into())
+        }
+    }
+}
+
+/// An Iterator over unknown transport parameters.
+pub struct UnknownTransportParameterIterator<'a> {
+    index: usize,
+    parameters: &'a Vec<UnknownTransportParameter<Vec<u8>>>,
+}
+
+impl<'a> IntoIterator for &'a UnknownTransportParameters {
+    type IntoIter = UnknownTransportParameterIterator<'a>;
+    type Item = &'a UnknownTransportParameter<Vec<u8>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        UnknownTransportParameterIterator {
+            index: 0,
+            parameters: &self.parameters,
+        }
+    }
+}
+
+impl<'a> Iterator for UnknownTransportParameterIterator<'a> {
+    type Item = &'a UnknownTransportParameter<Vec<u8>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = self.parameters.get(self.index);
+        self.index += 1;
+        result
     }
 }
 
@@ -8042,6 +8820,8 @@ pub struct TransportParams {
     pub retry_source_connection_id: Option<ConnectionId<'static>>,
     /// DATAGRAM frame extension parameter, if any.
     pub max_datagram_frame_size: Option<u64>,
+    /// Unknown peer transport parameters and values, if any.
+    pub unknown_params: Option<UnknownTransportParameters>,
     // pub preferred_address: ...,
 }
 
@@ -8065,16 +8845,26 @@ impl Default for TransportParams {
             initial_source_connection_id: None,
             retry_source_connection_id: None,
             max_datagram_frame_size: None,
+            unknown_params: Default::default(),
         }
     }
 }
 
 impl TransportParams {
-    fn decode(buf: &[u8], is_server: bool) -> Result<TransportParams> {
+    fn decode(
+        buf: &[u8], is_server: bool, unknown_size: Option<usize>,
+    ) -> Result<TransportParams> {
         let mut params = octets::Octets::with_slice(buf);
         let mut seen_params = HashSet::new();
 
         let mut tp = TransportParams::default();
+
+        if let Some(unknown_transport_param_tracking_size) = unknown_size {
+            tp.unknown_params = Some(UnknownTransportParameters {
+                capacity: unknown_transport_param_tracking_size,
+                parameters: vec![],
+            });
+        }
 
         while params.cap() > 0 {
             let id = params.get_varint()?;
@@ -8215,8 +9005,17 @@ impl TransportParams {
                     tp.max_datagram_frame_size = Some(val.get_varint()?);
                 },
 
-                // Ignore unknown parameters.
-                _ => (),
+                // Track unknown transport parameters specially.
+                unknown_tp_id => {
+                    if let Some(unknown_params) = &mut tp.unknown_params {
+                        // It is _not_ an error not to have space enough to track
+                        // an unknown parameter.
+                        let _ = unknown_params.push(UnknownTransportParameter {
+                            id: unknown_tp_id,
+                            value: val.buf(),
+                        });
+                    }
+                },
             }
         }
 
@@ -8395,16 +9194,13 @@ impl TransportParams {
             self.stateless_reset_token.map(|s| s.to_be_bytes()).as_ref(),
         );
 
+        let tls_cipher: Option<String> = cipher.map(|f| format!("{f:?}"));
+
         EventData::TransportParametersSet(
             qlog::events::quic::TransportParametersSet {
                 owner: Some(owner),
-                resumption_allowed: None,
-                early_data_enabled: None,
-                tls_cipher: Some(format!("{cipher:?}")),
-                aead_tag_length: None,
+                tls_cipher,
                 original_destination_connection_id,
-                initial_source_connection_id: None,
-                retry_source_connection_id: None,
                 stateless_reset_token,
                 disable_active_migration: Some(self.disable_active_migration),
                 max_idle_timeout: Some(self.max_idle_timeout),
@@ -8428,9002 +9224,33 @@ impl TransportParams {
                 initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
                 initial_max_streams_uni: Some(self.initial_max_streams_uni),
 
-                preferred_address: None,
+                unknown_parameters: self
+                    .unknown_params
+                    .as_ref()
+                    .map(|unknown_params| {
+                        unknown_params
+                            .into_iter()
+                            .cloned()
+                            .map(
+                                Into::<
+                                    qlog::events::quic::UnknownTransportParameter,
+                                >::into,
+                            )
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+
+                ..Default::default()
             },
         )
     }
 }
 
 #[doc(hidden)]
-pub mod testing {
-    use super::*;
-
-    pub struct Pipe {
-        pub client: Connection,
-        pub server: Connection,
-    }
-
-    impl Pipe {
-        pub fn new() -> Result<Pipe> {
-            let mut config = Config::new(crate::PROTOCOL_VERSION)?;
-            config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-            config.load_priv_key_from_pem_file("examples/cert.key")?;
-            config.set_application_protos(&[b"proto1", b"proto2"])?;
-            config.set_initial_max_data(30);
-            config.set_initial_max_stream_data_bidi_local(15);
-            config.set_initial_max_stream_data_bidi_remote(15);
-            config.set_initial_max_stream_data_uni(10);
-            config.set_initial_max_streams_bidi(3);
-            config.set_initial_max_streams_uni(3);
-            config.set_max_idle_timeout(180_000);
-            config.verify_peer(false);
-            config.set_ack_delay_exponent(8);
-
-            Pipe::with_config(&mut config)
-        }
-
-        pub fn client_addr() -> SocketAddr {
-            "127.0.0.1:1234".parse().unwrap()
-        }
-
-        pub fn server_addr() -> SocketAddr {
-            "127.0.0.1:4321".parse().unwrap()
-        }
-
-        pub fn with_config(config: &mut Config) -> Result<Pipe> {
-            let mut client_scid = [0; 16];
-            rand::rand_bytes(&mut client_scid[..]);
-            let client_scid = ConnectionId::from_ref(&client_scid);
-            let client_addr = Pipe::client_addr();
-
-            let mut server_scid = [0; 16];
-            rand::rand_bytes(&mut server_scid[..]);
-            let server_scid = ConnectionId::from_ref(&server_scid);
-            let server_addr = Pipe::server_addr();
-
-            Ok(Pipe {
-                client: connect(
-                    Some("quic.tech"),
-                    &client_scid,
-                    client_addr,
-                    server_addr,
-                    config,
-                )?,
-                server: accept(
-                    &server_scid,
-                    None,
-                    server_addr,
-                    client_addr,
-                    config,
-                )?,
-            })
-        }
-
-        pub fn with_config_and_scid_lengths(
-            config: &mut Config, client_scid_len: usize, server_scid_len: usize,
-        ) -> Result<Pipe> {
-            let mut client_scid = vec![0; client_scid_len];
-            rand::rand_bytes(&mut client_scid[..]);
-            let client_scid = ConnectionId::from_ref(&client_scid);
-            let client_addr = Pipe::client_addr();
-
-            let mut server_scid = vec![0; server_scid_len];
-            rand::rand_bytes(&mut server_scid[..]);
-            let server_scid = ConnectionId::from_ref(&server_scid);
-            let server_addr = Pipe::server_addr();
-
-            Ok(Pipe {
-                client: connect(
-                    Some("quic.tech"),
-                    &client_scid,
-                    client_addr,
-                    server_addr,
-                    config,
-                )?,
-                server: accept(
-                    &server_scid,
-                    None,
-                    server_addr,
-                    client_addr,
-                    config,
-                )?,
-            })
-        }
-
-        pub fn with_client_config(client_config: &mut Config) -> Result<Pipe> {
-            let mut client_scid = [0; 16];
-            rand::rand_bytes(&mut client_scid[..]);
-            let client_scid = ConnectionId::from_ref(&client_scid);
-            let client_addr = Pipe::client_addr();
-
-            let mut server_scid = [0; 16];
-            rand::rand_bytes(&mut server_scid[..]);
-            let server_scid = ConnectionId::from_ref(&server_scid);
-            let server_addr = Pipe::server_addr();
-
-            let mut config = Config::new(crate::PROTOCOL_VERSION)?;
-            config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-            config.load_priv_key_from_pem_file("examples/cert.key")?;
-            config.set_application_protos(&[b"proto1", b"proto2"])?;
-            config.set_initial_max_data(30);
-            config.set_initial_max_stream_data_bidi_local(15);
-            config.set_initial_max_stream_data_bidi_remote(15);
-            config.set_initial_max_streams_bidi(3);
-            config.set_initial_max_streams_uni(3);
-            config.set_ack_delay_exponent(8);
-
-            Ok(Pipe {
-                client: connect(
-                    Some("quic.tech"),
-                    &client_scid,
-                    client_addr,
-                    server_addr,
-                    client_config,
-                )?,
-                server: accept(
-                    &server_scid,
-                    None,
-                    server_addr,
-                    client_addr,
-                    &mut config,
-                )?,
-            })
-        }
-
-        pub fn with_server_config(server_config: &mut Config) -> Result<Pipe> {
-            let mut client_scid = [0; 16];
-            rand::rand_bytes(&mut client_scid[..]);
-            let client_scid = ConnectionId::from_ref(&client_scid);
-            let client_addr = Pipe::client_addr();
-
-            let mut server_scid = [0; 16];
-            rand::rand_bytes(&mut server_scid[..]);
-            let server_scid = ConnectionId::from_ref(&server_scid);
-            let server_addr = Pipe::server_addr();
-
-            let mut config = Config::new(crate::PROTOCOL_VERSION)?;
-            config.set_application_protos(&[b"proto1", b"proto2"])?;
-            config.set_initial_max_data(30);
-            config.set_initial_max_stream_data_bidi_local(15);
-            config.set_initial_max_stream_data_bidi_remote(15);
-            config.set_initial_max_streams_bidi(3);
-            config.set_initial_max_streams_uni(3);
-            config.set_ack_delay_exponent(8);
-
-            Ok(Pipe {
-                client: connect(
-                    Some("quic.tech"),
-                    &client_scid,
-                    client_addr,
-                    server_addr,
-                    &mut config,
-                )?,
-                server: accept(
-                    &server_scid,
-                    None,
-                    server_addr,
-                    client_addr,
-                    server_config,
-                )?,
-            })
-        }
-
-        pub fn with_client_and_server_config(
-            client_config: &mut Config, server_config: &mut Config,
-        ) -> Result<Pipe> {
-            let mut client_scid = [0; 16];
-            rand::rand_bytes(&mut client_scid[..]);
-            let client_scid = ConnectionId::from_ref(&client_scid);
-            let client_addr = Pipe::client_addr();
-
-            let mut server_scid = [0; 16];
-            rand::rand_bytes(&mut server_scid[..]);
-            let server_scid = ConnectionId::from_ref(&server_scid);
-            let server_addr = Pipe::server_addr();
-
-            Ok(Pipe {
-                client: connect(
-                    Some("quic.tech"),
-                    &client_scid,
-                    client_addr,
-                    server_addr,
-                    client_config,
-                )?,
-                server: accept(
-                    &server_scid,
-                    None,
-                    server_addr,
-                    client_addr,
-                    server_config,
-                )?,
-            })
-        }
-
-        pub fn handshake(&mut self) -> Result<()> {
-            while !self.client.is_established() || !self.server.is_established() {
-                let flight = emit_flight(&mut self.client)?;
-                process_flight(&mut self.server, flight)?;
-
-                let flight = emit_flight(&mut self.server)?;
-                process_flight(&mut self.client, flight)?;
-            }
-
-            Ok(())
-        }
-
-        pub fn advance(&mut self) -> Result<()> {
-            let mut client_done = false;
-            let mut server_done = false;
-
-            while !client_done || !server_done {
-                match emit_flight(&mut self.client) {
-                    Ok(flight) => process_flight(&mut self.server, flight)?,
-
-                    Err(Error::Done) => client_done = true,
-
-                    Err(e) => return Err(e),
-                };
-
-                match emit_flight(&mut self.server) {
-                    Ok(flight) => process_flight(&mut self.client, flight)?,
-
-                    Err(Error::Done) => server_done = true,
-
-                    Err(e) => return Err(e),
-                };
-            }
-
-            Ok(())
-        }
-
-        pub fn client_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-            let server_path = &self.server.paths.get_active().unwrap();
-            let info = RecvInfo {
-                to: server_path.peer_addr(),
-                from: server_path.local_addr(),
-            };
-
-            self.client.recv(buf, info)
-        }
-
-        pub fn server_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-            let client_path = &self.client.paths.get_active().unwrap();
-            let info = RecvInfo {
-                to: client_path.peer_addr(),
-                from: client_path.local_addr(),
-            };
-
-            self.server.recv(buf, info)
-        }
-
-        pub fn send_pkt_to_server(
-            &mut self, pkt_type: packet::Type, frames: &[frame::Frame],
-            buf: &mut [u8],
-        ) -> Result<usize> {
-            let written = encode_pkt(&mut self.client, pkt_type, frames, buf)?;
-            recv_send(&mut self.server, buf, written)
-        }
-
-        pub fn client_update_key(&mut self) -> Result<()> {
-            let space =
-                &mut self.client.pkt_num_spaces[packet::Epoch::Application];
-
-            let open_next = space
-                .crypto_open
-                .as_ref()
-                .unwrap()
-                .derive_next_packet_key()
-                .unwrap();
-
-            let seal_next = space
-                .crypto_seal
-                .as_ref()
-                .unwrap()
-                .derive_next_packet_key()?;
-
-            let open_prev = space.crypto_open.replace(open_next);
-            space.crypto_seal.replace(seal_next);
-
-            space.key_update = Some(packet::KeyUpdate {
-                crypto_open: open_prev.unwrap(),
-                pn_on_update: self.client.next_pkt_num,
-                update_acked: true,
-                timer: time::Instant::now(),
-            });
-
-            self.client.key_phase = !self.client.key_phase;
-
-            Ok(())
-        }
-    }
-
-    pub fn recv_send(
-        conn: &mut Connection, buf: &mut [u8], len: usize,
-    ) -> Result<usize> {
-        let active_path = conn.paths.get_active()?;
-        let info = RecvInfo {
-            to: active_path.local_addr(),
-            from: active_path.peer_addr(),
-        };
-
-        conn.recv(&mut buf[..len], info)?;
-
-        let mut off = 0;
-
-        match conn.send(&mut buf[off..]) {
-            Ok((write, _)) => off += write,
-
-            Err(Error::Done) => (),
-
-            Err(e) => return Err(e),
-        }
-
-        Ok(off)
-    }
-
-    pub fn process_flight(
-        conn: &mut Connection, flight: Vec<(Vec<u8>, SendInfo)>,
-    ) -> Result<()> {
-        for (mut pkt, si) in flight {
-            let info = RecvInfo {
-                to: si.to,
-                from: si.from,
-            };
-
-            conn.recv(&mut pkt, info)?;
-        }
-
-        Ok(())
-    }
-
-    pub fn emit_flight_with_max_buffer(
-        conn: &mut Connection, out_size: usize, from: Option<SocketAddr>,
-        to: Option<SocketAddr>,
-    ) -> Result<Vec<(Vec<u8>, SendInfo)>> {
-        let mut flight = Vec::new();
-
-        loop {
-            let mut out = vec![0u8; out_size];
-
-            let info = match conn.send_on_path(&mut out, from, to) {
-                Ok((written, info)) => {
-                    out.truncate(written);
-                    info
-                },
-
-                Err(Error::Done) => break,
-
-                Err(e) => return Err(e),
-            };
-
-            flight.push((out, info));
-        }
-
-        if flight.is_empty() {
-            return Err(Error::Done);
-        }
-
-        Ok(flight)
-    }
-
-    pub fn emit_flight_on_path(
-        conn: &mut Connection, from: Option<SocketAddr>, to: Option<SocketAddr>,
-    ) -> Result<Vec<(Vec<u8>, SendInfo)>> {
-        emit_flight_with_max_buffer(conn, 65535, from, to)
-    }
-
-    pub fn emit_flight(
-        conn: &mut Connection,
-    ) -> Result<Vec<(Vec<u8>, SendInfo)>> {
-        emit_flight_on_path(conn, None, None)
-    }
-
-    pub fn encode_pkt(
-        conn: &mut Connection, pkt_type: packet::Type, frames: &[frame::Frame],
-        buf: &mut [u8],
-    ) -> Result<usize> {
-        let mut b = octets::OctetsMut::with_slice(buf);
-
-        let epoch = pkt_type.to_epoch()?;
-
-        let space = &mut conn.pkt_num_spaces[epoch];
-
-        let pn = conn.next_pkt_num;
-        let pn_len = 4;
-
-        let send_path = conn.paths.get_active()?;
-        let active_dcid_seq = send_path
-            .active_dcid_seq
-            .as_ref()
-            .ok_or(Error::InvalidState)?;
-        let active_scid_seq = send_path
-            .active_scid_seq
-            .as_ref()
-            .ok_or(Error::InvalidState)?;
-
-        let hdr = Header {
-            ty: pkt_type,
-            version: conn.version,
-            dcid: ConnectionId::from_ref(
-                conn.ids.get_dcid(*active_dcid_seq)?.cid.as_ref(),
-            ),
-            scid: ConnectionId::from_ref(
-                conn.ids.get_scid(*active_scid_seq)?.cid.as_ref(),
-            ),
-            pkt_num: pn,
-            pkt_num_len: pn_len,
-            token: conn.token.clone(),
-            versions: None,
-            key_phase: conn.key_phase,
-        };
-
-        hdr.to_bytes(&mut b)?;
-
-        let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len());
-
-        if pkt_type != packet::Type::Short {
-            let len = pn_len + payload_len + space.crypto_overhead().unwrap();
-            b.put_varint(len as u64)?;
-        }
-
-        // Always encode packet number in 4 bytes, to allow encoding packets
-        // with empty payloads.
-        b.put_u32(pn as u32)?;
-
-        let payload_offset = b.off();
-
-        for frame in frames {
-            frame.to_bytes(&mut b)?;
-        }
-
-        let aead = match space.crypto_seal {
-            Some(ref v) => v,
-            None => return Err(Error::InvalidState),
-        };
-
-        let written = packet::encrypt_pkt(
-            &mut b,
-            pn,
-            pn_len,
-            payload_len,
-            payload_offset,
-            None,
-            aead,
-        )?;
-
-        conn.next_pkt_num += 1;
-
-        Ok(written)
-    }
-
-    pub fn decode_pkt(
-        conn: &mut Connection, buf: &mut [u8],
-    ) -> Result<Vec<frame::Frame>> {
-        let mut b = octets::OctetsMut::with_slice(buf);
-
-        let mut hdr = Header::from_bytes(&mut b, conn.source_id().len()).unwrap();
-
-        let epoch = hdr.ty.to_epoch()?;
-
-        let aead = conn.pkt_num_spaces[epoch].crypto_open.as_ref().unwrap();
-
-        let payload_len = b.cap();
-
-        packet::decrypt_hdr(&mut b, &mut hdr, aead).unwrap();
-
-        let pn = packet::decode_pkt_num(
-            conn.pkt_num_spaces[epoch].largest_rx_pkt_num,
-            hdr.pkt_num,
-            hdr.pkt_num_len,
-        );
-
-        let mut payload =
-            packet::decrypt_pkt(&mut b, pn, hdr.pkt_num_len, payload_len, aead)
-                .unwrap();
-
-        let mut frames = Vec::new();
-
-        while payload.cap() > 0 {
-            let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
-            frames.push(frame);
-        }
-
-        Ok(frames)
-    }
-
-    pub fn create_cid_and_reset_token(
-        cid_len: usize,
-    ) -> (ConnectionId<'static>, u128) {
-        let mut cid = vec![0; cid_len];
-        rand::rand_bytes(&mut cid[..]);
-        let cid = ConnectionId::from_ref(&cid).into_owned();
-
-        let mut reset_token = [0; 16];
-        rand::rand_bytes(&mut reset_token);
-        let reset_token = u128::from_be_bytes(reset_token);
-
-        (cid, reset_token)
-    }
-}
+pub mod test_utils;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn transport_params() {
-        // Server encodes, client decodes.
-        let tp = TransportParams {
-            original_destination_connection_id: None,
-            max_idle_timeout: 30,
-            stateless_reset_token: Some(u128::from_be_bytes([0xba; 16])),
-            max_udp_payload_size: 23_421,
-            initial_max_data: 424_645_563,
-            initial_max_stream_data_bidi_local: 154_323_123,
-            initial_max_stream_data_bidi_remote: 6_587_456,
-            initial_max_stream_data_uni: 2_461_234,
-            initial_max_streams_bidi: 12_231,
-            initial_max_streams_uni: 18_473,
-            ack_delay_exponent: 20,
-            max_ack_delay: 2_u64.pow(14) - 1,
-            disable_active_migration: true,
-            active_conn_id_limit: 8,
-            initial_source_connection_id: Some(b"woot woot".to_vec().into()),
-            retry_source_connection_id: Some(b"retry".to_vec().into()),
-            max_datagram_frame_size: Some(32),
-        };
-
-        let mut raw_params = [42; 256];
-        let raw_params =
-            TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 94);
-
-        let new_tp = TransportParams::decode(raw_params, false).unwrap();
-
-        assert_eq!(new_tp, tp);
-
-        // Client encodes, server decodes.
-        let tp = TransportParams {
-            original_destination_connection_id: None,
-            max_idle_timeout: 30,
-            stateless_reset_token: None,
-            max_udp_payload_size: 23_421,
-            initial_max_data: 424_645_563,
-            initial_max_stream_data_bidi_local: 154_323_123,
-            initial_max_stream_data_bidi_remote: 6_587_456,
-            initial_max_stream_data_uni: 2_461_234,
-            initial_max_streams_bidi: 12_231,
-            initial_max_streams_uni: 18_473,
-            ack_delay_exponent: 20,
-            max_ack_delay: 2_u64.pow(14) - 1,
-            disable_active_migration: true,
-            active_conn_id_limit: 8,
-            initial_source_connection_id: Some(b"woot woot".to_vec().into()),
-            retry_source_connection_id: None,
-            max_datagram_frame_size: Some(32),
-        };
-
-        let mut raw_params = [42; 256];
-        let raw_params =
-            TransportParams::encode(&tp, false, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 69);
-
-        let new_tp = TransportParams::decode(raw_params, true).unwrap();
-
-        assert_eq!(new_tp, tp);
-    }
-
-    #[test]
-    fn transport_params_forbid_duplicates() {
-        // Given an encoded param.
-        let initial_source_connection_id = b"id";
-        let initial_source_connection_id_raw = [
-            15,
-            initial_source_connection_id.len() as u8,
-            initial_source_connection_id[0],
-            initial_source_connection_id[1],
-        ];
-
-        // No error when decoding the param.
-        let tp = TransportParams::decode(
-            initial_source_connection_id_raw.as_slice(),
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(
-            tp.initial_source_connection_id,
-            Some(initial_source_connection_id.to_vec().into())
-        );
-
-        // Duplicate the param.
-        let mut raw_params = Vec::new();
-        raw_params.append(&mut initial_source_connection_id_raw.to_vec());
-        raw_params.append(&mut initial_source_connection_id_raw.to_vec());
-
-        // Decoding fails.
-        assert_eq!(
-            TransportParams::decode(raw_params.as_slice(), true),
-            Err(Error::InvalidTransportParam)
-        );
-    }
-
-    #[test]
-    fn unknown_version() {
-        let mut config = Config::new(0xbabababa).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Err(Error::UnknownVersion));
-    }
-
-    #[test]
-    fn config_version_reserved() {
-        Config::new(0xbabababa).unwrap();
-        Config::new(0x1a2a3a4a).unwrap();
-    }
-
-    #[test]
-    fn config_version_invalid() {
-        assert_eq!(
-            Config::new(0xb1bababa).err().unwrap(),
-            Error::UnknownVersion
-        );
-    }
-
-    #[test]
-    fn version_negotiation() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(0xbabababa).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-
-        let (mut len, _) = pipe.client.send(&mut buf).unwrap();
-
-        let hdr = packet::Header::from_slice(&mut buf[..len], 0).unwrap();
-        len = crate::negotiate_version(&hdr.scid, &hdr.dcid, &mut buf).unwrap();
-
-        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
-
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.version, PROTOCOL_VERSION);
-        assert_eq!(pipe.server.version, PROTOCOL_VERSION);
-    }
-
-    #[test]
-    fn verify_custom_root() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config.verify_peer(true);
-        config
-            .load_verify_locations_from_file("examples/rootca.crt")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-    }
-
-    // Disable this for openssl as it seems to fail for some reason. It could be
-    // because of the way the get_certs API differs from bssl.
-    #[cfg(not(feature = "openssl"))]
-    #[test]
-    fn verify_client_invalid() {
-        let mut server_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        server_config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        server_config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        server_config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        server_config.set_initial_max_data(30);
-        server_config.set_initial_max_stream_data_bidi_local(15);
-        server_config.set_initial_max_stream_data_bidi_remote(15);
-        server_config.set_initial_max_streams_bidi(3);
-
-        // The server shouldn't be able to verify the client's certificate due
-        // to missing CA.
-        server_config.verify_peer(true);
-
-        let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        client_config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        client_config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        client_config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        client_config.set_initial_max_data(30);
-        client_config.set_initial_max_stream_data_bidi_local(15);
-        client_config.set_initial_max_stream_data_bidi_remote(15);
-        client_config.set_initial_max_streams_bidi(3);
-
-        // The client is able to verify the server's certificate with the
-        // appropriate CA.
-        client_config
-            .load_verify_locations_from_file("examples/rootca.crt")
-            .unwrap();
-        client_config.verify_peer(true);
-
-        let mut pipe = testing::Pipe::with_client_and_server_config(
-            &mut client_config,
-            &mut server_config,
-        )
-        .unwrap();
-        assert_eq!(pipe.handshake(), Err(Error::TlsFail));
-
-        // Client did send a certificate.
-        assert!(pipe.server.peer_cert().is_some());
-    }
-
-    #[test]
-    fn verify_client_anonymous() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(3);
-
-        // Try to validate client certificate.
-        config.verify_peer(true);
-
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client didn't send a certificate.
-        assert!(pipe.server.peer_cert().is_none());
-    }
-
-    #[test]
-    fn missing_initial_source_connection_id() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Reset initial_source_connection_id.
-        pipe.client
-            .local_transport_params
-            .initial_source_connection_id = None;
-        assert_eq!(pipe.client.encode_transport_params(), Ok(()));
-
-        // Client sends initial flight.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        // Server rejects transport parameters.
-        assert_eq!(
-            pipe.server_recv(&mut buf[..len]),
-            Err(Error::InvalidTransportParam)
-        );
-    }
-
-    #[test]
-    fn invalid_initial_source_connection_id() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Scramble initial_source_connection_id.
-        pipe.client
-            .local_transport_params
-            .initial_source_connection_id = Some(b"bogus value".to_vec().into());
-        assert_eq!(pipe.client.encode_transport_params(), Ok(()));
-
-        // Client sends initial flight.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        // Server rejects transport parameters.
-        assert_eq!(
-            pipe.server_recv(&mut buf[..len]),
-            Err(Error::InvalidTransportParam)
-        );
-    }
-
-    #[test]
-    fn change_idle_timeout() {
-        let mut config = Config::new(0x1).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_max_idle_timeout(999999);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.client.local_transport_params.max_idle_timeout, 999999);
-        assert_eq!(pipe.client.peer_transport_params.max_idle_timeout, 0);
-        assert_eq!(pipe.server.local_transport_params.max_idle_timeout, 0);
-        assert_eq!(pipe.server.peer_transport_params.max_idle_timeout, 0);
-
-        pipe.client.set_max_idle_timeout(456000).unwrap();
-        pipe.server.set_max_idle_timeout(234000).unwrap();
-        assert_eq!(pipe.client.local_transport_params.max_idle_timeout, 456000);
-        assert_eq!(pipe.client.peer_transport_params.max_idle_timeout, 0);
-        assert_eq!(pipe.server.local_transport_params.max_idle_timeout, 234000);
-        assert_eq!(pipe.server.peer_transport_params.max_idle_timeout, 0);
-
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(
-            pipe.client.idle_timeout(),
-            Some(time::Duration::from_millis(234000))
-        );
-        assert_eq!(
-            pipe.server.idle_timeout(),
-            Some(time::Duration::from_millis(234000))
-        );
-    }
-
-    #[test]
-    fn handshake() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(
-            pipe.client.application_proto(),
-            pipe.server.application_proto()
-        );
-
-        assert_eq!(pipe.server.server_name(), Some("quic.tech"));
-    }
-
-    #[test]
-    fn handshake_done() {
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Disable session tickets on the server (SSL_OP_NO_TICKET) to avoid
-        // triggering 1-RTT packet send with a CRYPTO frame.
-        pipe.server.handshake.set_options(0x0000_4000);
-
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert!(pipe.server.handshake_done_sent);
-    }
-
-    #[test]
-    fn handshake_confirmation() {
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Client sends initial flight.
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        // Server sends initial flight.
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-
-        assert!(!pipe.client.is_established());
-        assert!(!pipe.client.handshake_confirmed);
-
-        assert!(!pipe.server.is_established());
-        assert!(!pipe.server.handshake_confirmed);
-
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-
-        // Client sends Handshake packet and completes handshake.
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-
-        assert!(pipe.client.is_established());
-        assert!(!pipe.client.handshake_confirmed);
-
-        assert!(!pipe.server.is_established());
-        assert!(!pipe.server.handshake_confirmed);
-
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        // Server completes and confirms handshake, and sends HANDSHAKE_DONE.
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-
-        assert!(pipe.client.is_established());
-        assert!(!pipe.client.handshake_confirmed);
-
-        assert!(pipe.server.is_established());
-        assert!(pipe.server.handshake_confirmed);
-
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-
-        // Client acks 1-RTT packet, and confirms handshake.
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-
-        assert!(pipe.client.is_established());
-        assert!(pipe.client.handshake_confirmed);
-
-        assert!(pipe.server.is_established());
-        assert!(pipe.server.handshake_confirmed);
-
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        assert!(pipe.client.is_established());
-        assert!(pipe.client.handshake_confirmed);
-
-        assert!(pipe.server.is_established());
-        assert!(pipe.server.handshake_confirmed);
-    }
-
-    #[test]
-    fn handshake_resumption() {
-        #[cfg(not(feature = "openssl"))]
-        const SESSION_TICKET_KEY: [u8; 48] = [0xa; 48];
-
-        // 80-byte key(AES 256)
-        // TODO: We can set the default? or query the ticket size by calling
-        // the same API(SSL_CTX_set_tlsext_ticket_keys) twice to fetch the size.
-        #[cfg(feature = "openssl")]
-        const SESSION_TICKET_KEY: [u8; 80] = [0xa; 80];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(3);
-        config.set_ticket_key(&SESSION_TICKET_KEY).unwrap();
-
-        // Perform initial handshake.
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert!(pipe.client.is_established());
-        assert!(pipe.server.is_established());
-
-        assert!(!pipe.client.is_resumed());
-        assert!(!pipe.server.is_resumed());
-
-        // Extract session,
-        let session = pipe.client.session().unwrap();
-
-        // Configure session on new connection and perform handshake.
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(3);
-        config.set_ticket_key(&SESSION_TICKET_KEY).unwrap();
-
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-
-        assert_eq!(pipe.client.set_session(session), Ok(()));
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert!(pipe.client.is_established());
-        assert!(pipe.server.is_established());
-
-        assert!(pipe.client.is_resumed());
-        assert!(pipe.server.is_resumed());
-    }
-
-    #[test]
-    fn handshake_alpn_mismatch() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .set_application_protos(&[b"proto3\x06proto4"])
-            .unwrap();
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Err(Error::TlsFail));
-
-        assert_eq!(pipe.client.application_proto(), b"");
-        assert_eq!(pipe.server.application_proto(), b"");
-
-        // Server should only send one packet in response to ALPN mismatch.
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-        assert_eq!(len, 1200);
-
-        assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
-        assert_eq!(pipe.server.sent_count, 1);
-    }
-
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
-    #[test]
-    fn handshake_0rtt() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(3);
-        config.enable_early_data();
-        config.verify_peer(false);
-
-        // Perform initial handshake.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Extract session,
-        let session = pipe.client.session().unwrap();
-
-        // Configure session on new connection.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(session), Ok(()));
-
-        // Client sends initial flight.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-
-        // Client sends 0-RTT packet.
-        let pkt_type = packet::Type::ZeroRTT;
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaa", 0, true),
-        }];
-
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Ok(1200)
-        );
-
-        assert_eq!(pipe.server.undecryptable_pkts.len(), 0);
-
-        // 0-RTT stream data is readable.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        let mut b = [0; 15];
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
-        assert_eq!(&b[..5], b"aaaaa");
-    }
-
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
-    #[test]
-    fn handshake_0rtt_reordered() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(3);
-        config.enable_early_data();
-        config.verify_peer(false);
-
-        // Perform initial handshake.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Extract session,
-        let session = pipe.client.session().unwrap();
-
-        // Configure session on new connection.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(session), Ok(()));
-
-        // Client sends initial flight.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        let mut initial = buf[..len].to_vec();
-
-        // Client sends 0-RTT packet.
-        let pkt_type = packet::Type::ZeroRTT;
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaa", 0, true),
-        }];
-
-        let len =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-        let mut zrtt = buf[..len].to_vec();
-
-        // 0-RTT packet is received before the Initial one.
-        assert_eq!(pipe.server_recv(&mut zrtt), Ok(zrtt.len()));
-
-        assert_eq!(pipe.server.undecryptable_pkts.len(), 1);
-        assert_eq!(pipe.server.undecryptable_pkts[0].0.len(), zrtt.len());
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        // Initial packet is also received.
-        assert_eq!(pipe.server_recv(&mut initial), Ok(initial.len()));
-
-        // 0-RTT stream data is readable.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        let mut b = [0; 15];
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
-        assert_eq!(&b[..5], b"aaaaa");
-    }
-
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
-    #[test]
-    fn handshake_0rtt_truncated() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(3);
-        config.enable_early_data();
-        config.verify_peer(false);
-
-        // Perform initial handshake.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Extract session,
-        let session = pipe.client.session().unwrap();
-
-        // Configure session on new connection.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(session), Ok(()));
-
-        // Client sends initial flight.
-        pipe.client.send(&mut buf).unwrap();
-
-        // Client sends 0-RTT packet.
-        let pkt_type = packet::Type::ZeroRTT;
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaa", 0, true),
-        }];
-
-        let len =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-
-        // Simulate a truncated packet by sending one byte less.
-        let mut zrtt = buf[..len - 1].to_vec();
-
-        // 0-RTT packet is received before the Initial one.
-        assert_eq!(pipe.server_recv(&mut zrtt), Err(Error::InvalidPacket));
-
-        assert_eq!(pipe.server.undecryptable_pkts.len(), 0);
-
-        assert!(pipe.server.is_closed());
-    }
-
-    #[test]
-    fn crypto_limit() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(3);
-        config.enable_early_data();
-        config.verify_peer(false);
-
-        // Perform initial handshake.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client send a 1-byte frame that starts from the crypto stream offset
-        // limit.
-        let frames = [frame::Frame::Crypto {
-            data: stream::RangeBuf::from(b"a", MAX_CRYPTO_STREAM_OFFSET, false),
-        }];
-
-        let pkt_type = packet::Type::Short;
-
-        let written =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-
-        let active_path = pipe.server.paths.get_active().unwrap();
-        let info = RecvInfo {
-            to: active_path.local_addr(),
-            from: active_path.peer_addr(),
-        };
-
-        assert_eq!(
-            pipe.server.recv(&mut buf[..written], info),
-            Err(Error::CryptoBufferExceeded)
-        );
-
-        let written = match pipe.server.send(&mut buf) {
-            Ok((write, _)) => write,
-
-            Err(_) => unreachable!(),
-        };
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..written]).unwrap();
-        let mut iter = frames.iter();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ConnectionClose {
-                error_code: 0x0d,
-                frame_type: 0,
-                reason: Vec::new(),
-            })
-        );
-    }
-
-    #[test]
-    fn limit_handshake_data() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert-big.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        let client_sent = flight.iter().fold(0, |out, p| out + p.0.len());
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-        let server_sent = flight.iter().fold(0, |out, p| out + p.0.len());
-
-        assert_eq!(server_sent, client_sent * MAX_AMPLIFICATION_FACTOR);
-    }
-
-    #[test]
-    fn custom_limit_handshake_data() {
-        const CUSTOM_AMPLIFICATION_FACTOR: usize = 2;
-
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert-big.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_max_amplification_factor(CUSTOM_AMPLIFICATION_FACTOR);
-
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        let client_sent = flight.iter().fold(0, |out, p| out + p.0.len());
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-        let server_sent = flight.iter().fold(0, |out, p| out + p.0.len());
-
-        assert_eq!(server_sent, client_sent * CUSTOM_AMPLIFICATION_FACTOR);
-    }
-
-    #[test]
-    fn stream() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert!(!pipe.server.stream_finished(4));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        let mut b = [0; 15];
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((12, true)));
-        assert_eq!(&b[..12], b"hello, world");
-
-        assert!(pipe.server.stream_finished(4));
-    }
-
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
-    #[test]
-    fn zero_rtt() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(3);
-        config.enable_early_data();
-        config.verify_peer(false);
-
-        // Perform initial handshake.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Extract session,
-        let session = pipe.client.session().unwrap();
-
-        // Configure session on new connection.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.client.set_session(session), Ok(()));
-
-        // Client sends initial flight.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        let mut initial = buf[..len].to_vec();
-
-        assert!(pipe.client.is_in_early_data());
-
-        // Client sends 0-RTT data.
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        let mut zrtt = buf[..len].to_vec();
-
-        // Server receives packets.
-        assert_eq!(pipe.server_recv(&mut initial), Ok(initial.len()));
-        assert!(pipe.server.is_in_early_data());
-
-        assert_eq!(pipe.server_recv(&mut zrtt), Ok(zrtt.len()));
-
-        // 0-RTT stream data is readable.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        let mut b = [0; 15];
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((12, true)));
-        assert_eq!(&b[..12], b"hello, world");
-    }
-
-    #[test]
-    fn stream_send_on_32bit_arch() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(2_u64.pow(32) + 5);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(0);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // In 32bit arch, send_capacity() should be min(2^32+5, cwnd),
-        // not min(5, cwnd)
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert!(!pipe.server.stream_finished(4));
-    }
-
-    #[test]
-    fn empty_stream_frame() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaa", 0, false),
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
-
-        let mut readable = pipe.server.readable();
-        assert_eq!(readable.next(), Some(4));
-
-        assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((5, false)));
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"", 5, true),
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
-
-        let mut readable = pipe.server.readable();
-        assert_eq!(readable.next(), Some(4));
-
-        assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((0, true)));
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"", 15, true),
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::FinalSize)
-        );
-    }
-
-    #[test]
-    fn update_key_request() {
-        let mut b = [0; 15];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client sends message with key update request.
-        assert_eq!(pipe.client_update_key(), Ok(()));
-        assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Ensure server updates key and it correctly decrypts the message.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, false)));
-        assert_eq!(&b[..5], b"hello");
-
-        // Ensure ACK for key update.
-        assert!(
-            pipe.server.pkt_num_spaces[packet::Epoch::Application]
-                .key_update
-                .as_ref()
-                .unwrap()
-                .update_acked
-        );
-
-        // Server sends message with the new key.
-        assert_eq!(pipe.server.stream_send(4, b"world", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Ensure update key is completed and client can decrypt packet.
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-        assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((5, true)));
-        assert_eq!(&b[..5], b"world");
-    }
-
-    #[test]
-    fn update_key_request_twice_error() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"hello", 0, false),
-        }];
-
-        // Client sends stream frame with key update request.
-        assert_eq!(pipe.client_update_key(), Ok(()));
-        let written = testing::encode_pkt(
-            &mut pipe.client,
-            packet::Type::Short,
-            &frames,
-            &mut buf,
-        )
-        .unwrap();
-
-        // Server correctly decode with new key.
-        assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
-
-        // Client sends stream frame with another key update request before server
-        // ACK.
-        assert_eq!(pipe.client_update_key(), Ok(()));
-        let written = testing::encode_pkt(
-            &mut pipe.client,
-            packet::Type::Short,
-            &frames,
-            &mut buf,
-        )
-        .unwrap();
-
-        // Check server correctly closes the connection with a key update error
-        // for the peer.
-        assert_eq!(pipe.server_recv(&mut buf[..written]), Err(Error::KeyUpdate));
-    }
-
-    #[test]
-    /// Tests that receiving a MAX_STREAM_DATA frame for a receive-only
-    /// unidirectional stream is forbidden.
-    fn max_stream_data_receive_uni() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client opens unidirectional stream.
-        assert_eq!(pipe.client.stream_send(2, b"hello", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client sends MAX_STREAM_DATA on local unidirectional stream.
-        let frames = [frame::Frame::MaxStreamData {
-            stream_id: 2,
-            max: 1024,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::InvalidStreamState(2)),
-        );
-    }
-
-    #[test]
-    fn empty_payload() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Send a packet with no frames.
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &[], &mut buf),
-            Err(Error::InvalidPacket)
-        );
-    }
-
-    #[test]
-    fn min_payload() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Send a non-ack-eliciting packet.
-        let frames = [frame::Frame::Padding { len: 4 }];
-
-        let pkt_type = packet::Type::Initial;
-        let written =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-        assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
-
-        let initial_path = pipe
-            .server
-            .paths
-            .get_active()
-            .expect("initial path not found");
-
-        assert_eq!(initial_path.max_send_bytes, 195);
-
-        // Force server to send a single PING frame.
-        pipe.server
-            .paths
-            .get_active_mut()
-            .expect("no active path")
-            .recovery
-            .inc_loss_probes(packet::Epoch::Initial);
-
-        let initial_path = pipe
-            .server
-            .paths
-            .get_active_mut()
-            .expect("initial path not found");
-
-        // Artificially limit the amount of bytes the server can send.
-        initial_path.max_send_bytes = 60;
-
-        assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
-    }
-
-    #[test]
-    fn flow_control_limit() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 8,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-        ];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::FlowControl),
-        );
-    }
-
-    #[test]
-    fn flow_control_limit_dup() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [
-            // One byte less than stream limit.
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaa", 0, false),
-            },
-            // Same stream, but one byte more.
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 8,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
-            },
-        ];
-
-        let pkt_type = packet::Type::Short;
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-    }
-
-    #[test]
-    fn flow_control_update() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-        ];
-
-        let pkt_type = packet::Type::Short;
-
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        pipe.server.stream_recv(0, &mut buf).unwrap();
-        pipe.server.stream_recv(4, &mut buf).unwrap();
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"a", 1, false),
-        }];
-
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        assert!(len > 0);
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-        let mut iter = frames.iter();
-
-        // Ignore ACK.
-        iter.next().unwrap();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::MaxStreamData {
-                stream_id: 0,
-                max: 30
-            })
-        );
-        assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 61 }));
-    }
-
-    #[test]
-    /// Tests that flow control is properly updated even when a stream is shut
-    /// down.
-    fn flow_control_drain() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client opens a stream and sends some data.
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server receives data, without reading it.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        // In the meantime, client sends more data.
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", true), Ok(5));
-
-        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.stream_send(8, b"aaaaa", true), Ok(5));
-
-        // Server shuts down one stream.
-        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        // Flush connection.
-        assert_eq!(pipe.advance(), Ok(()));
-    }
-
-    #[test]
-    fn stream_flow_control_limit_bidi() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaaa", 0, true),
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::FlowControl),
-        );
-    }
-
-    #[test]
-    fn stream_flow_control_limit_uni() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 2,
-            data: stream::RangeBuf::from(b"aaaaaaaaaaa", 0, true),
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::FlowControl),
-        );
-    }
-
-    #[test]
-    fn stream_flow_control_update() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"aaaaaaaaa", 0, false),
-        }];
-
-        let pkt_type = packet::Type::Short;
-
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        pipe.server.stream_recv(4, &mut buf).unwrap();
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"a", 9, false),
-        }];
-
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        assert!(len > 0);
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-        let mut iter = frames.iter();
-
-        // Ignore ACK.
-        iter.next().unwrap();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::MaxStreamData {
-                stream_id: 4,
-                max: 24,
-            })
-        );
-    }
-
-    #[test]
-    fn stream_left_bidi() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(3, pipe.client.peer_streams_left_bidi());
-        assert_eq!(3, pipe.server.peer_streams_left_bidi());
-
-        pipe.server.stream_send(1, b"a", false).ok();
-        assert_eq!(2, pipe.server.peer_streams_left_bidi());
-        pipe.server.stream_send(5, b"a", false).ok();
-        assert_eq!(1, pipe.server.peer_streams_left_bidi());
-
-        pipe.server.stream_send(9, b"a", false).ok();
-        assert_eq!(0, pipe.server.peer_streams_left_bidi());
-
-        let frames = [frame::Frame::MaxStreamsBidi { max: MAX_STREAM_ID }];
-
-        let pkt_type = packet::Type::Short;
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        assert_eq!(MAX_STREAM_ID - 3, pipe.server.peer_streams_left_bidi());
-    }
-
-    #[test]
-    fn stream_left_uni() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(3, pipe.client.peer_streams_left_uni());
-        assert_eq!(3, pipe.server.peer_streams_left_uni());
-
-        pipe.server.stream_send(3, b"a", false).ok();
-        assert_eq!(2, pipe.server.peer_streams_left_uni());
-        pipe.server.stream_send(7, b"a", false).ok();
-        assert_eq!(1, pipe.server.peer_streams_left_uni());
-
-        pipe.server.stream_send(11, b"a", false).ok();
-        assert_eq!(0, pipe.server.peer_streams_left_uni());
-
-        let frames = [frame::Frame::MaxStreamsUni { max: MAX_STREAM_ID }];
-
-        let pkt_type = packet::Type::Short;
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        assert_eq!(MAX_STREAM_ID - 3, pipe.server.peer_streams_left_uni());
-    }
-
-    #[test]
-    fn stream_limit_bidi() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 8,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 12,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 16,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 20,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 24,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 28,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-        ];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::StreamLimit),
-        );
-    }
-
-    #[test]
-    fn stream_limit_max_bidi() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::MaxStreamsBidi { max: MAX_STREAM_ID }];
-
-        let pkt_type = packet::Type::Short;
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        let frames = [frame::Frame::MaxStreamsBidi {
-            max: MAX_STREAM_ID + 1,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::InvalidFrame),
-        );
-    }
-
-    #[test]
-    fn stream_limit_uni() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 2,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 6,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 10,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 14,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 18,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 22,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 26,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-        ];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::StreamLimit),
-        );
-    }
-
-    #[test]
-    fn stream_limit_max_uni() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::MaxStreamsUni { max: MAX_STREAM_ID }];
-
-        let pkt_type = packet::Type::Short;
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        let frames = [frame::Frame::MaxStreamsUni {
-            max: MAX_STREAM_ID + 1,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::InvalidFrame),
-        );
-    }
-
-    #[test]
-    fn stream_left_reset_bidi() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(3, pipe.client.peer_streams_left_bidi());
-        assert_eq!(3, pipe.server.peer_streams_left_bidi());
-
-        pipe.client.stream_send(0, b"a", false).ok();
-        assert_eq!(2, pipe.client.peer_streams_left_bidi());
-        pipe.client.stream_send(4, b"a", false).ok();
-        assert_eq!(1, pipe.client.peer_streams_left_bidi());
-        pipe.client.stream_send(8, b"a", false).ok();
-        assert_eq!(0, pipe.client.peer_streams_left_bidi());
-
-        // Client resets the stream.
-        pipe.client
-            .stream_shutdown(0, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        assert_eq!(0, pipe.client.peer_streams_left_bidi());
-        let mut r = pipe.server.readable();
-        assert_eq!(Some(0), r.next());
-        assert_eq!(Some(4), r.next());
-        assert_eq!(Some(8), r.next());
-        assert_eq!(None, r.next());
-
-        assert_eq!(
-            pipe.server.stream_recv(0, &mut buf),
-            Err(Error::StreamReset(1001))
-        );
-
-        let mut r = pipe.server.readable();
-        assert_eq!(Some(4), r.next());
-        assert_eq!(Some(8), r.next());
-        assert_eq!(None, r.next());
-
-        // Server resets the stream in reaction.
-        pipe.server
-            .stream_shutdown(0, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        assert_eq!(1, pipe.client.peer_streams_left_bidi());
-
-        // Repeat for the other 2 streams
-        pipe.client
-            .stream_shutdown(4, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.client
-            .stream_shutdown(8, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        let mut r = pipe.server.readable();
-        assert_eq!(Some(4), r.next());
-        assert_eq!(Some(8), r.next());
-        assert_eq!(None, r.next());
-
-        assert_eq!(
-            pipe.server.stream_recv(4, &mut buf),
-            Err(Error::StreamReset(1001))
-        );
-
-        assert_eq!(
-            pipe.server.stream_recv(8, &mut buf),
-            Err(Error::StreamReset(1001))
-        );
-
-        let mut r = pipe.server.readable();
-        assert_eq!(None, r.next());
-
-        pipe.server
-            .stream_shutdown(4, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.server
-            .stream_shutdown(8, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        assert_eq!(3, pipe.client.peer_streams_left_bidi());
-    }
-
-    #[test]
-    fn stream_reset_counts() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        pipe.client.stream_send(0, b"a", false).ok();
-        pipe.client.stream_send(2, b"a", false).ok();
-        pipe.client.stream_send(4, b"a", false).ok();
-        pipe.client.stream_send(8, b"a", false).ok();
-        pipe.advance().unwrap();
-
-        let stats = pipe.client.stats();
-        assert_eq!(stats.reset_stream_count_local, 0);
-
-        // Client resets the stream.
-        pipe.client
-            .stream_shutdown(0, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        let stats = pipe.client.stats();
-        assert_eq!(stats.reset_stream_count_local, 1);
-        assert_eq!(stats.reset_stream_count_remote, 0);
-        let stats = pipe.server.stats();
-        assert_eq!(stats.reset_stream_count_local, 0);
-        assert_eq!(stats.reset_stream_count_remote, 1);
-
-        // Server resets the stream in reaction.
-        pipe.server
-            .stream_shutdown(0, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        let stats = pipe.client.stats();
-        assert_eq!(stats.reset_stream_count_local, 1);
-        assert_eq!(stats.reset_stream_count_remote, 1);
-        let stats = pipe.server.stats();
-        assert_eq!(stats.reset_stream_count_local, 1);
-        assert_eq!(stats.reset_stream_count_remote, 1);
-
-        // Repeat for the other streams
-        pipe.client
-            .stream_shutdown(2, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.client
-            .stream_shutdown(4, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.client
-            .stream_shutdown(8, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        pipe.server
-            .stream_shutdown(4, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.server
-            .stream_shutdown(8, Shutdown::Write, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        let stats = pipe.client.stats();
-        assert_eq!(stats.reset_stream_count_local, 4);
-        assert_eq!(stats.reset_stream_count_remote, 3);
-        let stats = pipe.server.stats();
-        assert_eq!(stats.reset_stream_count_local, 3);
-        assert_eq!(stats.reset_stream_count_remote, 4);
-    }
-
-    #[test]
-    fn stream_stop_counts() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        pipe.client.stream_send(0, b"a", false).ok();
-        pipe.client.stream_send(2, b"a", false).ok();
-        pipe.client.stream_send(4, b"a", false).ok();
-        pipe.client.stream_send(8, b"a", false).ok();
-        pipe.advance().unwrap();
-
-        let stats = pipe.client.stats();
-        assert_eq!(stats.reset_stream_count_local, 0);
-
-        // Server stops the stream and client automatically resets.
-        pipe.server
-            .stream_shutdown(0, Shutdown::Read, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        let stats = pipe.client.stats();
-        assert_eq!(stats.stopped_stream_count_local, 0);
-        assert_eq!(stats.stopped_stream_count_remote, 1);
-        assert_eq!(stats.reset_stream_count_local, 1);
-        assert_eq!(stats.reset_stream_count_remote, 0);
-
-        let stats = pipe.server.stats();
-        assert_eq!(stats.stopped_stream_count_local, 1);
-        assert_eq!(stats.stopped_stream_count_remote, 0);
-        assert_eq!(stats.reset_stream_count_local, 0);
-        assert_eq!(stats.reset_stream_count_remote, 1);
-
-        // Repeat for the other streams
-        pipe.server
-            .stream_shutdown(2, Shutdown::Read, 1001)
-            .unwrap();
-        pipe.server
-            .stream_shutdown(4, Shutdown::Read, 1001)
-            .unwrap();
-        pipe.server
-            .stream_shutdown(8, Shutdown::Read, 1001)
-            .unwrap();
-        pipe.advance().unwrap();
-
-        let stats = pipe.client.stats();
-        assert_eq!(stats.stopped_stream_count_local, 0);
-        assert_eq!(stats.stopped_stream_count_remote, 4);
-        assert_eq!(stats.reset_stream_count_local, 4);
-        assert_eq!(stats.reset_stream_count_remote, 0);
-
-        let stats = pipe.server.stats();
-        assert_eq!(stats.stopped_stream_count_local, 4);
-        assert_eq!(stats.stopped_stream_count_remote, 0);
-        assert_eq!(stats.reset_stream_count_local, 0);
-        assert_eq!(stats.reset_stream_count_remote, 4);
-    }
-
-    #[test]
-    fn streams_blocked_max_bidi() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::StreamsBlockedBidi {
-            limit: MAX_STREAM_ID,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        let frames = [frame::Frame::StreamsBlockedBidi {
-            limit: MAX_STREAM_ID + 1,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::InvalidFrame),
-        );
-    }
-
-    #[test]
-    fn streams_blocked_max_uni() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::StreamsBlockedUni {
-            limit: MAX_STREAM_ID,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        let frames = [frame::Frame::StreamsBlockedUni {
-            limit: MAX_STREAM_ID + 1,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::InvalidFrame),
-        );
-    }
-
-    #[test]
-    fn stream_data_overlap() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"bbbbb", 3, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"ccccc", 6, false),
-            },
-        ];
-
-        let pkt_type = packet::Type::Short;
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        let mut b = [0; 15];
-        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((11, false)));
-        assert_eq!(&b[..11], b"aaaaabbbccc");
-    }
-
-    #[test]
-    fn stream_data_overlap_with_reordering() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"ccccc", 6, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"bbbbb", 3, false),
-            },
-        ];
-
-        let pkt_type = packet::Type::Short;
-        assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
-
-        let mut b = [0; 15];
-        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((11, false)));
-        assert_eq!(&b[..11], b"aaaaabccccc");
-    }
-
-    #[test]
-    /// Tests that receiving a valid RESET_STREAM frame when all data has
-    /// already been read, notifies the application.
-    fn reset_stream_data_recvd() {
-        let mut b = [0; 15];
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data.
-        assert_eq!(pipe.client.stream_send(0, b"hello", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server gets data and sends data back, closing stream.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, false)));
-        assert!(!pipe.server.stream_finished(0));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_send(0, b"", true), Ok(0));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.client.stream_recv(0, &mut b), Ok((0, true)));
-        assert!(pipe.client.stream_finished(0));
-
-        // Client sends RESET_STREAM, closing stream.
-        let frames = [frame::Frame::ResetStream {
-            stream_id: 0,
-            error_code: 42,
-            final_size: 5,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
-
-        // Server is notified of stream readability, due to reset.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(
-            pipe.server.stream_recv(0, &mut b),
-            Err(Error::StreamReset(42))
-        );
-
-        assert!(pipe.server.stream_finished(0));
-
-        // Sending RESET_STREAM again shouldn't make stream readable again.
-        pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-    }
-
-    #[test]
-    /// Tests that receiving a valid RESET_STREAM frame when all data has _not_
-    /// been read, discards all buffered data and notifies the application.
-    fn reset_stream_data_not_recvd() {
-        let mut b = [0; 15];
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data.
-        assert_eq!(pipe.client.stream_send(0, b"h", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server gets data and sends data back, closing stream.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((1, false)));
-        assert!(!pipe.server.stream_finished(0));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_send(0, b"", true), Ok(0));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.client.stream_recv(0, &mut b), Ok((0, true)));
-        assert!(pipe.client.stream_finished(0));
-
-        // Client sends RESET_STREAM, closing stream.
-        let frames = [frame::Frame::ResetStream {
-            stream_id: 0,
-            error_code: 42,
-            final_size: 5,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
-
-        // Server is notified of stream readability, due to reset.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(
-            pipe.server.stream_recv(0, &mut b),
-            Err(Error::StreamReset(42))
-        );
-
-        assert!(pipe.server.stream_finished(0));
-
-        // Sending RESET_STREAM again shouldn't make stream readable again.
-        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-    }
-
-    #[test]
-    /// Tests that RESET_STREAM frames exceeding the connection-level flow
-    /// control limit cause an error.
-    fn reset_stream_flow_control() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
-            },
-            frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::ResetStream {
-                stream_id: 4,
-                error_code: 0,
-                final_size: 15,
-            },
-            frame::Frame::Stream {
-                stream_id: 8,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-        ];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::FlowControl),
-        );
-    }
-
-    #[test]
-    /// Tests that RESET_STREAM frames exceeding the stream-level flow control
-    /// limit cause an error.
-    fn reset_stream_flow_control_stream() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [
-            frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            },
-            frame::Frame::ResetStream {
-                stream_id: 4,
-                error_code: 0,
-                final_size: 16, // Past stream's flow control limit.
-            },
-        ];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Err(Error::FlowControl),
-        );
-    }
-
-    #[test]
-    fn path_challenge() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::PathChallenge { data: [0xba; 8] }];
-
-        let pkt_type = packet::Type::Short;
-
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        assert!(len > 0);
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-        let mut iter = frames.iter();
-
-        // Ignore ACK.
-        iter.next().unwrap();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::PathResponse { data: [0xba; 8] })
-        );
-    }
-
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
-    #[test]
-    /// Simulates reception of an early 1-RTT packet on the server, by
-    /// delaying the client's Handshake packet that completes the handshake.
-    fn early_1rtt_packet() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Client sends initial flight
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        // Server sends initial flight.
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-
-        // Client sends Handshake packet.
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-
-        // Emulate handshake packet delay by not making server process client
-        // packet.
-        let delayed = flight;
-
-        testing::emit_flight(&mut pipe.server).ok();
-
-        assert!(pipe.client.is_established());
-
-        // Send 1-RTT packet #0.
-        let frames = [frame::Frame::Stream {
-            stream_id: 0,
-            data: stream::RangeBuf::from(b"hello, world", 0, true),
-        }];
-
-        let pkt_type = packet::Type::Short;
-        let written =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-
-        assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
-
-        // Send 1-RTT packet #1.
-        let frames = [frame::Frame::Stream {
-            stream_id: 4,
-            data: stream::RangeBuf::from(b"hello, world", 0, true),
-        }];
-
-        let written =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-
-        assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
-
-        assert!(!pipe.server.is_established());
-
-        // Client sent 1-RTT packets 0 and 1, but server hasn't received them.
-        //
-        // Note that `largest_rx_pkt_num` is initialized to 0, so we need to
-        // send another 1-RTT packet to make this check meaningful.
-        assert_eq!(
-            pipe.server.pkt_num_spaces[packet::Epoch::Application]
-                .largest_rx_pkt_num,
-            0
-        );
-
-        // Process delayed packet.
-        testing::process_flight(&mut pipe.server, delayed).unwrap();
-
-        assert!(pipe.server.is_established());
-
-        assert_eq!(
-            pipe.server.pkt_num_spaces[packet::Epoch::Application]
-                .largest_rx_pkt_num,
-            0
-        );
-    }
-
-    #[test]
-    fn stop_sending() {
-        let mut b = [0; 15];
-
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data, and closes stream.
-        assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server gets data.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
-        assert!(pipe.server.stream_finished(0));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        // Server sends data, until blocked.
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        while pipe.server.stream_send(0, b"world", false) != Err(Error::Done) {
-            assert_eq!(pipe.advance(), Ok(()));
-        }
-
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), None);
-
-        // Client sends STOP_SENDING.
-        let frames = [frame::Frame::StopSending {
-            stream_id: 0,
-            error_code: 42,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        // Server sent a RESET_STREAM frame in response.
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        // Skip ACK frame.
-        iter.next();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ResetStream {
-                stream_id: 0,
-                error_code: 42,
-                final_size: 15,
-            })
-        );
-
-        // Stream is writable, but writing returns an error.
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(
-            pipe.server.stream_send(0, b"world", true),
-            Err(Error::StreamStopped(42)),
-        );
-
-        assert_eq!(pipe.server.streams.len(), 1);
-
-        // Client acks RESET_STREAM frame.
-        let mut ranges = ranges::RangeSet::default();
-        ranges.insert(pipe.server.next_pkt_num - 5..pipe.server.next_pkt_num);
-
-        let frames = [frame::Frame::ACK {
-            ack_delay: 15,
-            ranges,
-            ecn_counts: None,
-        }];
-
-        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
-
-        // Stream is collected on the server after RESET_STREAM is acked.
-        assert_eq!(pipe.server.streams.len(), 0);
-
-        // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
-        let frames = [frame::Frame::StopSending {
-            stream_id: 0,
-            error_code: 42,
-        }];
-
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        assert_eq!(frames.len(), 1);
-
-        match frames.first() {
-            Some(frame::Frame::ACK { .. }) => (),
-
-            f => panic!("expected ACK frame, got {:?}", f),
-        };
-
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), None);
-    }
-
-    #[test]
-    fn stop_sending_fin() {
-        let mut b = [0; 15];
-
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data, and closes stream.
-        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server gets data.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
-        assert!(pipe.server.stream_finished(4));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        // Server sends data...
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_send(4, b"world", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // ...and buffers more, and closes stream.
-        assert_eq!(pipe.server.stream_send(4, b"world", true), Ok(5));
-
-        // Client sends STOP_SENDING before server flushes stream.
-        let frames = [frame::Frame::StopSending {
-            stream_id: 4,
-            error_code: 42,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        // Server sent a RESET_STREAM frame in response.
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        // Skip ACK frame.
-        iter.next();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ResetStream {
-                stream_id: 4,
-                error_code: 42,
-                final_size: 5,
-            })
-        );
-
-        // No more frames are sent by the server.
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    /// Tests that resetting a stream restores flow control for unsent data.
-    fn stop_sending_unsent_tx_cap() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(15);
-        config.set_initial_max_stream_data_bidi_local(30);
-        config.set_initial_max_stream_data_bidi_remote(30);
-        config.set_initial_max_stream_data_uni(30);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(0);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data.
-        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        let mut b = [0; 15];
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
-
-        // Server sends some data.
-        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server buffers some data, until send capacity limit reached.
-        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
-        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
-        assert_eq!(
-            pipe.server.stream_send(4, b"hello", false),
-            Err(Error::Done)
-        );
-
-        // Client sends STOP_SENDING.
-        let frames = [frame::Frame::StopSending {
-            stream_id: 4,
-            error_code: 42,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        // Server can now send more data (on a different stream).
-        assert_eq!(pipe.client.stream_send(8, b"hello", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.server.stream_send(8, b"hello", false), Ok(5));
-        assert_eq!(pipe.server.stream_send(8, b"hello", false), Ok(5));
-        assert_eq!(
-            pipe.server.stream_send(8, b"hello", false),
-            Err(Error::Done)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-    }
-
-    #[test]
-    fn stream_shutdown_read() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data.
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.client.streams.len(), 1);
-        assert_eq!(pipe.server.streams.len(), 1);
-
-        // Server shuts down stream.
-        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-
-        let mut dummy = buf[..len].to_vec();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
-        let mut iter = frames.iter();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::StopSending {
-                stream_id: 4,
-                error_code: 42,
-            })
-        );
-
-        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Sending more data is forbidden.
-        let mut r = pipe.client.writable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(
-            pipe.client.stream_send(4, b"bye", false),
-            Err(Error::StreamStopped(42))
-        );
-
-        // Server sends some data, without reading the incoming data, and closes
-        // the stream.
-        assert_eq!(pipe.server.stream_send(4, b"hello, world", true), Ok(12));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client reads the data.
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((12, true)));
-
-        // Stream is collected on both sides.
-        assert_eq!(pipe.client.streams.len(), 0);
-        assert_eq!(pipe.server.streams.len(), 0);
-
-        assert_eq!(
-            pipe.server.stream_shutdown(4, Shutdown::Read, 0),
-            Err(Error::Done)
-        );
-    }
-
-    #[test]
-    fn stream_shutdown_read_after_fin() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data.
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.client.streams.len(), 1);
-        assert_eq!(pipe.server.streams.len(), 1);
-
-        // Server shuts down stream.
-        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        // Server has nothing to send.
-        assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server sends some data, without reading the incoming data, and closes
-        // the stream.
-        assert_eq!(pipe.server.stream_send(4, b"hello, world", true), Ok(12));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client reads the data.
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((12, true)));
-
-        // Stream is collected on both sides.
-        assert_eq!(pipe.client.streams.len(), 0);
-        assert_eq!(pipe.server.streams.len(), 0);
-
-        assert_eq!(
-            pipe.server.stream_shutdown(4, Shutdown::Read, 0),
-            Err(Error::Done)
-        );
-    }
-
-    #[test]
-    fn stream_shutdown_read_update_max_data() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(10000);
-        config.set_initial_max_stream_data_bidi_remote(10000);
-        config.set_initial_max_streams_bidi(10);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((1, false)));
-        assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 123), Ok(()));
-
-        assert_eq!(pipe.server.rx_data, 1);
-        assert_eq!(pipe.client.tx_data, 1);
-        assert_eq!(pipe.client.max_tx_data, 30);
-
-        assert_eq!(
-            pipe.client
-                .stream_send(0, &buf[..pipe.client.tx_cap], false),
-            Ok(29)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert!(!pipe.server.stream_readable(0)); // nothing can be consumed
-
-        // The client has increased its tx_data, and server has received it, so
-        // it increases flow control accordingly.
-        assert_eq!(pipe.client.tx_data, 30);
-        assert_eq!(pipe.server.rx_data, 30);
-        assert_eq!(pipe.client.tx_cap, 45);
-    }
-
-    #[test]
-    fn stream_shutdown_uni() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Exchange some data on uni streams.
-        assert_eq!(pipe.client.stream_send(2, b"hello, world", false), Ok(10));
-        assert_eq!(pipe.server.stream_send(3, b"hello, world", false), Ok(10));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Test local and remote shutdown.
-        assert_eq!(pipe.client.stream_shutdown(2, Shutdown::Write, 42), Ok(()));
-        assert_eq!(
-            pipe.client.stream_shutdown(2, Shutdown::Read, 42),
-            Err(Error::InvalidStreamState(2))
-        );
-
-        assert_eq!(
-            pipe.client.stream_shutdown(3, Shutdown::Write, 42),
-            Err(Error::InvalidStreamState(3))
-        );
-        assert_eq!(pipe.client.stream_shutdown(3, Shutdown::Read, 42), Ok(()));
-    }
-
-    #[test]
-    fn stream_shutdown_write() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data.
-        assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.client.streams.len(), 1);
-        assert_eq!(pipe.server.streams.len(), 1);
-
-        // Server sends some data.
-        assert_eq!(pipe.server.stream_send(4, b"goodbye, world", false), Ok(14));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server shuts down stream.
-        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
-
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), None);
-
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-
-        let mut dummy = buf[..len].to_vec();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
-        let mut iter = frames.iter();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ResetStream {
-                stream_id: 4,
-                error_code: 42,
-                final_size: 14,
-            })
-        );
-
-        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Sending more data is forbidden.
-        assert_eq!(
-            pipe.server.stream_send(4, b"bye", false),
-            Err(Error::FinalSize)
-        );
-
-        // Client sends some data and closes the stream.
-        assert_eq!(pipe.client.stream_send(4, b"bye", true), Ok(3));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server reads the data.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((15, true)));
-
-        // Client processes readable streams.
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(
-            pipe.client.stream_recv(4, &mut buf),
-            Err(Error::StreamReset(42))
-        );
-
-        // Stream is collected on both sides.
-        assert_eq!(pipe.client.streams.len(), 0);
-        assert_eq!(pipe.server.streams.len(), 0);
-
-        assert_eq!(
-            pipe.server.stream_shutdown(4, Shutdown::Write, 0),
-            Err(Error::Done)
-        );
-    }
-
-    #[test]
-    /// Tests that shutting down a stream restores flow control for unsent data.
-    fn stream_shutdown_write_unsent_tx_cap() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(15);
-        config.set_initial_max_stream_data_bidi_local(30);
-        config.set_initial_max_stream_data_bidi_remote(30);
-        config.set_initial_max_stream_data_uni(30);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(0);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data.
-        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), None);
-
-        let mut b = [0; 15];
-        assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
-
-        // Server sends some data.
-        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server buffers some data, until send capacity limit reached.
-        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
-        assert_eq!(pipe.server.stream_send(4, b"hello", false), Ok(5));
-        assert_eq!(
-            pipe.server.stream_send(4, b"hello", false),
-            Err(Error::Done)
-        );
-
-        // Client shouldn't update flow control.
-        assert!(!pipe.client.should_update_max_data());
-
-        // Server shuts down stream.
-        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server can now send more data (on a different stream).
-        assert_eq!(pipe.client.stream_send(8, b"hello", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.server.stream_send(8, b"hello", false), Ok(5));
-        assert_eq!(pipe.server.stream_send(8, b"hello", false), Ok(5));
-        assert_eq!(
-            pipe.server.stream_send(8, b"hello", false),
-            Err(Error::Done)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-    }
-
-    #[test]
-    /// Tests that the order of flushable streams scheduled on the wire is the
-    /// same as the order of `stream_send()` calls done by the application.
-    fn stream_round_robin() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        // Skip ACK frame.
-        iter.next();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::Stream {
-                stream_id: 8,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
-            })
-        );
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        assert_eq!(
-            frames.first(),
-            Some(&frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
-            })
-        );
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        assert_eq!(
-            frames.first(),
-            Some(&frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"aaaaa", 0, false),
-            })
-        );
-    }
-
-    #[test]
-    /// Tests the readable iterator.
-    fn stream_readable() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // No readable streams.
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
-
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), None);
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server received stream.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(
-            pipe.server.stream_send(0, b"aaaaaaaaaaaaaaa", false),
-            Ok(15)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        // Client drains stream.
-        let mut b = [0; 15];
-        pipe.client.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), None);
-
-        // Server shuts down stream.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 0), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        // Client creates multiple streams.
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.len(), 2);
-
-        assert!(r.next().is_some());
-        assert!(r.next().is_some());
-        assert!(r.next().is_none());
-
-        assert_eq!(r.len(), 0);
-    }
-
-    #[test]
-    /// Tests the writable iterator.
-    fn stream_writable() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // No writable streams.
-        let mut w = pipe.client.writable();
-        assert_eq!(w.next(), None);
-
-        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
-
-        // Client created stream.
-        let mut w = pipe.client.writable();
-        assert_eq!(w.next(), Some(0));
-        assert_eq!(w.next(), None);
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server created stream.
-        let mut w = pipe.server.writable();
-        assert_eq!(w.next(), Some(0));
-        assert_eq!(w.next(), None);
-
-        assert_eq!(
-            pipe.server.stream_send(0, b"aaaaaaaaaaaaaaa", false),
-            Ok(15)
-        );
-
-        // Server stream is full.
-        let mut w = pipe.server.writable();
-        assert_eq!(w.next(), None);
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client drains stream.
-        let mut b = [0; 15];
-        pipe.client.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server stream is writable again.
-        let mut w = pipe.server.writable();
-        assert_eq!(w.next(), Some(0));
-        assert_eq!(w.next(), None);
-
-        // Server shuts down stream.
-        assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Write, 0), Ok(()));
-
-        let mut w = pipe.server.writable();
-        assert_eq!(w.next(), None);
-
-        // Client creates multiple streams.
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut w = pipe.server.writable();
-        assert_eq!(w.len(), 2);
-
-        assert!(w.next().is_some());
-        assert!(w.next().is_some());
-        assert!(w.next().is_none());
-
-        assert_eq!(w.len(), 0);
-
-        // Server finishes stream.
-        assert_eq!(pipe.server.stream_send(8, b"aaaaa", true), Ok(5));
-
-        let mut w = pipe.server.writable();
-        assert_eq!(w.next(), Some(4));
-        assert_eq!(w.next(), None);
-    }
-
-    #[test]
-    fn stream_writable_blocked() {
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config.set_application_protos(&[b"h3"]).unwrap();
-        config.set_initial_max_data(70);
-        config.set_initial_max_stream_data_bidi_local(150000);
-        config.set_initial_max_stream_data_bidi_remote(150000);
-        config.set_initial_max_stream_data_uni(150000);
-        config.set_initial_max_streams_bidi(100);
-        config.set_initial_max_streams_uni(5);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client creates stream and sends some data.
-        let send_buf = [0; 35];
-        assert_eq!(pipe.client.stream_send(0, &send_buf, false), Ok(35));
-
-        // Stream is still writable as it still has capacity.
-        assert_eq!(pipe.client.stream_writable_next(), Some(0));
-        assert_eq!(pipe.client.stream_writable_next(), None);
-
-        // Client fills stream, which becomes unwritable due to connection
-        // capacity.
-        let send_buf = [0; 36];
-        assert_eq!(pipe.client.stream_send(0, &send_buf, false), Ok(35));
-
-        assert_eq!(pipe.client.stream_writable_next(), None);
-
-        assert_eq!(pipe.client.tx_cap, 0);
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut b = [0; 70];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // The connection capacity has increased and the stream is now writable
-        // again.
-        assert_ne!(pipe.client.tx_cap, 0);
-
-        assert_eq!(pipe.client.stream_writable_next(), Some(0));
-        assert_eq!(pipe.client.stream_writable_next(), None);
-    }
-
-    #[test]
-    /// Tests that we don't exceed the per-connection flow control limit set by
-    /// the peer.
-    fn flow_control_limit_send() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(
-            pipe.client.stream_send(0, b"aaaaaaaaaaaaaaa", false),
-            Ok(15)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(
-            pipe.client.stream_send(4, b"aaaaaaaaaaaaaaa", false),
-            Ok(15)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(pipe.client.stream_send(8, b"a", false), Err(Error::Done));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert!(r.next().is_some());
-        assert!(r.next().is_some());
-        assert!(r.next().is_none());
-    }
-
-    #[test]
-    /// Tests that invalid packets received before any other valid ones cause
-    /// the server to close the connection immediately.
-    fn invalid_initial_server() {
-        let mut buf = [0; 65535];
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        let frames = [frame::Frame::Padding { len: 10 }];
-
-        let written = testing::encode_pkt(
-            &mut pipe.client,
-            packet::Type::Initial,
-            &frames,
-            &mut buf,
-        )
-        .unwrap();
-
-        // Corrupt the packets's last byte to make decryption fail (the last
-        // byte is part of the AEAD tag, so changing it means that the packet
-        // cannot be authenticated during decryption).
-        buf[written - 1] = !buf[written - 1];
-
-        assert_eq!(pipe.server.timeout(), None);
-
-        assert_eq!(
-            pipe.server_recv(&mut buf[..written]),
-            Err(Error::CryptoFail)
-        );
-
-        assert!(pipe.server.is_closed());
-    }
-
-    #[test]
-    /// Tests that invalid Initial packets received to cause
-    /// the client to close the connection immediately.
-    fn invalid_initial_client() {
-        let mut buf = [0; 65535];
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Client sends initial flight.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        // Server sends initial flight.
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(1200));
-
-        let frames = [frame::Frame::Padding { len: 10 }];
-
-        let written = testing::encode_pkt(
-            &mut pipe.server,
-            packet::Type::Initial,
-            &frames,
-            &mut buf,
-        )
-        .unwrap();
-
-        // Corrupt the packets's last byte to make decryption fail (the last
-        // byte is part of the AEAD tag, so changing it means that the packet
-        // cannot be authenticated during decryption).
-        buf[written - 1] = !buf[written - 1];
-
-        // Client will ignore invalid packet.
-        assert_eq!(pipe.client_recv(&mut buf[..written]), Ok(71));
-
-        // The connection should be alive...
-        assert!(!pipe.client.is_closed());
-
-        // ...and the idle timeout should be armed.
-        assert!(pipe.client.idle_timer.is_some());
-    }
-
-    #[test]
-    /// Tests that packets with invalid payload length received before any other
-    /// valid packet cause the server to close the connection immediately.
-    fn invalid_initial_payload() {
-        let mut buf = [0; 65535];
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        let mut b = octets::OctetsMut::with_slice(&mut buf);
-
-        let epoch = packet::Type::Initial.to_epoch().unwrap();
-
-        let pn = 0;
-        let pn_len = packet::pkt_num_len(pn, 0);
-
-        let dcid = pipe.client.destination_id();
-        let scid = pipe.client.source_id();
-
-        let hdr = Header {
-            ty: packet::Type::Initial,
-            version: pipe.client.version,
-            dcid: ConnectionId::from_ref(&dcid),
-            scid: ConnectionId::from_ref(&scid),
-            pkt_num: 0,
-            pkt_num_len: pn_len,
-            token: pipe.client.token.clone(),
-            versions: None,
-            key_phase: false,
-        };
-
-        hdr.to_bytes(&mut b).unwrap();
-
-        // Payload length is invalid!!!
-        let payload_len = 4096;
-
-        let len = pn_len + payload_len;
-        b.put_varint(len as u64).unwrap();
-
-        packet::encode_pkt_num(pn, pn_len, &mut b).unwrap();
-
-        let payload_offset = b.off();
-
-        let frames = [frame::Frame::Padding { len: 10 }];
-
-        for frame in &frames {
-            frame.to_bytes(&mut b).unwrap();
-        }
-
-        let space = &mut pipe.client.pkt_num_spaces[epoch];
-
-        // Use correct payload length when encrypting the packet.
-        let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len());
-
-        let aead = space.crypto_seal.as_ref().unwrap();
-
-        let written = packet::encrypt_pkt(
-            &mut b,
-            pn,
-            pn_len,
-            payload_len,
-            payload_offset,
-            None,
-            aead,
-        )
-        .unwrap();
-
-        assert_eq!(pipe.server.timeout(), None);
-
-        assert_eq!(
-            pipe.server_recv(&mut buf[..written]),
-            Err(Error::InvalidPacket)
-        );
-
-        assert!(pipe.server.is_closed());
-    }
-
-    #[test]
-    /// Tests that invalid packets don't cause the connection to be closed.
-    fn invalid_packet() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = [frame::Frame::Padding { len: 10 }];
-
-        let written = testing::encode_pkt(
-            &mut pipe.client,
-            packet::Type::Short,
-            &frames,
-            &mut buf,
-        )
-        .unwrap();
-
-        // Corrupt the packets's last byte to make decryption fail (the last
-        // byte is part of the AEAD tag, so changing it means that the packet
-        // cannot be authenticated during decryption).
-        buf[written - 1] = !buf[written - 1];
-
-        assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
-
-        // Corrupt the packets's first byte to make the header fail decoding.
-        buf[0] = 255;
-
-        assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
-    }
-
-    #[test]
-    fn recv_empty_buffer() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.server_recv(&mut buf[..0]), Err(Error::BufferTooShort));
-    }
-
-    #[test]
-    fn stop_sending_before_flushed_packets() {
-        let mut b = [0; 15];
-
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data, and closes stream.
-        assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server gets data.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
-        assert!(pipe.server.stream_finished(0));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        // Server sends data, until blocked.
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        while pipe.server.stream_send(0, b"world", false) != Err(Error::Done) {}
-
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), None);
-
-        // Client sends STOP_SENDING.
-        let frames = [frame::Frame::StopSending {
-            stream_id: 0,
-            error_code: 42,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        // Server sent a RESET_STREAM frame in response.
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        // Skip ACK frame.
-        iter.next();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ResetStream {
-                stream_id: 0,
-                error_code: 42,
-                final_size: 0,
-            })
-        );
-
-        // Stream is writable, but writing returns an error.
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(
-            pipe.server.stream_send(0, b"world", true),
-            Err(Error::StreamStopped(42)),
-        );
-
-        assert_eq!(pipe.server.streams.len(), 1);
-
-        // Client acks RESET_STREAM frame.
-        let mut ranges = ranges::RangeSet::default();
-        ranges.insert(0..6);
-
-        let frames = [frame::Frame::ACK {
-            ack_delay: 15,
-            ranges,
-            ecn_counts: None,
-        }];
-
-        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
-
-        // Client has ACK'd the RESET_STREAM so the stream is collected.
-        assert_eq!(pipe.server.streams.len(), 0);
-    }
-
-    #[test]
-    fn reset_before_flushed_packets() {
-        let mut b = [0; 15];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(5);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_streams_bidi(3);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends some data, and closes stream.
-        assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server gets data.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
-        assert!(pipe.server.stream_finished(0));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        // Server sends data and is blocked by small stream flow control.
-        let mut r = pipe.server.writable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        assert_eq!(pipe.server.stream_send(0, b"helloworld", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client reads to give flow control back.
-        assert_eq!(pipe.client.stream_recv(0, &mut b), Ok((5, false)));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server writes stream data and resets the stream before sending a
-        // packet.
-        assert_eq!(pipe.server.stream_send(0, b"world", false), Ok(5));
-        pipe.server.stream_shutdown(0, Shutdown::Write, 42).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client has ACK'd the RESET_STREAM so the stream is collected.
-        assert_eq!(pipe.server.streams.len(), 0);
-    }
-
-    #[test]
-    /// Tests that the MAX_STREAMS frame is sent for bidirectional streams.
-    fn stream_limit_update_bidi() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(0);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data.
-        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(4, b"b", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"b", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server reads stream data.
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        pipe.server.stream_recv(4, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server sends stream data, with fin.
-        assert_eq!(pipe.server.stream_send(0, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.server.stream_send(4, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.server.stream_send(4, b"b", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.server.stream_send(0, b"b", true), Ok(1));
-
-        // Server sends MAX_STREAMS.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client tries to create new streams.
-        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(12, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(16, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(
-            pipe.client.stream_send(20, b"a", false),
-            Err(Error::StreamLimit)
-        );
-
-        assert_eq!(pipe.server.readable().len(), 3);
-    }
-
-    #[test]
-    /// Tests that the MAX_STREAMS frame is sent for unidirectional streams.
-    fn stream_limit_update_uni() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(0);
-        config.set_initial_max_streams_uni(3);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data.
-        assert_eq!(pipe.client.stream_send(2, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(6, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(6, b"b", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(2, b"b", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server reads stream data.
-        let mut b = [0; 15];
-        pipe.server.stream_recv(2, &mut b).unwrap();
-        pipe.server.stream_recv(6, &mut b).unwrap();
-
-        // Server sends MAX_STREAMS.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client tries to create new streams.
-        assert_eq!(pipe.client.stream_send(10, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(14, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(18, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(
-            pipe.client.stream_send(22, b"a", false),
-            Err(Error::StreamLimit)
-        );
-
-        assert_eq!(pipe.server.readable().len(), 3);
-    }
-
-    #[test]
-    /// Tests that the stream's fin flag is properly flushed even if there's no
-    /// data in the buffer, and that the buffer becomes readable on the other
-    /// side.
-    fn stream_zero_length_fin() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(
-            pipe.client.stream_send(0, b"aaaaaaaaaaaaaaa", false),
-            Ok(15)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert!(r.next().is_none());
-
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client sends zero-length frame.
-        assert_eq!(pipe.client.stream_send(0, b"", true), Ok(0));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Stream should be readable on the server after receiving empty fin.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert!(r.next().is_none());
-
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client sends zero-length frame (again).
-        assert_eq!(pipe.client.stream_send(0, b"", true), Ok(0));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Stream should _not_ be readable on the server after receiving empty
-        // fin, because it was already finished.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-    }
-
-    #[test]
-    /// Tests that the stream's fin flag is properly flushed even if there's no
-    /// data in the buffer, that the buffer becomes readable on the other
-    /// side and stays readable even if the stream is fin'd locally.
-    fn stream_zero_length_fin_deferred_collection() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(
-            pipe.client.stream_send(0, b"aaaaaaaaaaaaaaa", false),
-            Ok(15)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert!(r.next().is_none());
-
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client sends zero-length frame.
-        assert_eq!(pipe.client.stream_send(0, b"", true), Ok(0));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server sends zero-length frame.
-        assert_eq!(pipe.server.stream_send(0, b"", true), Ok(0));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Stream should be readable on the server after receiving empty fin.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert!(r.next().is_none());
-
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client sends zero-length frame (again).
-        assert_eq!(pipe.client.stream_send(0, b"", true), Ok(0));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Stream should _not_ be readable on the server after receiving empty
-        // fin, because it was already finished.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), None);
-
-        // Stream _is_readable on the client side.
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), Some(0));
-
-        pipe.client.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Stream is completed and _is not_ readable.
-        let mut r = pipe.client.readable();
-        assert_eq!(r.next(), None);
-    }
-
-    #[test]
-    /// Tests that the stream gets created with stream_send() even if there's
-    /// no data in the buffer and the fin flag is not set.
-    fn stream_zero_length_non_fin() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"", false), Ok(0));
-
-        // The stream now should have been created.
-        assert_eq!(pipe.client.streams.len(), 1);
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Sending an empty non-fin should not change any stream state on the
-        // other side.
-        let mut r = pipe.server.readable();
-        assert!(r.next().is_none());
-    }
-
-    #[test]
-    /// Tests that completed streams are garbage collected.
-    fn collect_streams() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.streams.len(), 0);
-        assert_eq!(pipe.server.streams.len(), 0);
-
-        assert_eq!(pipe.client.stream_send(0, b"aaaaa", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert!(!pipe.client.stream_finished(0));
-        assert!(!pipe.server.stream_finished(0));
-
-        assert_eq!(pipe.client.streams.len(), 1);
-        assert_eq!(pipe.server.streams.len(), 1);
-
-        let mut b = [0; 5];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.server.stream_send(0, b"aaaaa", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert!(!pipe.client.stream_finished(0));
-        assert!(pipe.server.stream_finished(0));
-
-        assert_eq!(pipe.client.streams.len(), 1);
-        assert_eq!(pipe.server.streams.len(), 0);
-
-        let mut b = [0; 5];
-        pipe.client.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.streams.len(), 0);
-        assert_eq!(pipe.server.streams.len(), 0);
-
-        assert!(pipe.client.stream_finished(0));
-        assert!(pipe.server.stream_finished(0));
-
-        assert_eq!(pipe.client.stream_send(0, b"", true), Err(Error::Done));
-
-        let frames = [frame::Frame::Stream {
-            stream_id: 0,
-            data: stream::RangeBuf::from(b"aa", 0, false),
-        }];
-
-        let pkt_type = packet::Type::Short;
-        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
-    }
-
-    #[test]
-    fn config_set_cc_algorithm_name() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-
-        assert_eq!(config.set_cc_algorithm_name("reno"), Ok(()));
-
-        // Unknown name.
-        assert_eq!(
-            config.set_cc_algorithm_name("???"),
-            Err(Error::CongestionControl)
-        );
-    }
-
-    #[test]
-    fn peer_cert() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        match pipe.client.peer_cert() {
-            Some(c) => assert_eq!(c.len(), 753),
-
-            None => panic!("missing server certificate"),
-        }
-    }
-
-    #[test]
-    fn peer_cert_chain() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert-big.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        match pipe.client.peer_cert_chain() {
-            Some(c) => assert_eq!(c.len(), 5),
-
-            None => panic!("missing server certificate chain"),
-        }
-    }
-
-    #[test]
-    fn retry() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-
-        // Client sends initial flight.
-        let (mut len, _) = pipe.client.send(&mut buf).unwrap();
-
-        // Server sends Retry packet.
-        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
-
-        let odcid = hdr.dcid.clone();
-
-        let mut scid = [0; MAX_CONN_ID_LEN];
-        rand::rand_bytes(&mut scid[..]);
-        let scid = ConnectionId::from_ref(&scid);
-
-        let token = b"quiche test retry token";
-
-        len = packet::retry(
-            &hdr.scid,
-            &hdr.dcid,
-            &scid,
-            token,
-            hdr.version,
-            &mut buf,
-        )
-        .unwrap();
-
-        // Client receives Retry and sends new Initial.
-        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
-        assert_eq!(&hdr.token.unwrap(), token);
-
-        // Server accepts connection.
-        let from = "127.0.0.1:1234".parse().unwrap();
-        pipe.server = accept(
-            &scid,
-            Some(&odcid),
-            testing::Pipe::server_addr(),
-            from,
-            &mut config,
-        )
-        .unwrap();
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert!(pipe.client.is_established());
-        assert!(pipe.server.is_established());
-    }
-
-    #[test]
-    fn missing_retry_source_connection_id() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-
-        // Client sends initial flight.
-        let (mut len, _) = pipe.client.send(&mut buf).unwrap();
-
-        // Server sends Retry packet.
-        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
-
-        let mut scid = [0; MAX_CONN_ID_LEN];
-        rand::rand_bytes(&mut scid[..]);
-        let scid = ConnectionId::from_ref(&scid);
-
-        let token = b"quiche test retry token";
-
-        len = packet::retry(
-            &hdr.scid,
-            &hdr.dcid,
-            &scid,
-            token,
-            hdr.version,
-            &mut buf,
-        )
-        .unwrap();
-
-        // Client receives Retry and sends new Initial.
-        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        // Server accepts connection and send first flight. But original
-        // destination connection ID is ignored.
-        let from = "127.0.0.1:1234".parse().unwrap();
-        pipe.server =
-            accept(&scid, None, testing::Pipe::server_addr(), from, &mut config)
-                .unwrap();
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-
-        assert_eq!(
-            testing::process_flight(&mut pipe.client, flight),
-            Err(Error::InvalidTransportParam)
-        );
-    }
-
-    #[test]
-    fn invalid_retry_source_connection_id() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-
-        // Client sends initial flight.
-        let (mut len, _) = pipe.client.send(&mut buf).unwrap();
-
-        // Server sends Retry packet.
-        let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
-
-        let mut scid = [0; MAX_CONN_ID_LEN];
-        rand::rand_bytes(&mut scid[..]);
-        let scid = ConnectionId::from_ref(&scid);
-
-        let token = b"quiche test retry token";
-
-        len = packet::retry(
-            &hdr.scid,
-            &hdr.dcid,
-            &scid,
-            token,
-            hdr.version,
-            &mut buf,
-        )
-        .unwrap();
-
-        // Client receives Retry and sends new Initial.
-        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        // Server accepts connection and send first flight. But original
-        // destination connection ID is invalid.
-        let from = "127.0.0.1:1234".parse().unwrap();
-        let odcid = ConnectionId::from_ref(b"bogus value");
-        pipe.server = accept(
-            &scid,
-            Some(&odcid),
-            testing::Pipe::server_addr(),
-            from,
-            &mut config,
-        )
-        .unwrap();
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-
-        assert_eq!(
-            testing::process_flight(&mut pipe.client, flight),
-            Err(Error::InvalidTransportParam)
-        );
-    }
-
-    #[test]
-    /// Tests that a zero-length NEW_TOKEN frame is detected as an error.
-    fn zero_length_new_token() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = vec![frame::Frame::NewToken { token: vec![] }];
-
-        let pkt_type = packet::Type::Short;
-
-        let written =
-            testing::encode_pkt(&mut pipe.server, pkt_type, &frames, &mut buf)
-                .unwrap();
-
-        assert_eq!(
-            pipe.client_recv(&mut buf[..written]),
-            Err(Error::InvalidFrame)
-        );
-    }
-
-    #[test]
-    /// Tests that a NEW_TOKEN frame sent by client is detected as an error.
-    fn client_sent_new_token() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let frames = vec![frame::Frame::NewToken {
-            token: vec![1, 2, 3],
-        }];
-
-        let pkt_type = packet::Type::Short;
-
-        let written =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-
-        assert_eq!(
-            pipe.server_recv(&mut buf[..written]),
-            Err(Error::InvalidPacket)
-        );
-    }
-
-    fn check_send(_: &mut impl Send) {}
-
-    #[test]
-    fn config_must_be_send() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        check_send(&mut config);
-    }
-
-    #[test]
-    fn connection_must_be_send() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        check_send(&mut pipe.client);
-    }
-
-    fn check_sync(_: &mut impl Sync) {}
-
-    #[test]
-    fn config_must_be_sync() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        check_sync(&mut config);
-    }
-
-    #[test]
-    fn connection_must_be_sync() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        check_sync(&mut pipe.client);
-    }
-
-    #[test]
-    fn data_blocked() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"aaaaaaaaaa", false), Ok(10));
-        assert_eq!(pipe.client.blocked_limit, None);
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(4, b"aaaaaaaaaa", false), Ok(10));
-        assert_eq!(pipe.client.blocked_limit, None);
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(8, b"aaaaaaaaaaa", false), Ok(10));
-        assert_eq!(pipe.client.blocked_limit, Some(30));
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(pipe.client.blocked_limit, None);
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        assert_eq!(iter.next(), Some(&frame::Frame::DataBlocked { limit: 30 }));
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::Stream {
-                stream_id: 8,
-                data: stream::RangeBuf::from(b"aaaaaaaaaa", 0, false),
-            })
-        );
-
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn stream_data_blocked() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.streams.blocked().len(), 0);
-
-        assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.client.streams.blocked().len(), 0);
-
-        assert_eq!(pipe.client.stream_send(0, b"aaaaaa", false), Ok(5));
-        assert_eq!(pipe.client.streams.blocked().len(), 1);
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(pipe.client.streams.blocked().len(), 0);
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        // Skip ACK frame.
-        iter.next();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::StreamDataBlocked {
-                stream_id: 0,
-                limit: 15,
-            })
-        );
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"aaaaaaaaaaaaaaa", 0, false),
-            })
-        );
-
-        assert_eq!(iter.next(), None);
-
-        // Send from another stream, make sure we don't send STREAM_DATA_BLOCKED
-        // again.
-        assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(pipe.client.streams.blocked().len(), 0);
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"a", 0, false),
-            })
-        );
-
-        assert_eq!(iter.next(), None);
-
-        // Send again from blocked stream and make sure it is not marked as
-        // blocked again.
-        assert_eq!(
-            pipe.client.stream_send(0, b"aaaaaa", false),
-            Err(Error::Done)
-        );
-        assert_eq!(pipe.client.streams.blocked().len(), 0);
-        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
-    }
-
-    #[test]
-    fn stream_data_blocked_unblocked_flow_control() {
-        let mut buf = [0; 65535];
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(
-            pipe.client.stream_send(0, b"aaaaaaaaaaaaaaah", false),
-            Ok(15)
-        );
-        assert_eq!(pipe.client.streams.blocked().len(), 1);
-        assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(pipe.client.streams.blocked().len(), 0);
-
-        // Send again on blocked stream. It's blocked at the same offset as
-        // previously, so it should not be marked as blocked again.
-        assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
-        assert_eq!(pipe.client.streams.blocked().len(), 0);
-
-        // No matter how many times we try to write stream data tried, no
-        // packets containing STREAM_BLOCKED should be emitted.
-        assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
-        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
-
-        assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
-        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
-
-        assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
-        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
-
-        // Now read some data at the server to release flow control.
-        let mut r = pipe.server.readable();
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), None);
-
-        let mut b = [0; 10];
-        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((10, false)));
-        assert_eq!(&b[..10], b"aaaaaaaaaa");
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"hhhhhhhhhh!", false), Ok(10));
-        assert_eq!(pipe.client.streams.blocked().len(), 1);
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(pipe.client.streams.blocked().len(), 0);
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::StreamDataBlocked {
-                stream_id: 0,
-                limit: 25,
-            })
-        );
-
-        // don't care about remaining received frames
-
-        assert_eq!(pipe.client.stream_send(0, b"!", false), Err(Error::Done));
-        assert_eq!(pipe.client.streams.blocked().len(), 0);
-        assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
-    }
-
-    #[test]
-    fn app_limited_true() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(50000);
-        config.set_initial_max_stream_data_bidi_local(50000);
-        config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_recv_udp_payload_size(1200);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data.
-        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server reads stream data.
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server sends stream data smaller than cwnd.
-        let send_buf = [0; 10000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf, false), Ok(10000));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // app_limited should be true because we send less than cwnd.
-        assert!(pipe
-            .server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
-    }
-
-    #[test]
-    fn app_limited_false() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(50000);
-        config.set_initial_max_stream_data_bidi_local(50000);
-        config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_recv_udp_payload_size(1200);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data.
-        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server reads stream data.
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server sends stream data bigger than cwnd.
-        let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(12000));
-
-        testing::emit_flight(&mut pipe.server).ok();
-
-        // We can't create a new packet header because there is no room by cwnd.
-        // app_limited should be false because we can't send more by cwnd.
-        assert!(!pipe
-            .server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
-    }
-
-    #[test]
-    fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(50000);
-        config.set_initial_max_stream_data_bidi_local(50000);
-        config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.set_max_recv_udp_payload_size(1200);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data bigger than cwnd (it will never arrive to the
-        // server).
-        let send_buf1 = [0; 20000];
-        assert_eq!(pipe.client.stream_send(0, &send_buf1, false), Ok(12000));
-
-        testing::emit_flight(&mut pipe.client).ok();
-
-        // Server sends some stream data that will need ACKs.
-        assert_eq!(
-            pipe.server.stream_send(1, &send_buf1[..500], false),
-            Ok(500)
-        );
-
-        testing::process_flight(
-            &mut pipe.client,
-            testing::emit_flight(&mut pipe.server).unwrap(),
-        )
-        .unwrap();
-
-        let mut buf = [0; 2000];
-
-        let ret = pipe.client.send(&mut buf);
-
-        assert_eq!(pipe.client.tx_cap, 0);
-
-        assert!(matches!(ret, Ok((_, _))), "the client should at least send one packet to acknowledge the newly received data");
-
-        let (sent, _) = ret.unwrap();
-
-        assert_ne!(sent, 0, "the client should at least send a pure ACK packet");
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..sent]).unwrap();
-        assert_eq!(1, frames.len());
-        assert!(
-            matches!(frames[0], frame::Frame::ACK { .. }),
-            "the packet sent by the client must be an ACK only packet"
-        );
-    }
-
-    /// Like sends_ack_only_pkt_when_full_cwnd_and_ack_elicited, but when
-    /// ack_eliciting is explicitly requested.
-    #[test]
-    fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledging(
-    ) {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(50000);
-        config.set_initial_max_stream_data_bidi_local(50000);
-        config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.set_max_recv_udp_payload_size(1200);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data bigger than cwnd (it will never arrive to the
-        // server). This exhausts the congestion window.
-        let send_buf1 = [0; 20000];
-        assert_eq!(pipe.client.stream_send(0, &send_buf1, false), Ok(12000));
-
-        testing::emit_flight(&mut pipe.client).ok();
-
-        // Client gets PING frames from server, which elicit ACK
-        let mut buf = [0; 2000];
-        for _ in 0..recovery::MAX_OUTSTANDING_NON_ACK_ELICITING {
-            let written = testing::encode_pkt(
-                &mut pipe.server,
-                packet::Type::Short,
-                &[frame::Frame::Ping { mtu_probe: None }],
-                &mut buf,
-            )
-            .unwrap();
-
-            pipe.client_recv(&mut buf[..written])
-                .expect("client recv ping");
-
-            // Client acknowledges despite a full congestion window
-            let ret = pipe.client.send(&mut buf);
-
-            assert!(matches!(ret, Ok((_, _))), "the client should at least send one packet to acknowledge the newly received data");
-
-            let (sent, _) = ret.unwrap();
-
-            assert_ne!(
-                sent, 0,
-                "the client should at least send a pure ACK packet"
-            );
-
-            let frames =
-                testing::decode_pkt(&mut pipe.server, &mut buf[..sent]).unwrap();
-
-            assert_eq!(1, frames.len());
-
-            assert!(
-                matches!(frames[0], frame::Frame::ACK { .. }),
-                "the packet sent by the client must be an ACK only packet"
-            );
-        }
-
-        // The client shouldn't need to send any more packets after the ACK only
-        // packet it just sent.
-        assert_eq!(
-            pipe.client.send(&mut buf),
-            Err(Error::Done),
-            "nothing for client to send after ACK-only packet"
-        );
-    }
-
-    #[test]
-    fn app_limited_false_no_frame() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(50000);
-        config.set_initial_max_stream_data_bidi_local(50000);
-        config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_recv_udp_payload_size(1405);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data.
-        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server reads stream data.
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server sends stream data bigger than cwnd.
-        let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(12000));
-
-        testing::emit_flight(&mut pipe.server).ok();
-
-        // We can't create a new packet header because there is no room by cwnd.
-        // app_limited should be false because we can't send more by cwnd.
-        assert!(!pipe
-            .server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
-    }
-
-    #[test]
-    fn app_limited_false_no_header() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(50000);
-        config.set_initial_max_stream_data_bidi_local(50000);
-        config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_recv_udp_payload_size(1406);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data.
-        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server reads stream data.
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server sends stream data bigger than cwnd.
-        let send_buf1 = [0; 20000];
-        assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(12000));
-
-        testing::emit_flight(&mut pipe.server).ok();
-
-        // We can't create a new frame because there is no room by cwnd.
-        // app_limited should be false because we can't send more by cwnd.
-        assert!(!pipe
-            .server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
-    }
-
-    #[test]
-    fn app_limited_not_changed_on_no_new_frames() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(50000);
-        config.set_initial_max_stream_data_bidi_local(50000);
-        config.set_initial_max_stream_data_bidi_remote(50000);
-        config.set_max_recv_udp_payload_size(1200);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data.
-        assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server reads stream data.
-        let mut b = [0; 15];
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client's app_limited is true because its bytes-in-flight
-        // is much smaller than the current cwnd.
-        assert!(pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
-
-        // Client has no new frames to send - returns Done.
-        assert_eq!(testing::emit_flight(&mut pipe.client), Err(Error::Done));
-
-        // Client's app_limited should remain the same.
-        assert!(pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
-    }
-
-    #[test]
-    fn limit_ack_ranges() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let epoch = packet::Epoch::Application;
-
-        assert_eq!(pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.len(), 0);
-
-        let frames = [
-            frame::Frame::Ping { mtu_probe: None },
-            frame::Frame::Padding { len: 3 },
-        ];
-
-        let pkt_type = packet::Type::Short;
-
-        let mut last_packet_sent = 0;
-
-        for _ in 0..512 {
-            let recv_count = pipe.server.recv_count;
-
-            last_packet_sent = pipe.client.next_pkt_num;
-
-            pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
-                .unwrap();
-
-            assert_eq!(pipe.server.recv_count, recv_count + 1);
-
-            // Skip packet number.
-            pipe.client.next_pkt_num += 1;
-        }
-
-        assert_eq!(
-            pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.len(),
-            MAX_ACK_RANGES
-        );
-
-        assert_eq!(
-            pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.first(),
-            Some(last_packet_sent - ((MAX_ACK_RANGES as u64) - 1) * 2)
-        );
-
-        assert_eq!(
-            pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.last(),
-            Some(last_packet_sent)
-        );
-    }
-
-    #[test]
-    /// Tests that streams are correctly scheduled based on their priority.
-    fn stream_priority() {
-        // Limit 1-RTT packet size to avoid congestion control interference.
-        const MAX_TEST_PACKET_SIZE: usize = 540;
-
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(1_000_000);
-        config.set_initial_max_stream_data_bidi_local(1_000_000);
-        config.set_initial_max_stream_data_bidi_remote(1_000_000);
-        config.set_initial_max_stream_data_uni(0);
-        config.set_initial_max_streams_bidi(100);
-        config.set_initial_max_streams_uni(0);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(12, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(16, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(20, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut b = [0; 1];
-
-        let out = [b'b'; 500];
-
-        // Server prioritizes streams as follows:
-        //  * Stream 8 and 16 have the same priority but are non-incremental.
-        //  * Stream 4, 12 and 20 have the same priority but 20 is non-incremental
-        //    and 4 and 12 are incremental.
-        //  * Stream 0 is on its own.
-
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
-        pipe.server.stream_send(0, &out, false).unwrap();
-        pipe.server.stream_send(0, &out, false).unwrap();
-        pipe.server.stream_send(0, &out, false).unwrap();
-
-        pipe.server.stream_recv(12, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(12, 42, true), Ok(()));
-        pipe.server.stream_send(12, &out, false).unwrap();
-        pipe.server.stream_send(12, &out, false).unwrap();
-        pipe.server.stream_send(12, &out, false).unwrap();
-
-        pipe.server.stream_recv(16, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(16, 10, false), Ok(()));
-        pipe.server.stream_send(16, &out, false).unwrap();
-        pipe.server.stream_send(16, &out, false).unwrap();
-        pipe.server.stream_send(16, &out, false).unwrap();
-
-        pipe.server.stream_recv(4, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(4, 42, true), Ok(()));
-        pipe.server.stream_send(4, &out, false).unwrap();
-        pipe.server.stream_send(4, &out, false).unwrap();
-        pipe.server.stream_send(4, &out, false).unwrap();
-
-        pipe.server.stream_recv(8, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(8, 10, false), Ok(()));
-        pipe.server.stream_send(8, &out, false).unwrap();
-        pipe.server.stream_send(8, &out, false).unwrap();
-        pipe.server.stream_send(8, &out, false).unwrap();
-
-        pipe.server.stream_recv(20, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(20, 42, false), Ok(()));
-        pipe.server.stream_send(20, &out, false).unwrap();
-        pipe.server.stream_send(20, &out, false).unwrap();
-        pipe.server.stream_send(20, &out, false).unwrap();
-
-        // First is stream 8.
-        let mut off = 0;
-
-        for _ in 1..=3 {
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-            let stream = frames.first().unwrap();
-
-            assert_eq!(stream, &frame::Frame::Stream {
-                stream_id: 8,
-                data: stream::RangeBuf::from(&out, off, false),
-            });
-
-            off = match stream {
-                frame::Frame::Stream { data, .. } => data.max_off(),
-
-                _ => unreachable!(),
-            };
-        }
-
-        // Then is stream 16.
-        let mut off = 0;
-
-        for _ in 1..=3 {
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-            let stream = frames.first().unwrap();
-
-            assert_eq!(stream, &frame::Frame::Stream {
-                stream_id: 16,
-                data: stream::RangeBuf::from(&out, off, false),
-            });
-
-            off = match stream {
-                frame::Frame::Stream { data, .. } => data.max_off(),
-
-                _ => unreachable!(),
-            };
-        }
-
-        // Then is stream 20.
-        let mut off = 0;
-
-        for _ in 1..=3 {
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-            let stream = frames.first().unwrap();
-
-            assert_eq!(stream, &frame::Frame::Stream {
-                stream_id: 20,
-                data: stream::RangeBuf::from(&out, off, false),
-            });
-
-            off = match stream {
-                frame::Frame::Stream { data, .. } => data.max_off(),
-
-                _ => unreachable!(),
-            };
-        }
-
-        // Then are stream 12 and 4, with the same priority, incrementally.
-        let mut off = 0;
-
-        for _ in 1..=3 {
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-            assert_eq!(
-                frames.first(),
-                Some(&frame::Frame::Stream {
-                    stream_id: 12,
-                    data: stream::RangeBuf::from(&out, off, false),
-                })
-            );
-
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-            let stream = frames.first().unwrap();
-
-            assert_eq!(stream, &frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(&out, off, false),
-            });
-
-            off = match stream {
-                frame::Frame::Stream { data, .. } => data.max_off(),
-
-                _ => unreachable!(),
-            };
-        }
-
-        // Final is stream 0.
-        let mut off = 0;
-
-        for _ in 1..=3 {
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-            let stream = frames.first().unwrap();
-
-            assert_eq!(stream, &frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(&out, off, false),
-            });
-
-            off = match stream {
-                frame::Frame::Stream { data, .. } => data.max_off(),
-
-                _ => unreachable!(),
-            };
-        }
-
-        assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
-    }
-
-    #[test]
-    /// Tests that changing a stream's priority is correctly propagated.
-    fn stream_reprioritize() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(0);
-        config.set_initial_max_streams_bidi(5);
-        config.set_initial_max_streams_uni(0);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(12, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut b = [0; 1];
-
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
-        pipe.server.stream_send(0, b"b", false).unwrap();
-
-        pipe.server.stream_recv(12, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(12, 42, true), Ok(()));
-        pipe.server.stream_send(12, b"b", false).unwrap();
-
-        pipe.server.stream_recv(8, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(8, 10, true), Ok(()));
-        pipe.server.stream_send(8, b"b", false).unwrap();
-
-        pipe.server.stream_recv(4, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(4, 42, true), Ok(()));
-        pipe.server.stream_send(4, b"b", false).unwrap();
-
-        // Stream 0 is re-prioritized!!!
-        assert_eq!(pipe.server.stream_priority(0, 20, true), Ok(()));
-
-        // First is stream 8.
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        assert_eq!(
-            frames.first(),
-            Some(&frame::Frame::Stream {
-                stream_id: 8,
-                data: stream::RangeBuf::from(b"b", 0, false),
-            })
-        );
-
-        // Then is stream 0.
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        assert_eq!(
-            frames.first(),
-            Some(&frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(b"b", 0, false),
-            })
-        );
-
-        // Then are stream 12 and 4, with the same priority.
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        assert_eq!(
-            frames.first(),
-            Some(&frame::Frame::Stream {
-                stream_id: 12,
-                data: stream::RangeBuf::from(b"b", 0, false),
-            })
-        );
-
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        assert_eq!(
-            frames.first(),
-            Some(&frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"b", 0, false),
-            })
-        );
-
-        assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
-    }
-
-    #[test]
-    /// Tests that streams and datagrams are correctly scheduled.
-    fn stream_datagram_priority() {
-        // Limit 1-RTT packet size to avoid congestion control interference.
-        const MAX_TEST_PACKET_SIZE: usize = 540;
-
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(1_000_000);
-        config.set_initial_max_stream_data_bidi_local(1_000_000);
-        config.set_initial_max_stream_data_bidi_remote(1_000_000);
-        config.set_initial_max_stream_data_uni(0);
-        config.set_initial_max_streams_bidi(100);
-        config.set_initial_max_streams_uni(0);
-        config.enable_dgram(true, 10, 10);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut b = [0; 1];
-
-        let out = [b'b'; 500];
-
-        // Server prioritizes Stream 0 and 4 with the same urgency with
-        // incremental, meaning the frames should be sent in round-robin
-        // fashion. It also sends DATAGRAMS which are always interleaved with
-        // STREAM frames. So we'll expect a mix of frame types regardless
-        // of the order that the application writes things in.
-
-        pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
-        pipe.server.stream_send(0, &out, false).unwrap();
-        pipe.server.stream_send(0, &out, false).unwrap();
-        pipe.server.stream_send(0, &out, false).unwrap();
-
-        assert_eq!(pipe.server.stream_priority(4, 255, true), Ok(()));
-        pipe.server.stream_send(4, &out, false).unwrap();
-        pipe.server.stream_send(4, &out, false).unwrap();
-        pipe.server.stream_send(4, &out, false).unwrap();
-
-        for _ in 1..=6 {
-            assert_eq!(pipe.server.dgram_send(&out), Ok(()));
-        }
-
-        let mut off_0 = 0;
-        let mut off_4 = 0;
-
-        for _ in 1..=3 {
-            // DATAGRAM
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-            let mut frame_iter = frames.iter();
-
-            assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
-                data: out.into()
-            });
-            assert_eq!(frame_iter.next(), None);
-
-            // STREAM 0
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-            let mut frame_iter = frames.iter();
-            let stream = frame_iter.next().unwrap();
-
-            assert_eq!(stream, &frame::Frame::Stream {
-                stream_id: 0,
-                data: stream::RangeBuf::from(&out, off_0, false),
-            });
-
-            off_0 = match stream {
-                frame::Frame::Stream { data, .. } => data.max_off(),
-
-                _ => unreachable!(),
-            };
-            assert_eq!(frame_iter.next(), None);
-
-            // DATAGRAM
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-            let mut frame_iter = frames.iter();
-
-            assert_eq!(frame_iter.next().unwrap(), &frame::Frame::Datagram {
-                data: out.into()
-            });
-            assert_eq!(frame_iter.next(), None);
-
-            // STREAM 4
-            let (len, _) =
-                pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-            let mut frame_iter = frames.iter();
-            let stream = frame_iter.next().unwrap();
-
-            assert_eq!(stream, &frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(&out, off_4, false),
-            });
-
-            off_4 = match stream {
-                frame::Frame::Stream { data, .. } => data.max_off(),
-
-                _ => unreachable!(),
-            };
-            assert_eq!(frame_iter.next(), None);
-        }
-    }
-
-    #[test]
-    /// Tests that old data is retransmitted on PTO.
-    fn early_retransmit() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends stream data.
-        assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client sends more stream data, but packet is lost
-        assert_eq!(pipe.client.stream_send(4, b"b", false), Ok(1));
-        assert!(pipe.client.send(&mut buf).is_ok());
-
-        // Wait until PTO expires. Since the RTT is very low, wait a bit more.
-        let timer = pipe.client.timeout().unwrap();
-        std::thread::sleep(timer + time::Duration::from_millis(1));
-
-        pipe.client.on_timeout();
-
-        let epoch = packet::Epoch::Application;
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .loss_probes(epoch),
-            1,
-        );
-
-        // Client retransmits stream data in PTO probe.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .loss_probes(epoch),
-            0,
-        );
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        // Skip ACK frame.
-        iter.next();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::Stream {
-                stream_id: 4,
-                data: stream::RangeBuf::from(b"b", 0, false),
-            })
-        );
-        assert_eq!(pipe.client.stats().retrans, 1);
-    }
-
-    #[test]
-    /// Tests that PTO probe packets are not coalesced together.
-    fn dont_coalesce_probes() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Client sends Initial packet.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(len, 1200);
-
-        // Wait for PTO to expire.
-        let timer = pipe.client.timeout().unwrap();
-        std::thread::sleep(timer + time::Duration::from_millis(1));
-
-        pipe.client.on_timeout();
-
-        let epoch = packet::Epoch::Initial;
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .loss_probes(epoch),
-            1,
-        );
-
-        // Client sends PTO probe.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(len, 1200);
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .loss_probes(epoch),
-            0,
-        );
-
-        // Wait for PTO to expire.
-        let timer = pipe.client.timeout().unwrap();
-        std::thread::sleep(timer + time::Duration::from_millis(1));
-
-        pipe.client.on_timeout();
-
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .loss_probes(epoch),
-            2,
-        );
-
-        // Client sends first PTO probe.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(len, 1200);
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .loss_probes(epoch),
-            1,
-        );
-
-        // Client sends second PTO probe.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(len, 1200);
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .loss_probes(epoch),
-            0,
-        );
-    }
-
-    #[test]
-    fn coalesce_padding_short() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Client sends first flight.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-
-        // Server sends first flight.
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-        assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
-        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
-
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
-
-        // Client sends stream data.
-        assert!(pipe.client.is_established());
-        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
-
-        // Client sends second flight.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-
-        // None of the sent packets should have been dropped.
-        assert_eq!(pipe.client.sent_count, pipe.server.recv_count);
-        assert_eq!(pipe.server.sent_count, pipe.client.recv_count);
-    }
-
-    #[test]
-    /// Tests that client avoids handshake deadlock by arming PTO.
-    fn handshake_anti_deadlock() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert-big.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-
-        let mut pipe = testing::Pipe::with_server_config(&mut config).unwrap();
-
-        assert!(!pipe.client.handshake_status().has_handshake_keys);
-        assert!(!pipe.client.handshake_status().peer_verified_address);
-        assert!(!pipe.server.handshake_status().has_handshake_keys);
-        assert!(pipe.server.handshake_status().peer_verified_address);
-
-        // Client sends padded Initial.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(len, 1200);
-
-        // Server receives client's Initial and sends own Initial and Handshake
-        // until it's blocked by the anti-amplification limit.
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-
-        assert!(!pipe.client.handshake_status().has_handshake_keys);
-        assert!(!pipe.client.handshake_status().peer_verified_address);
-        assert!(pipe.server.handshake_status().has_handshake_keys);
-        assert!(pipe.server.handshake_status().peer_verified_address);
-
-        // Client receives the server flight and sends Handshake ACK, but it is
-        // lost.
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-        testing::emit_flight(&mut pipe.client).unwrap();
-
-        assert!(pipe.client.handshake_status().has_handshake_keys);
-        assert!(!pipe.client.handshake_status().peer_verified_address);
-        assert!(pipe.server.handshake_status().has_handshake_keys);
-        assert!(pipe.server.handshake_status().peer_verified_address);
-
-        // Make sure client's PTO timer is armed.
-        assert!(pipe.client.timeout().is_some());
-    }
-
-    #[test]
-    /// Tests that packets with corrupted type (from Handshake to Initial) are
-    /// properly ignored.
-    fn handshake_packet_type_corruption() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Client sends padded Initial.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-        assert_eq!(len, 1200);
-
-        // Server receives client's Initial and sends own Initial and Handshake.
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-
-        // Client sends Initial packet with ACK.
-        let active_pid =
-            pipe.client.paths.get_active_path_id().expect("no active");
-        let (ty, len) = pipe
-            .client
-            .send_single(&mut buf, active_pid, false, time::Instant::now())
-            .unwrap();
-        assert_eq!(ty, Type::Initial);
-
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-
-        // Client sends Handshake packet.
-        let (ty, len) = pipe
-            .client
-            .send_single(&mut buf, active_pid, false, time::Instant::now())
-            .unwrap();
-        assert_eq!(ty, Type::Handshake);
-
-        // Packet type is corrupted to Initial.
-        buf[0] &= !(0x20);
-
-        let hdr = Header::from_slice(&mut buf[..len], 0).unwrap();
-        assert_eq!(hdr.ty, Type::Initial);
-
-        // Server receives corrupted packet without returning an error.
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-    }
-
-    #[test]
-    fn dgram_send_fails_invalidstate() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(
-            pipe.client.dgram_send(b"hello, world"),
-            Err(Error::InvalidState)
-        );
-    }
-
-    #[test]
-    fn dgram_send_app_limited() {
-        let mut buf = [0; 65535];
-        let send_buf = [0xcf; 1000];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 1000, 1000);
-        config.set_max_recv_udp_payload_size(1200);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        for _ in 0..1000 {
-            assert_eq!(pipe.client.dgram_send(&send_buf), Ok(()));
-        }
-
-        assert!(!pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
-        assert_eq!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        assert_ne!(pipe.client.dgram_send_queue.byte_size(), 0);
-        assert_ne!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
-        assert!(!pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
-
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
-
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-
-        assert_ne!(pipe.client.dgram_send_queue.byte_size(), 0);
-        assert_ne!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
-
-        assert!(!pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
-    }
-
-    #[test]
-    fn dgram_single_datagram() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 10, 10);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let result1 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result1, Ok(12));
-
-        let result2 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result2, Err(Error::Done));
-    }
-
-    #[test]
-    fn dgram_multiple_datagrams() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 2, 3);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.dgram_send_queue_len(), 0);
-        assert_eq!(pipe.client.dgram_send_queue_byte_size(), 0);
-
-        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
-        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
-        assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Ok(()));
-        assert!(pipe.client.is_dgram_send_queue_full());
-
-        assert_eq!(pipe.client.dgram_send_queue_byte_size(), 34);
-
-        pipe.client
-            .dgram_purge_outgoing(|d: &[u8]| -> bool { d[0] == b'c' });
-
-        assert_eq!(pipe.client.dgram_send_queue_len(), 2);
-        assert_eq!(pipe.client.dgram_send_queue_byte_size(), 23);
-        assert!(!pipe.client.is_dgram_send_queue_full());
-
-        // Before packets exchanged, no dgrams on server receive side.
-        assert_eq!(pipe.server.dgram_recv_queue_len(), 0);
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // After packets exchanged, no dgrams on client send side.
-        assert_eq!(pipe.client.dgram_send_queue_len(), 0);
-        assert_eq!(pipe.client.dgram_send_queue_byte_size(), 0);
-
-        assert_eq!(pipe.server.dgram_recv_queue_len(), 2);
-        assert_eq!(pipe.server.dgram_recv_queue_byte_size(), 23);
-        assert!(pipe.server.is_dgram_recv_queue_full());
-
-        let result1 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result1, Ok(12));
-        assert_eq!(buf[0], b'h');
-        assert_eq!(buf[1], b'e');
-        assert!(!pipe.server.is_dgram_recv_queue_full());
-
-        let result2 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result2, Ok(11));
-        assert_eq!(buf[0], b'h');
-        assert_eq!(buf[1], b'o');
-
-        let result3 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result3, Err(Error::Done));
-
-        assert_eq!(pipe.server.dgram_recv_queue_len(), 0);
-        assert_eq!(pipe.server.dgram_recv_queue_byte_size(), 0);
-    }
-
-    #[test]
-    fn dgram_send_queue_overflow() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 10, 2);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
-        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
-        assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Err(Error::Done));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let result1 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result1, Ok(12));
-        assert_eq!(buf[0], b'h');
-        assert_eq!(buf[1], b'e');
-
-        let result2 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result2, Ok(11));
-        assert_eq!(buf[0], b'c');
-        assert_eq!(buf[1], b'i');
-
-        let result3 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result3, Err(Error::Done));
-    }
-
-    #[test]
-    fn dgram_recv_queue_overflow() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 2, 10);
-        config.set_max_recv_udp_payload_size(1200);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
-        assert_eq!(pipe.client.dgram_send(b"ciao, mondo"), Ok(()));
-        assert_eq!(pipe.client.dgram_send(b"hola, mundo"), Ok(()));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let result1 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result1, Ok(11));
-        assert_eq!(buf[0], b'c');
-        assert_eq!(buf[1], b'i');
-
-        let result2 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result2, Ok(11));
-        assert_eq!(buf[0], b'h');
-        assert_eq!(buf[1], b'o');
-
-        let result3 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result3, Err(Error::Done));
-    }
-
-    #[test]
-    fn dgram_send_max_size() {
-        let mut buf = [0; MAX_DGRAM_FRAME_SIZE as usize];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 10, 10);
-        config.set_max_recv_udp_payload_size(1452);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-
-        // Before handshake (before peer settings) we don't know max dgram size
-        assert_eq!(pipe.client.dgram_max_writable_len(), None);
-
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let max_dgram_size = pipe.client.dgram_max_writable_len().unwrap();
-
-        // Tests use a 16-byte connection ID, so the max datagram frame payload
-        // size is (1200 byte-long packet - 40 bytes overhead)
-        assert_eq!(max_dgram_size, 1160);
-
-        let dgram_packet: Vec<u8> = vec![42; max_dgram_size];
-
-        assert_eq!(pipe.client.dgram_send(&dgram_packet), Ok(()));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let result1 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result1, Ok(max_dgram_size));
-
-        let result2 = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(result2, Err(Error::Done));
-    }
-
-    #[test]
-    /// Tests is_readable check.
-    fn is_readable() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.enable_dgram(true, 10, 10);
-        config.set_max_recv_udp_payload_size(1452);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // No readable data.
-        assert!(!pipe.client.is_readable());
-        assert!(!pipe.server.is_readable());
-
-        assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server received stream.
-        assert!(!pipe.client.is_readable());
-        assert!(pipe.server.is_readable());
-
-        assert_eq!(
-            pipe.server.stream_send(4, b"aaaaaaaaaaaaaaa", false),
-            Ok(15)
-        );
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Client received stream.
-        assert!(pipe.client.is_readable());
-        assert!(pipe.server.is_readable());
-
-        // Client drains stream.
-        let mut b = [0; 15];
-        pipe.client.stream_recv(4, &mut b).unwrap();
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert!(!pipe.client.is_readable());
-        assert!(pipe.server.is_readable());
-
-        // Server shuts down stream.
-        assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 0), Ok(()));
-        assert!(!pipe.server.is_readable());
-
-        // Server received dgram.
-        assert_eq!(pipe.client.dgram_send(b"dddddddddddddd"), Ok(()));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert!(!pipe.client.is_readable());
-        assert!(pipe.server.is_readable());
-
-        // Client received dgram.
-        assert_eq!(pipe.server.dgram_send(b"dddddddddddddd"), Ok(()));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert!(pipe.client.is_readable());
-        assert!(pipe.server.is_readable());
-
-        // Drain the dgram queues.
-        let r = pipe.server.dgram_recv(&mut buf);
-        assert_eq!(r, Ok(14));
-        assert!(!pipe.server.is_readable());
-
-        let r = pipe.client.dgram_recv(&mut buf);
-        assert_eq!(r, Ok(14));
-        assert!(!pipe.client.is_readable());
-    }
-
-    #[test]
-    fn close() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.close(false, 0x1234, b"hello?"), Ok(()));
-
-        assert_eq!(
-            pipe.client.close(false, 0x4321, b"hello?"),
-            Err(Error::Done)
-        );
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        assert_eq!(
-            frames.first(),
-            Some(&frame::Frame::ConnectionClose {
-                error_code: 0x1234,
-                frame_type: 0,
-                reason: b"hello?".to_vec(),
-            })
-        );
-    }
-
-    #[test]
-    fn app_close_by_client() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.close(true, 0x1234, b"hello!"), Ok(()));
-
-        assert_eq!(pipe.client.close(true, 0x4321, b"hello!"), Err(Error::Done));
-
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
-
-        assert_eq!(
-            frames.first(),
-            Some(&frame::Frame::ApplicationClose {
-                error_code: 0x1234,
-                reason: b"hello!".to_vec(),
-            })
-        );
-    }
-
-    // OpenSSL does not provide a straightforward interface to deal with custom
-    // off-load key signing.
-    #[cfg(not(feature = "openssl"))]
-    #[test]
-    fn app_close_by_server_during_handshake_private_key_failure() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        pipe.server.handshake.set_failing_private_key_method();
-
-        // Client sends initial flight.
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        assert_eq!(
-            testing::process_flight(&mut pipe.server, flight),
-            Err(Error::TlsFail)
-        );
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-
-        // Both connections are not established.
-        assert!(!pipe.server.is_established());
-        assert!(!pipe.client.is_established());
-
-        // Connection should already be closed due the failure during key signing.
-        assert_eq!(
-            pipe.server.close(true, 123, b"fail whale"),
-            Err(Error::Done)
-        );
-
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-
-        // Connection should already be closed due the failure during key signing.
-        assert_eq!(
-            pipe.client.close(true, 123, b"fail whale"),
-            Err(Error::Done)
-        );
-
-        // Connection is not established on the server / client (and never
-        // will be)
-        assert!(!pipe.server.is_established());
-        assert!(!pipe.client.is_established());
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(
-            pipe.server.local_error(),
-            Some(&ConnectionError {
-                is_app: false,
-                error_code: 0x01,
-                reason: vec![],
-            })
-        );
-        assert_eq!(
-            pipe.client.peer_error(),
-            Some(&ConnectionError {
-                is_app: false,
-                error_code: 0x01,
-                reason: vec![],
-            })
-        );
-    }
-
-    #[test]
-    fn app_close_by_server_during_handshake_not_established() {
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Client sends initial flight.
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-
-        // Both connections are not established.
-        assert!(!pipe.client.is_established() && !pipe.server.is_established());
-
-        // Server closes before connection is established.
-        pipe.server.close(true, 123, b"fail whale").unwrap();
-
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-
-        // Connection is established on the client.
-        assert!(pipe.client.is_established());
-
-        // Client sends after connection is established.
-        pipe.client.stream_send(0, b"badauthtoken", true).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        // Connection is not established on the server (and never will be)
-        assert!(!pipe.server.is_established());
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(
-            pipe.server.local_error(),
-            Some(&ConnectionError {
-                is_app: false,
-                error_code: 0x0c,
-                reason: vec![],
-            })
-        );
-        assert_eq!(
-            pipe.client.peer_error(),
-            Some(&ConnectionError {
-                is_app: false,
-                error_code: 0x0c,
-                reason: vec![],
-            })
-        );
-    }
-
-    #[test]
-    fn app_close_by_server_during_handshake_established() {
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Client sends initial flight.
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-
-        // Both connections are not established.
-        assert!(!pipe.client.is_established() && !pipe.server.is_established());
-
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-
-        // Connection is established on the client.
-        assert!(pipe.client.is_established());
-
-        // Client sends after connection is established.
-        pipe.client.stream_send(0, b"badauthtoken", true).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        // Connection is established on the server but the Handshake ACK has not
-        // been sent yet.
-        assert!(pipe.server.is_established());
-
-        // Server closes after connection is established.
-        pipe.server
-            .close(true, 123, b"Invalid authentication")
-            .unwrap();
-
-        // Server sends Handshake ACK and then 1RTT CONNECTION_CLOSE.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(
-            pipe.server.local_error(),
-            Some(&ConnectionError {
-                is_app: true,
-                error_code: 123,
-                reason: b"Invalid authentication".to_vec()
-            })
-        );
-        assert_eq!(
-            pipe.client.peer_error(),
-            Some(&ConnectionError {
-                is_app: true,
-                error_code: 123,
-                reason: b"Invalid authentication".to_vec()
-            })
-        );
-    }
-
-    #[test]
-    fn transport_close_by_client_during_handshake_established() {
-        let mut pipe = testing::Pipe::new().unwrap();
-
-        // Client sends initial flight.
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.server).unwrap();
-
-        // Both connections are not established.
-        assert!(!pipe.client.is_established() && !pipe.server.is_established());
-
-        testing::process_flight(&mut pipe.client, flight).unwrap();
-
-        // Connection is established on the client.
-        assert!(pipe.client.is_established());
-
-        // Client sends after connection is established.
-        pipe.client.close(false, 123, b"connection close").unwrap();
-
-        let flight = testing::emit_flight(&mut pipe.client).unwrap();
-        testing::process_flight(&mut pipe.server, flight).unwrap();
-
-        assert_eq!(
-            pipe.server.peer_error(),
-            Some(&ConnectionError {
-                is_app: false,
-                error_code: 123,
-                reason: b"connection close".to_vec()
-            })
-        );
-        assert_eq!(
-            pipe.client.local_error(),
-            Some(&ConnectionError {
-                is_app: false,
-                error_code: 123,
-                reason: b"connection close".to_vec()
-            })
-        );
-    }
-
-    #[test]
-    fn peer_error() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.server.close(false, 0x1234, b"hello?"), Ok(()));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(
-            pipe.client.peer_error(),
-            Some(&ConnectionError {
-                is_app: false,
-                error_code: 0x1234u64,
-                reason: b"hello?".to_vec()
-            })
-        );
-    }
-
-    #[test]
-    fn app_peer_error() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.server.close(true, 0x1234, b"hello!"), Ok(()));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(
-            pipe.client.peer_error(),
-            Some(&ConnectionError {
-                is_app: true,
-                error_code: 0x1234u64,
-                reason: b"hello!".to_vec()
-            })
-        );
-    }
-
-    #[test]
-    fn local_error() {
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.server.local_error(), None);
-
-        assert_eq!(pipe.server.close(true, 0x1234, b"hello!"), Ok(()));
-
-        assert_eq!(
-            pipe.server.local_error(),
-            Some(&ConnectionError {
-                is_app: true,
-                error_code: 0x1234u64,
-                reason: b"hello!".to_vec()
-            })
-        );
-    }
-
-    #[test]
-    fn update_max_datagram_size() {
-        let mut client_scid = [0; 16];
-        rand::rand_bytes(&mut client_scid[..]);
-        let client_scid = ConnectionId::from_ref(&client_scid);
-        let client_addr = "127.0.0.1:1234".parse().unwrap();
-
-        let mut server_scid = [0; 16];
-        rand::rand_bytes(&mut server_scid[..]);
-        let server_scid = ConnectionId::from_ref(&server_scid);
-        let server_addr = "127.0.0.1:4321".parse().unwrap();
-
-        let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        client_config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        client_config.set_max_recv_udp_payload_size(1200);
-
-        let mut server_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        server_config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        server_config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        server_config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        server_config.verify_peer(false);
-        server_config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        // Larger than the client
-        server_config.set_max_send_udp_payload_size(1500);
-
-        let mut pipe = testing::Pipe {
-            client: connect(
-                Some("quic.tech"),
-                &client_scid,
-                client_addr,
-                server_addr,
-                &mut client_config,
-            )
-            .unwrap(),
-            server: accept(
-                &server_scid,
-                None,
-                server_addr,
-                client_addr,
-                &mut server_config,
-            )
-            .unwrap(),
-        };
-
-        // Before handshake
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .max_datagram_size(),
-            1500,
-        );
-
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // After handshake, max_datagram_size should match to client's
-        // max_recv_udp_payload_size which is smaller
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .max_datagram_size(),
-            1200,
-        );
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .recovery
-                .cwnd(),
-            12000,
-        );
-    }
-
-    #[test]
-    /// Tests that connection-level send capacity decreases as more stream data
-    /// is buffered.
-    fn send_capacity() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(100000);
-        config.set_initial_max_stream_data_bidi_local(10000);
-        config.set_initial_max_stream_data_bidi_remote(10000);
-        config.set_initial_max_streams_bidi(10);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(0, b"hello!", true), Ok(6));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(4, b"hello!", true), Ok(6));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(8, b"hello!", true), Ok(6));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.stream_send(12, b"hello!", true), Ok(6));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut r = pipe.server.readable().collect::<Vec<u64>>();
-        assert_eq!(r.len(), 4);
-
-        r.sort();
-
-        assert_eq!(r, [0, 4, 8, 12]);
-
-        assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((6, true)));
-        assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((6, true)));
-        assert_eq!(pipe.server.stream_recv(8, &mut buf), Ok((6, true)));
-        assert_eq!(pipe.server.stream_recv(12, &mut buf), Ok((6, true)));
-
-        assert_eq!(pipe.server.tx_cap, 12000);
-
-        assert_eq!(pipe.server.stream_send(0, &buf[..5000], false), Ok(5000));
-        assert_eq!(pipe.server.stream_send(4, &buf[..5000], false), Ok(5000));
-        assert_eq!(pipe.server.stream_send(8, &buf[..5000], false), Ok(2000));
-
-        // No more connection send capacity.
-        assert_eq!(
-            pipe.server.stream_send(12, &buf[..5000], false),
-            Err(Error::Done)
-        );
-        assert_eq!(pipe.server.tx_cap, 0);
-
-        assert_eq!(pipe.advance(), Ok(()));
-    }
-
-    #[cfg(feature = "boringssl-boring-crate")]
-    #[test]
-    fn user_provided_boring_ctx() -> Result<()> {
-        // Manually construct boring ssl ctx for server
-        let mut server_tls_ctx_builder =
-            boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
-                .unwrap();
-        server_tls_ctx_builder
-            .set_certificate_chain_file("examples/cert.crt")
-            .unwrap();
-        server_tls_ctx_builder
-            .set_private_key_file(
-                "examples/cert.key",
-                boring::ssl::SslFiletype::PEM,
-            )
-            .unwrap();
-
-        let mut server_config = Config::with_boring_ssl_ctx_builder(
-            crate::PROTOCOL_VERSION,
-            server_tls_ctx_builder,
-        )?;
-        let mut client_config = Config::new(crate::PROTOCOL_VERSION)?;
-        client_config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-        client_config.load_priv_key_from_pem_file("examples/cert.key")?;
-
-        for config in [&mut client_config, &mut server_config] {
-            config.set_application_protos(&[b"proto1", b"proto2"])?;
-            config.set_initial_max_data(30);
-            config.set_initial_max_stream_data_bidi_local(15);
-            config.set_initial_max_stream_data_bidi_remote(15);
-            config.set_initial_max_stream_data_uni(10);
-            config.set_initial_max_streams_bidi(3);
-            config.set_initial_max_streams_uni(3);
-            config.set_max_idle_timeout(180_000);
-            config.verify_peer(false);
-            config.set_ack_delay_exponent(8);
-        }
-
-        let mut client_scid = [0; 16];
-        rand::rand_bytes(&mut client_scid[..]);
-        let client_scid = ConnectionId::from_ref(&client_scid);
-        let client_addr = "127.0.0.1:1234".parse().unwrap();
-
-        let mut server_scid = [0; 16];
-        rand::rand_bytes(&mut server_scid[..]);
-        let server_scid = ConnectionId::from_ref(&server_scid);
-        let server_addr = "127.0.0.1:4321".parse().unwrap();
-
-        let mut pipe = testing::Pipe {
-            client: connect(
-                Some("quic.tech"),
-                &client_scid,
-                client_addr,
-                server_addr,
-                &mut client_config,
-            )?,
-            server: accept(
-                &server_scid,
-                None,
-                server_addr,
-                client_addr,
-                &mut server_config,
-            )?,
-        };
-
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        Ok(())
-    }
-
-    #[test]
-    /// Tests that resetting a stream restores flow control for unsent data.
-    fn last_tx_data_larger_than_tx_data() {
-        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(12000);
-        config.set_initial_max_stream_data_bidi_local(20000);
-        config.set_initial_max_stream_data_bidi_remote(20000);
-        config.set_max_recv_udp_payload_size(1200);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_client_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client opens stream 4 and 8.
-        assert_eq!(pipe.client.stream_send(4, b"a", true), Ok(1));
-        assert_eq!(pipe.client.stream_send(8, b"b", true), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server reads stream data.
-        let mut b = [0; 15];
-        pipe.server.stream_recv(4, &mut b).unwrap();
-
-        // Server sends stream data close to cwnd (12000).
-        let buf = [0; 10000];
-        assert_eq!(pipe.server.stream_send(4, &buf, false), Ok(10000));
-
-        testing::emit_flight(&mut pipe.server).unwrap();
-
-        // Server buffers some data, until send capacity limit reached.
-        let mut buf = [0; 1200];
-        assert_eq!(pipe.server.stream_send(4, &buf, false), Ok(1200));
-        assert_eq!(pipe.server.stream_send(8, &buf, false), Ok(800));
-        assert_eq!(pipe.server.stream_send(4, &buf, false), Err(Error::Done));
-
-        // Wait for PTO to expire.
-        let timer = pipe.server.timeout().unwrap();
-        std::thread::sleep(timer + time::Duration::from_millis(1));
-
-        pipe.server.on_timeout();
-
-        // Server sends PTO probe (not limited to cwnd),
-        // to update last_tx_data.
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-        assert_eq!(len, 1200);
-
-        // Client sends STOP_SENDING to decrease tx_data
-        // by unsent data. It will make last_tx_data > tx_data
-        // and trigger #1232 bug.
-        let frames = [frame::Frame::StopSending {
-            stream_id: 4,
-            error_code: 42,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-    }
-
-    /// Tests that when the client provides a new ConnectionId, it eventually
-    /// reaches the server and notifies the application.
-    #[test]
-    fn send_connection_ids() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(3);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // So far, there should not have any QUIC event.
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.scids_left(), 2);
-
-        let (scid, reset_token) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.client.new_scid(&scid, reset_token, false), Ok(1));
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // At this point, the server should be notified that it has a new CID.
-        assert_eq!(pipe.server.available_dcids(), 1);
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.client.scids_left(), 1);
-
-        // Now, a second CID can be provided.
-        let (scid, reset_token) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.client.new_scid(&scid, reset_token, false), Ok(2));
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // At this point, the server should be notified that it has a new CID.
-        assert_eq!(pipe.server.available_dcids(), 2);
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.client.scids_left(), 0);
-
-        // If now the client tries to send another CID, it reports an error
-        // since it exceeds the limit of active CIDs.
-        let (scid, reset_token) = testing::create_cid_and_reset_token(16);
-        assert_eq!(
-            pipe.client.new_scid(&scid, reset_token, false),
-            Err(Error::IdLimit),
-        );
-    }
-
-    #[test]
-    /// Tests that NEW_CONNECTION_ID with zero-length CID are rejected.
-    fn connection_id_zero() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let mut frames = Vec::new();
-
-        // Client adds a CID that is too short.
-        let (scid, reset_token) = testing::create_cid_and_reset_token(0);
-
-        frames.push(frame::Frame::NewConnectionId {
-            seq_num: 1,
-            retire_prior_to: 0,
-            conn_id: scid.to_vec(),
-            reset_token: reset_token.to_be_bytes(),
-        });
-
-        let pkt_type = packet::Type::Short;
-
-        let written =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-
-        let active_path = pipe.server.paths.get_active().unwrap();
-        let info = RecvInfo {
-            to: active_path.local_addr(),
-            from: active_path.peer_addr(),
-        };
-
-        assert_eq!(
-            pipe.server.recv(&mut buf[..written], info),
-            Err(Error::InvalidFrame)
-        );
-
-        let written = match pipe.server.send(&mut buf) {
-            Ok((write, _)) => write,
-
-            Err(_) => unreachable!(),
-        };
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..written]).unwrap();
-        let mut iter = frames.iter();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ConnectionClose {
-                error_code: 0x7,
-                frame_type: 0,
-                reason: Vec::new(),
-            })
-        );
-    }
-
-    #[test]
-    /// Tests that NEW_CONNECTION_ID with too long CID are rejected.
-    fn connection_id_invalid_max_len() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let mut frames = Vec::new();
-
-        // Client adds a CID that is too long.
-        let (scid, reset_token) =
-            testing::create_cid_and_reset_token(MAX_CONN_ID_LEN + 1);
-
-        frames.push(frame::Frame::NewConnectionId {
-            seq_num: 1,
-            retire_prior_to: 0,
-            conn_id: scid.to_vec(),
-            reset_token: reset_token.to_be_bytes(),
-        });
-
-        let pkt_type = packet::Type::Short;
-
-        let written =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-
-        let active_path = pipe.server.paths.get_active().unwrap();
-        let info = RecvInfo {
-            to: active_path.local_addr(),
-            from: active_path.peer_addr(),
-        };
-
-        assert_eq!(
-            pipe.server.recv(&mut buf[..written], info),
-            Err(Error::InvalidFrame)
-        );
-
-        let written = match pipe.server.send(&mut buf) {
-            Ok((write, _)) => write,
-
-            Err(_) => unreachable!(),
-        };
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..written]).unwrap();
-        let mut iter = frames.iter();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ConnectionClose {
-                error_code: 0x7,
-                frame_type: 0,
-                reason: Vec::new(),
-            })
-        );
-    }
-
-    #[test]
-    /// Exercises the handling of NEW_CONNECTION_ID and RETIRE_CONNECTION_ID
-    /// frames.
-    fn connection_id_handling() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // So far, there should not have any QUIC event.
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.scids_left(), 1);
-
-        let scid = pipe.client.source_id().into_owned();
-
-        let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // At this point, the server should be notified that it has a new CID.
-        assert_eq!(pipe.server.available_dcids(), 1);
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.client.scids_left(), 0);
-
-        // Now we assume that the client wants to advertise more source
-        // Connection IDs than the advertised limit. This is valid if it
-        // requests its peer to retire enough Connection IDs to fit within the
-        // limits.
-
-        let (scid_2, reset_token_2) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.client.new_scid(&scid_2, reset_token_2, true), Ok(2));
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // At this point, the server still have a spare DCID.
-        assert_eq!(pipe.server.available_dcids(), 1);
-        assert_eq!(pipe.server.path_event_next(), None);
-
-        // Client should have received a retired notification.
-        assert_eq!(pipe.client.retired_scid_next(), Some(scid));
-        assert_eq!(pipe.client.retired_scid_next(), None);
-
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.client.scids_left(), 0);
-
-        // The active Destination Connection ID of the server should now be the
-        // one with sequence number 1.
-        assert_eq!(pipe.server.destination_id(), scid_1);
-
-        // Now tries to experience CID retirement. If the server tries to remove
-        // non-existing DCIDs, it fails.
-        assert_eq!(pipe.server.retire_dcid(0), Err(Error::InvalidState));
-        assert_eq!(pipe.server.retire_dcid(3), Err(Error::InvalidState));
-
-        // Now it removes DCID with sequence 1.
-        assert_eq!(pipe.server.retire_dcid(1), Ok(()));
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.retired_scid_next(), Some(scid_1));
-        assert_eq!(pipe.client.retired_scid_next(), None);
-
-        assert_eq!(pipe.server.destination_id(), scid_2);
-        assert_eq!(pipe.server.available_dcids(), 0);
-
-        // Trying to remove the last DCID triggers an error.
-        assert_eq!(pipe.server.retire_dcid(2), Err(Error::OutOfIdentifiers));
-    }
-
-    #[test]
-    fn lost_connection_id_frames() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let scid = pipe.client.source_id().into_owned();
-
-        let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
-
-        // Packets are sent, but never received.
-        testing::emit_flight(&mut pipe.client).unwrap();
-
-        // Wait until timer expires. Since the RTT is very low, wait a bit more.
-        let timer = pipe.client.timeout().unwrap();
-        std::thread::sleep(timer + time::Duration::from_millis(1));
-
-        pipe.client.on_timeout();
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // At this point, the server should be notified that it has a new CID.
-        assert_eq!(pipe.server.available_dcids(), 1);
-
-        // Now the server retires the first Destination CID.
-        assert_eq!(pipe.server.retire_dcid(0), Ok(()));
-
-        // But the packet never reaches the client.
-        testing::emit_flight(&mut pipe.server).unwrap();
-
-        // Wait until timer expires. Since the RTT is very low, wait a bit more.
-        let timer = pipe.server.timeout().unwrap();
-        std::thread::sleep(timer + time::Duration::from_millis(1));
-
-        pipe.server.on_timeout();
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.client.retired_scid_next(), Some(scid));
-        assert_eq!(pipe.client.retired_scid_next(), None);
-    }
-
-    #[test]
-    fn sending_duplicate_scids() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(3);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Trying to send the same CID with a different reset token raises an
-        // InvalidState error.
-        let reset_token_2 = reset_token_1.wrapping_add(1);
-        assert_eq!(
-            pipe.client.new_scid(&scid_1, reset_token_2, false),
-            Err(Error::InvalidState),
-        );
-
-        // Retrying to send the exact same CID with the same token returns the
-        // previously assigned CID seq, but without sending anything.
-        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
-        assert!(!pipe.client.ids.has_new_scids());
-
-        // Now retire this new CID.
-        assert_eq!(pipe.server.retire_dcid(1), Ok(()));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // It is up to the application to ensure that a given SCID is not reused
-        // later.
-        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(2));
-    }
-
-    #[test]
-    /// Tests the limit to retired DCID sequence numbers.
-    fn connection_id_retire_limit() {
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // So far, there should not have any QUIC event.
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.scids_left(), 1);
-
-        let (scid_1, reset_token_1) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // At this point, the server should be notified that it has a new CID.
-        assert_eq!(pipe.server.available_dcids(), 1);
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.client.scids_left(), 0);
-
-        let mut frames = Vec::new();
-
-        // Client retires more than 3x the number of allowed active CIDs.
-        for i in 2..=7 {
-            let (scid, reset_token) = testing::create_cid_and_reset_token(16);
-
-            frames.push(frame::Frame::NewConnectionId {
-                seq_num: i,
-                retire_prior_to: i,
-                conn_id: scid.to_vec(),
-                reset_token: reset_token.to_be_bytes(),
-            });
-        }
-
-        let pkt_type = packet::Type::Short;
-
-        let written =
-            testing::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
-                .unwrap();
-
-        let active_path = pipe.server.paths.get_active().unwrap();
-        let info = RecvInfo {
-            to: active_path.local_addr(),
-            from: active_path.peer_addr(),
-        };
-
-        assert_eq!(
-            pipe.server.recv(&mut buf[..written], info),
-            Err(Error::IdLimit)
-        );
-
-        let written = match pipe.server.send(&mut buf) {
-            Ok((write, _)) => write,
-
-            Err(_) => unreachable!(),
-        };
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..written]).unwrap();
-        let mut iter = frames.iter();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ConnectionClose {
-                error_code: 0x9,
-                frame_type: 0,
-                reason: Vec::new(),
-            })
-        );
-    }
-
-    // Utility function.
-    fn pipe_with_exchanged_cids(
-        config: &mut Config, client_scid_len: usize, server_scid_len: usize,
-        additional_cids: usize,
-    ) -> testing::Pipe {
-        let mut pipe = testing::Pipe::with_config_and_scid_lengths(
-            config,
-            client_scid_len,
-            server_scid_len,
-        )
-        .unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let mut c_cids = Vec::new();
-        let mut c_reset_tokens = Vec::new();
-        let mut s_cids = Vec::new();
-        let mut s_reset_tokens = Vec::new();
-
-        for i in 0..additional_cids {
-            if client_scid_len > 0 {
-                let (c_cid, c_reset_token) =
-                    testing::create_cid_and_reset_token(client_scid_len);
-                c_cids.push(c_cid);
-                c_reset_tokens.push(c_reset_token);
-
-                assert_eq!(
-                    pipe.client.new_scid(&c_cids[i], c_reset_tokens[i], true),
-                    Ok(i as u64 + 1)
-                );
-            }
-
-            if server_scid_len > 0 {
-                let (s_cid, s_reset_token) =
-                    testing::create_cid_and_reset_token(server_scid_len);
-                s_cids.push(s_cid);
-                s_reset_tokens.push(s_reset_token);
-                assert_eq!(
-                    pipe.server.new_scid(&s_cids[i], s_reset_tokens[i], true),
-                    Ok(i as u64 + 1)
-                );
-            }
-        }
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        if client_scid_len > 0 {
-            assert_eq!(pipe.server.available_dcids(), additional_cids);
-        }
-
-        if server_scid_len > 0 {
-            assert_eq!(pipe.client.available_dcids(), additional_cids);
-        }
-
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.path_event_next(), None);
-
-        pipe
-    }
-
-    #[test]
-    fn path_validation() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-
-        // We cannot probe a new path if there are not enough identifiers.
-        assert_eq!(
-            pipe.client.probe_path(client_addr_2, server_addr),
-            Err(Error::OutOfIdentifiers)
-        );
-
-        let (c_cid, c_reset_token) = testing::create_cid_and_reset_token(16);
-
-        assert_eq!(pipe.client.new_scid(&c_cid, c_reset_token, true), Ok(1));
-
-        let (s_cid, s_reset_token) = testing::create_cid_and_reset_token(16);
-        assert_eq!(pipe.server.new_scid(&s_cid, s_reset_token, true), Ok(1));
-
-        // We need to exchange the CIDs first.
-        assert_eq!(
-            pipe.client.probe_path(client_addr_2, server_addr),
-            Err(Error::OutOfIdentifiers)
-        );
-
-        // Let exchange packets over the connection.
-        assert_eq!(pipe.advance(), Ok(()));
-
-        assert_eq!(pipe.server.available_dcids(), 1);
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(pipe.client.available_dcids(), 1);
-        assert_eq!(pipe.client.path_event_next(), None);
-
-        // Now the path probing can work.
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-
-        // But the server cannot probe a yet-unseen path.
-        assert_eq!(
-            pipe.server.probe_path(server_addr, client_addr_2),
-            Err(Error::InvalidState),
-        );
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // The path should be validated at some point.
-        assert_eq!(
-            pipe.client.path_event_next(),
-            Some(PathEvent::Validated(client_addr_2, server_addr)),
-        );
-        assert_eq!(pipe.client.path_event_next(), None);
-
-        // The server should be notified of this new path.
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::New(server_addr, client_addr_2)),
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::Validated(server_addr, client_addr_2)),
-        );
-        assert_eq!(pipe.server.path_event_next(), None);
-
-        // The server can later probe the path again.
-        assert_eq!(pipe.server.probe_path(server_addr, client_addr_2), Ok(1));
-
-        // This should not trigger any event at client side.
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(pipe.server.path_event_next(), None);
-    }
-
-    #[test]
-    fn losing_probing_packets() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-
-        // The client creates the PATH CHALLENGE, but it is lost.
-        testing::emit_flight(&mut pipe.client).unwrap();
-
-        // Wait until probing timer expires. Since the RTT is very low,
-        // wait a bit more.
-        let probed_pid = pipe
-            .client
-            .paths
-            .path_id_from_addrs(&(client_addr_2, server_addr))
-            .unwrap();
-        let probe_instant = pipe
-            .client
-            .paths
-            .get(probed_pid)
-            .unwrap()
-            .recovery
-            .loss_detection_timer()
-            .unwrap();
-        let timer = probe_instant.duration_since(time::Instant::now());
-        std::thread::sleep(timer + time::Duration::from_millis(1));
-
-        pipe.client.on_timeout();
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // The path should be validated at some point.
-        assert_eq!(
-            pipe.client.path_event_next(),
-            Some(PathEvent::Validated(client_addr_2, server_addr))
-        );
-        assert_eq!(pipe.client.path_event_next(), None);
-
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::New(server_addr, client_addr_2))
-        );
-        // The path should be validated at some point.
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::Validated(server_addr, client_addr_2))
-        );
-        assert_eq!(pipe.server.path_event_next(), None);
-    }
-
-    #[test]
-    fn failed_path_validation() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-
-        for _ in 0..MAX_PROBING_TIMEOUTS {
-            // The client creates the PATH CHALLENGE, but it is always lost.
-            testing::emit_flight(&mut pipe.client).unwrap();
-
-            // Wait until probing timer expires. Since the RTT is very low,
-            // wait a bit more.
-            let probed_pid = pipe
-                .client
-                .paths
-                .path_id_from_addrs(&(client_addr_2, server_addr))
-                .unwrap();
-            let probe_instant = pipe
-                .client
-                .paths
-                .get(probed_pid)
-                .unwrap()
-                .recovery
-                .loss_detection_timer()
-                .unwrap();
-            let timer = probe_instant.duration_since(time::Instant::now());
-            std::thread::sleep(timer + time::Duration::from_millis(1));
-
-            pipe.client.on_timeout();
-        }
-
-        assert_eq!(
-            pipe.client.path_event_next(),
-            Some(PathEvent::FailedValidation(client_addr_2, server_addr)),
-        );
-    }
-
-    #[test]
-    fn client_discard_unknown_address() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_uni(3);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Server sends stream data.
-        assert_eq!(pipe.server.stream_send(3, b"a", true), Ok(1));
-
-        let mut flight =
-            testing::emit_flight(&mut pipe.server).expect("no packet");
-        // Let's change the address info.
-        flight
-            .iter_mut()
-            .for_each(|(_, si)| si.from = "127.0.0.1:9292".parse().unwrap());
-        assert_eq!(testing::process_flight(&mut pipe.client, flight), Ok(()));
-        assert_eq!(pipe.client.paths.len(), 1);
-    }
-
-    #[test]
-    fn path_validation_limited_mtu() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-        // Limited MTU of 1199 bytes for some reason.
-        testing::process_flight(
-            &mut pipe.server,
-            testing::emit_flight_with_max_buffer(
-                &mut pipe.client,
-                1199,
-                None,
-                None,
-            )
-            .expect("no packet"),
-        )
-        .expect("error when processing client packets");
-        testing::process_flight(
-            &mut pipe.client,
-            testing::emit_flight(&mut pipe.server).expect("no packet"),
-        )
-        .expect("error when processing client packets");
-        let probed_pid = pipe
-            .client
-            .paths
-            .path_id_from_addrs(&(client_addr_2, server_addr))
-            .unwrap();
-        assert!(!pipe.client.paths.get(probed_pid).unwrap().validated(),);
-        assert_eq!(pipe.client.path_event_next(), None);
-        // Now let the client probe at its MTU.
-        assert_eq!(pipe.advance(), Ok(()));
-        assert!(pipe.client.paths.get(probed_pid).unwrap().validated());
-        assert_eq!(
-            pipe.client.path_event_next(),
-            Some(PathEvent::Validated(client_addr_2, server_addr))
-        );
-    }
-
-    #[test]
-    fn path_probing_dos() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // The path should be validated at some point.
-        assert_eq!(
-            pipe.client.path_event_next(),
-            Some(PathEvent::Validated(client_addr_2, server_addr))
-        );
-        assert_eq!(pipe.client.path_event_next(), None);
-
-        // The server should be notified of this new path.
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::New(server_addr, client_addr_2))
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::Validated(server_addr, client_addr_2))
-        );
-        assert_eq!(pipe.server.path_event_next(), None);
-
-        assert_eq!(pipe.server.paths.len(), 2);
-
-        // Now forge a packet reusing the unverified path's CID over another
-        // 4-tuple.
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-        let client_addr_3 = "127.0.0.1:9012".parse().unwrap();
-        let mut flight =
-            testing::emit_flight(&mut pipe.client).expect("no generated packet");
-        flight
-            .iter_mut()
-            .for_each(|(_, si)| si.from = client_addr_3);
-        testing::process_flight(&mut pipe.server, flight)
-            .expect("failed to process");
-        assert_eq!(pipe.server.paths.len(), 2);
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::ReusedSourceConnectionId(
-                1,
-                (server_addr, client_addr_2),
-                (server_addr, client_addr_3)
-            ))
-        );
-        assert_eq!(pipe.server.path_event_next(), None);
-    }
-
-    #[test]
-    fn retiring_active_path_dcid() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-
-        assert_eq!(pipe.client.retire_dcid(0), Err(Error::OutOfIdentifiers));
-    }
-
-    #[test]
-    fn send_on_path_test() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_initial_max_data(100000);
-        config.set_initial_max_stream_data_bidi_local(100000);
-        config.set_initial_max_stream_data_bidi_remote(100000);
-        config.set_initial_max_streams_bidi(2);
-        config.set_active_connection_id_limit(4);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 3);
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr = testing::Pipe::client_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-
-        let mut buf = [0; 65535];
-        // There is nothing to send on the initial path.
-        assert_eq!(
-            pipe.client.send_on_path(
-                &mut buf,
-                Some(client_addr),
-                Some(server_addr)
-            ),
-            Err(Error::Done)
-        );
-
-        // Client should send padded PATH_CHALLENGE.
-        let (sent, si) = pipe
-            .client
-            .send_on_path(&mut buf, Some(client_addr_2), Some(server_addr))
-            .expect("No error");
-        assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
-        assert_eq!(si.from, client_addr_2);
-        assert_eq!(si.to, server_addr);
-
-        let ri = RecvInfo {
-            to: si.to,
-            from: si.from,
-        };
-        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
-
-        let stats = pipe.server.stats();
-        assert_eq!(stats.path_challenge_rx_count, 1);
-
-        // A non-existing 4-tuple raises an InvalidState.
-        let client_addr_3 = "127.0.0.1:9012".parse().unwrap();
-        let server_addr_2 = "127.0.0.1:9876".parse().unwrap();
-        assert_eq!(
-            pipe.client.send_on_path(
-                &mut buf,
-                Some(client_addr_3),
-                Some(server_addr)
-            ),
-            Err(Error::InvalidState)
-        );
-        assert_eq!(
-            pipe.client.send_on_path(
-                &mut buf,
-                Some(client_addr),
-                Some(server_addr_2)
-            ),
-            Err(Error::InvalidState)
-        );
-
-        // Let's introduce some additional path challenges and data exchange.
-        assert_eq!(pipe.client.probe_path(client_addr, server_addr_2), Ok(2));
-        assert_eq!(pipe.client.probe_path(client_addr_3, server_addr), Ok(3));
-        // Just to fit in two packets.
-        assert_eq!(pipe.client.stream_send(0, &buf[..1201], true), Ok(1201));
-
-        // PATH_CHALLENGE
-        let (sent, si) = pipe
-            .client
-            .send_on_path(&mut buf, Some(client_addr), None)
-            .expect("No error");
-        assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
-        assert_eq!(si.from, client_addr);
-        assert_eq!(si.to, server_addr_2);
-
-        let ri = RecvInfo {
-            to: si.to,
-            from: si.from,
-        };
-        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
-
-        let stats = pipe.server.stats();
-        assert_eq!(stats.path_challenge_rx_count, 2);
-
-        // STREAM frame on active path.
-        let (sent, si) = pipe
-            .client
-            .send_on_path(&mut buf, Some(client_addr), None)
-            .expect("No error");
-        assert_eq!(si.from, client_addr);
-        assert_eq!(si.to, server_addr);
-
-        let ri = RecvInfo {
-            to: si.to,
-            from: si.from,
-        };
-        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
-
-        let stats = pipe.server.stats();
-        assert_eq!(stats.path_challenge_rx_count, 2);
-
-        // PATH_CHALLENGE
-        let (sent, si) = pipe
-            .client
-            .send_on_path(&mut buf, None, Some(server_addr))
-            .expect("No error");
-        assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
-        assert_eq!(si.from, client_addr_3);
-        assert_eq!(si.to, server_addr);
-
-        let ri = RecvInfo {
-            to: si.to,
-            from: si.from,
-        };
-        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
-
-        let stats = pipe.server.stats();
-        assert_eq!(stats.path_challenge_rx_count, 3);
-
-        // STREAM frame on active path.
-        let (sent, si) = pipe
-            .client
-            .send_on_path(&mut buf, None, Some(server_addr))
-            .expect("No error");
-        assert_eq!(si.from, client_addr);
-        assert_eq!(si.to, server_addr);
-
-        let ri = RecvInfo {
-            to: si.to,
-            from: si.from,
-        };
-        assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
-
-        // No more data to exchange leads to Error::Done.
-        assert_eq!(
-            pipe.client.send_on_path(&mut buf, Some(client_addr), None),
-            Err(Error::Done)
-        );
-        assert_eq!(
-            pipe.client.send_on_path(&mut buf, None, Some(server_addr)),
-            Err(Error::Done)
-        );
-
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let mut v1 = pipe.client.paths_iter(client_addr).collect::<Vec<_>>();
-        let mut v2 = vec![server_addr, server_addr_2];
-
-        v1.sort();
-        v2.sort();
-
-        assert_eq!(v1, v2);
-
-        let mut v1 = pipe.client.paths_iter(client_addr_2).collect::<Vec<_>>();
-        let mut v2 = vec![server_addr];
-
-        v1.sort();
-        v2.sort();
-
-        assert_eq!(v1, v2);
-
-        let mut v1 = pipe.client.paths_iter(client_addr_3).collect::<Vec<_>>();
-        let mut v2 = vec![server_addr];
-
-        v1.sort();
-        v2.sort();
-
-        assert_eq!(v1, v2);
-
-        let stats = pipe.server.stats();
-        assert_eq!(stats.path_challenge_rx_count, 3);
-    }
-
-    #[test]
-    fn connection_migration() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(3);
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 2);
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-        let client_addr_3 = "127.0.0.1:9012".parse().unwrap();
-        let client_addr_4 = "127.0.0.1:8908".parse().unwrap();
-
-        // Case 1: the client first probes the new address, the server too, and
-        // then migrates.
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(
-            pipe.client.path_event_next(),
-            Some(PathEvent::Validated(client_addr_2, server_addr))
-        );
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::New(server_addr, client_addr_2))
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::Validated(server_addr, client_addr_2))
-        );
-        assert_eq!(
-            pipe.client.is_path_validated(client_addr_2, server_addr),
-            Ok(true)
-        );
-        assert_eq!(
-            pipe.server.is_path_validated(server_addr, client_addr_2),
-            Ok(true)
-        );
-        // The server can never initiates the connection migration.
-        assert_eq!(
-            pipe.server.migrate(server_addr, client_addr_2),
-            Err(Error::InvalidState)
-        );
-        assert_eq!(pipe.client.migrate(client_addr_2, server_addr), Ok(1));
-        assert_eq!(pipe.client.stream_send(0, b"data", true), Ok(4));
-        assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .local_addr(),
-            client_addr_2
-        );
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            server_addr
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::PeerMigrated(server_addr, client_addr_2))
-        );
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .local_addr(),
-            server_addr
-        );
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            client_addr_2
-        );
-
-        // Case 2: the client migrates on a path that was not previously
-        // validated, and has spare SCIDs/DCIDs to do so.
-        assert_eq!(pipe.client.migrate(client_addr_3, server_addr), Ok(2));
-        assert_eq!(pipe.client.stream_send(4, b"data", true), Ok(4));
-        assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .local_addr(),
-            client_addr_3
-        );
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            server_addr
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::New(server_addr, client_addr_3))
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::Validated(server_addr, client_addr_3))
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::PeerMigrated(server_addr, client_addr_3))
-        );
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .local_addr(),
-            server_addr
-        );
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            client_addr_3
-        );
-
-        // Case 3: the client tries to migrate on the current active path.
-        // This is not an error, but it triggers nothing.
-        assert_eq!(pipe.client.migrate(client_addr_3, server_addr), Ok(2));
-        assert_eq!(pipe.client.stream_send(8, b"data", true), Ok(4));
-        assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .local_addr(),
-            client_addr_3
-        );
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            server_addr
-        );
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .local_addr(),
-            server_addr
-        );
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            client_addr_3
-        );
-
-        // Case 4: the client tries to migrate on a path that was not previously
-        // validated, and has no spare SCIDs/DCIDs. Prevent active migration.
-        assert_eq!(
-            pipe.client.migrate(client_addr_4, server_addr),
-            Err(Error::OutOfIdentifiers)
-        );
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .local_addr(),
-            client_addr_3
-        );
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            server_addr
-        );
-    }
-
-    #[test]
-    fn connection_migration_zero_length_cid() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 0, 16, 1);
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-
-        // The client migrates on a path that was not previously
-        // validated, and has spare SCIDs/DCIDs to do so.
-        assert_eq!(pipe.client.migrate(client_addr_2, server_addr), Ok(1));
-        assert_eq!(pipe.client.stream_send(4, b"data", true), Ok(4));
-        assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .local_addr(),
-            client_addr_2
-        );
-        assert_eq!(
-            pipe.client
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            server_addr
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::New(server_addr, client_addr_2))
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::Validated(server_addr, client_addr_2))
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::PeerMigrated(server_addr, client_addr_2))
-        );
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .local_addr(),
-            server_addr
-        );
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            client_addr_2
-        );
-    }
-
-    #[test]
-    fn connection_migration_reordered_non_probing() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(2);
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
-
-        let client_addr = testing::Pipe::client_addr();
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-
-        assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
-        assert_eq!(pipe.advance(), Ok(()));
-        assert_eq!(
-            pipe.client.path_event_next(),
-            Some(PathEvent::Validated(client_addr_2, server_addr))
-        );
-        assert_eq!(pipe.client.path_event_next(), None);
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::New(server_addr, client_addr_2))
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::Validated(server_addr, client_addr_2))
-        );
-        assert_eq!(pipe.server.path_event_next(), None);
-
-        // A first flight sent from secondary address.
-        assert_eq!(pipe.client.stream_send(0, b"data", true), Ok(4));
-        let mut first = testing::emit_flight(&mut pipe.client).unwrap();
-        first.iter_mut().for_each(|(_, si)| si.from = client_addr_2);
-        // A second one, but sent from the original one.
-        assert_eq!(pipe.client.stream_send(4, b"data", true), Ok(4));
-        let second = testing::emit_flight(&mut pipe.client).unwrap();
-        // Second flight is received before first one.
-        assert_eq!(testing::process_flight(&mut pipe.server, second), Ok(()));
-        assert_eq!(testing::process_flight(&mut pipe.server, first), Ok(()));
-
-        // Server does not perform connection migration because of packet
-        // reordering.
-        assert_eq!(pipe.server.path_event_next(), None);
-        assert_eq!(
-            pipe.server
-                .paths
-                .get_active()
-                .expect("no active")
-                .peer_addr(),
-            client_addr
-        );
-    }
-
-    #[test]
-    fn resilience_against_migration_attack() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(3);
-        config.set_initial_max_data(100000);
-        config.set_initial_max_stream_data_bidi_local(100000);
-        config.set_initial_max_stream_data_bidi_remote(100000);
-        config.set_initial_max_streams_bidi(2);
-
-        let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
-
-        let client_addr = testing::Pipe::client_addr();
-        let server_addr = testing::Pipe::server_addr();
-        let spoofed_client_addr = "127.0.0.1:6666".parse().unwrap();
-
-        const DATA_BYTES: usize = 24000;
-        let buf = [42; DATA_BYTES];
-        let mut recv_buf = [0; DATA_BYTES];
-        assert_eq!(pipe.server.stream_send(1, &buf, true), Ok(12000));
-        assert_eq!(
-            testing::process_flight(
-                &mut pipe.client,
-                testing::emit_flight(&mut pipe.server).unwrap()
-            ),
-            Ok(())
-        );
-        let (rcv_data_1, _) = pipe.client.stream_recv(1, &mut recv_buf).unwrap();
-
-        // Fake the source address of client.
-        let mut faked_addr_flight =
-            testing::emit_flight(&mut pipe.client).unwrap();
-        faked_addr_flight
-            .iter_mut()
-            .for_each(|(_, si)| si.from = spoofed_client_addr);
-        assert_eq!(
-            testing::process_flight(&mut pipe.server, faked_addr_flight),
-            Ok(())
-        );
-        assert_eq!(pipe.server.stream_send(1, &buf[12000..], true), Ok(12000));
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::ReusedSourceConnectionId(
-                0,
-                (server_addr, client_addr),
-                (server_addr, spoofed_client_addr)
-            ))
-        );
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::New(server_addr, spoofed_client_addr))
-        );
-
-        assert_eq!(
-            pipe.server.is_path_validated(server_addr, client_addr),
-            Ok(true)
-        );
-        assert_eq!(
-            pipe.server
-                .is_path_validated(server_addr, spoofed_client_addr),
-            Ok(false)
-        );
-
-        // The client creates the PATH CHALLENGE, but it is always lost.
-        testing::emit_flight(&mut pipe.server).unwrap();
-
-        // Wait until probing timer expires. Since the RTT is very low,
-        // wait a bit more.
-        let probed_pid = pipe
-            .server
-            .paths
-            .path_id_from_addrs(&(server_addr, spoofed_client_addr))
-            .unwrap();
-        let probe_instant = pipe
-            .server
-            .paths
-            .get(probed_pid)
-            .unwrap()
-            .recovery
-            .loss_detection_timer()
-            .unwrap();
-        let timer = probe_instant.duration_since(time::Instant::now());
-        std::thread::sleep(timer + time::Duration::from_millis(1));
-
-        pipe.server.on_timeout();
-
-        // Because of the small ACK size, the server cannot send more to the
-        // client. Fallback on the previous active path.
-        assert_eq!(
-            pipe.server.path_event_next(),
-            Some(PathEvent::FailedValidation(
-                server_addr,
-                spoofed_client_addr
-            ))
-        );
-
-        assert_eq!(
-            pipe.server.is_path_validated(server_addr, client_addr),
-            Ok(true)
-        );
-        assert_eq!(
-            pipe.server
-                .is_path_validated(server_addr, spoofed_client_addr),
-            Ok(false)
-        );
-
-        let server_active_path = pipe.server.paths.get_active().unwrap();
-        assert_eq!(server_active_path.local_addr(), server_addr);
-        assert_eq!(server_active_path.peer_addr(), client_addr);
-        assert_eq!(pipe.advance(), Ok(()));
-        let (rcv_data_2, fin) =
-            pipe.client.stream_recv(1, &mut recv_buf).unwrap();
-        assert!(fin);
-        assert_eq!(rcv_data_1 + rcv_data_2, DATA_BYTES);
-    }
-
-    #[test]
-    fn consecutive_non_ack_eliciting() {
-        let mut buf = [0; 65535];
-
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Client sends a bunch of PING frames, causing server to ACK (ACKs aren't
-        // ack-eliciting)
-        let frames = [frame::Frame::Ping { mtu_probe: None }];
-        let pkt_type = packet::Type::Short;
-        for _ in 0..24 {
-            let len = pipe
-                .send_pkt_to_server(pkt_type, &frames, &mut buf)
-                .unwrap();
-            assert!(len > 0);
-
-            let frames =
-                testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-            assert!(
-                frames
-                    .iter()
-                    .all(|frame| matches!(frame, frame::Frame::ACK { .. })),
-                "ACK only"
-            );
-        }
-
-        // After 24 non-ack-eliciting, an ACK is explicitly elicited with a PING
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-        assert!(len > 0);
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-        assert!(
-            frames
-                .iter()
-                .any(|frame| matches!(frame, frame::Frame::Ping {
-                    mtu_probe: None
-                })),
-            "found a PING"
-        );
-    }
-
-    #[test]
-    fn send_ack_eliciting_causes_ping() {
-        // First establish a connection
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Queue a PING frame
-        pipe.server.send_ack_eliciting().unwrap();
-
-        // Make sure ping is sent
-        let mut buf = [0; 1500];
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-        let mut iter = frames.iter();
-
-        assert_eq!(iter.next(), Some(&frame::Frame::Ping { mtu_probe: None }));
-    }
-
-    #[test]
-    fn send_ack_eliciting_no_ping() {
-        // First establish a connection
-        let mut pipe = testing::Pipe::new().unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Queue a PING frame
-        pipe.server.send_ack_eliciting().unwrap();
-
-        // Send a stream frame, which is ACK-eliciting to make sure the ping is
-        // not sent
-        assert_eq!(pipe.server.stream_send(1, b"a", false), Ok(1));
-
-        // Make sure ping is not sent
-        let mut buf = [0; 1500];
-        let (len, _) = pipe.server.send(&mut buf).unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-        let mut iter = frames.iter();
-
-        assert!(matches!(
-            iter.next(),
-            Some(&frame::Frame::Stream {
-                stream_id: 1,
-                data: _
-            })
-        ));
-        assert!(iter.next().is_none());
-    }
-
-    /// Tests that streams do not keep being "writable" after being collected
-    /// on reset.
-    #[test]
-    fn stop_sending_stream_send_after_reset_stream_ack() {
-        let mut b = [0; 15];
-
-        let mut buf = [0; 65535];
-
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(999999999);
-        config.set_initial_max_stream_data_bidi_local(30);
-        config.set_initial_max_stream_data_bidi_remote(30);
-        config.set_initial_max_stream_data_uni(30);
-        config.set_initial_max_streams_bidi(1000);
-        config.set_initial_max_streams_uni(0);
-        config.verify_peer(false);
-
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        assert_eq!(pipe.server.streams.len(), 0);
-        assert_eq!(pipe.server.readable().len(), 0);
-        assert_eq!(pipe.server.writable().len(), 0);
-
-        // Client opens a load of streams
-        assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
-        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
-        assert_eq!(pipe.client.stream_send(8, b"hello", true), Ok(5));
-        assert_eq!(pipe.client.stream_send(12, b"hello", true), Ok(5));
-        assert_eq!(pipe.client.stream_send(16, b"hello", true), Ok(5));
-        assert_eq!(pipe.client.stream_send(20, b"hello", true), Ok(5));
-        assert_eq!(pipe.client.stream_send(24, b"hello", true), Ok(5));
-        assert_eq!(pipe.client.stream_send(28, b"hello", true), Ok(5));
-        assert_eq!(pipe.client.stream_send(32, b"hello", true), Ok(5));
-        assert_eq!(pipe.client.stream_send(36, b"hello", true), Ok(5));
-        assert_eq!(pipe.advance(), Ok(()));
-
-        // Server iterators are populated
-        let mut r = pipe.server.readable();
-        assert_eq!(r.len(), 10);
-        assert_eq!(r.next(), Some(0));
-        assert_eq!(r.next(), Some(4));
-        assert_eq!(r.next(), Some(8));
-        assert_eq!(r.next(), Some(12));
-        assert_eq!(r.next(), Some(16));
-        assert_eq!(r.next(), Some(20));
-        assert_eq!(r.next(), Some(24));
-        assert_eq!(r.next(), Some(28));
-        assert_eq!(r.next(), Some(32));
-        assert_eq!(r.next(), Some(36));
-
-        assert_eq!(r.next(), None);
-
-        let mut w = pipe.server.writable();
-        assert_eq!(w.len(), 10);
-        assert_eq!(w.next(), Some(0));
-        assert_eq!(w.next(), Some(4));
-        assert_eq!(w.next(), Some(8));
-        assert_eq!(w.next(), Some(12));
-        assert_eq!(w.next(), Some(16));
-        assert_eq!(w.next(), Some(20));
-        assert_eq!(w.next(), Some(24));
-        assert_eq!(w.next(), Some(28));
-        assert_eq!(w.next(), Some(32));
-        assert_eq!(w.next(), Some(36));
-        assert_eq!(w.next(), None);
-
-        // Read one stream
-        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
-        assert!(pipe.server.stream_finished(0));
-
-        assert_eq!(pipe.server.readable().len(), 9);
-        assert_eq!(pipe.server.writable().len(), 10);
-
-        assert_eq!(pipe.server.stream_writable(0, 0), Ok(true));
-
-        // Server sends data on stream 0, until blocked.
-        while pipe.server.stream_send(0, b"world", false) != Err(Error::Done) {
-            assert_eq!(pipe.advance(), Ok(()));
-        }
-
-        assert_eq!(pipe.server.writable().len(), 9);
-        assert_eq!(pipe.server.stream_writable(0, 0), Ok(true));
-
-        // Client sends STOP_SENDING.
-        let frames = [frame::Frame::StopSending {
-            stream_id: 0,
-            error_code: 42,
-        }];
-
-        let pkt_type = packet::Type::Short;
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        // Server sent a RESET_STREAM frame in response.
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        let mut iter = frames.iter();
-
-        // Skip ACK frame.
-        iter.next();
-
-        assert_eq!(
-            iter.next(),
-            Some(&frame::Frame::ResetStream {
-                stream_id: 0,
-                error_code: 42,
-                final_size: 30,
-            })
-        );
-
-        // Stream 0 is now writable in order to make apps aware of STOP_SENDING
-        // via returning an error.
-        let mut w = pipe.server.writable();
-        assert_eq!(w.len(), 10);
-
-        assert!(w.any(|s| s == 0));
-        assert_eq!(
-            pipe.server.stream_writable(0, 1),
-            Err(Error::StreamStopped(42))
-        );
-
-        assert_eq!(pipe.server.writable().len(), 10);
-        assert_eq!(pipe.server.streams.len(), 10);
-
-        // Client acks RESET_STREAM frame.
-        let mut ranges = ranges::RangeSet::default();
-        ranges.insert(0..12);
-
-        let frames = [frame::Frame::ACK {
-            ack_delay: 15,
-            ranges,
-            ecn_counts: None,
-        }];
-
-        assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
-
-        // Stream is collected on the server after RESET_STREAM is acked.
-        assert_eq!(pipe.server.streams.len(), 9);
-
-        // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
-        let frames = [frame::Frame::StopSending {
-            stream_id: 0,
-            error_code: 42,
-        }];
-
-        let len = pipe
-            .send_pkt_to_server(pkt_type, &frames, &mut buf)
-            .unwrap();
-
-        let frames =
-            testing::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
-
-        assert_eq!(frames.len(), 1);
-
-        match frames.first() {
-            Some(frame::Frame::ACK { .. }) => (),
-
-            f => panic!("expected ACK frame, got {:?}", f),
-        };
-
-        assert_eq!(pipe.server.streams.len(), 9);
-
-        // Stream 0 has been collected and must not be writable anymore.
-        let mut w = pipe.server.writable();
-        assert_eq!(w.len(), 9);
-        assert!(!w.any(|s| s == 0));
-
-        // If we called send before the client ACK of reset stream, it would
-        // have failed with StreamStopped.
-        assert_eq!(pipe.server.stream_send(0, b"world", true), Err(Error::Done),);
-
-        // Stream 0 is still not writable.
-        let mut w = pipe.server.writable();
-        assert_eq!(w.len(), 9);
-        assert!(!w.any(|s| s == 0));
-    }
-
-    #[test]
-    fn challenge_no_cids() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_active_connection_id_limit(4);
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-
-        let mut pipe =
-            testing::Pipe::with_config_and_scid_lengths(&mut config, 16, 16)
-                .unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        // Server send CIDs to client
-        let mut server_cids = Vec::new();
-        for _ in 0..2 {
-            let (cid, reset_token) = testing::create_cid_and_reset_token(16);
-            pipe.server
-                .new_scid(&cid, reset_token, true)
-                .expect("server issue cid");
-            server_cids.push(cid);
-        }
-        assert_eq!(pipe.advance(), Ok(()));
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
-
-        // Client probes path before sending CIDs (simulating race condition)
-        let frames = [frame::Frame::PathChallenge {
-            data: [0, 1, 2, 3, 4, 5, 6, 7],
-        }];
-        let mut pkt_buf = [0u8; 1500];
-        let mut b = octets::OctetsMut::with_slice(&mut pkt_buf);
-        let epoch = packet::Type::Short.to_epoch().unwrap();
-        let space = &mut pipe.client.pkt_num_spaces[epoch];
-        let pn = pipe.client.next_pkt_num;
-        let pn_len = 4;
-
-        let hdr = Header {
-            ty: packet::Type::Short,
-            version: pipe.client.version,
-            dcid: server_cids[0].clone(),
-            scid: ConnectionId::from_ref(&[5, 4, 3, 2, 1]),
-            pkt_num: 0,
-            pkt_num_len: pn_len,
-            token: pipe.client.token.clone(),
-            versions: None,
-            key_phase: pipe.client.key_phase,
-        };
-        hdr.to_bytes(&mut b).expect("encode header");
-        let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len());
-        b.put_u32(pn as u32).expect("put pn");
-
-        let payload_offset = b.off();
-
-        for frame in frames {
-            frame.to_bytes(&mut b).expect("encode frames");
-        }
-
-        let aead = space.crypto_seal.as_ref().expect("crypto seal");
-
-        let written = packet::encrypt_pkt(
-            &mut b,
-            pn,
-            pn_len,
-            payload_len,
-            payload_offset,
-            None,
-            aead,
-        )
-        .expect("packet encrypt");
-        pipe.client.next_pkt_num += 1;
-
-        pipe.server
-            .recv(&mut pkt_buf[..written], RecvInfo {
-                to: server_addr,
-                from: client_addr_2,
-            })
-            .expect("server receive path challenge");
-
-        // Show that the new path is not considered a destination path by quiche
-        assert!(!pipe
-            .server
-            .paths_iter(server_addr)
-            .any(|path| path == client_addr_2));
-    }
-
-    #[test]
-    fn successful_probe_pmtud() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_initial_max_data(100000);
-        config.set_initial_max_stream_data_bidi_local(100000);
-        config.set_initial_max_stream_data_bidi_remote(100000);
-        config.set_initial_max_streams_bidi(2);
-        config.set_active_connection_id_limit(4);
-        config.set_max_send_udp_payload_size(1350);
-        config.set_max_recv_udp_payload_size(1350);
-        config.discover_pmtu(true);
-
-        // Perform initial handshake.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr = testing::Pipe::client_addr();
-        let pid_1 = pipe
-            .server
-            .paths
-            .path_id_from_addrs(&(server_addr, client_addr))
-            .expect("no such path");
-
-        // Check that PMTU params are configured correctly
-        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_probe_status());
-        assert_eq!(pmtu_param.get_probe_size(), 1350);
-        assert_eq!(pipe.advance(), Ok(()));
-
-        for (_, p) in pipe.server.paths.iter_mut() {
-            assert_eq!(p.pmtud.get_current(), 1350);
-            assert!(!p.pmtud.get_probe_status());
-        }
-    }
-
-    #[test]
-    fn pmtud_probe_loss() {
-        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        config
-            .load_cert_chain_from_pem_file("examples/cert.crt")
-            .unwrap();
-        config
-            .load_priv_key_from_pem_file("examples/cert.key")
-            .unwrap();
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.verify_peer(false);
-        config.set_initial_max_data(100000);
-        config.set_initial_max_stream_data_bidi_local(100000);
-        config.set_initial_max_stream_data_bidi_remote(100000);
-        config.set_initial_max_streams_bidi(2);
-        config.set_active_connection_id_limit(4);
-        config.set_max_send_udp_payload_size(1350);
-        config.set_max_recv_udp_payload_size(1250);
-        config.discover_pmtu(true);
-
-        // Perform initial handshake.
-        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
-        assert_eq!(pipe.handshake(), Ok(()));
-
-        let server_addr = testing::Pipe::server_addr();
-        let client_addr = testing::Pipe::client_addr();
-        let pid_1 = pipe
-            .server
-            .paths
-            .path_id_from_addrs(&(server_addr, client_addr))
-            .expect("no such path");
-
-        // Check that PMTU params are configured correctly
-        let pmtu_param = &mut pipe.server.paths.get_mut(pid_1).unwrap().pmtud;
-        assert!(pmtu_param.get_probe_status());
-        assert_eq!(pmtu_param.get_probe_size(), 1350);
-        std::thread::sleep(
-            pipe.server.paths.get_mut(pid_1).unwrap().recovery.rtt() +
-                time::Duration::from_millis(1),
-        );
-
-        let active_server_path = pipe.server.paths.get_active_mut().unwrap();
-        let pmtu_param = &mut active_server_path.pmtud;
-
-        // PMTU not updated since probe is not ACKed
-        assert_eq!(pmtu_param.get_current(), 1200);
-
-        // Continue searching for PMTU
-        assert!(pmtu_param.get_probe_status());
-    }
-}
+mod tests;
 
 pub use crate::packet::ConnectionId;
 pub use crate::packet::Header;
@@ -17433,9 +9260,17 @@ pub use crate::path::PathEvent;
 pub use crate::path::PathStats;
 pub use crate::path::SocketAddrIter;
 
-pub use crate::recovery::congestion::CongestionControlAlgorithm;
+pub use crate::recovery::BbrBwLoReductionStrategy;
+pub use crate::recovery::BbrParams;
+pub use crate::recovery::CongestionControlAlgorithm;
+use crate::recovery::RecoveryOps;
+pub use crate::recovery::StartupExit;
+pub use crate::recovery::StartupExitReason;
 
 pub use crate::stream::StreamIter;
+
+pub use crate::range_buf::BufFactory;
+pub use crate::range_buf::BufSplit;
 
 mod cid;
 mod crypto;
@@ -17450,6 +9285,7 @@ mod packet;
 mod path;
 mod pmtud;
 mod rand;
+mod range_buf;
 mod ranges;
 mod recovery;
 mod stream;

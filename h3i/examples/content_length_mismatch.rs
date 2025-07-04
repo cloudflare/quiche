@@ -39,6 +39,7 @@ fn main() {
             stream_id: STREAM_ID,
             fin_stream: false,
             headers,
+            literal_headers: false,
             frame: Frame::Headers { header_block },
         },
         Action::SendFrame {
@@ -70,7 +71,7 @@ fn main() {
     // connection upon receiving a HEADERS frame on stream 0.
     let close_trigger_frames = None;
 
-    let summary = sync_client::connect(config, &actions, close_trigger_frames)
+    let summary = sync_client::connect(config, actions, close_trigger_frames)
         .expect("connection failed");
 
     println!(

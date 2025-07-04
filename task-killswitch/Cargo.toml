@@ -1,0 +1,17 @@
+[package]
+name = "task-killswitch"
+version = "0.1.0"
+repository = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+description = "Abort all tokio tasks at once"
+
+[dependencies]
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync"] }
+
+[dev-dependencies]
+futures-util = { workspace = true, features = ["alloc"] }
+tokio = { workspace = true, features = ["macros", "time"] }

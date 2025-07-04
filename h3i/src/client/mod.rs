@@ -30,12 +30,13 @@
 //! as series of [Action]s, and capturing the results in a
 //! [ConnectionSummary].
 
+#[cfg(feature = "async")]
+pub mod async_client;
 pub mod connection_summary;
 pub mod sync_client;
 
 use connection_summary::*;
 use qlog::events::h3::HttpHeader;
-use quiche::ConnectionError;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -58,92 +59,14 @@ use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
 use serde::Serialize;
 
+use crate::quiche;
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
 use quiche::h3::NameValue;
-use quiche::Connection;
-use quiche::Result;
-use quiche::{
-    self,
-};
+use quiche::ConnectionError;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 const QUIC_VERSION: u32 = 1;
-
-pub fn build_quiche_connection(
-    args: Config, peer_addr: SocketAddr, local_addr: SocketAddr,
-) -> Result<Connection> {
-    // We'll only connect to one server.
-    let connect_url = if !args.omit_sni {
-        args.host_port.split(':').next()
-    } else {
-        None
-    };
-
-    // Create the configuration for the QUIC connection.
-    let mut config = quiche::Config::new(QUIC_VERSION).unwrap();
-
-    config.verify_peer(args.verify_peer);
-    config.set_application_protos(&[b"h3"]).unwrap();
-    config.set_max_idle_timeout(args.idle_timeout);
-    config.set_max_recv_udp_payload_size(MAX_DATAGRAM_SIZE);
-    config.set_max_send_udp_payload_size(MAX_DATAGRAM_SIZE);
-    config.set_initial_max_data(10_000_000);
-    config
-        .set_initial_max_stream_data_bidi_local(args.max_stream_data_bidi_local);
-    config.set_initial_max_stream_data_bidi_remote(
-        args.max_stream_data_bidi_remote,
-    );
-    config.set_initial_max_stream_data_uni(args.max_stream_data_uni);
-    config.set_initial_max_streams_bidi(args.max_streams_bidi);
-    config.set_initial_max_streams_uni(args.max_streams_uni);
-    config.set_disable_active_migration(true);
-    config.set_active_connection_id_limit(0);
-
-    config.set_max_connection_window(args.max_window);
-    config.set_max_stream_window(args.max_stream_window);
-
-    let mut keylog = None;
-
-    if let Some(keylog_path) = std::env::var_os("SSLKEYLOGFILE") {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(keylog_path)
-            .unwrap();
-
-        keylog = Some(file);
-
-        config.log_keys();
-    }
-
-    config.grease(false);
-
-    // Generate a random source connection ID for the connection.
-    let mut scid = [0; quiche::MAX_CONN_ID_LEN];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut scid);
-
-    let scid = quiche::ConnectionId::from_ref(&scid);
-
-    // Create a QUIC connection and initiate handshake.
-    let mut conn =
-        quiche::connect(connect_url, &scid, local_addr, peer_addr, &mut config)?;
-
-    if let Some(keylog) = &mut keylog {
-        if let Ok(keylog) = keylog.try_clone() {
-            conn.set_keylog(Box::new(keylog));
-        }
-    }
-
-    log::info!(
-        "connecting to {:} from {:} with scid {:?}",
-        peer_addr,
-        local_addr,
-        scid,
-    );
-
-    Ok(conn)
-}
 
 fn handle_qlog(
     qlog_streamer: Option<&mut QlogStreamer>, qlog_frame: Http3Frame,
@@ -152,9 +75,8 @@ fn handle_qlog(
     if let Some(s) = qlog_streamer {
         let ev_data = EventData::H3FrameParsed(H3FrameParsed {
             stream_id,
-            length: None,
             frame: qlog_frame,
-            raw: None,
+            ..Default::default()
         });
 
         s.add_event_data_now(ev_data).ok();
@@ -162,7 +84,7 @@ fn handle_qlog(
 }
 
 #[derive(Debug, Serialize)]
-/// Represents different errors that can occur when [sync_client] runs.
+/// Represents different errors that can occur when the h3i client runs.
 pub enum ClientError {
     /// An error during the QUIC handshake.
     HandshakeFail,
@@ -193,7 +115,7 @@ pub(crate) fn execute_action(
             fin_stream,
             frame,
         } => {
-            log::info!("frame tx id={} frame={:?}", stream_id, frame);
+            log::info!("frame tx id={stream_id} frame={frame:?}");
 
             // TODO: make serialization smarter
             let mut d = [42; 9999];
@@ -244,11 +166,7 @@ pub(crate) fn execute_action(
             frame,
             ..
         } => {
-            log::info!(
-                "headers frame tx stream={} hdrs={:?}",
-                stream_id,
-                headers
-            );
+            log::info!("headers frame tx stream={stream_id} hdrs={headers:?}");
 
             // TODO: make serialization smarter
             let mut d = [42; 9999];
@@ -294,10 +212,7 @@ pub(crate) fn execute_action(
             stream_type,
         } => {
             log::info!(
-                "open uni stream_id={} ty={} fin={}",
-                stream_id,
-                stream_type,
-                fin_stream
+                "open uni stream_id={stream_id} ty={stream_type} fin={fin_stream}"
             );
 
             let mut d = [42; 8];
@@ -336,16 +251,14 @@ pub(crate) fn execute_action(
             error_code,
         } => {
             log::info!(
-                "reset_stream stream_id={} error_code={}",
-                stream_id,
-                error_code
+                "reset_stream stream_id={stream_id} error_code={error_code}"
             );
             if let Err(e) = conn.stream_shutdown(
                 *stream_id,
                 quiche::Shutdown::Write,
                 *error_code,
             ) {
-                log::error!("can't send reset_stream: {}", e);
+                log::error!("can't send reset_stream: {e}");
                 // Clients can't reset streams they don't own. If we attempt to do
                 // this, stream_shutdown would fail, and we
                 // shouldn't create a parser.
@@ -362,9 +275,7 @@ pub(crate) fn execute_action(
             error_code,
         } => {
             log::info!(
-                "stop_sending stream id={} error_code={}",
-                stream_id,
-                error_code
+                "stop_sending stream id={stream_id} error_code={error_code}"
             );
 
             if let Err(e) = conn.stream_shutdown(
@@ -372,7 +283,7 @@ pub(crate) fn execute_action(
                 quiche::Shutdown::Read,
                 *error_code,
             ) {
-                log::error!("can't send stop_sending: {}", e);
+                log::error!("can't send stop_sending: {e}");
             }
 
             // A `STOP_SENDING` should elicit a `RESET_STREAM` in response, which
@@ -420,7 +331,7 @@ pub(crate) fn parse_streams<C: Client>(
             match stream_parse_result {
                 Ok(FrameParseResult::FrameParsed { h3i_frame, fin }) => {
                     if let H3iFrame::Headers(ref headers) = h3i_frame {
-                        log::info!("hdrs={:?}", headers);
+                        log::info!("hdrs={headers:?}");
                     }
 
                     handle_response_frame(
@@ -448,7 +359,7 @@ pub(crate) fn parse_streams<C: Client>(
                             error_code,
                         });
 
-                        log::info!("received reset stream: {:?}", frame);
+                        log::info!("received reset stream: {frame:?}");
                         handle_response_frame(
                             client,
                             None,
@@ -478,7 +389,7 @@ pub(crate) fn parse_streams<C: Client>(
                                 error_code,
                             });
 
-                            log::info!("received reset stream: {:?}", frame);
+                            log::info!("received reset stream: {frame:?}");
 
                             handle_response_frame(
                                 client,
@@ -573,4 +484,55 @@ fn handle_response_frame<C: Client>(
     if let Some(to_push) = push_to_responses {
         responded_streams.push(to_push);
     }
+}
+
+pub(crate) struct ParsedArgs<'a> {
+    pub(crate) bind_addr: SocketAddr,
+    pub(crate) peer_addr: SocketAddr,
+    pub(crate) connect_url: Option<&'a str>,
+}
+
+pub(crate) fn parse_args(args: &Config) -> ParsedArgs<'_> {
+    // We'll only connect to one server.
+    let connect_url = if !args.omit_sni {
+        args.host_port.split(':').next()
+    } else {
+        None
+    };
+
+    let (peer_addr, bind_addr) = resolve_socket_addrs(args);
+
+    ParsedArgs {
+        peer_addr,
+        bind_addr,
+        connect_url,
+    }
+}
+
+fn resolve_socket_addrs(args: &Config) -> (SocketAddr, SocketAddr) {
+    // Resolve server address.
+    let peer_addr = if let Some(addr) = &args.connect_to {
+        addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
+    } else {
+        let x = format!("https://{}", args.host_port);
+        *url::Url::parse(&x)
+            .unwrap()
+            .socket_addrs(|| None)
+            .unwrap()
+            .first()
+            .unwrap()
+    };
+
+    // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
+    // server address. This is needed on macOS and BSD variants that don't
+    // support binding to IN6ADDR_ANY for both v4 and v6.
+    let bind_addr = match peer_addr {
+        std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
+        std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
+    };
+
+    (
+        peer_addr,
+        bind_addr.parse().expect("unable to parse bind address"),
+    )
 }

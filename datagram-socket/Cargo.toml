@@ -1,0 +1,19 @@
+[package]
+name = "datagram-socket"
+version = "0.3.0"
+repository = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+description = "Utilities for working with datagram sockets"
+
+[dependencies]
+buffer-pool = { workspace = true }
+futures-util = { workspace = true }
+libc = { workspace = true }
+smallvec = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

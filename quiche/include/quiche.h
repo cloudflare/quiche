@@ -127,6 +127,13 @@ enum quiche_error {
 
     // The peer sent more data in CRYPTO frames than we can buffer.
     QUICHE_ERR_CRYPTO_BUFFER_EXCEEDED = -20,
+
+    // The peer sent an ACK frame with an invalid range.
+    QUICHE_ERR_INVALID_ACK_RANGE = -21,
+
+    // The peer send an ACK frame for a skipped packet used for Optimistic ACK
+    // mitigation.
+    QUICHE_ERR_OPTIMISTIC_ACK_DETECTED = -22,
 };
 
 // Returns a human readable null-terminated string with the quiche version number.
@@ -532,6 +539,9 @@ void quiche_conn_peer_cert(const quiche_conn *conn, const uint8_t **out, size_t 
 
 // Returns the serialized cryptographic session for the connection.
 void quiche_conn_session(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
+
+// Returns the server name requested by the client.
+void quiche_conn_server_name(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
 
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(const quiche_conn *conn);
@@ -1044,6 +1054,15 @@ enum quiche_h3_error {
 
     // See QUICHE_ERR_KEY_UPDATE.
     QUICHE_H3_TRANSPORT_ERR_KEY_UPDATE = QUICHE_ERR_KEY_UPDATE - 1000,
+
+    // See QUICHE_ERR_CRYPTO_BUFFER_EXCEEDED.
+    QUICHE_H3_TRANSPORT_ERR_CRYPTO_BUFFER_EXCEEDED = QUICHE_ERR_CRYPTO_BUFFER_EXCEEDED - 1000,
+
+    // See QUICHE_ERR_INVALID_ACK_RANGE.
+    QUICHE_H3_TRANSPORT_ERR_INVALID_ACK_RANGE = QUICHE_ERR_INVALID_ACK_RANGE - 1000,
+
+    // See QUICHE_ERR_OPTIMISTIC_ACK_DETECTED.
+    QUICHE_H3_TRANSPORT_ERR_OPTIMISTIC_ACK_DETECTED = QUICHE_ERR_OPTIMISTIC_ACK_DETECTED - 1000,
 };
 
 // Stores configuration shared between multiple connections.

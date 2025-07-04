@@ -40,6 +40,8 @@ use qlog::reader::QlogSeqReader;
 
 use clap::App;
 use clap::Arg;
+#[cfg(feature = "async")]
+use tokio_quiche::BoxError;
 
 fn main() -> Result<(), ClientError> {
     let mut log_builder = env_logger::builder();
@@ -47,13 +49,13 @@ fn main() -> Result<(), ClientError> {
         log_builder.filter_level(log::LevelFilter::Info);
     }
 
-    log_builder.default_format_timestamp_nanos(true).init();
+    log_builder.format_timestamp_nanos().init();
 
     let config = match config_from_clap() {
         Ok(v) => v,
 
         Err(e) => {
-            log::error!("Error loading configuration, exiting: {}", e);
+            log::error!("Error loading configuration, exiting: {e}");
             return Err(ClientError::Other("Invalid configuration".into()));
         },
     };
@@ -63,17 +65,21 @@ fn main() -> Result<(), ClientError> {
         None => prompt_frames(&config),
     };
 
-    match sync_client(config, &actions) {
-        Ok(summary) => {
+    #[cfg(not(feature = "async"))]
+    let summary = sync_client(config, actions);
+    #[cfg(feature = "async")]
+    let summary = async_client(config, actions);
+
+    match summary {
+        Ok(s) => {
             log::debug!(
                 "received connection_summary: {}",
-                serde_json::to_string_pretty(&summary)
+                serde_json::to_string_pretty(&s)
                     .unwrap_or_else(|e| e.to_string())
             );
         },
-
         Err(e) => {
-            log::error!("error: {:?}", e);
+            log::error!("{e:?}");
         },
     }
 
@@ -207,55 +213,55 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         .value_of("idle-timeout")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("idle-timeout input error {}", e))?;
+        .map_err(|e| format!("idle-timeout input error {e}"))?;
 
     let max_data = matches
         .value_of("max-data")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-data input error {}", e))?;
+        .map_err(|e| format!("max-data input error {e}"))?;
 
     let max_stream_data_bidi_local = matches
         .value_of("max-stream-data-bidi-local")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-stream-data-bidi-local input error {}", e))?;
+        .map_err(|e| format!("max-stream-data-bidi-local input error {e}"))?;
 
     let max_stream_data_bidi_remote = matches
         .value_of("max-stream-data-bidi-remote")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-stream-data-bidi-remote input error {}", e))?;
+        .map_err(|e| format!("max-stream-data-bidi-remote input error {e}"))?;
 
     let max_stream_data_uni = matches
         .value_of("max-stream-data-uni")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-stream-data-uni input error {}", e))?;
+        .map_err(|e| format!("max-stream-data-uni input error {e}"))?;
 
     let max_streams_bidi = matches
         .value_of("max-streams-bidi")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-streams-bidi input error {}", e))?;
+        .map_err(|e| format!("max-streams-bidi input error {e}"))?;
 
     let max_streams_uni = matches
         .value_of("max-streams-uni")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-streams-uni input error {}", e))?;
+        .map_err(|e| format!("max-streams-uni input error {e}"))?;
 
     let max_window = matches
         .value_of("max-window")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-window input error {}", e))?;
+        .map_err(|e| format!("max-window input error {e}"))?;
 
     let max_stream_window = matches
         .value_of("max-stream-window")
         .unwrap()
         .parse::<u64>()
-        .map_err(|e| format!("max-stream-window input error {}", e))?;
+        .map_err(|e| format!("max-stream-window input error {e}"))?;
 
     let qlog_actions_output = !matches.is_present("no-qlog-actions-output");
     let qlog_input = matches.value_of("qlog-input").and_then(|q| {
@@ -295,8 +301,32 @@ fn config_from_clap() -> std::result::Result<Config, String> {
     })
 }
 
+#[cfg(feature = "async")]
+fn async_client(
+    config: Config, frame_actions: Vec<Action>,
+) -> Result<ConnectionSummary, BoxError> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(Box::new)?;
+
+    let fut = async {
+        h3i::client::async_client::connect(
+            &config.library_config,
+            frame_actions,
+            None,
+        )
+        .await
+        .unwrap()
+        .await
+    };
+
+    Ok(rt.block_on(fut))
+}
+
+#[cfg(not(feature = "async"))]
 fn sync_client(
-    config: Config, actions: &[Action],
+    config: Config, actions: Vec<Action>,
 ) -> Result<ConnectionSummary, ClientError> {
     // TODO: CLI/qlog don't support passing close trigger frames at the moment
     h3i::client::sync_client::connect(config.library_config, actions, None)
@@ -368,15 +398,13 @@ pub fn make_qlog_writer() -> std::io::BufWriter<std::fs::File> {
     );
     path.push(filename.clone());
 
-    log::info!("Session will be recorded to {}", filename);
+    log::info!("Session will be recorded to {filename}");
 
     match std::fs::File::create(&path) {
         Ok(f) => std::io::BufWriter::new(f),
 
-        Err(e) => panic!(
-            "Error creating qlog file attempted path was {:?}: {}",
-            path, e
-        ),
+        Err(e) =>
+            panic!("Error creating qlog file attempted path was {path:?}: {e}"),
     }
 }
 

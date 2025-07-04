@@ -73,8 +73,8 @@ impl PRR {
         self.snd_cnt = if pipe > ssthresh {
             // Proportional Rate Reduction.
             if self.recoverfs > 0 {
-                ((self.prr_delivered * ssthresh + self.recoverfs - 1) /
-                    self.recoverfs)
+                (self.prr_delivered * ssthresh)
+                    .div_ceil(self.recoverfs)
                     .saturating_sub(self.prr_out)
             } else {
                 0

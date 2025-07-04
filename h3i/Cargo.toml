@@ -1,29 +1,43 @@
 [package]
 name = "h3i"
-version = "0.2.0"
-authors = ["Lucas Pardue <lucas@lucaspardue.com>", "Evan Rittenhouse <evanrittenhouse@gmail.com>"]
-edition = "2018"
+version = "0.5.0"
+authors = [
+  "Lucas Pardue <lucas@lucaspardue.com>",
+  "Evan Rittenhouse <evanrittenhouse@gmail.com>",
+]
 description = "Low-level HTTP/3 debugging and testing"
-repository = "https://github.com/cloudflare/quiche"
-readme = "README.md"
-keywords = ["quic", "http3"]
-categories = ["network-programming"]
-license = "BSD-2-Clause"
-rust-version = "1.67"
+rust-version = "1.82"
+edition = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+readme = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[features]
+default = ["sync"]
+
+sync = ["dep:quiche"]
+async = ["dep:tokio-quiche", "dep:buffer-pool", "dep:tokio"]
 
 [dependencies]
 clap = "3"
-env_logger = "0.6"
+env_logger = { workspace = true }
 inquire = "0.6.2"
-log = { version = "0.4", features = ["std"] }
-mio = { version = "0.8", features = ["net", "os-poll"] }
+log = { workspace = true, features = ["std"] }
+mio = { workspace = true, features = ["net", "os-poll"] }
 multimap = "0.10"
-octets = { version = "0.3", path = "../octets"}
-qlog = { version = "0.14", path = "../qlog" }
-quiche = { version = "0.22", path = "../quiche", features = ["internal", "qlog"] }
-rand = "0.8.5"
-smallvec = "1.11.2"
-serde_with = "1"
-serde_json = "1"
-serde = "1"
-url = "1"
+octets = { workspace = true }
+qlog = { workspace = true }
+quiche = { features = ["internal", "qlog"], optional = true, workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true, features = ["macros", "std"] }
+smallvec = { workspace = true }
+url = { workspace = true }
+
+# Dependencies for async client
+buffer-pool = { optional = true, workspace = true }
+tokio = { version = "1.44", features = ["net", "sync", "time"], optional = true }
+tokio-quiche = { features = ["capture_keylogs", "quiche_internal"], optional = true, workspace = true }

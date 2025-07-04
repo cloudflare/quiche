@@ -27,8 +27,6 @@
 use crate::args::*;
 use crate::common::*;
 
-use std::net::ToSocketAddrs;
-
 use std::io::prelude::*;
 
 use std::rc::Rc;
@@ -67,7 +65,7 @@ pub fn connect(
     let peer_addr = if let Some(addr) = &args.connect_to {
         addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
     } else {
-        connect_url.to_socket_addrs().unwrap().next().unwrap()
+        *connect_url.socket_addrs(|| None).unwrap().first().unwrap()
     };
 
     // Bind to INADDR_ANY or IN6ADDR_ANY depending on the IP family of the
@@ -105,10 +103,7 @@ pub fn connect(
         config
             .load_verify_locations_from_file(trust_origin_ca_pem)
             .map_err(|e| {
-                ClientError::Other(format!(
-                    "error loading origin CA file : {}",
-                    e
-                ))
+                ClientError::Other(format!("error loading origin CA file : {e}"))
             })?;
     } else {
         config.verify_peer(!args.no_verify);
@@ -245,7 +240,7 @@ pub fn connect(
         return Err(ClientError::Other(format!("send() failed: {e:?}")));
     }
 
-    trace!("written {}", write);
+    trace!("written {write}");
 
     let app_data_start = std::time::Instant::now();
 
@@ -289,7 +284,7 @@ pub fn connect(
                         // There are no more UDP packets to read on this socket.
                         // Process subsequent events.
                         if e.kind() == std::io::ErrorKind::WouldBlock {
-                            trace!("{}: recv() would block", local_addr);
+                            trace!("{local_addr}: recv() would block");
                             break 'read;
                         }
 
@@ -299,7 +294,7 @@ pub fn connect(
                     },
                 };
 
-                trace!("{}: got {} bytes", local_addr, len);
+                trace!("got {len} bytes from {from} to {local_addr}");
 
                 if let Some(target_path) = conn_args.dump_packet_path.as_ref() {
                     let path = format!("{target_path}/{pkt_count}.pkt");
@@ -322,12 +317,12 @@ pub fn connect(
                     Ok(v) => v,
 
                     Err(e) => {
-                        error!("{}: recv failed: {:?}", local_addr, e);
+                        error!("{local_addr}: recv failed: {e:?}");
                         continue 'read;
                     },
                 };
 
-                trace!("{}: processed {} bytes", local_addr, read);
+                trace!("{local_addr}: processed {read} bytes");
             }
         }
 
@@ -432,25 +427,18 @@ pub fn connect(
                 quiche::PathEvent::New(..) => unreachable!(),
 
                 quiche::PathEvent::Validated(local_addr, peer_addr) => {
-                    info!(
-                        "Path ({}, {}) is now validated",
-                        local_addr, peer_addr
-                    );
+                    info!("Path ({local_addr}, {peer_addr}) is now validated");
                     conn.migrate(local_addr, peer_addr).unwrap();
                     migrated = true;
                 },
 
                 quiche::PathEvent::FailedValidation(local_addr, peer_addr) => {
-                    info!(
-                        "Path ({}, {}) failed validation",
-                        local_addr, peer_addr
-                    );
+                    info!("Path ({local_addr}, {peer_addr}) failed validation");
                 },
 
                 quiche::PathEvent::Closed(local_addr, peer_addr) => {
                     info!(
-                        "Path ({}, {}) is now closed and unusable",
-                        local_addr, peer_addr
+                        "Path ({local_addr}, {peer_addr}) is now closed and unusable"
                     );
                 },
 
@@ -460,8 +448,7 @@ pub fn connect(
                     new,
                 ) => {
                     info!(
-                        "Peer reused cid seq {} (initially {:?}) on {:?}",
-                        cid_seq, old, new
+                        "Peer reused cid seq {cid_seq} (initially {old:?}) on {new:?}"
                     );
                 },
 
@@ -471,7 +458,7 @@ pub fn connect(
 
         // See whether source Connection IDs have been retired.
         while let Some(retired_scid) = conn.retired_scid_next() {
-            info!("Retiring source CID {:?}", retired_scid);
+            info!("Retiring source CID {retired_scid:?}");
         }
 
         // Provides as many CIDs as possible.
@@ -517,18 +504,13 @@ pub fn connect(
                         Ok(v) => v,
 
                         Err(quiche::Error::Done) => {
-                            trace!(
-                                "{} -> {}: done writing",
-                                local_addr,
-                                peer_addr
-                            );
+                            trace!("{local_addr} -> {peer_addr}: done writing");
                             break;
                         },
 
                         Err(e) => {
                             error!(
-                                "{} -> {}: send failed: {:?}",
-                                local_addr, peer_addr, e
+                                "{local_addr} -> {peer_addr}: send failed: {e:?}"
                             );
 
                             conn.close(false, 0x1, b"fail").ok();
@@ -553,10 +535,8 @@ pub fn connect(
                     }
 
                     trace!(
-                        "{} -> {}: written {}",
-                        local_addr,
-                        send_info.to,
-                        write
+                        "written {write} bytes from {local_addr} to {}",
+                        send_info.to
                     );
                 }
             }

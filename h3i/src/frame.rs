@@ -32,8 +32,8 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use crate::quiche;
 use multimap::MultiMap;
-use quiche;
 
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Header;
@@ -304,8 +304,13 @@ impl Serialize for SerializableQFrame<'_> {
         let name = frame_name(self.0);
         match self.0 {
             QFrame::Data { payload } => {
-                let mut state = s.serialize_struct(name, 1)?;
+                let mut state = s.serialize_struct(name, 2)?;
+                let max = cmp::min(payload.len(), MAX_SERIALIZED_BUFFER_LEN);
                 state.serialize_field("payload_len", &payload.len())?;
+                state.serialize_field(
+                    "payload",
+                    &qlog::HexSlice::maybe_string(Some(&payload[..max])),
+                )?;
                 state.end()
             },
 
@@ -382,7 +387,7 @@ impl Serialize for SerializableQFrame<'_> {
                 prioritized_element_id,
                 priority_field_value,
             } => {
-                let mut state = s.serialize_struct(name, 2)?;
+                let mut state = s.serialize_struct(name, 3)?;
                 state.serialize_field(
                     "prioritized_element_id",
                     &prioritized_element_id,
@@ -392,6 +397,10 @@ impl Serialize for SerializableQFrame<'_> {
                     priority_field_value.len(),
                     MAX_SERIALIZED_BUFFER_LEN,
                 );
+                state.serialize_field(
+                    "priority_field_value_len",
+                    &priority_field_value.len(),
+                )?;
                 state.serialize_field(
                     "priority_field_value",
                     &String::from_utf8_lossy(&priority_field_value[..max]),
@@ -403,7 +412,7 @@ impl Serialize for SerializableQFrame<'_> {
                 prioritized_element_id,
                 priority_field_value,
             } => {
-                let mut state = s.serialize_struct(name, 1)?;
+                let mut state = s.serialize_struct(name, 3)?;
                 state.serialize_field(
                     "prioritized_element_id",
                     &prioritized_element_id,
@@ -413,6 +422,10 @@ impl Serialize for SerializableQFrame<'_> {
                     MAX_SERIALIZED_BUFFER_LEN,
                 );
                 state.serialize_field(
+                    "priority_field_value_len",
+                    &priority_field_value.len(),
+                )?;
+                state.serialize_field(
                     "priority_field_value",
                     &String::from_utf8_lossy(&priority_field_value[..max]),
                 )?;
@@ -420,10 +433,10 @@ impl Serialize for SerializableQFrame<'_> {
             },
 
             QFrame::Unknown { raw_type, payload } => {
-                let mut state = s.serialize_struct(name, 1)?;
+                let mut state = s.serialize_struct(name, 3)?;
                 state.serialize_field("raw_type", &raw_type)?;
                 let max = cmp::min(payload.len(), MAX_SERIALIZED_BUFFER_LEN);
-
+                state.serialize_field("payload_len", &payload.len())?;
                 state.serialize_field(
                     "payload",
                     &qlog::HexSlice::maybe_string(Some(&payload[..max])),
@@ -490,7 +503,7 @@ impl CloseTriggerFrame {
     /// For Headers variants, this [`CloseTriggerFrame`] is equivalent to the
     /// incoming [`H3iFrame`] if the [`H3iFrame`] contains all [`Header`]s
     /// in _this_ frame. In other words, `this` can be considered equivalent
-    /// to `other` if `other` contains a superset of `this`'s [`Headers`].
+    /// to `other` if `other` contains a superset of `this`'s [`Header`]s.
     ///
     /// This allows users for fuzzy-matching on header frames without needing to
     /// supply every individual header on the frame.

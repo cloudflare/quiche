@@ -65,7 +65,7 @@ of QUIC and HTTP/3 will be written.
 
 In some cases, it can be useful to ignore server name resolution and connect to
 a server at a specific IP address, using the indicated SNI. The `--connect-to`
-option can be used to specificy the desired IP and port.
+option can be used to specify the desired IP and port.
 
 ## Record and Replay
 
@@ -88,6 +88,8 @@ schema].
 h3i is also provided as a library, which allows programmatic control over HTTP/3 client behavior. This is useful for writing test cases.
 
 The key components of the library are actions, client runner, connection summary, and stream map.
+
+The library provides both synchronous and asynchronous clients. The latter is built on [tokio-quiche] and can be accessed by using the `async` feature.
 
 ## Example
 h3i currently has one example, which can be run with:
@@ -132,7 +134,7 @@ let actions = vec![send_headers_action];
 
 ## Client runner
 
-Applications using the library can invoke the client runner via sync_client::connect(). This requires a set of configuration parameters and an actions vector.
+Applications using the library can invoke the client runner via `sync_client::connect()` or `async_client::connect()`. This requires a set of configuration parameters and an actions vector.
 
 ```rust
 let config = pub struct Config {
@@ -140,7 +142,10 @@ let config = pub struct Config {
     .. // other fields omitted for brevity
 };
 
-let summary = sync_client::connect(&config, &actions);
+#[cfg(not(feature = "async"))]
+let summary = sync_client::connect(&config, actions);
+#[cfg(feature = "async")]
+let summary = async_client::connect(&config, actions);
 ```
 
 ## ConnectionSummary
@@ -172,4 +177,4 @@ for QUIC and HTTP/3. Written and maintained by Kazu Yamamato.
 [qlog]: https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-main-schema/
 [QUIC schema]: https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-quic-events
 [HTTP/3 schema]: https://datatracker.ietf.org/doc/draft-ietf-quic-qlog-h3-events
-
+[tokio-quiche]: https://docs.rs/tokio-quiche

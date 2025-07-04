@@ -34,7 +34,7 @@ use std::cmp;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery;
+use super::Acked;
 
 /// Constants from I-D.
 const MIN_RTT_THRESH: Duration = Duration::from_millis(4);
@@ -121,7 +121,7 @@ impl Hystart {
 
     // On receiving ACK. Returns true if need to enter Congestion Avoidance.
     pub fn on_packet_acked(
-        &mut self, packet: &recovery::Acked, rtt: Duration, now: Instant,
+        &mut self, packet: &Acked, rtt: Duration, now: Instant,
     ) -> bool {
         if !self.enabled {
             return false;

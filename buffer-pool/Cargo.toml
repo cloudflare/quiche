@@ -1,0 +1,12 @@
+[package]
+name = "buffer-pool"
+version = "0.1.0"
+repository = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+description = "Pooled in-memory buffers"
+
+[dependencies]
+crossbeam = { workspace = true, features = ["alloc"] }

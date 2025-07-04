@@ -36,14 +36,14 @@ use std::cmp;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery;
-use crate::recovery::rtt::RttStats;
-use crate::recovery::Acked;
-use crate::recovery::Sent;
+use super::rtt::RttStats;
+use super::Acked;
+use super::Sent;
 
 use super::reno;
 use super::Congestion;
 use super::CongestionControlOps;
+use crate::recovery::MINIMUM_WINDOW_PACKETS;
 
 pub(crate) static CUBIC: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -53,6 +53,8 @@ pub(crate) static CUBIC: CongestionControlOps = CongestionControlOps {
     checkpoint,
     rollback,
     has_custom_pacing,
+    #[cfg(feature = "qlog")]
+    state_str,
     debug_fmt,
 };
 
@@ -193,7 +195,7 @@ fn on_packet_acked(
         r.prr.on_packet_acked(
             packet.size,
             bytes_in_flight,
-            r.ssthresh,
+            r.ssthresh.get(),
             r.max_datagram_size,
         );
 
@@ -227,7 +229,7 @@ fn on_packet_acked(
         }
     }
 
-    if r.congestion_window < r.ssthresh {
+    if r.congestion_window < r.ssthresh.get() {
         // In Slow start, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
@@ -245,7 +247,7 @@ fn on_packet_acked(
 
         if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
-            r.ssthresh = r.congestion_window;
+            r.ssthresh.update(r.congestion_window, true);
         }
     } else {
         // Congestion avoidance.
@@ -347,12 +349,11 @@ fn congestion_event(
             r.cubic_state.w_max = r.congestion_window as f64;
         }
 
-        r.ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
-        r.ssthresh = cmp::max(
-            r.ssthresh,
-            r.max_datagram_size * recovery::MINIMUM_WINDOW_PACKETS,
-        );
-        r.congestion_window = r.ssthresh;
+        let ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
+        let ssthresh =
+            cmp::max(ssthresh, r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
+        r.ssthresh.update(ssthresh, r.hystart.in_css());
+        r.congestion_window = ssthresh;
 
         r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {
             0.0
@@ -377,7 +378,7 @@ fn congestion_event(
 
 fn checkpoint(r: &mut Congestion) {
     r.cubic_state.prior.congestion_window = r.congestion_window;
-    r.cubic_state.prior.ssthresh = r.ssthresh;
+    r.cubic_state.prior.ssthresh = r.ssthresh.get();
     r.cubic_state.prior.w_max = r.cubic_state.w_max;
     r.cubic_state.prior.k = r.cubic_state.k;
     r.cubic_state.prior.epoch_start = r.congestion_recovery_start_time;
@@ -395,7 +396,7 @@ fn rollback(r: &mut Congestion) -> bool {
     }
 
     r.congestion_window = r.cubic_state.prior.congestion_window;
-    r.ssthresh = r.cubic_state.prior.ssthresh;
+    r.ssthresh.update(r.cubic_state.prior.ssthresh, false);
     r.cubic_state.w_max = r.cubic_state.prior.w_max;
     r.cubic_state.k = r.cubic_state.prior.k;
     r.congestion_recovery_start_time = r.cubic_state.prior.epoch_start;
@@ -405,6 +406,11 @@ fn rollback(r: &mut Congestion) -> bool {
 
 fn has_custom_pacing() -> bool {
     false
+}
+
+#[cfg(feature = "qlog")]
+fn state_str(r: &Congestion, now: Instant) -> &'static str {
+    reno::state_str(r, now)
 }
 
 fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -422,15 +428,16 @@ mod tests {
     use crate::CongestionControlAlgorithm;
 
     use crate::recovery::congestion::hystart;
+    use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::congestion::test_sender::TestSender;
-    use crate::recovery::Recovery;
+    use crate::recovery::RecoveryOps;
 
     fn test_sender() -> TestSender {
-        TestSender::new(recovery::CongestionControlAlgorithm::CUBIC, false)
+        TestSender::new(CongestionControlAlgorithm::CUBIC, false)
     }
 
     fn hystart_test_sender() -> TestSender {
-        TestSender::new(recovery::CongestionControlAlgorithm::CUBIC, true)
+        TestSender::new(CongestionControlAlgorithm::CUBIC, true)
     }
 
     #[test]
@@ -438,10 +445,10 @@ mod tests {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(CongestionControlAlgorithm::CUBIC);
 
-        let r = Recovery::new(&cfg);
+        let r = LegacyRecovery::new(&cfg);
 
         assert!(r.cwnd() > 0);
-        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
     }
 
     #[test]
@@ -688,7 +695,7 @@ mod tests {
             sender.ack_n_packets(n_rtt_sample, size);
         }
         // Now we are in congestion avoidance.
-        assert_eq!(sender.congestion_window(), sender.ssthresh);
+        assert_eq!(sender.congestion_window(), sender.ssthresh.get());
     }
 
     #[test]
