@@ -9536,11 +9536,18 @@ fn pmtud_probe_success(
     assert_eq!(pipe.advance(), Ok(()));
 
     // Verify probing is disabled after successful probe
-    let active_path = pipe.client.paths.get_active_mut().unwrap();
-    assert!(!active_path.pmtud.get_should_probe());
+    let pmtud = pipe
+        .client
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap();
+    assert!(!pmtud.should_probe());
 
     // Verify MTU was updated
-    let current_mtu = active_path.pmtud.get_current_mtu();
+    let current_mtu = pmtud.get_current_mtu();
     assert_eq!(current_mtu, 1400);
 }
 
@@ -9569,10 +9576,16 @@ fn pmtud_no_duplicate_probes(
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Verify PMTUD is enabled and ready to probe
-    let active_path = pipe.client.paths.get_active_mut().unwrap();
-    assert!(active_path.pmtud.is_enabled());
-    assert!(active_path.pmtud.get_should_probe());
-    let initial_probe_size = active_path.pmtud.get_probe_size();
+    let pmtud = pipe
+        .client
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap();
+    assert!(pmtud.should_probe());
+    let initial_probe_size = pmtud.get_probe_size();
     assert_eq!(initial_probe_size, 1400);
 
     let mut frames: Vec<frame::Frame> = Vec::new();
@@ -9595,8 +9608,15 @@ fn pmtud_no_duplicate_probes(
     assert_eq!(pipe.client.send(&mut buf).unwrap_err(), Error::Done);
 
     // Verify probe flag was reset after sending
-    let active_path = pipe.client.paths.get_active_mut().unwrap();
-    assert!(!active_path.pmtud.get_should_probe());
+    assert!(!pipe
+        .client
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap()
+        .should_probe());
 }
 
 #[rstest]
@@ -9622,7 +9642,7 @@ fn pmtud_probe_retry_after_loss(
 
     // Get initial probe size
     let active_path = pipe.client.paths.get_active_mut().unwrap();
-    let initial_probe_size = active_path.pmtud.get_probe_size();
+    let initial_probe_size = active_path.pmtud.as_mut().unwrap().get_probe_size();
     assert_eq!(initial_probe_size, 1400);
 
     // Send first probe
@@ -9634,18 +9654,25 @@ fn pmtud_probe_retry_after_loss(
     assert_eq!(len, 1400);
 
     // Verify probe flag was reset after sending
-    let active_path = pipe.client.paths.get_active_mut().unwrap();
-    assert!(!active_path.pmtud.get_should_probe());
+    let pmtud = pipe
+        .client
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap();
+    assert!(!pmtud.should_probe());
 
     // Simulate probe loss
-    active_path.pmtud.pmtu_probe_lost();
+    pmtud.failed_probe(initial_probe_size);
 
     // Verify MTU is not updated
-    assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
+    assert_eq!(pmtud.get_current_mtu(), 1200);
 
     // Verify probe flag is re-enabled and size is reduced
-    assert!(active_path.pmtud.get_should_probe());
-    assert_eq!(active_path.pmtud.get_probe_size(), 1300);
+    assert!(pmtud.should_probe());
+    assert_eq!(pmtud.get_probe_size(), 1300);
 
     // Send second probe
     let mut out = [0; 4096];
@@ -9654,30 +9681,45 @@ fn pmtud_probe_retry_after_loss(
     assert_eq!(len, 1300);
 
     // Verify should_probe flag gets reset
-    let active_path = pipe.client.paths.get_active_mut().unwrap();
-    assert!(!active_path.pmtud.get_should_probe());
+    let pmtud = pipe
+        .client
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap();
+    assert!(!pmtud.should_probe());
 
     // Simulate second probe loss
-    active_path.pmtud.pmtu_probe_lost();
+    pmtud.failed_probe(1300);
 
     // Verify MTU is not updated
-    assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
+    assert_eq!(pmtud.get_current_mtu(), 1200);
 
     // Verify probe flag is re-enabled and probe size is reduced
-    assert!(active_path.pmtud.get_should_probe());
+    assert!(pmtud.should_probe());
     // Third probe should be 1250 bytes which is halfway between 1200 and the
     // second probe size=1300.
-    assert_eq!(active_path.pmtud.get_probe_size(), 1250);
+    assert_eq!(pmtud.get_probe_size(), 1250);
 
-    // Make the third probe succeed
+    // Make probes succeed til pmtu is found
     assert_eq!(pipe.advance(), Ok(()));
 
-    let active_path = pipe.client.paths.get_active_mut().unwrap();
+    let pmtud = pipe
+        .client
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap();
+
     // MTU should finally update
-    assert_eq!(active_path.pmtud.get_current_mtu(), 1250);
+    assert_eq!(pmtud.get_current_mtu(), 1299);
 
     // Verify should_probe gets reset
-    assert!(!active_path.pmtud.get_should_probe());
+    assert!(!pmtud.should_probe());
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
@@ -9744,18 +9786,27 @@ fn enable_pmtud_mid_handshake(
     .unwrap();
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
-    assert!(!active_path.pmtud.is_enabled());
+    assert!(active_path.pmtud.is_none());
 
     assert_eq!(pipe.handshake(), Ok(()));
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
-    assert!(active_path.pmtud.is_enabled());
-    assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
+    assert!(active_path.pmtud.is_some());
+    assert_eq!(active_path.pmtud.as_mut().unwrap().get_current_mtu(), 1200);
 
     assert_eq!(pipe.advance(), Ok(()));
 
-    let active_path = pipe.server.paths.get_active_mut().unwrap();
-    assert_eq!(active_path.pmtud.get_current_mtu(), 1350);
+    assert_eq!(
+        pipe.server
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .as_mut()
+            .unwrap()
+            .get_current_mtu(),
+        1350
+    );
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
@@ -9763,7 +9814,7 @@ fn enable_pmtud_mid_handshake(
 fn disable_pmtud_mid_handshake(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    // Manually construct `SslContextBuilder` for the server so we can enable
+    // Manually construct `SslContextBuilder` for the server so we can disable
     // PMTUD during the handshake.
     let mut server_tls_ctx_builder =
         boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
@@ -9823,16 +9874,15 @@ fn disable_pmtud_mid_handshake(
     .unwrap();
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
-    assert!(active_path.pmtud.is_enabled());
+    assert!(active_path.pmtud.is_some());
 
     assert_eq!(pipe.handshake(), Ok(()));
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
-    assert!(!active_path.pmtud.is_enabled());
-    assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
+    assert!(active_path.pmtud.is_none());
 
     assert_eq!(pipe.advance(), Ok(()));
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
-    assert_eq!(active_path.pmtud.get_current_mtu(), 1200);
+    assert!(active_path.pmtud.is_none());
 }
