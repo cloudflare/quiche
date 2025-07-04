@@ -106,7 +106,9 @@ pub extern "C" fn quiche_version() -> *const u8 {
 }
 
 #[no_mangle]
-pub extern "C" fn quiche_version_sliced(version: &mut *const u8, version_len: &mut size_t) {
+pub extern "C" fn quiche_version_sliced(
+    version: &mut *const u8, version_len: &mut size_t,
+) {
     static VERSION: &str = env!("CARGO_PKG_VERSION");
     *version = VERSION.as_ptr();
     *version_len = VERSION.len();
@@ -133,10 +135,14 @@ impl log::Log for Logger {
                 let line = format!("{}: {}\0", record.target(), record.args());
                 (cb)(line.as_ptr(), self.argp.load(atomic::Ordering::Relaxed));
             },
-            
+    
             LogCB::Sliced(cb) => {
                 let line = format!("{}: {}", record.target(), record.args());
-                (cb)(line.as_ptr(), line.len(), self.argp.load(atomic::Ordering::Relaxed));
+                (cb)(
+                    line.as_ptr(),
+                    line.len(),
+                    self.argp.load(atomic::Ordering::Relaxed),
+                );
             },
         }
     }
@@ -163,7 +169,8 @@ pub extern "C" fn quiche_enable_debug_logging(
 
 #[no_mangle]
 pub extern "C" fn quiche_enable_debug_logging_sliced(
-    cb: extern "C" fn(line: *const u8, line_len: size_t, argp: *mut c_void), argp: *mut c_void,
+    cb: extern "C" fn(line: *const u8, line_len: size_t, argp: *mut c_void),
+    argp: *mut c_void,
 ) -> c_int {
     let cb = LogCB::Sliced(cb);
     let argp = atomic::AtomicPtr::new(argp);
@@ -204,7 +211,12 @@ pub extern "C" fn quiche_config_load_cert_chain_from_pem_file(
 pub extern "C" fn quiche_config_load_cert_chain_from_pem_file_sliced(
     config: &mut Config, path: *const c_char, path_len: size_t,
 ) -> c_int {
-    let path = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path as *const u8, path_len)) };
+    let path = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            path as *const u8,
+            path_len,
+        ))
+    };
 
     match config.load_cert_chain_from_pem_file(path) {
         Ok(_) => 0,
@@ -230,7 +242,12 @@ pub extern "C" fn quiche_config_load_priv_key_from_pem_file(
 pub extern "C" fn quiche_config_load_priv_key_from_pem_file_sliced(
     config: &mut Config, path: *const c_char, path_len: size_t,
 ) -> c_int {
-    let path = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path as *const u8, path_len)) };
+    let path = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            path as *const u8,
+            path_len,
+        ))
+    };
 
     match config.load_priv_key_from_pem_file(path) {
         Ok(_) => 0,
@@ -256,7 +273,12 @@ pub extern "C" fn quiche_config_load_verify_locations_from_file(
 pub extern "C" fn quiche_config_load_verify_locations_from_file_sliced(
     config: &mut Config, path: *const c_char, path_len: size_t,
 ) -> c_int {
-    let path = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path as *const u8, path_len)) };
+    let path = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            path as *const u8,
+            path_len,
+        ))
+    };
 
     match config.load_verify_locations_from_file(path) {
         Ok(_) => 0,
@@ -282,7 +304,12 @@ pub extern "C" fn quiche_config_load_verify_locations_from_directory(
 pub extern "C" fn quiche_config_load_verify_locations_from_directory_sliced(
     config: &mut Config, path: *const c_char, path_len: size_t,
 ) -> c_int {
-    let path = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path as *const u8, path_len)) };
+    let path = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            path as *const u8,
+            path_len,
+        ))
+    };
 
     match config.load_verify_locations_from_directory(path) {
         Ok(_) => 0,
@@ -429,7 +456,12 @@ pub extern "C" fn quiche_config_set_cc_algorithm_name(
 pub extern "C" fn quiche_config_set_cc_algorithm_name_sliced(
     config: &mut Config, name: *const c_char, name_len: size_t,
 ) -> c_int {
-    let name = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(name as *const u8, name_len)) };
+    let name = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            name as *const u8,
+            name_len,
+        ))
+    };
     match config.set_cc_algorithm_name(name) {
         Ok(_) => 0,
 
@@ -659,14 +691,19 @@ pub extern "C" fn quiche_connect(
 
 #[no_mangle]
 pub extern "C" fn quiche_connect_sliced(
-    server_name: *const c_char, server_name_len: size_t, scid: *const u8, scid_len: size_t,
-    local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
-    config: &mut Config,
+    server_name: *const c_char, server_name_len: size_t, scid: *const u8,
+    scid_len: size_t, local: &sockaddr, local_len: socklen_t, peer: &sockaddr,
+    peer_len: socklen_t, config: &mut Config,
 ) -> *mut Connection {
     let server_name = if server_name.is_null() {
         None
     } else {
-        Some(unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(server_name as *const u8, server_name_len)) })
+        Some(unsafe {
+            std::str::from_utf8_unchecked(slice::from_raw_parts(
+                server_name as *const u8,
+                server_name_len,
+            ))
+        })
     };
 
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
@@ -795,7 +832,12 @@ pub extern "C" fn quiche_conn_set_keylog_path(
 pub extern "C" fn quiche_conn_set_keylog_path_sliced(
     conn: &mut Connection, path: *const c_char, path_len: size_t,
 ) -> bool {
-    let filename = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path as *const u8, path_len)) };
+    let filename = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            path as *const u8,
+            path_len,
+        ))
+    };
 
     let file = std::fs::OpenOptions::new()
         .create(true)
@@ -856,10 +898,16 @@ pub extern "C" fn quiche_conn_set_qlog_path(
 #[no_mangle]
 #[cfg(feature = "qlog")]
 pub extern "C" fn quiche_conn_set_qlog_path_sliced(
-    conn: &mut Connection, path: *const c_char, path_len: size_t, log_title: *const c_char, log_title_len: size_t,
-    log_desc: *const c_char, log_desc_len: size_t,
+    conn: &mut Connection, path: *const c_char, path_len: size_t,
+    log_title: *const c_char, log_title_len: size_t, log_desc: *const c_char,
+    log_desc_len: size_t,
 ) -> bool {
-    let filename = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path as *const u8, path_len)) };
+    let filename = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            path as *const u8,
+            path_len,
+        ))
+    };
 
     let file = std::fs::OpenOptions::new()
         .write(true)
@@ -872,8 +920,18 @@ pub extern "C" fn quiche_conn_set_qlog_path_sliced(
         Err(_) => return false,
     };
 
-    let title = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(log_title as *const u8, log_title_len)) };
-    let description = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(log_desc as *const u8, log_desc_len)) };
+    let title = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            log_title as *const u8,
+            log_title_len,
+        ))
+    };
+    let description = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            log_desc as *const u8,
+            log_desc_len,
+        ))
+    };
 
     conn.set_qlog(
         Box::new(writer),
@@ -906,14 +964,24 @@ pub extern "C" fn quiche_conn_set_qlog_fd(
 #[no_mangle]
 #[cfg(all(unix, feature = "qlog"))]
 pub extern "C" fn quiche_conn_set_qlog_fd_sliced(
-    conn: &mut Connection, fd: c_int, log_title: *const c_char, log_title_len: size_t,
-    log_desc: *const c_char, log_desc_len: size_t,
+    conn: &mut Connection, fd: c_int, log_title: *const c_char,
+    log_title_len: size_t, log_desc: *const c_char, log_desc_len: size_t,
 ) {
     let f = unsafe { std::fs::File::from_raw_fd(fd) };
     let writer = std::io::BufWriter::new(f);
 
-    let title = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(log_title as *const u8, log_title_len)) };
-    let description = unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(log_desc as *const u8, log_desc_len)) };
+    let title = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            log_title as *const u8,
+            log_title_len,
+        ))
+    };
+    let description = unsafe {
+        std::str::from_utf8_unchecked(slice::from_raw_parts(
+            log_desc as *const u8,
+            log_desc_len,
+        ))
+    };
 
     conn.set_qlog(
         Box::new(writer),
