@@ -36,6 +36,8 @@ use crate::Config;
 use crate::Result;
 
 #[cfg(feature = "qlog")]
+use qlog::events;
+#[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
 use smallvec::SmallVec;
@@ -159,6 +161,11 @@ pub trait RecoveryOps {
     fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame>;
 
     fn get_lost_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame>;
+
+    #[cfg(feature = "qlog")]
+    fn get_lost_pkts(
+        &mut self, epoch: packet::Epoch,
+    ) -> Vec<(events::quic::PacketHeader, Instant)>;
 
     fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64>;
     fn has_lost_frames(&self, epoch: packet::Epoch) -> bool;
@@ -526,7 +533,7 @@ impl QlogMetrics {
         if emit_event {
             // QVis can't use all these fields and they can be large.
             return Some(EventData::MetricsUpdated(
-                qlog::events::quic::MetricsUpdated {
+                events::quic::MetricsUpdated {
                     min_rtt: new_min_rtt,
                     smoothed_rtt: new_smoothed_rtt,
                     latest_rtt: new_latest_rtt,
