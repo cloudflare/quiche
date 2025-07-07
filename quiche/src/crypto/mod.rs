@@ -415,7 +415,7 @@ fn derive_server_initial_secret(
 fn derive_next_secret(aead: Algorithm, secret: &[u8]) -> Result<Vec<u8>> {
     const LABEL: &[u8] = b"quic ku";
 
-    let mut next_secret = vec![0u8; 32];
+    let mut next_secret = vec![0u8; secret.len()];
 
     hkdf_expand_label(aead, secret, LABEL, &mut next_secret)?;
 
