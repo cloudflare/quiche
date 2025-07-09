@@ -58,6 +58,9 @@ pub struct Http3Settings {
     /// request on a connection. Only applicable to
     /// [ServerH3Driver](crate::http3::driver::ServerH3Driver).
     pub post_accept_timeout: Option<Duration>,
+    /// Set the `SETTINGS_ENABLE_CONNECT_PROTOCOL` HTTP/3 setting.
+    /// See <https://www.rfc-editor.org/rfc/rfc9220#section-3-2>
+    pub enable_extended_connect: bool,
 }
 
 impl From<&Http3Settings> for quiche::h3::Config {
@@ -67,11 +70,17 @@ impl From<&Http3Settings> for quiche::h3::Config {
         if let Some(v) = value.max_header_list_size {
             config.set_max_field_section_size(v);
         }
+
         if let Some(v) = value.qpack_max_table_capacity {
             config.set_qpack_max_table_capacity(v);
         }
+
         if let Some(v) = value.qpack_blocked_streams {
             config.set_qpack_blocked_streams(v);
+        }
+
+        if value.enable_extended_connect {
+            config.enable_extended_connect(value.enable_extended_connect)
         }
 
         config
