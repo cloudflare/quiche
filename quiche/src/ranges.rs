@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::cmp;
 use std::iter::FromIterator;
 use std::ops::Range;
 
@@ -277,8 +278,8 @@ impl BTreeRangeSet {
             if range_overlaps(&r, &item) {
                 self.inner.remove(&r.start);
 
-                start = std::cmp::min(start, r.start);
-                end = std::cmp::max(end, r.end);
+                start = cmp::min(start, r.start);
+                end = cmp::max(end, r.end);
             }
         }
 
@@ -298,8 +299,8 @@ impl BTreeRangeSet {
             // New range overlaps with existing range in the set, merge them.
             self.inner.remove(&r.start);
 
-            start = std::cmp::min(start, r.start);
-            end = std::cmp::max(end, r.end);
+            start = cmp::min(start, r.start);
+            end = cmp::max(end, r.end);
         }
 
         if self.inner.len() >= self.capacity {

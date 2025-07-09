@@ -808,7 +808,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::SETTINGS_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, SETTINGS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -858,7 +858,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::SETTINGS_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, SETTINGS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -890,7 +890,7 @@ mod tests {
             (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
         ];
 
-        let frame = frame::Frame::Settings {
+        let frame = Frame::Settings {
             max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
@@ -915,7 +915,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::SETTINGS_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, SETTINGS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -947,7 +947,7 @@ mod tests {
         let mut d = vec![42; 40];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
-        let goaway = frame::Frame::GoAway { id: 0 };
+        let goaway = Frame::GoAway { id: 0 };
 
         let raw_settings = vec![
             (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
@@ -955,7 +955,7 @@ mod tests {
             (SETTINGS_QPACK_BLOCKED_STREAMS, 0),
         ];
 
-        let settings = frame::Frame::Settings {
+        let settings = Frame::Settings {
             max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
@@ -990,7 +990,7 @@ mod tests {
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-        let hdrs = frame::Frame::Headers { header_block };
+        let hdrs = Frame::Headers { header_block };
 
         let raw_settings = vec![
             (SETTINGS_MAX_FIELD_SECTION_SIZE, 0),
@@ -999,7 +999,7 @@ mod tests {
             (33, 33),
         ];
 
-        let settings = frame::Frame::Settings {
+        let settings = Frame::Settings {
             max_field_section_size: Some(0),
             qpack_max_table_capacity: Some(0),
             qpack_blocked_streams: Some(0),
@@ -1061,8 +1061,8 @@ mod tests {
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-        let hdrs = frame::Frame::Headers { header_block };
-        let data = frame::Frame::Data {
+        let hdrs = Frame::Headers { header_block };
+        let data = Frame::Data {
             payload: payload.clone(),
         };
 
@@ -1075,7 +1075,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, HEADERS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1099,7 +1099,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, DATA_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1131,8 +1131,8 @@ mod tests {
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-        let hdrs = frame::Frame::Headers { header_block };
-        let data = frame::Frame::Data {
+        let hdrs = Frame::Headers { header_block };
+        let data = Frame::Data {
             payload: payload.clone(),
         };
 
@@ -1159,7 +1159,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, HEADERS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1183,7 +1183,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, DATA_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1235,7 +1235,7 @@ mod tests {
         let mut d = vec![42; 128];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
-        let data = frame::Frame::Data {
+        let data = Frame::Data {
             payload: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         };
 
@@ -1247,7 +1247,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, DATA_FRAME_TYPE_ID);
 
         assert_eq!(stream.set_frame_type(frame_ty), Err(Error::FrameUnexpected));
     }
@@ -1261,14 +1261,14 @@ mod tests {
 
         let header_block = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         let payload = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-        let info_hdrs = frame::Frame::Headers {
+        let info_hdrs = Frame::Headers {
             header_block: header_block.clone(),
         };
-        let non_info_hdrs = frame::Frame::Headers {
+        let non_info_hdrs = Frame::Headers {
             header_block: header_block.clone(),
         };
-        let trailers = frame::Frame::Headers { header_block };
-        let data = frame::Frame::Data {
+        let trailers = Frame::Headers { header_block };
+        let data = Frame::Data {
             payload: payload.clone(),
         };
 
@@ -1283,7 +1283,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, HEADERS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1307,7 +1307,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, HEADERS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1331,7 +1331,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::DATA_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, DATA_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1359,7 +1359,7 @@ mod tests {
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
 
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::HEADERS_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, HEADERS_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1400,7 +1400,7 @@ mod tests {
         frame.to_bytes(&mut b).unwrap();
 
         // Write a 0-length payload frame.
-        b.put_varint(frame::GOAWAY_FRAME_TYPE_ID).unwrap();
+        b.put_varint(GOAWAY_FRAME_TYPE_ID).unwrap();
         b.put_varint(0).unwrap();
 
         let mut cursor = std::io::Cursor::new(d);
@@ -1414,7 +1414,7 @@ mod tests {
         // Parse frame type.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::GOAWAY_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, GOAWAY_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1439,7 +1439,7 @@ mod tests {
         assert_eq!(stream.state, State::FrameType);
 
         // Write a 0-length payload frame.
-        b.put_varint(frame::PUSH_PROMISE_FRAME_TYPE_ID).unwrap();
+        b.put_varint(PUSH_PROMISE_FRAME_TYPE_ID).unwrap();
         b.put_varint(0).unwrap();
 
         let mut cursor = std::io::Cursor::new(d);
@@ -1447,7 +1447,7 @@ mod tests {
         // Parse frame type.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::PUSH_PROMISE_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, PUSH_PROMISE_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1481,7 +1481,7 @@ mod tests {
         frame.to_bytes(&mut b).unwrap();
 
         // Write a 0-length payload frame.
-        b.put_varint(frame::CANCEL_PUSH_FRAME_TYPE_ID).unwrap();
+        b.put_varint(CANCEL_PUSH_FRAME_TYPE_ID).unwrap();
         b.put_varint(0).unwrap();
 
         let mut cursor = std::io::Cursor::new(d);
@@ -1495,7 +1495,7 @@ mod tests {
         // Parse frame type.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::CANCEL_PUSH_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, CANCEL_PUSH_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);
@@ -1529,7 +1529,7 @@ mod tests {
         frame.to_bytes(&mut b).unwrap();
 
         // Write a 0-length payload frame.
-        b.put_varint(frame::MAX_PUSH_FRAME_TYPE_ID).unwrap();
+        b.put_varint(MAX_PUSH_FRAME_TYPE_ID).unwrap();
         b.put_varint(0).unwrap();
 
         let mut cursor = std::io::Cursor::new(d);
@@ -1543,7 +1543,7 @@ mod tests {
         // Parse frame type.
         stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
         let frame_ty = stream.try_consume_varint().unwrap();
-        assert_eq!(frame_ty, frame::MAX_PUSH_FRAME_TYPE_ID);
+        assert_eq!(frame_ty, MAX_PUSH_FRAME_TYPE_ID);
 
         stream.set_frame_type(frame_ty).unwrap();
         assert_eq!(stream.state, State::FramePayloadLen);

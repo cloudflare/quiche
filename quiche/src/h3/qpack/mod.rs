@@ -76,7 +76,7 @@ impl std::error::Error for Error {
     }
 }
 
-impl std::convert::From<octets::BufferTooShortError> for Error {
+impl From<octets::BufferTooShortError> for Error {
     fn from(_err: octets::BufferTooShortError) -> Self {
         Error::BufferTooShort
     }
@@ -116,20 +116,20 @@ mod tests {
         let mut encoded = [0u8; 35];
 
         let headers_expected = vec![
-            crate::h3::Header::new(b":status", b"200"),
-            crate::h3::Header::new(b":path", b"/HeLlO"),
-            crate::h3::Header::new(b"woot", b"woot"),
-            crate::h3::Header::new(b"hello", b"WorlD"),
-            crate::h3::Header::new(b"foo", b"BaR"),
+            h3::Header::new(b":status", b"200"),
+            h3::Header::new(b":path", b"/HeLlO"),
+            h3::Header::new(b"woot", b"woot"),
+            h3::Header::new(b"hello", b"WorlD"),
+            h3::Header::new(b"foo", b"BaR"),
         ];
 
         // Header.
         let headers_in = vec![
-            crate::h3::Header::new(b":StAtUs", b"200"),
-            crate::h3::Header::new(b":PaTh", b"/HeLlO"),
-            crate::h3::Header::new(b"WooT", b"woot"),
-            crate::h3::Header::new(b"hello", b"WorlD"),
-            crate::h3::Header::new(b"fOo", b"BaR"),
+            h3::Header::new(b":StAtUs", b"200"),
+            h3::Header::new(b":PaTh", b"/HeLlO"),
+            h3::Header::new(b"WooT", b"woot"),
+            h3::Header::new(b"hello", b"WorlD"),
+            h3::Header::new(b"fOo", b"BaR"),
         ];
 
         let mut enc = Encoder::new();
@@ -142,11 +142,11 @@ mod tests {
 
         // HeaderRef.
         let headers_in = vec![
-            crate::h3::HeaderRef::new(b":StAtUs", b"200"),
-            crate::h3::HeaderRef::new(b":PaTh", b"/HeLlO"),
-            crate::h3::HeaderRef::new(b"WooT", b"woot"),
-            crate::h3::HeaderRef::new(b"hello", b"WorlD"),
-            crate::h3::HeaderRef::new(b"fOo", b"BaR"),
+            h3::HeaderRef::new(b":StAtUs", b"200"),
+            h3::HeaderRef::new(b":PaTh", b"/HeLlO"),
+            h3::HeaderRef::new(b"WooT", b"woot"),
+            h3::HeaderRef::new(b"hello", b"WorlD"),
+            h3::HeaderRef::new(b"fOo", b"BaR"),
         ];
 
         let mut enc = Encoder::new();
@@ -164,15 +164,14 @@ mod tests {
         let mut enc = Encoder::new();
 
         // Indexed name with literal value
-        let headers1 =
-            vec![crate::h3::Header::new(b"location", b"															")];
+        let headers1 = vec![h3::Header::new(b"location", b"															")];
         assert_eq!(enc.encode(&headers1, &mut encoded), Ok(19));
 
         // Literal name and value
-        let headers2 = vec![crate::h3::Header::new(b"a", b"")];
+        let headers2 = vec![h3::Header::new(b"a", b"")];
         assert_eq!(enc.encode(&headers2, &mut encoded), Ok(20));
 
-        let headers3 = vec![crate::h3::Header::new(b"															", b"hello")];
+        let headers3 = vec![h3::Header::new(b"															", b"hello")];
         assert_eq!(enc.encode(&headers3, &mut encoded), Ok(24));
     }
 
@@ -185,15 +184,15 @@ mod tests {
         let value = "£££££££££££££££";
 
         // Indexed name with literal value
-        let headers1 = vec![crate::h3::Header::new(name, value.as_bytes())];
+        let headers1 = vec![h3::Header::new(name, value.as_bytes())];
         assert_eq!(enc.encode(&headers1, &mut encoded), Ok(34));
 
         // Literal name and value
         let value = "ððððððððððððððð";
-        let headers2 = vec![crate::h3::Header::new(b"a", value.as_bytes())];
+        let headers2 = vec![h3::Header::new(b"a", value.as_bytes())];
         assert_eq!(enc.encode(&headers2, &mut encoded), Ok(35));
 
-        let headers3 = vec![crate::h3::Header::new(value.as_bytes(), b"hello")];
+        let headers3 = vec![h3::Header::new(value.as_bytes(), b"hello")];
         assert_eq!(enc.encode(&headers3, &mut encoded), Ok(39));
     }
 }

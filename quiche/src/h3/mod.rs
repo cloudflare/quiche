@@ -535,8 +535,8 @@ impl Error {
     }
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{self:?}")
     }
 }
@@ -547,7 +547,7 @@ impl std::error::Error for Error {
     }
 }
 
-impl std::convert::From<super::Error> for Error {
+impl From<super::Error> for Error {
     fn from(err: super::Error) -> Self {
         match err {
             super::Error::Done => Error::Done,
@@ -557,7 +557,7 @@ impl std::convert::From<super::Error> for Error {
     }
 }
 
-impl std::convert::From<octets::BufferTooShortError> for Error {
+impl From<octets::BufferTooShortError> for Error {
     fn from(_err: octets::BufferTooShortError) -> Self {
         Error::BufferTooShort
     }
@@ -840,7 +840,7 @@ impl Priority {
 #[cfg(feature = "sfv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sfv")))]
 impl TryFrom<&[u8]> for Priority {
-    type Error = crate::h3::Error;
+    type Error = Error;
 
     /// Try to parse an Extensible Priority field value.
     ///

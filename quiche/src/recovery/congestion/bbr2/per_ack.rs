@@ -476,7 +476,7 @@ fn bbr2_check_probe_rtt(r: &mut Congestion, in_flight: usize, now: Instant) {
     {
         bbr2_enter_probe_rtt(r);
 
-        r.bbr2_state.prior_cwnd = per_ack::bbr2_save_cwnd(r);
+        r.bbr2_state.prior_cwnd = bbr2_save_cwnd(r);
         r.bbr2_state.probe_rtt_done_stamp = None;
         r.bbr2_state.ack_phase = BBR2AckPhase::ProbeStopping;
 

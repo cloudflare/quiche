@@ -24,11 +24,13 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::time;
-
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
+
 use std::net::SocketAddr;
+
+use std::time::Duration;
+use std::time::Instant;
 
 use smallvec::SmallVec;
 
@@ -145,7 +147,7 @@ pub struct Path {
 
     /// Pending challenge data with the size of the packet containing them and
     /// when they were sent.
-    in_flight_challenges: VecDeque<([u8; 8], usize, time::Instant)>,
+    in_flight_challenges: VecDeque<([u8; 8], usize, Instant)>,
 
     /// The maximum challenge size that got acknowledged.
     max_challenge_size: usize,
@@ -154,7 +156,7 @@ pub struct Path {
     probing_lost: usize,
 
     /// Last instant when a probing packet got lost.
-    last_probe_lost_time: Option<time::Instant>,
+    last_probe_lost_time: Option<Instant>,
 
     /// Received challenge data.
     received_challenges: VecDeque<[u8; 8]>,
@@ -394,7 +396,7 @@ impl Path {
 
     /// Handles the sending of PATH_CHALLENGE.
     pub fn add_challenge_sent(
-        &mut self, data: [u8; 8], pkt_size: usize, sent_time: time::Instant,
+        &mut self, data: [u8; 8], pkt_size: usize, sent_time: Instant,
     ) {
         self.on_challenge_sent();
         self.in_flight_challenges
@@ -461,7 +463,7 @@ impl Path {
     }
 
     pub fn on_loss_detection_timeout(
-        &mut self, handshake_status: HandshakeStatus, now: time::Instant,
+        &mut self, handshake_status: HandshakeStatus, now: Instant,
         is_server: bool, trace_id: &str,
     ) -> OnLossDetectionTimeoutOutcome {
         let outcome = self.recovery.on_loss_detection_timeout(
@@ -552,7 +554,7 @@ impl Path {
         }
     }
 
-    pub fn bytes_in_flight_duration(&self) -> time::Duration {
+    pub fn bytes_in_flight_duration(&self) -> Duration {
         self.recovery.bytes_in_flight_duration()
     }
 }
@@ -935,17 +937,17 @@ pub struct PathStats {
     pub dgram_sent: usize,
 
     /// The estimated round-trip time of the connection.
-    pub rtt: time::Duration,
+    pub rtt: Duration,
 
     /// The minimum round-trip time observed.
-    pub min_rtt: Option<time::Duration>,
+    pub min_rtt: Option<Duration>,
 
     /// The maximum round-trip time observed.
-    pub max_rtt: Option<time::Duration>,
+    pub max_rtt: Option<Duration>,
 
     /// The estimated round-trip time variation in samples using a mean
     /// variation.
-    pub rttvar: time::Duration,
+    pub rttvar: Duration,
 
     /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
@@ -1064,7 +1066,7 @@ mod tests {
         path_mgr.get_mut(pid).unwrap().add_challenge_sent(
             data,
             MIN_CLIENT_INITIAL_LEN - 1,
-            time::Instant::now(),
+            Instant::now(),
         );
 
         assert!(!path_mgr.get_mut(pid).unwrap().validation_requested());
@@ -1094,7 +1096,7 @@ mod tests {
         path_mgr.get_mut(pid).unwrap().add_challenge_sent(
             data,
             MIN_CLIENT_INITIAL_LEN,
-            time::Instant::now(),
+            Instant::now(),
         );
 
         path_mgr.on_response_received(data).unwrap();
@@ -1146,11 +1148,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(
-                data,
-                MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
-            );
+            .add_challenge_sent(data, MIN_CLIENT_INITIAL_LEN, Instant::now());
 
         // Second probe.
         let data_2 = rand::rand_u64().to_be_bytes();
@@ -1158,11 +1156,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(
-                data_2,
-                MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
-            );
+            .add_challenge_sent(data_2, MIN_CLIENT_INITIAL_LEN, Instant::now());
         assert_eq!(
             client_path_mgr
                 .get(client_pid)
@@ -1238,11 +1232,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(
-                data,
-                MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
-            );
+            .add_challenge_sent(data, MIN_CLIENT_INITIAL_LEN, Instant::now());
 
         // Second probe.
         let data_2 = rand::rand_u64().to_be_bytes();
@@ -1250,11 +1240,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(
-                data_2,
-                MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
-            );
+            .add_challenge_sent(data_2, MIN_CLIENT_INITIAL_LEN, Instant::now());
         assert_eq!(
             client_path_mgr
                 .get(client_pid)
@@ -1270,11 +1256,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(
-                data_3,
-                MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
-            );
+            .add_challenge_sent(data_3, MIN_CLIENT_INITIAL_LEN, Instant::now());
         assert_eq!(
             client_path_mgr
                 .get(client_pid)
@@ -1290,11 +1272,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(
-                data_4,
-                MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
-            );
+            .add_challenge_sent(data_4, MIN_CLIENT_INITIAL_LEN, Instant::now());
         assert_eq!(
             client_path_mgr
                 .get(client_pid)

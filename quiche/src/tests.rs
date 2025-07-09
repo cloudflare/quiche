@@ -25,7 +25,9 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::*;
+
 use crate::range_buf::RangeBuf;
+
 use rstest::rstest;
 
 #[test]
@@ -252,8 +254,8 @@ fn version_negotiation() {
 
     let (mut len, _) = pipe.client.send(&mut buf).unwrap();
 
-    let hdr = packet::Header::from_slice(&mut buf[..len], 0).unwrap();
-    len = crate::negotiate_version(&hdr.scid, &hdr.dcid, &mut buf).unwrap();
+    let hdr = Header::from_slice(&mut buf[..len], 0).unwrap();
+    len = negotiate_version(&hdr.scid, &hdr.dcid, &mut buf).unwrap();
 
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
@@ -283,7 +285,7 @@ fn verify_custom_root() {
 #[cfg(not(feature = "openssl"))]
 #[test]
 fn verify_client_invalid() {
-    let mut server_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut server_config = Config::new(PROTOCOL_VERSION).unwrap();
     server_config
         .load_cert_chain_from_pem_file("examples/cert.crt")
         .unwrap();
@@ -302,7 +304,7 @@ fn verify_client_invalid() {
     // to missing CA.
     server_config.verify_peer(true);
 
-    let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
     client_config
         .load_cert_chain_from_pem_file("examples/cert.crt")
         .unwrap();
@@ -337,7 +339,7 @@ fn verify_client_invalid() {
 
 #[test]
 fn verify_client_anonymous() {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
         .unwrap();
@@ -439,11 +441,11 @@ fn change_idle_timeout(
 
     assert_eq!(
         pipe.client.idle_timeout(),
-        Some(time::Duration::from_millis(234000))
+        Some(Duration::from_millis(234000))
     );
     assert_eq!(
         pipe.server.idle_timeout(),
-        Some(time::Duration::from_millis(234000))
+        Some(Duration::from_millis(234000))
     );
 }
 
@@ -551,7 +553,7 @@ fn handshake_resumption(
     #[cfg(feature = "openssl")]
     const SESSION_TICKET_KEY: [u8; 80] = [0xa; 80];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
     config
@@ -583,7 +585,7 @@ fn handshake_resumption(
     let session = pipe.client.session().unwrap();
 
     // Configure session on new connection and perform handshake.
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
         .unwrap();
@@ -645,7 +647,7 @@ fn handshake_0rtt(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -679,7 +681,7 @@ fn handshake_0rtt(
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
     // Client sends 0-RTT packet.
-    let pkt_type = packet::Type::ZeroRTT;
+    let pkt_type = Type::ZeroRTT;
 
     let frames = [frame::Frame::Stream {
         stream_id: 4,
@@ -710,7 +712,7 @@ fn handshake_0rtt_reordered(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -744,7 +746,7 @@ fn handshake_0rtt_reordered(
     let mut initial = buf[..len].to_vec();
 
     // Client sends 0-RTT packet.
-    let pkt_type = packet::Type::ZeroRTT;
+    let pkt_type = Type::ZeroRTT;
 
     let frames = [frame::Frame::Stream {
         stream_id: 4,
@@ -785,7 +787,7 @@ fn handshake_0rtt_truncated(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -818,7 +820,7 @@ fn handshake_0rtt_truncated(
     pipe.client.send(&mut buf).unwrap();
 
     // Client sends 0-RTT packet.
-    let pkt_type = packet::Type::ZeroRTT;
+    let pkt_type = Type::ZeroRTT;
 
     let frames = [frame::Frame::Stream {
         stream_id: 4,
@@ -846,7 +848,7 @@ fn crypto_limit(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -874,7 +876,7 @@ fn crypto_limit(
         data: RangeBuf::from(b"a", MAX_CRYPTO_STREAM_OFFSET, false),
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     let written =
         test_utils::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
@@ -1000,7 +1002,7 @@ fn zero_rtt(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -1061,7 +1063,7 @@ fn zero_rtt(
 fn stream_send_on_32bit_arch(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -1106,7 +1108,7 @@ fn empty_stream_frame(
         data: <RangeBuf>::from(b"aaaaa", 0, false),
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
 
     let mut readable = pipe.server.readable();
@@ -1119,7 +1121,7 @@ fn empty_stream_frame(
         data: <RangeBuf>::from(b"", 5, true),
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
 
     let mut readable = pipe.server.readable();
@@ -1132,7 +1134,7 @@ fn empty_stream_frame(
         data: <RangeBuf>::from(b"", 15, true),
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::FinalSize)
@@ -1211,13 +1213,9 @@ fn update_key_request_twice_error(
 
     // Client sends stream frame with key update request.
     assert_eq!(pipe.client_update_key(), Ok(()));
-    let written = test_utils::encode_pkt(
-        &mut pipe.client,
-        packet::Type::Short,
-        &frames,
-        &mut buf,
-    )
-    .unwrap();
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
 
     // Server correctly decode with new key.
     assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
@@ -1225,13 +1223,9 @@ fn update_key_request_twice_error(
     // Client sends stream frame with another key update request before server
     // ACK.
     assert_eq!(pipe.client_update_key(), Ok(()));
-    let written = test_utils::encode_pkt(
-        &mut pipe.client,
-        packet::Type::Short,
-        &frames,
-        &mut buf,
-    )
-    .unwrap();
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
 
     // Check server correctly closes the connection with a key update error
     // for the peer.
@@ -1259,7 +1253,7 @@ fn max_stream_data_receive_uni(
         max: 1024,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::InvalidStreamState(2)),
@@ -1276,7 +1270,7 @@ fn empty_payload(
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Send a packet with no frames.
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &[], &mut buf),
         Err(Error::InvalidPacket)
@@ -1294,7 +1288,7 @@ fn min_payload(
     // Send a non-ack-eliciting packet.
     let frames = [frame::Frame::Padding { len: 4 }];
 
-    let pkt_type = packet::Type::Initial;
+    let pkt_type = Type::Initial;
     let written =
         test_utils::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
             .unwrap();
@@ -1352,7 +1346,7 @@ fn flow_control_limit(
         },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::FlowControl),
@@ -1385,7 +1379,7 @@ fn flow_control_limit_dup(
         },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 }
 
@@ -1409,7 +1403,7 @@ fn flow_control_update(
         },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
@@ -1494,7 +1488,7 @@ fn stream_flow_control_limit_bidi(
         data: <RangeBuf>::from(b"aaaaaaaaaaaaaaaa", 0, true),
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::FlowControl),
@@ -1515,7 +1509,7 @@ fn stream_flow_control_limit_uni(
         data: <RangeBuf>::from(b"aaaaaaaaaaa", 0, true),
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::FlowControl),
@@ -1536,7 +1530,7 @@ fn stream_flow_control_update(
         data: <RangeBuf>::from(b"aaaaaaaaa", 0, false),
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
@@ -1591,7 +1585,7 @@ fn stream_left_bidi(
 
     let frames = [frame::Frame::MaxStreamsBidi { max: MAX_STREAM_ID }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
     assert_eq!(MAX_STREAM_ID - 3, pipe.server.peer_streams_left_bidi());
@@ -1619,7 +1613,7 @@ fn stream_left_uni(
 
     let frames = [frame::Frame::MaxStreamsUni { max: MAX_STREAM_ID }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
     assert_eq!(MAX_STREAM_ID - 3, pipe.server.peer_streams_left_uni());
@@ -1665,7 +1659,7 @@ fn stream_limit_bidi(
         },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::StreamLimit),
@@ -1683,14 +1677,14 @@ fn stream_limit_max_bidi(
 
     let frames = [frame::Frame::MaxStreamsBidi { max: MAX_STREAM_ID }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
     let frames = [frame::Frame::MaxStreamsBidi {
         max: MAX_STREAM_ID + 1,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::InvalidFrame),
@@ -1737,7 +1731,7 @@ fn stream_limit_uni(
         },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::StreamLimit),
@@ -1755,14 +1749,14 @@ fn stream_limit_max_uni(
 
     let frames = [frame::Frame::MaxStreamsUni { max: MAX_STREAM_ID }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
     let frames = [frame::Frame::MaxStreamsUni {
         max: MAX_STREAM_ID + 1,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::InvalidFrame),
@@ -1999,14 +1993,14 @@ fn streams_blocked_max_bidi(
         limit: MAX_STREAM_ID,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
     let frames = [frame::Frame::StreamsBlockedBidi {
         limit: MAX_STREAM_ID + 1,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::InvalidFrame),
@@ -2026,14 +2020,14 @@ fn streams_blocked_max_uni(
         limit: MAX_STREAM_ID,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
     let frames = [frame::Frame::StreamsBlockedUni {
         limit: MAX_STREAM_ID + 1,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::InvalidFrame),
@@ -2064,7 +2058,7 @@ fn stream_data_overlap(
         },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
     let mut b = [0; 15];
@@ -2096,7 +2090,7 @@ fn stream_data_overlap_with_reordering(
         },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
 
     let mut b = [0; 15];
@@ -2148,7 +2142,7 @@ fn reset_stream_data_recvd(
         final_size: 5,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
 
     // Server is notified of stream readability, due to reset.
@@ -2215,7 +2209,7 @@ fn reset_stream_data_not_recvd(
         final_size: 5,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
 
     // Server is notified of stream readability, due to reset.
@@ -2268,7 +2262,7 @@ fn reset_stream_flow_control(
         },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::FlowControl),
@@ -2298,7 +2292,7 @@ fn reset_stream_flow_control_stream(
         },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(
         pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
         Err(Error::FlowControl),
@@ -2316,7 +2310,7 @@ fn path_challenge(
 
     let frames = [frame::Frame::PathChallenge { data: [0xba; 8] }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     let len = pipe
         .send_pkt_to_server(pkt_type, &frames, &mut buf)
@@ -2373,7 +2367,7 @@ fn early_1rtt_packet(
         data: <RangeBuf>::from(b"hello, world", 0, true),
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     let written =
         test_utils::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
             .unwrap();
@@ -2458,7 +2452,7 @@ fn stop_sending(
         error_code: 42,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     let len = pipe
         .send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
@@ -2576,7 +2570,7 @@ fn stop_sending_fin(
         error_code: 42,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     let len = pipe
         .send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
@@ -2610,7 +2604,7 @@ fn stop_sending_unsent_tx_cap(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -2661,7 +2655,7 @@ fn stop_sending_unsent_tx_cap(
         error_code: 42,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
 
@@ -2815,7 +2809,7 @@ fn stream_shutdown_read_update_max_data(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -2984,7 +2978,7 @@ fn stream_shutdown_write(
 fn stream_shutdown_write_unsent_tx_cap(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -3262,7 +3256,7 @@ fn stream_writable(
 fn stream_writable_blocked(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -3355,7 +3349,7 @@ fn invalid_initial_server(
 
     let written = test_utils::encode_pkt(
         &mut pipe.client,
-        packet::Type::Initial,
+        Type::Initial,
         &frames,
         &mut buf,
     )
@@ -3395,7 +3389,7 @@ fn invalid_initial_client(
 
     let written = test_utils::encode_pkt(
         &mut pipe.server,
-        packet::Type::Initial,
+        Type::Initial,
         &frames,
         &mut buf,
     )
@@ -3427,7 +3421,7 @@ fn invalid_initial_payload(
 
     let mut b = octets::OctetsMut::with_slice(&mut buf);
 
-    let epoch = packet::Type::Initial.to_epoch().unwrap();
+    let epoch = Type::Initial.to_epoch().unwrap();
 
     let pn = 0;
     let pn_len = packet::pkt_num_len(pn, 0);
@@ -3436,7 +3430,7 @@ fn invalid_initial_payload(
     let scid = pipe.client.source_id();
 
     let hdr = Header {
-        ty: packet::Type::Initial,
+        ty: Type::Initial,
         version: pipe.client.version,
         dcid: ConnectionId::from_ref(&dcid),
         scid: ConnectionId::from_ref(&scid),
@@ -3505,13 +3499,9 @@ fn invalid_packet(
 
     let frames = [frame::Frame::Padding { len: 10 }];
 
-    let written = test_utils::encode_pkt(
-        &mut pipe.client,
-        packet::Type::Short,
-        &frames,
-        &mut buf,
-    )
-    .unwrap();
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
 
     // Corrupt the packets's last byte to make decryption fail (the last
     // byte is part of the AEAD tag, so changing it means that the packet
@@ -3580,7 +3570,7 @@ fn stop_sending_before_flushed_packets(
         error_code: 42,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     let len = pipe
         .send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
@@ -3637,7 +3627,7 @@ fn reset_before_flushed_packets(
 ) {
     let mut b = [0; 15];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -3699,7 +3689,7 @@ fn reset_before_flushed_packets(
 fn stream_limit_update_bidi(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -3778,7 +3768,7 @@ fn stream_limit_update_bidi(
 fn stream_limit_update_uni(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -4021,7 +4011,7 @@ fn collect_streams(
         data: <RangeBuf>::from(b"aa", 0, false),
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
 }
 
@@ -4198,7 +4188,7 @@ fn retry_with_pto(
 
     // Wait for the client's PTO so it will try to send an Initial again.
     let timer = pipe.client.timeout().unwrap();
-    std::thread::sleep(timer + time::Duration::from_millis(1));
+    std::thread::sleep(timer + Duration::from_millis(1));
     pipe.client.on_timeout();
 
     assert_eq!(pipe.advance(), Ok(()));
@@ -4344,7 +4334,7 @@ fn zero_length_new_token(
 
     let frames = vec![frame::Frame::NewToken { token: vec![] }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     let written =
         test_utils::encode_pkt(&mut pipe.server, pkt_type, &frames, &mut buf)
@@ -4370,7 +4360,7 @@ fn client_sent_new_token(
         token: vec![1, 2, 3],
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     let written =
         test_utils::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
@@ -4388,7 +4378,7 @@ fn check_send(_: &mut impl Send) {}
 fn config_must_be_send(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     check_send(&mut config);
 }
@@ -4407,7 +4397,7 @@ fn check_sync(_: &mut impl Sync) {}
 fn config_must_be_sync(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     check_sync(&mut config);
 }
@@ -4870,7 +4860,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
     for _ in 0..recovery::MAX_OUTSTANDING_NON_ACK_ELICITING {
         let written = test_utils::encode_pkt(
             &mut pipe.server,
-            packet::Type::Short,
+            Type::Short,
             &[frame::Frame::Ping { mtu_probe: None }],
             &mut buf,
         )
@@ -4938,7 +4928,7 @@ fn validate_peer_sent_ack_range(
 
     let mut buf = [0; 2000];
     let epoch = packet::Epoch::Application;
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     // Elicit client to send an ACK to the server
     let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
@@ -5000,7 +4990,7 @@ fn validate_peer_sent_ack_range(
 fn validate_peer_sent_ack_range_for_multi_path(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -5027,7 +5017,7 @@ fn validate_peer_sent_ack_range_for_multi_path(
 
     let mut buf = [0; 2000];
     let epoch = packet::Epoch::Application;
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     // active path
     let expected_max_active_pkt_sent = 7;
@@ -5116,7 +5106,7 @@ fn validate_peer_sent_ack_range_for_multi_path(
 fn optimistic_ack_mitigation_via_skip_pn(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -5173,7 +5163,7 @@ fn optimistic_ack_mitigation_via_skip_pn(
 fn prevent_optimistic_ack(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -5209,7 +5199,7 @@ fn prevent_optimistic_ack(
         }
     }
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     let mut buf = [0; 2000];
 
     // Construct an ACK with the skip_pn to send to the server
@@ -5395,7 +5385,7 @@ fn limit_ack_ranges(
         frame::Frame::Padding { len: 3 },
     ];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     let mut last_packet_sent = 0;
 
@@ -5439,7 +5429,7 @@ fn stream_priority(
 
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -5665,7 +5655,7 @@ fn stream_reprioritize(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -5788,7 +5778,7 @@ fn stream_datagram_priority(
 
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -5936,7 +5926,7 @@ fn early_retransmit(
 
     // Wait until PTO expires. Since the RTT is very low, wait a bit more.
     let timer = pipe.client.timeout().unwrap();
-    std::thread::sleep(timer + time::Duration::from_millis(1));
+    std::thread::sleep(timer + Duration::from_millis(1));
 
     pipe.client.on_timeout();
 
@@ -5997,7 +5987,7 @@ fn dont_coalesce_probes(
 
     // Wait for PTO to expire.
     let timer = pipe.client.timeout().unwrap();
-    std::thread::sleep(timer + time::Duration::from_millis(1));
+    std::thread::sleep(timer + Duration::from_millis(1));
 
     pipe.client.on_timeout();
     assert_eq!(pipe.client.path_stats().next().unwrap().total_pto_count, 1);
@@ -6028,7 +6018,7 @@ fn dont_coalesce_probes(
 
     // Wait for PTO to expire.
     let timer = pipe.client.timeout().unwrap();
-    std::thread::sleep(timer + time::Duration::from_millis(1));
+    std::thread::sleep(timer + Duration::from_millis(1));
 
     pipe.client.on_timeout();
     assert_eq!(pipe.client.path_stats().next().unwrap().total_pto_count, 2);
@@ -6183,7 +6173,7 @@ fn handshake_packet_type_corruption(
     let active_pid = pipe.client.paths.get_active_path_id().expect("no active");
     let (ty, len) = pipe
         .client
-        .send_single(&mut buf, active_pid, false, time::Instant::now())
+        .send_single(&mut buf, active_pid, false, Instant::now())
         .unwrap();
     assert_eq!(ty, Type::Initial);
 
@@ -6192,7 +6182,7 @@ fn handshake_packet_type_corruption(
     // Client sends Handshake packet.
     let (ty, len) = pipe
         .client
-        .send_single(&mut buf, active_pid, false, time::Instant::now())
+        .send_single(&mut buf, active_pid, false, Instant::now())
         .unwrap();
     assert_eq!(ty, Type::Handshake);
 
@@ -6226,7 +6216,7 @@ fn dgram_send_app_limited(
     let mut buf = [0; 65535];
     let send_buf = [0xcf; 1000];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -6312,7 +6302,7 @@ fn dgram_single_datagram(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -6352,7 +6342,7 @@ fn dgram_multiple_datagrams(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -6429,7 +6419,7 @@ fn dgram_send_queue_overflow(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -6478,7 +6468,7 @@ fn dgram_recv_queue_overflow(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -6528,7 +6518,7 @@ fn dgram_send_max_size(
 ) {
     let mut buf = [0; MAX_DGRAM_FRAME_SIZE as usize];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -6582,7 +6572,7 @@ fn is_readable(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -7008,7 +6998,7 @@ fn update_max_datagram_size(
     let server_scid = ConnectionId::from_ref(&server_scid);
     let server_addr = "127.0.0.1:4321".parse().unwrap();
 
-    let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(
         client_config.set_cc_algorithm_name(cc_algorithm_name),
         Ok(())
@@ -7018,7 +7008,7 @@ fn update_max_datagram_size(
         .unwrap();
     client_config.set_max_recv_udp_payload_size(1200);
 
-    let mut server_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut server_config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(
         server_config.set_cc_algorithm_name(cc_algorithm_name),
         Ok(())
@@ -7107,7 +7097,7 @@ fn send_capacity(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -7202,10 +7192,10 @@ fn user_provided_boring_ctx(
         .unwrap();
 
     let mut server_config = Config::with_boring_ssl_ctx_builder(
-        crate::PROTOCOL_VERSION,
+        PROTOCOL_VERSION,
         server_tls_ctx_builder,
     )?;
-    let mut client_config = Config::new(crate::PROTOCOL_VERSION)?;
+    let mut client_config = Config::new(PROTOCOL_VERSION)?;
     assert_eq!(
         client_config.set_cc_algorithm_name(cc_algorithm_name),
         Ok(())
@@ -7281,7 +7271,7 @@ fn in_handshake_config(
     });
 
     let mut server_config = Config::with_boring_ssl_ctx_builder(
-        crate::PROTOCOL_VERSION,
+        PROTOCOL_VERSION,
         server_tls_ctx_builder,
     )?;
     assert_eq!(
@@ -7289,7 +7279,7 @@ fn in_handshake_config(
         Ok(())
     );
 
-    let mut client_config = Config::new(crate::PROTOCOL_VERSION)?;
+    let mut client_config = Config::new(PROTOCOL_VERSION)?;
     client_config.load_cert_chain_from_pem_file("examples/cert.crt")?;
     client_config.load_priv_key_from_pem_file("examples/cert.key")?;
 
@@ -7445,7 +7435,7 @@ fn last_tx_data_larger_than_tx_data(
 
     // Wait for PTO to expire.
     let timer = pipe.server.timeout().unwrap();
-    std::thread::sleep(timer + time::Duration::from_millis(1));
+    std::thread::sleep(timer + Duration::from_millis(1));
 
     pipe.server.on_timeout();
 
@@ -7462,7 +7452,7 @@ fn last_tx_data_larger_than_tx_data(
         error_code: 42,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
 }
@@ -7473,7 +7463,7 @@ fn last_tx_data_larger_than_tx_data(
 fn send_connection_ids(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -7536,7 +7526,7 @@ fn connection_id_zero(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -7565,7 +7555,7 @@ fn connection_id_zero(
         reset_token: reset_token.to_be_bytes(),
     });
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     let written =
         test_utils::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
@@ -7609,7 +7599,7 @@ fn connection_id_invalid_max_len(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -7639,7 +7629,7 @@ fn connection_id_invalid_max_len(
         reset_token: reset_token.to_be_bytes(),
     });
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     let written =
         test_utils::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
@@ -7682,7 +7672,7 @@ fn connection_id_invalid_max_len(
 fn connection_id_handling(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -7770,7 +7760,7 @@ fn connection_id_handling(
 fn lost_connection_id_frames(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -7797,7 +7787,7 @@ fn lost_connection_id_frames(
 
     // Wait until timer expires. Since the RTT is very low, wait a bit more.
     let timer = pipe.client.timeout().unwrap();
-    std::thread::sleep(timer + time::Duration::from_millis(1));
+    std::thread::sleep(timer + Duration::from_millis(1));
 
     pipe.client.on_timeout();
 
@@ -7815,7 +7805,7 @@ fn lost_connection_id_frames(
 
     // Wait until timer expires. Since the RTT is very low, wait a bit more.
     let timer = pipe.server.timeout().unwrap();
-    std::thread::sleep(timer + time::Duration::from_millis(1));
+    std::thread::sleep(timer + Duration::from_millis(1));
 
     pipe.server.on_timeout();
 
@@ -7830,7 +7820,7 @@ fn lost_connection_id_frames(
 fn sending_duplicate_scids(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -7880,7 +7870,7 @@ fn connection_id_retire_limit(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -7928,7 +7918,7 @@ fn connection_id_retire_limit(
         });
     }
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
 
     let written =
         test_utils::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
@@ -8029,7 +8019,7 @@ fn pipe_with_exchanged_cids(
 fn path_validation(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8117,7 +8107,7 @@ fn path_validation(
 fn losing_probing_packets(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8155,8 +8145,8 @@ fn losing_probing_packets(
         .recovery
         .loss_detection_timer()
         .unwrap();
-    let timer = probe_instant.duration_since(time::Instant::now());
-    std::thread::sleep(timer + time::Duration::from_millis(1));
+    let timer = probe_instant.duration_since(Instant::now());
+    std::thread::sleep(timer + Duration::from_millis(1));
 
     pipe.client.on_timeout();
 
@@ -8185,7 +8175,7 @@ fn losing_probing_packets(
 fn failed_path_validation(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8224,8 +8214,8 @@ fn failed_path_validation(
             .recovery
             .loss_detection_timer()
             .unwrap();
-        let timer = probe_instant.duration_since(time::Instant::now());
-        std::thread::sleep(timer + time::Duration::from_millis(1));
+        let timer = probe_instant.duration_since(Instant::now());
+        std::thread::sleep(timer + Duration::from_millis(1));
 
         pipe.client.on_timeout();
     }
@@ -8240,7 +8230,7 @@ fn failed_path_validation(
 fn client_discard_unknown_address(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8276,7 +8266,7 @@ fn client_discard_unknown_address(
 fn path_validation_limited_mtu(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8332,7 +8322,7 @@ fn path_validation_limited_mtu(
 fn path_probing_dos(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8401,7 +8391,7 @@ fn path_probing_dos(
 fn retiring_active_path_dcid(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8427,7 +8417,7 @@ fn retiring_active_path_dcid(
 fn send_on_path_test(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8615,7 +8605,7 @@ fn send_on_path_test(
 fn connection_migration(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8831,7 +8821,7 @@ fn connection_migration(
 fn connection_migration_zero_length_cid(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8911,7 +8901,7 @@ fn connection_migration_zero_length_cid(
 fn connection_migration_reordered_non_probing(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -8981,7 +8971,7 @@ fn connection_migration_reordered_non_probing(
 fn resilience_against_migration_attack(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -9084,8 +9074,8 @@ fn resilience_against_migration_attack(
         .recovery
         .loss_detection_timer()
         .unwrap();
-    let timer = probe_instant.duration_since(time::Instant::now());
-    std::thread::sleep(timer + time::Duration::from_millis(1));
+    let timer = probe_instant.duration_since(Instant::now());
+    std::thread::sleep(timer + Duration::from_millis(1));
 
     pipe.server.on_timeout();
 
@@ -9130,7 +9120,7 @@ fn consecutive_non_ack_eliciting(
     // Client sends a bunch of PING frames, causing server to ACK (ACKs aren't
     // ack-eliciting)
     let frames = [frame::Frame::Ping { mtu_probe: None }];
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     for _ in 0..24 {
         let len = pipe
             .send_pkt_to_server(pkt_type, &frames, &mut buf)
@@ -9228,7 +9218,7 @@ fn stop_sending_stream_send_after_reset_stream_ack(
 
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -9320,7 +9310,7 @@ fn stop_sending_stream_send_after_reset_stream_ack(
         error_code: 42,
     }];
 
-    let pkt_type = packet::Type::Short;
+    let pkt_type = Type::Short;
     let len = pipe
         .send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
@@ -9414,7 +9404,7 @@ fn stop_sending_stream_send_after_reset_stream_ack(
 fn challenge_no_cids(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -9458,13 +9448,13 @@ fn challenge_no_cids(
     }];
     let mut pkt_buf = [0u8; 1500];
     let mut b = octets::OctetsMut::with_slice(&mut pkt_buf);
-    let epoch = packet::Type::Short.to_epoch().unwrap();
+    let epoch = Type::Short.to_epoch().unwrap();
     let crypto_ctx = &mut pipe.client.crypto_ctx[epoch];
     let pn = pipe.client.next_pkt_num;
     let pn_len = 4;
 
     let hdr = Header {
-        ty: packet::Type::Short,
+        ty: Type::Short,
         version: pipe.client.version,
         dcid: server_cids[0].clone(),
         scid: ConnectionId::from_ref(&[5, 4, 3, 2, 1]),
@@ -9516,7 +9506,7 @@ fn challenge_no_cids(
 fn pmtud_probe_success(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -9557,7 +9547,7 @@ fn pmtud_probe_success(
 fn pmtud_no_duplicate_probes(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -9624,7 +9614,7 @@ fn pmtud_no_duplicate_probes(
 fn pmtud_probe_retry_after_loss(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -9746,7 +9736,7 @@ fn enable_pmtud_mid_handshake(
     });
 
     let mut server_config = Config::with_boring_ssl_ctx_builder(
-        crate::PROTOCOL_VERSION,
+        PROTOCOL_VERSION,
         server_tls_ctx_builder,
     )
     .unwrap();
@@ -9755,7 +9745,7 @@ fn enable_pmtud_mid_handshake(
         Ok(())
     );
 
-    let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
     client_config
         .load_cert_chain_from_pem_file("examples/cert.crt")
         .unwrap();
@@ -9833,7 +9823,7 @@ fn disable_pmtud_mid_handshake(
     });
 
     let mut server_config = Config::with_boring_ssl_ctx_builder(
-        crate::PROTOCOL_VERSION,
+        PROTOCOL_VERSION,
         server_tls_ctx_builder,
     )
     .unwrap();
@@ -9842,7 +9832,7 @@ fn disable_pmtud_mid_handshake(
         Ok(())
     );
 
-    let mut client_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+    let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
     client_config
         .load_cert_chain_from_pem_file("examples/cert.crt")
         .unwrap();

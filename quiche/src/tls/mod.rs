@@ -171,7 +171,7 @@ impl Context {
             SSL_CTX_load_verify_locations(
                 self.as_mut_ptr(),
                 file.as_ptr(),
-                std::ptr::null(),
+                ptr::null(),
             )
         })
     }
@@ -183,7 +183,7 @@ impl Context {
         map_result(unsafe {
             SSL_CTX_load_verify_locations(
                 self.as_mut_ptr(),
-                std::ptr::null(),
+                ptr::null(),
                 path.as_ptr(),
             )
         })
@@ -338,8 +338,8 @@ impl Context {
 // should be its only owner), and there is no interior mutability, as the
 // pointer is not accessed directly outside of this module, and the Context
 // object API should preserve Rust's borrowing guarantees.
-unsafe impl std::marker::Send for Context {}
-unsafe impl std::marker::Sync for Context {}
+unsafe impl Send for Context {}
+unsafe impl Sync for Context {}
 
 impl Drop for Context {
     fn drop(&mut self) {
@@ -535,7 +535,7 @@ impl Handshake {
     pub fn do_handshake(&mut self, ex_data: &mut ExData) -> Result<()> {
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
         let rc = unsafe { SSL_do_handshake(self.as_mut_ptr()) };
-        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
+        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, ptr::null())?;
 
         self.set_transport_error(ex_data, rc);
         self.map_result_ssl(rc)
@@ -551,7 +551,7 @@ impl Handshake {
 
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
         let rc = unsafe { SSL_process_quic_post_handshake(self.as_mut_ptr()) };
-        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
+        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, ptr::null())?;
 
         self.set_transport_error(ex_data, rc);
         self.map_result_ssl(rc)
@@ -678,8 +678,8 @@ impl Handshake {
 // Handshake should be its only owner), and there is no interior mutability, as
 // the pointer is not accessed directly outside of this module, and the
 // Handshake object API should preserve Rust's borrowing guarantees.
-unsafe impl std::marker::Send for Handshake {}
-unsafe impl std::marker::Sync for Handshake {}
+unsafe impl Send for Handshake {}
+unsafe impl Sync for Handshake {}
 
 impl Drop for Handshake {
     fn drop(&mut self) {
@@ -694,9 +694,9 @@ pub struct ExData<'a> {
 
     pub session: &'a mut Option<Vec<u8>>,
 
-    pub local_error: &'a mut Option<super::ConnectionError>,
+    pub local_error: &'a mut Option<ConnectionError>,
 
-    pub keylog: Option<&'a mut Box<dyn std::io::Write + Send + Sync>>,
+    pub keylog: Option<&'a mut Box<dyn Write + Send + Sync>>,
 
     pub trace_id: &'a str,
 

@@ -237,7 +237,7 @@ impl HeaderProtectionKey {
                         PLAINTEXT.as_ptr(),
                         PLAINTEXT.len(),
                         key.as_ptr(),
-                        sample[std::mem::size_of::<u32>()..].as_ptr(),
+                        sample[size_of::<u32>()..].as_ptr(),
                         counter,
                     );
                 };

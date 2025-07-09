@@ -258,7 +258,7 @@ impl FromStr for BbrBwLoReductionStrategy {
     /// Converts a string to `BbrBwLoReductionStrategy`.
     ///
     /// If `name` is not valid, `Error::CongestionControl` is returned.
-    fn from_str(name: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
         match name {
             "default" => Ok(BbrBwLoReductionStrategy::Default),
             "minrtt" => Ok(BbrBwLoReductionStrategy::MinRttReduction),

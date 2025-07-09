@@ -48,7 +48,6 @@ use crate::Result;
 use crate::recovery::QlogMetrics;
 
 use crate::frame;
-use crate::packet;
 
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
@@ -324,7 +323,7 @@ impl RecoveryEpoch {
 }
 
 pub struct LegacyRecovery {
-    epochs: [RecoveryEpoch; packet::Epoch::count()],
+    epochs: [RecoveryEpoch; Epoch::count()],
 
     loss_timer: LossDetectionTimer,
 
@@ -408,12 +407,12 @@ impl LegacyRecovery {
         Self::new_with_config(&RecoveryConfig::from_config(config))
     }
 
-    fn loss_time_and_space(&self) -> (Option<Instant>, packet::Epoch) {
-        let mut epoch = packet::Epoch::Initial;
+    fn loss_time_and_space(&self) -> (Option<Instant>, Epoch) {
+        let mut epoch = Epoch::Initial;
         let mut time = self.epochs[epoch].loss_time;
 
         // Iterate over all packet number spaces starting from Handshake.
-        for e in [packet::Epoch::Handshake, packet::Epoch::Application] {
+        for e in [Epoch::Handshake, Epoch::Application] {
             let new_time = self.epochs[e].loss_time;
             if time.is_none() || new_time < time {
                 time = new_time;
@@ -426,33 +425,29 @@ impl LegacyRecovery {
 
     fn pto_time_and_space(
         &self, handshake_status: HandshakeStatus, now: Instant,
-    ) -> (Option<Instant>, packet::Epoch) {
+    ) -> (Option<Instant>, Epoch) {
         let mut duration = self.pto() * 2_u32.pow(self.pto_count);
 
         // Arm PTO from now when there are no inflight packets.
         if self.bytes_in_flight.is_zero() {
             if handshake_status.has_handshake_keys {
-                return (Some(now + duration), packet::Epoch::Handshake);
+                return (Some(now + duration), Epoch::Handshake);
             } else {
-                return (Some(now + duration), packet::Epoch::Initial);
+                return (Some(now + duration), Epoch::Initial);
             }
         }
 
         let mut pto_timeout = None;
-        let mut pto_space = packet::Epoch::Initial;
+        let mut pto_space = Epoch::Initial;
 
         // Iterate over all packet number spaces.
-        for e in [
-            packet::Epoch::Initial,
-            packet::Epoch::Handshake,
-            packet::Epoch::Application,
-        ] {
+        for e in [Epoch::Initial, Epoch::Handshake, Epoch::Application] {
             let epoch = &self.epochs[e];
             if epoch.in_flight_count == 0 {
                 continue;
             }
 
-            if e == packet::Epoch::Application {
+            if e == Epoch::Application {
                 // Skip Application Data until handshake completes.
                 if !handshake_status.completed {
                     return (pto_timeout, pto_space);
@@ -502,7 +497,7 @@ impl LegacyRecovery {
     }
 
     fn detect_lost_packets(
-        &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
+        &mut self, epoch: Epoch, now: Instant, trace_id: &str,
     ) -> (usize, usize) {
         let loss_delay = cmp::max(self.rtt_stats.latest_rtt, self.rtt())
             .mul_f64(self.time_thresh);
@@ -547,44 +542,44 @@ impl LegacyRecovery {
 impl RecoveryOps for LegacyRecovery {
     /// Returns whether or not we should elicit an ACK even if we wouldn't
     /// otherwise have constructed an ACK eliciting packet.
-    fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
+    fn should_elicit_ack(&self, epoch: Epoch) -> bool {
         self.epochs[epoch].loss_probes > 0 ||
             self.outstanding_non_ack_eliciting >=
                 MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
-    fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
+    fn get_acked_frames(&mut self, epoch: Epoch) -> Vec<frame::Frame> {
         std::mem::take(&mut self.epochs[epoch].acked_frames)
     }
 
-    fn get_lost_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
+    fn get_lost_frames(&mut self, epoch: Epoch) -> Vec<frame::Frame> {
         std::mem::take(&mut self.epochs[epoch].lost_frames)
     }
 
-    fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64> {
+    fn get_largest_acked_on_epoch(&self, epoch: Epoch) -> Option<u64> {
         self.epochs[epoch].largest_acked_packet
     }
 
-    fn has_lost_frames(&self, epoch: packet::Epoch) -> bool {
+    fn has_lost_frames(&self, epoch: Epoch) -> bool {
         !self.epochs[epoch].lost_frames.is_empty()
     }
 
-    fn loss_probes(&self, epoch: packet::Epoch) -> usize {
+    fn loss_probes(&self, epoch: Epoch) -> usize {
         self.epochs[epoch].loss_probes
     }
 
     #[cfg(test)]
-    fn inc_loss_probes(&mut self, epoch: packet::Epoch) {
+    fn inc_loss_probes(&mut self, epoch: Epoch) {
         self.epochs[epoch].loss_probes += 1;
     }
 
-    fn ping_sent(&mut self, epoch: packet::Epoch) {
+    fn ping_sent(&mut self, epoch: Epoch) {
         self.epochs[epoch].loss_probes =
             self.epochs[epoch].loss_probes.saturating_sub(1);
     }
 
     fn on_packet_sent(
-        &mut self, mut pkt: Sent, epoch: packet::Epoch,
+        &mut self, mut pkt: Sent, epoch: Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
         let ack_eliciting = pkt.ack_eliciting;
@@ -640,9 +635,9 @@ impl RecoveryOps for LegacyRecovery {
 
     // `peer_sent_ack_ranges` should not be used without validation.
     fn on_ack_received(
-        &mut self, peer_sent_ack_ranges: &RangeSet, ack_delay: u64,
-        epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
-        skip_pn: Option<u64>, trace_id: &str,
+        &mut self, peer_sent_ack_ranges: &RangeSet, ack_delay: u64, epoch: Epoch,
+        handshake_status: HandshakeStatus, now: Instant, skip_pn: Option<u64>,
+        trace_id: &str,
     ) -> Result<OnAckReceivedOutcome> {
         let AckedDetectionResult {
             acked_bytes,
@@ -757,9 +752,9 @@ impl RecoveryOps for LegacyRecovery {
             // more anti-amplification credit, a Handshake packet proves address
             // ownership.
             if handshake_status.has_handshake_keys {
-                packet::Epoch::Handshake
+                Epoch::Handshake
             } else {
-                packet::Epoch::Initial
+                Epoch::Initial
             }
         };
 
@@ -801,8 +796,7 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn on_pkt_num_space_discarded(
-        &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
-        now: Instant,
+        &mut self, epoch: Epoch, handshake_status: HandshakeStatus, now: Instant,
     ) {
         let epoch = &mut self.epochs[epoch];
 
@@ -829,7 +823,7 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn on_path_change(
-        &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
+        &mut self, epoch: Epoch, now: Instant, trace_id: &str,
     ) -> (usize, usize) {
         // Time threshold loss detection.
         self.detect_lost_packets(epoch, now, trace_id)
@@ -917,12 +911,12 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     #[cfg(test)]
-    fn sent_packets_len(&self, epoch: packet::Epoch) -> usize {
+    fn sent_packets_len(&self, epoch: Epoch) -> usize {
         self.epochs[epoch].sent_packets.len()
     }
 
     #[cfg(test)]
-    fn in_flight_count(&self, epoch: packet::Epoch) -> usize {
+    fn in_flight_count(&self, epoch: Epoch) -> usize {
         self.epochs[epoch].in_flight_count
     }
 
@@ -957,7 +951,7 @@ impl RecoveryOps for LegacyRecovery {
 
     #[cfg(test)]
     fn detect_lost_packets_for_test(
-        &mut self, epoch: packet::Epoch, now: Instant,
+        &mut self, epoch: Epoch, now: Instant,
     ) -> (usize, usize) {
         self.detect_lost_packets(epoch, now, "")
     }
@@ -969,7 +963,7 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     #[cfg(test)]
-    fn largest_sent_pkt_num_on_path(&self, epoch: packet::Epoch) -> Option<u64> {
+    fn largest_sent_pkt_num_on_path(&self, epoch: Epoch) -> Option<u64> {
         self.epochs[epoch].test_largest_sent_pkt_num_on_path
     }
 

@@ -377,12 +377,28 @@
 
 #![allow(clippy::upper_case_acronyms)]
 #![warn(missing_docs)]
+#![warn(unused_qualifications)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[macro_use]
 extern crate log;
 
-use octets::BufferTooShortError;
+use std::cmp;
+
+use std::collections::HashSet;
+use std::collections::VecDeque;
+
+use std::convert::TryInto;
+
+use std::net::SocketAddr;
+
+use std::str::FromStr;
+
+use std::sync::Arc;
+
+use std::time::Duration;
+use std::time::Instant;
+
 #[cfg(feature = "qlog")]
 use qlog::events::connectivity::ConnectivityEventType;
 #[cfg(feature = "qlog")]
@@ -403,28 +419,17 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::RawInfo;
-use recovery::OnLossDetectionTimeoutOutcome;
-use stream::StreamPriorityKey;
 
-use std::cmp;
-use std::convert::TryInto;
-use std::time;
-
-use std::sync::Arc;
-
-use std::net::SocketAddr;
-
-use std::str::FromStr;
-
-use std::collections::HashSet;
-use std::collections::VecDeque;
-use std::time::Duration;
-
-use range_buf::DefaultBufFactory;
 use smallvec::SmallVec;
 
+use crate::range_buf::DefaultBufFactory;
+
 use crate::recovery::OnAckReceivedOutcome;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
+use crate::recovery::RecoveryOps;
 use crate::recovery::ReleaseDecision;
+
+use crate::stream::StreamPriorityKey;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -433,7 +438,7 @@ pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 const PROTOCOL_VERSION_V1: u32 = 0x0000_0001;
 
 /// The maximum length of a connection ID.
-pub const MAX_CONN_ID_LEN: usize = crate::packet::MAX_CID_LEN as usize;
+pub const MAX_CONN_ID_LEN: usize = packet::MAX_CID_LEN as usize;
 
 /// The minimum length of Initial packets sent by a client.
 pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
@@ -724,7 +729,7 @@ impl std::error::Error for Error {
     }
 }
 
-impl std::convert::From<octets::BufferTooShortError> for Error {
+impl From<octets::BufferTooShortError> for Error {
     fn from(_err: octets::BufferTooShortError) -> Self {
         Error::BufferTooShort
     }
@@ -754,7 +759,7 @@ pub struct SendInfo {
     /// See [Pacing] for more details.
     ///
     /// [Pacing]: index.html#pacing
-    pub at: time::Instant,
+    pub at: Instant,
 }
 
 /// Represents information carried by `CONNECTION_CLOSE` frames.
@@ -1583,10 +1588,10 @@ where
     blocked_limit: Option<u64>,
 
     /// Idle timeout expiration time.
-    idle_timer: Option<time::Instant>,
+    idle_timer: Option<Instant>,
 
     /// Draining timeout expiration time.
-    draining_timer: Option<time::Instant>,
+    draining_timer: Option<Instant>,
 
     /// List of raw packets that were received before they could be decrypted.
     undecryptable_pkts: VecDeque<(Vec<u8>, RecvInfo)>,
@@ -2296,7 +2301,7 @@ impl<F: BufFactory> Connection<F> {
             Some(title),
             Some(description),
             None,
-            time::Instant::now(),
+            Instant::now(),
             trace,
             self.qlog.level,
             writer,
@@ -2839,7 +2844,7 @@ impl<F: BufFactory> Connection<F> {
     fn recv_single(
         &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
     ) -> Result<usize> {
-        let now = time::Instant::now();
+        let now = Instant::now();
 
         if buf.is_empty() {
             return Err(Error::Done);
@@ -2869,7 +2874,7 @@ impl<F: BufFactory> Connection<F> {
                 )
             })?;
 
-        if hdr.ty == packet::Type::VersionNegotiation {
+        if hdr.ty == Type::VersionNegotiation {
             // Version negotiation packets can only be sent by the server.
             if self.is_server {
                 return Err(Error::Done);
@@ -2960,7 +2965,7 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        if hdr.ty == packet::Type::Retry {
+        if hdr.ty == Type::Retry {
             // Retry packets can only be sent by the server.
             if self.is_server {
                 return Err(Error::Done);
@@ -3033,7 +3038,7 @@ impl<F: BufFactory> Connection<F> {
             self.encode_transport_params()?;
         }
 
-        if hdr.ty != packet::Type::Short && hdr.version != self.version {
+        if hdr.ty != Type::Short && hdr.version != self.version {
             // At this point version negotiation was already performed, so
             // ignore packets that don't match the connection's version.
             return Err(Error::Done);
@@ -3041,7 +3046,7 @@ impl<F: BufFactory> Connection<F> {
 
         // Long header packets have an explicit payload length, but short
         // packets don't so just use the remaining capacity in the buffer.
-        let payload_len = if hdr.ty == packet::Type::Short {
+        let payload_len = if hdr.ty == Type::Short {
             b.cap()
         } else {
             b.get_varint().map_err(|e| {
@@ -3084,7 +3089,7 @@ impl<F: BufFactory> Connection<F> {
         let epoch = hdr.ty.to_epoch()?;
 
         // Select AEAD context used to open incoming packet.
-        let aead = if hdr.ty == packet::Type::ZeroRTT {
+        let aead = if hdr.ty == Type::ZeroRTT {
             // Only use 0-RTT key if incoming packet is 0-RTT.
             self.crypto_ctx[epoch].crypto_0rtt_open.as_ref()
         } else {
@@ -3097,7 +3102,7 @@ impl<F: BufFactory> Connection<F> {
             Some(v) => v,
 
             None => {
-                if hdr.ty == packet::Type::ZeroRTT &&
+                if hdr.ty == Type::ZeroRTT &&
                     self.undecryptable_pkts.len() < MAX_UNDECRYPTABLE_PACKETS &&
                     !self.is_established()
                 {
@@ -3211,7 +3216,7 @@ impl<F: BufFactory> Connection<F> {
 
         // Now that we decrypted the packet, let's see if we can map it to an
         // existing path.
-        let recv_pid = if hdr.ty == packet::Type::Short && self.got_peer_conn_id {
+        let recv_pid = if hdr.ty == Type::Short && self.got_peer_conn_id {
             let pkt_dcid = ConnectionId::from_ref(&hdr.dcid);
             self.get_or_create_recv_path_id(recv_pid, &pkt_dcid, buf_len, info)?
         } else {
@@ -3611,7 +3616,7 @@ impl<F: BufFactory> Connection<F> {
         // An Handshake packet has been received from the client and has been
         // successfully processed, so we can drop the initial state and consider
         // the client's address to be verified.
-        if self.is_server && hdr.ty == packet::Type::Handshake {
+        if self.is_server && hdr.ty == Type::Handshake {
             self.drop_epoch_state(packet::Epoch::Initial, now);
 
             self.paths.get_mut(recv_pid)?.verified_peer_address = true;
@@ -3782,7 +3787,7 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        let now = time::Instant::now();
+        let now = Instant::now();
 
         if self.local_error.is_none() {
             self.do_handshake(now)?;
@@ -3863,10 +3868,10 @@ impl<F: BufFactory> Connection<F> {
             left -= written;
 
             match ty {
-                packet::Type::Initial => has_initial = true,
+                Type::Initial => has_initial = true,
 
                 // No more packets can be coalesced after a 1-RTT.
-                packet::Type::Short => break,
+                Type::Short => break,
 
                 _ => (),
             };
@@ -3919,8 +3924,8 @@ impl<F: BufFactory> Connection<F> {
 
     fn send_single(
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
-        now: time::Instant,
-    ) -> Result<(packet::Type, usize)> {
+        now: Instant,
+    ) -> Result<(Type, usize)> {
         if out.is_empty() {
             return Err(Error::BufferTooShort);
         }
@@ -4085,7 +4090,7 @@ impl<F: BufFactory> Connection<F> {
 
         let scid = if let Some(scid_seq) = path.active_scid_seq {
             ConnectionId::from_ref(self.ids.get_scid(scid_seq)?.cid.as_ref())
-        } else if pkt_type == packet::Type::Short {
+        } else if pkt_type == Type::Short {
             ConnectionId::default()
         } else {
             return Err(Error::InvalidState);
@@ -4105,7 +4110,7 @@ impl<F: BufFactory> Connection<F> {
             // Only clone token for Initial packets, as other packets don't have
             // this field (Retry doesn't count, as it's not encoded as part of
             // this code path).
-            token: if pkt_type == packet::Type::Initial {
+            token: if pkt_type == Type::Initial {
                 self.token.clone()
             } else {
                 None
@@ -4142,7 +4147,7 @@ impl<F: BufFactory> Connection<F> {
 
         // We assume that the payload length, which is only present in long
         // header packets, can always be encoded with a 2-byte varint.
-        if pkt_type != packet::Type::Short {
+        if pkt_type != Type::Short {
             overhead += PAYLOAD_LENGTH_LEN;
         }
 
@@ -4185,7 +4190,7 @@ impl<F: BufFactory> Connection<F> {
         // what the final length will be, we reserve 2 bytes in all cases.
         //
         // Only long header packets have an explicit length field.
-        if pkt_type != packet::Type::Short {
+        if pkt_type != Type::Short {
             b.skip(PAYLOAD_LENGTH_LEN)?;
         }
 
@@ -4250,7 +4255,7 @@ impl<F: BufFactory> Connection<F> {
 
         let active_path = self.paths.get_active_mut()?;
 
-        if pkt_type == packet::Type::Short {
+        if pkt_type == Type::Short {
             // Create PMTUD probe.
             //
             // In order to send a PMTUD probe the current `left` value, which was
@@ -4362,7 +4367,7 @@ impl<F: BufFactory> Connection<F> {
 
         let path = self.paths.get_mut(send_pid)?;
 
-        if pkt_type == packet::Type::Short && !is_closing {
+        if pkt_type == Type::Short && !is_closing {
             // Create NEW_CONNECTION_ID frames as needed.
             while let Some(seq_num) = self.ids.next_advertise_new_scid_seq() {
                 let frame = self.ids.get_new_connection_id_frame_for(seq_num)?;
@@ -4378,7 +4383,7 @@ impl<F: BufFactory> Connection<F> {
             }
         }
 
-        if pkt_type == packet::Type::Short && !is_closing && path.active() {
+        if pkt_type == Type::Short && !is_closing && path.active() {
             // Create HANDSHAKE_DONE frame.
             // self.should_send_handshake_done() but without the need to borrow
             if self.handshake_completed &&
@@ -4588,7 +4593,7 @@ impl<F: BufFactory> Connection<F> {
             if let Some(conn_err) = self.local_error.as_ref() {
                 if conn_err.is_app {
                     // Create ApplicationClose frame.
-                    if pkt_type == packet::Type::Short {
+                    if pkt_type == Type::Short {
                         let frame = frame::Frame::ApplicationClose {
                             error_code: conn_err.error_code,
                             reason: conn_err.reason.clone(),
@@ -4704,7 +4709,7 @@ impl<F: BufFactory> Connection<F> {
         }
 
         // Create DATAGRAM frame.
-        if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
+        if (pkt_type == Type::Short || pkt_type == Type::ZeroRTT) &&
             left > frame::MAX_DGRAM_OVERHEAD &&
             !is_closing &&
             path.active() &&
@@ -4786,7 +4791,7 @@ impl<F: BufFactory> Connection<F> {
         }
 
         // Create a single STREAM frame for the first stream that is flushable.
-        if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
+        if (pkt_type == Type::Short || pkt_type == Type::ZeroRTT) &&
             left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing &&
             path.active() &&
@@ -4946,7 +4951,7 @@ impl<F: BufFactory> Connection<F> {
         //
         // 2) this is a probing packet towards an unvalidated peer address.
         if (has_initial || !path.validated()) &&
-            pkt_type == packet::Type::Short &&
+            pkt_type == Type::Short &&
             left >= 1
         {
             let frame = frame::Frame::Padding { len: left };
@@ -4973,7 +4978,7 @@ impl<F: BufFactory> Connection<F> {
         let payload_len = b.off() - payload_offset;
 
         // Fill in payload length.
-        if pkt_type != packet::Type::Short {
+        if pkt_type != Type::Short {
             let len = pn_len + payload_len + crypto_overhead;
 
             let (_, mut payload_with_len) = b.split_at(header_offset)?;
@@ -5109,7 +5114,7 @@ impl<F: BufFactory> Connection<F> {
         path.max_send_bytes = path.max_send_bytes.saturating_sub(written);
 
         // On the client, drop initial state after sending an Handshake packet.
-        if !self.is_server && hdr_ty == packet::Type::Handshake {
+        if !self.is_server && hdr_ty == Type::Handshake {
             self.drop_epoch_state(packet::Epoch::Initial, now);
         }
 
@@ -5138,7 +5143,7 @@ impl<F: BufFactory> Connection<F> {
     fn on_packet_sent(
         &mut self, send_pid: usize, sent_pkt: recovery::Sent,
         epoch: packet::Epoch, handshake_status: recovery::HandshakeStatus,
-        now: std::time::Instant,
+        now: Instant,
     ) -> Result<()> {
         let path = self.paths.get_mut(send_pid)?;
 
@@ -5185,11 +5190,11 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// Equals 1/8 of the smoothed RTT, but at least 1ms and not greater than
     /// 5ms.
-    pub fn max_release_into_future(&self) -> time::Duration {
+    pub fn max_release_into_future(&self) -> Duration {
         self.paths
             .get_active()
             .map(|p| p.recovery.rtt().mul_f64(0.125))
-            .unwrap_or(time::Duration::from_millis(1))
+            .unwrap_or(Duration::from_millis(1))
             .max(Duration::from_millis(1))
             .min(Duration::from_millis(5))
     }
@@ -5337,7 +5342,7 @@ impl<F: BufFactory> Connection<F> {
                 ..Default::default()
             });
 
-            let now = time::Instant::now();
+            let now = Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
@@ -5577,7 +5582,7 @@ impl<F: BufFactory> Connection<F> {
                 ..Default::default()
             });
 
-            let now = time::Instant::now();
+            let now = Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
@@ -6377,7 +6382,7 @@ impl<F: BufFactory> Connection<F> {
     /// disarmed.
     ///
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
-    pub fn timeout_instant(&self) -> Option<time::Instant> {
+    pub fn timeout_instant(&self) -> Option<Instant> {
         if self.is_closed() {
             return None;
         }
@@ -6415,12 +6420,12 @@ impl<F: BufFactory> Connection<F> {
     /// be called. A timeout of `None` means that the timer should be disarmed.
     ///
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
-    pub fn timeout(&self) -> Option<time::Duration> {
+    pub fn timeout(&self) -> Option<Duration> {
         self.timeout_instant().map(|timeout| {
-            let now = time::Instant::now();
+            let now = Instant::now();
 
             if timeout <= now {
-                time::Duration::ZERO
+                Duration::ZERO
             } else {
                 timeout.duration_since(now)
             }
@@ -6431,7 +6436,7 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// If no timeout has occurred it does nothing.
     pub fn on_timeout(&mut self) {
-        let now = time::Instant::now();
+        let now = Instant::now();
 
         if let Some(draining_timer) = self.draining_timer {
             if draining_timer <= now {
@@ -6646,7 +6651,7 @@ impl<F: BufFactory> Connection<F> {
         };
 
         // Change the active path.
-        self.set_active_path(pid, time::Instant::now())?;
+        self.set_active_path(pid, Instant::now())?;
 
         Ok(dcid_seq)
     }
@@ -7303,8 +7308,7 @@ impl<F: BufFactory> Connection<F> {
         self.streams
             .update_peer_max_streams_uni(peer_params.initial_max_streams_uni);
 
-        let max_ack_delay =
-            time::Duration::from_millis(peer_params.max_ack_delay);
+        let max_ack_delay = Duration::from_millis(peer_params.max_ack_delay);
 
         self.recovery_config.max_ack_delay = max_ack_delay;
 
@@ -7344,7 +7348,7 @@ impl<F: BufFactory> Connection<F> {
     /// Continues the handshake.
     ///
     /// If the connection is already established, it does nothing.
-    fn do_handshake(&mut self, now: time::Instant) -> Result<()> {
+    fn do_handshake(&mut self, now: Instant) -> Result<()> {
         let mut ex_data = tls::ExData {
             application_protos: &self.application_protos,
 
@@ -7480,7 +7484,7 @@ impl<F: BufFactory> Connection<F> {
     }
 
     /// Selects the packet type for the next outgoing packet.
-    fn write_pkt_type(&self, send_pid: usize) -> Result<packet::Type> {
+    fn write_pkt_type(&self, send_pid: usize) -> Result<Type> {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
         if self
@@ -7499,20 +7503,19 @@ impl<F: BufFactory> Connection<F> {
                 match epoch {
                     // Downgrade the epoch to Handshake as the handshake is not
                     // completed yet.
-                    packet::Epoch::Application =>
-                        return Ok(packet::Type::Handshake),
+                    packet::Epoch::Application => return Ok(Type::Handshake),
 
                     // Downgrade the epoch to Initial as the remote peer might
                     // not be able to decrypt handshake packets yet.
                     packet::Epoch::Handshake
                         if self.crypto_ctx[packet::Epoch::Initial].has_keys() =>
-                        return Ok(packet::Type::Initial),
+                        return Ok(Type::Initial),
 
                     _ => (),
                 };
             }
 
-            return Ok(packet::Type::from_epoch(epoch));
+            return Ok(Type::from_epoch(epoch));
         }
 
         for &epoch in packet::Epoch::epochs(
@@ -7528,18 +7531,18 @@ impl<F: BufFactory> Connection<F> {
 
             // We are ready to send data for this packet number space.
             if crypto_ctx.data_available() || pkt_space.ready() {
-                return Ok(packet::Type::from_epoch(epoch));
+                return Ok(Type::from_epoch(epoch));
             }
 
             // There are lost frames in this packet number space.
             for (_, p) in self.paths.iter() {
                 if p.recovery.has_lost_frames(epoch) {
-                    return Ok(packet::Type::from_epoch(epoch));
+                    return Ok(Type::from_epoch(epoch));
                 }
 
                 // We need to send PTO probe packets.
                 if p.recovery.loss_probes(epoch) > 0 {
-                    return Ok(packet::Type::from_epoch(epoch));
+                    return Ok(Type::from_epoch(epoch));
                 }
             }
         }
@@ -7573,10 +7576,10 @@ impl<F: BufFactory> Connection<F> {
         {
             // Only clients can send 0-RTT packets.
             if !self.is_server && self.is_in_early_data() {
-                return Ok(packet::Type::ZeroRTT);
+                return Ok(Type::ZeroRTT);
             }
 
-            return Ok(packet::Type::Short);
+            return Ok(Type::Short);
         }
 
         Err(Error::Done)
@@ -7598,8 +7601,8 @@ impl<F: BufFactory> Connection<F> {
 
     /// Processes an incoming frame.
     fn process_frame(
-        &mut self, frame: frame::Frame, hdr: &packet::Header,
-        recv_path_id: usize, epoch: packet::Epoch, now: time::Instant,
+        &mut self, frame: frame::Frame, hdr: &Header, recv_path_id: usize,
+        epoch: packet::Epoch, now: Instant,
     ) -> Result<()> {
         trace!("{} rx frm {:?}", self.trace_id, frame);
 
@@ -8127,7 +8130,7 @@ impl<F: BufFactory> Connection<F> {
     }
 
     /// Drops the keys and recovery state for the given epoch.
-    fn drop_epoch_state(&mut self, epoch: packet::Epoch, now: time::Instant) {
+    fn drop_epoch_state(&mut self, epoch: packet::Epoch, now: Instant) {
         let crypto_ctx = &mut self.crypto_ctx[epoch];
         if crypto_ctx.crypto_open.is_none() {
             return;
@@ -8165,7 +8168,7 @@ impl<F: BufFactory> Connection<F> {
     /// Returns the idle timeout value.
     ///
     /// `None` is returned if both end-points disabled the idle timeout.
-    fn idle_timeout(&self) -> Option<time::Duration> {
+    fn idle_timeout(&self) -> Option<Duration> {
         // If the transport parameter is set to 0, then the respective endpoint
         // decided to disable the idle timeout. If both are disabled we should
         // not set any timeout.
@@ -8190,10 +8193,10 @@ impl<F: BufFactory> Connection<F> {
 
         let path_pto = match self.paths.get_active() {
             Ok(p) => p.recovery.pto(),
-            Err(_) => time::Duration::ZERO,
+            Err(_) => Duration::ZERO,
         };
 
-        let idle_timeout = time::Duration::from_millis(idle_timeout);
+        let idle_timeout = Duration::from_millis(idle_timeout);
         let idle_timeout = cmp::max(idle_timeout, 3 * path_pto);
 
         Some(idle_timeout)
@@ -8340,12 +8343,11 @@ impl<F: BufFactory> Connection<F> {
             );
 
             // Notify the application.
-            self.paths
-                .notify_event(path::PathEvent::ReusedSourceConnectionId(
-                    in_scid_seq,
-                    (old_local_addr, old_peer_addr),
-                    (info.to, info.from),
-                ));
+            self.paths.notify_event(PathEvent::ReusedSourceConnectionId(
+                in_scid_seq,
+                (old_local_addr, old_peer_addr),
+                (info.to, info.from),
+            ));
         }
 
         // This is a new path using an unassigned CID; create it!
@@ -8411,9 +8413,7 @@ impl<F: BufFactory> Connection<F> {
     }
 
     /// Sets the path with identifier 'path_id' to be active.
-    fn set_active_path(
-        &mut self, path_id: usize, now: time::Instant,
-    ) -> Result<()> {
+    fn set_active_path(&mut self, path_id: usize, now: Instant) -> Result<()> {
         if let Ok(old_active_path) = self.paths.get_active_mut() {
             for &e in packet::Epoch::epochs(
                 packet::Epoch::Initial..=packet::Epoch::Application,
@@ -8432,7 +8432,7 @@ impl<F: BufFactory> Connection<F> {
 
     /// Handles potential connection migration.
     fn on_peer_migrated(
-        &mut self, new_pid: usize, disable_dcid_reuse: bool, now: time::Instant,
+        &mut self, new_pid: usize, disable_dcid_reuse: bool, now: Instant,
     ) -> Result<()> {
         let active_path_id = self.paths.get_active_path_id()?;
 
@@ -8577,7 +8577,7 @@ impl<F: BufFactory> Connection<F> {
             };
 
             qlog_with_type!(QLOG_CONNECTION_CLOSED, self.qlog, q, {
-                let ev_data = qlog::events::EventData::ConnectionClosed(cc);
+                let ev_data = EventData::ConnectionClosed(cc);
 
                 q.add_event_data_now(ev_data).ok();
             });
@@ -8793,13 +8793,13 @@ impl UnknownTransportParameters {
     /// Pushes an unknown transport parameter into storage if there is space
     /// remaining.
     pub fn push(&mut self, new: UnknownTransportParameter<&[u8]>) -> Result<()> {
-        let new_unknown_tp_size = new.value.len() + std::mem::size_of::<u64>();
+        let new_unknown_tp_size = new.value.len() + size_of::<u64>();
         if new_unknown_tp_size < self.capacity {
             self.capacity -= new_unknown_tp_size;
             self.parameters.push(new.into());
             Ok(())
         } else {
-            Err(BufferTooShortError.into())
+            Err(octets::BufferTooShortError.into())
         }
     }
 }
@@ -9314,7 +9314,6 @@ pub use crate::path::SocketAddrIter;
 pub use crate::recovery::BbrBwLoReductionStrategy;
 pub use crate::recovery::BbrParams;
 pub use crate::recovery::CongestionControlAlgorithm;
-use crate::recovery::RecoveryOps;
 pub use crate::recovery::StartupExit;
 pub use crate::recovery::StartupExitReason;
 

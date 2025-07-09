@@ -25,10 +25,12 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::cmp;
-use std::time;
 
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
+
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::Error;
 use crate::Result;
@@ -288,7 +290,7 @@ impl RecvBuf {
     }
 
     /// Commits the new max_data limit.
-    pub fn update_max_data(&mut self, now: time::Instant) {
+    pub fn update_max_data(&mut self, now: Instant) {
         self.flow_control.update_max_data(now);
     }
 
@@ -308,7 +310,7 @@ impl RecvBuf {
     }
 
     /// Autotune the window size.
-    pub fn autotune_window(&mut self, now: time::Instant, rtt: time::Duration) {
+    pub fn autotune_window(&mut self, now: Instant, rtt: Duration) {
         self.flow_control.autotune_window(now, rtt);
     }
 

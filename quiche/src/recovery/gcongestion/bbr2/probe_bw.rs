@@ -80,14 +80,14 @@ impl ModeImpl for ProbeBW {
         self.cycle.start_time = now;
 
         match self.cycle.phase {
-            super::mode::CyclePhase::NotStarted => {
+            CyclePhase::NotStarted => {
                 // First time entering PROBE_BW. Start a new probing cycle.
                 self.enter_probe_down(false, false, now, params)
             },
-            super::mode::CyclePhase::Cruise => self.enter_probe_cruise(now),
-            super::mode::CyclePhase::Refill =>
+            CyclePhase::Cruise => self.enter_probe_cruise(now),
+            CyclePhase::Refill =>
                 self.enter_probe_refill(self.cycle.probe_up_rounds, now),
-            super::mode::CyclePhase::Up | super::mode::CyclePhase::Down => {},
+            CyclePhase::Up | CyclePhase::Down => {},
         }
     }
 
