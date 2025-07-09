@@ -25,10 +25,12 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::fmt::Display;
+
 use std::ops::Index;
 use std::ops::IndexMut;
 use std::ops::RangeInclusive;
-use std::time;
+
+use std::time::Instant;
 
 use crate::Error;
 use crate::Result;
@@ -856,7 +858,7 @@ pub struct KeyUpdate {
     pub update_acked: bool,
 
     /// When the old key should be discarded.
-    pub timer: time::Instant,
+    pub timer: Instant,
 }
 
 pub struct PktNumSpace {
@@ -864,7 +866,7 @@ pub struct PktNumSpace {
     pub largest_rx_pkt_num: u64,
 
     /// Time the largest packet number received.
-    pub largest_rx_pkt_time: time::Instant,
+    pub largest_rx_pkt_time: Instant,
 
     /// The largest non-probing packet number.
     pub largest_rx_non_probing_pkt_num: u64,
@@ -886,7 +888,7 @@ impl PktNumSpace {
     pub fn new() -> PktNumSpace {
         PktNumSpace {
             largest_rx_pkt_num: 0,
-            largest_rx_pkt_time: time::Instant::now(),
+            largest_rx_pkt_time: Instant::now(),
             largest_rx_non_probing_pkt_num: 0,
             largest_tx_pkt_num: None,
             recv_pkt_need_ack: ranges::RangeSet::new(crate::MAX_ACK_RANGES),
@@ -1160,9 +1162,7 @@ impl PktNumWindow {
     }
 
     fn upper(&self) -> u64 {
-        self.lower
-            .saturating_add(std::mem::size_of::<u128>() as u64 * 8) -
-            1
+        self.lower.saturating_add(size_of::<u128>() as u64 * 8) - 1
     }
 }
 
@@ -2187,7 +2187,7 @@ mod tests {
 
     #[test]
     fn track_largest_packet_sent() {
-        let now = time::Instant::now();
+        let now = Instant::now();
         let mut pkt_space = PktNumSpace::new();
 
         assert!(pkt_space.largest_tx_pkt_num.is_none());

@@ -107,7 +107,7 @@ pub extern "C" fn quiche_version() -> *const u8 {
 
 struct Logger {
     cb: extern "C" fn(line: *const u8, argp: *mut c_void),
-    argp: std::sync::atomic::AtomicPtr<c_void>,
+    argp: atomic::AtomicPtr<c_void>,
 }
 
 impl log::Log for Logger {
@@ -1899,7 +1899,7 @@ fn optional_std_addr_from_c(
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
     match addr.sa_family as _ {
         AF_INET => {
-            assert!(addr_len as usize == std::mem::size_of::<sockaddr_in>());
+            assert!(addr_len as usize == size_of::<sockaddr_in>());
 
             let in4 = unsafe { *(addr as *const _ as *const sockaddr_in) };
 
@@ -1925,7 +1925,7 @@ fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
         },
 
         AF_INET6 => {
-            assert!(addr_len as usize == std::mem::size_of::<sockaddr_in6>());
+            assert!(addr_len as usize == size_of::<sockaddr_in6>());
 
             let in6 = unsafe { *(addr as *const _ as *const sockaddr_in6) };
 
@@ -1960,7 +1960,7 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
 
     match addr {
         SocketAddr::V4(addr) => unsafe {
-            let sa_len = std::mem::size_of::<sockaddr_in>();
+            let sa_len = size_of::<sockaddr_in>();
             let out_in = out as *mut _ as *mut sockaddr_in;
 
             let s_addr = u32::from_ne_bytes(addr.ip().octets());
@@ -1997,7 +1997,7 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
         },
 
         SocketAddr::V6(addr) => unsafe {
-            let sa_len = std::mem::size_of::<sockaddr_in6>();
+            let sa_len = size_of::<sockaddr_in6>();
             let out_in6 = out as *mut _ as *mut sockaddr_in6;
 
             #[cfg(not(windows))]
@@ -2045,8 +2045,8 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
-fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
-    const INSTANT_ZERO: std::time::Instant =
+fn std_time_to_c(time: &Instant, out: &mut timespec) {
+    const INSTANT_ZERO: Instant =
         unsafe { std::mem::transmute(std::time::UNIX_EPOCH) };
 
     let raw_time = time.duration_since(INSTANT_ZERO);
@@ -2056,7 +2056,7 @@ fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
-fn std_time_to_c(_time: &std::time::Instant, out: &mut timespec) {
+fn std_time_to_c(_time: &Instant, out: &mut timespec) {
     // TODO: implement Instant conversion for systems that don't use timespec.
     out.tv_sec = 0;
     out.tv_nsec = 0;
@@ -2078,10 +2078,10 @@ mod tests {
 
         assert_eq!(
             std_addr_to_c(&addr, &mut out),
-            std::mem::size_of::<sockaddr_in>() as socklen_t
+            size_of::<sockaddr_in>() as socklen_t
         );
 
-        let s = std::ffi::CString::new("ddd.ddd.ddd.ddd").unwrap();
+        let s = ffi::CString::new("ddd.ddd.ddd.ddd").unwrap();
 
         let s = unsafe {
             let in_addr = &out as *const _ as *const sockaddr_in;
@@ -2096,7 +2096,7 @@ mod tests {
                 16,
             );
 
-            std::ffi::CString::from_raw(dst).into_string().unwrap()
+            ffi::CString::from_raw(dst).into_string().unwrap()
         };
 
         assert_eq!(s, "127.0.0.1");
@@ -2104,7 +2104,7 @@ mod tests {
         let addr = unsafe {
             std_addr_from_c(
                 &*(&out as *const _ as *const sockaddr),
-                std::mem::size_of::<sockaddr_in>() as socklen_t,
+                size_of::<sockaddr_in>() as socklen_t,
             )
         };
 
@@ -2121,11 +2121,11 @@ mod tests {
 
         assert_eq!(
             std_addr_to_c(&addr, &mut out),
-            std::mem::size_of::<sockaddr_in6>() as socklen_t
+            size_of::<sockaddr_in6>() as socklen_t
         );
 
-        let s = std::ffi::CString::new("dddd:dddd:dddd:dddd:dddd:dddd:dddd:dddd")
-            .unwrap();
+        let s =
+            ffi::CString::new("dddd:dddd:dddd:dddd:dddd:dddd:dddd:dddd").unwrap();
 
         let s = unsafe {
             let in6_addr = &out as *const _ as *const sockaddr_in6;
@@ -2140,7 +2140,7 @@ mod tests {
                 45,
             );
 
-            std::ffi::CString::from_raw(dst).into_string().unwrap()
+            ffi::CString::from_raw(dst).into_string().unwrap()
         };
 
         assert_eq!(s, "2001:db8:85a3::8a2e:370:7334");
@@ -2148,7 +2148,7 @@ mod tests {
         let addr = unsafe {
             std_addr_from_c(
                 &*(&out as *const _ as *const sockaddr),
-                std::mem::size_of::<sockaddr_in6>() as socklen_t,
+                size_of::<sockaddr_in6>() as socklen_t,
             )
         };
 

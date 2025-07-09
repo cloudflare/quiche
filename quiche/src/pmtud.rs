@@ -142,7 +142,7 @@ impl Pmtud {
     /// Records a failed probe
     pub fn failed_probe(&mut self, probe_size: usize) {
         // Treat errant probes as if they failed at the minimum supported MTU
-        let probe_size = std::cmp::max(probe_size, crate::MIN_CLIENT_INITIAL_LEN);
+        let probe_size = std::cmp::max(probe_size, MIN_CLIENT_INITIAL_LEN);
 
         // Check if we have one instance of a failed probe so that a min
         // comparison can be made otherwise if this is the first failed

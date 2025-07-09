@@ -59,7 +59,7 @@ impl ModeImpl for Startup {
     }
 
     fn on_congestion_event(
-        mut self, _prior_in_flight: usize, event_time: std::time::Instant,
+        mut self, _prior_in_flight: usize, event_time: Instant,
         _acked_packets: &[Acked], _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize, params: &Params,

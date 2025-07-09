@@ -539,7 +539,7 @@ impl CongestionControl for BBRv2 {
     }
 
     fn on_packet_sent(
-        &mut self, sent_time: std::time::Instant, bytes_in_flight: usize,
+        &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
         rtt_stats: &RttStats,
     ) {
@@ -631,12 +631,12 @@ impl CongestionControl for BBRv2 {
     }
 
     fn pacing_rate(
-        &self, _bytes_in_flight: usize, _rtt_stats: &super::RttStats,
+        &self, _bytes_in_flight: usize, _rtt_stats: &RttStats,
     ) -> Bandwidth {
         self.pacing_rate
     }
 
-    fn bandwidth_estimate(&self, _rtt_stats: &super::RttStats) -> Bandwidth {
+    fn bandwidth_estimate(&self, _rtt_stats: &RttStats) -> Bandwidth {
         self.mode.bandwidth_estimate()
     }
 

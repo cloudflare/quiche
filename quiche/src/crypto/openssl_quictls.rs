@@ -299,8 +299,8 @@ impl Drop for PacketKey {
     }
 }
 
-unsafe impl std::marker::Send for PacketKey {}
-unsafe impl std::marker::Sync for PacketKey {}
+unsafe impl Send for PacketKey {}
+unsafe impl Sync for PacketKey {}
 
 pub(crate) struct HeaderProtectionKey {
     ctx: *mut EVP_CIPHER_CTX,
@@ -386,8 +386,8 @@ impl Drop for HeaderProtectionKey {
     }
 }
 
-unsafe impl std::marker::Send for HeaderProtectionKey {}
-unsafe impl std::marker::Sync for HeaderProtectionKey {}
+unsafe impl Send for HeaderProtectionKey {}
+unsafe impl Sync for HeaderProtectionKey {}
 
 fn make_evp_cipher_ctx_basic(
     alg: Algorithm, aead: bool, enc: u32,

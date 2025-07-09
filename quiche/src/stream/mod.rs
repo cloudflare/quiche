@@ -248,7 +248,7 @@ impl<F: BufFactory> StreamMap<F> {
                 // Enforce stream count limits.
                 match (is_local(id, is_server), is_bidi(id)) {
                     (true, true) => {
-                        let n = std::cmp::max(
+                        let n = cmp::max(
                             self.local_opened_streams_bidi,
                             stream_sequence + 1,
                         );
@@ -261,7 +261,7 @@ impl<F: BufFactory> StreamMap<F> {
                     },
 
                     (true, false) => {
-                        let n = std::cmp::max(
+                        let n = cmp::max(
                             self.local_opened_streams_uni,
                             stream_sequence + 1,
                         );
@@ -274,7 +274,7 @@ impl<F: BufFactory> StreamMap<F> {
                     },
 
                     (false, true) => {
-                        let n = std::cmp::max(
+                        let n = cmp::max(
                             self.peer_opened_streams_bidi,
                             stream_sequence + 1,
                         );
@@ -287,7 +287,7 @@ impl<F: BufFactory> StreamMap<F> {
                     },
 
                     (false, false) => {
-                        let n = std::cmp::max(
+                        let n = cmp::max(
                             self.peer_opened_streams_uni,
                             stream_sequence + 1,
                         );
@@ -797,10 +797,10 @@ impl Eq for StreamPriorityKey {}
 impl PartialOrd for StreamPriorityKey {
     // Priority ordering is complex, disable Clippy warning.
     #[allow(clippy::non_canonical_partial_ord_impl)]
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         // Ignore priority if ID matches.
         if self.id == other.id {
-            return Some(std::cmp::Ordering::Equal);
+            return Some(cmp::Ordering::Equal);
         }
 
         // First, order by urgency...
@@ -816,21 +816,21 @@ impl PartialOrd for StreamPriorityKey {
 
         // ...non-incremental takes priority over incremental...
         if self.incremental && !other.incremental {
-            return Some(std::cmp::Ordering::Greater);
+            return Some(cmp::Ordering::Greater);
         }
         if !self.incremental && other.incremental {
-            return Some(std::cmp::Ordering::Less);
+            return Some(cmp::Ordering::Less);
         }
 
         // ...finally, when both are incremental, `other` takes precedence (so
         // `self` is always sorted after other same-urgency incremental
         // entries).
-        Some(std::cmp::Ordering::Greater)
+        Some(cmp::Ordering::Greater)
     }
 }
 
 impl Ord for StreamPriorityKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
         // `partial_cmp()` never returns `None`, so this should be safe.
         self.partial_cmp(other).unwrap()
     }

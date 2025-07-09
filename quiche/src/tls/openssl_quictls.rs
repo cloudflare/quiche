@@ -46,9 +46,9 @@ pub(super) struct SSL_QUIC_METHOD {
 
 pub(super) static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
     set_encryption_secrets: Some(set_encryption_secrets),
-    add_handshake_data: Some(super::add_handshake_data),
-    flush_flight: Some(super::flush_flight),
-    send_alert: Some(super::send_alert),
+    add_handshake_data: Some(add_handshake_data),
+    flush_flight: Some(flush_flight),
+    send_alert: Some(send_alert),
 };
 
 impl Context {
@@ -99,7 +99,7 @@ impl Handshake {
                 let cert =
                     map_result_ptr(sk_X509_value(chain, i) as *mut X509).ok()?;
 
-                let mut out: *mut u8 = std::ptr::null_mut();
+                let mut out: *mut u8 = ptr::null_mut();
                 let len = i2d_X509(cert, &mut out);
                 if len < 0 {
                     return None;
@@ -123,7 +123,7 @@ impl Handshake {
             // the local peer's identity.
             let cert =
                 map_result_ptr(SSL_get0_peer_certificate(self.as_ptr())).ok()?;
-            let mut out: *mut u8 = std::ptr::null_mut();
+            let mut out: *mut u8 = ptr::null_mut();
             let len = i2d_X509(cert, &mut out);
             if len < 0 {
                 return None;
@@ -150,7 +150,7 @@ impl Handshake {
             }
 
             let session = d2i_SSL_SESSION(
-                std::ptr::null_mut(),
+                ptr::null_mut(),
                 &mut session.as_ptr(),
                 session.len() as c_long,
             );
@@ -302,7 +302,7 @@ unsafe fn SSL_get_negotiated_group(ssl: *const SSL) -> c_int {
 pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
     let session_bytes = unsafe {
         // get session encoding length
-        let out_len = i2d_SSL_SESSION(session, std::ptr::null_mut());
+        let out_len = i2d_SSL_SESSION(session, ptr::null_mut());
         if out_len == 0 {
             return Err(Error::TlsFail);
         }
@@ -310,8 +310,7 @@ pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
 
         let out_len = i2d_SSL_SESSION(session, &mut out.as_mut_ptr());
         let session_bytes =
-            std::slice::from_raw_parts(out.as_mut_ptr(), out_len as usize)
-                .to_vec();
+            slice::from_raw_parts(out.as_mut_ptr(), out_len as usize).to_vec();
         session_bytes
     };
 

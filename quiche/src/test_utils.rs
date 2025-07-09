@@ -25,9 +25,10 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::*;
-use crate::recovery::Sent;
+
 use smallvec::smallvec;
-use std::time::Instant;
+
+use crate::recovery::Sent;
 
 pub struct Pipe {
     pub client: Connection,
@@ -36,7 +37,7 @@ pub struct Pipe {
 
 impl Pipe {
     pub fn new(cc_algorithm_name: &str) -> Result<Pipe> {
-        let mut config = Config::new(crate::PROTOCOL_VERSION)?;
+        let mut config = Config::new(PROTOCOL_VERSION)?;
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
         config.load_cert_chain_from_pem_file("examples/cert.crt")?;
         config.load_priv_key_from_pem_file("examples/cert.key")?;
@@ -121,7 +122,7 @@ impl Pipe {
         let server_scid = ConnectionId::from_ref(&server_scid);
         let server_addr = Pipe::server_addr();
 
-        let mut config = Config::new(crate::PROTOCOL_VERSION)?;
+        let mut config = Config::new(PROTOCOL_VERSION)?;
         config.load_cert_chain_from_pem_file("examples/cert.crt")?;
         config.load_priv_key_from_pem_file("examples/cert.key")?;
         config.set_application_protos(&[b"proto1", b"proto2"])?;
@@ -161,7 +162,7 @@ impl Pipe {
         let server_scid = ConnectionId::from_ref(&server_scid);
         let server_addr = Pipe::server_addr();
 
-        let mut config = Config::new(crate::PROTOCOL_VERSION)?;
+        let mut config = Config::new(PROTOCOL_VERSION)?;
         config.set_application_protos(&[b"proto1", b"proto2"])?;
         config.set_initial_max_data(30);
         config.set_initial_max_stream_data_bidi_local(15);
@@ -277,8 +278,7 @@ impl Pipe {
     }
 
     pub fn send_pkt_to_server(
-        &mut self, pkt_type: packet::Type, frames: &[frame::Frame],
-        buf: &mut [u8],
+        &mut self, pkt_type: Type, frames: &[frame::Frame], buf: &mut [u8],
     ) -> Result<usize> {
         let written = encode_pkt(&mut self.client, pkt_type, frames, buf)?;
         recv_send(&mut self.server, buf, written)
@@ -307,7 +307,7 @@ impl Pipe {
             crypto_open: open_prev.unwrap(),
             pn_on_update: self.client.next_pkt_num,
             update_acked: true,
-            timer: time::Instant::now(),
+            timer: Instant::now(),
         });
 
         self.client.key_phase = !self.client.key_phase;
@@ -396,7 +396,7 @@ pub fn emit_flight(conn: &mut Connection) -> Result<Vec<(Vec<u8>, SendInfo)>> {
 }
 
 pub fn encode_pkt(
-    conn: &mut Connection, pkt_type: packet::Type, frames: &[frame::Frame],
+    conn: &mut Connection, pkt_type: Type, frames: &[frame::Frame],
     buf: &mut [u8],
 ) -> Result<usize> {
     let mut b = octets::OctetsMut::with_slice(buf);
@@ -438,7 +438,7 @@ pub fn encode_pkt(
 
     let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len());
 
-    if pkt_type != packet::Type::Short {
+    if pkt_type != Type::Short {
         let len = pn_len + payload_len + crypto_ctx.crypto_overhead().unwrap();
         b.put_varint(len as u64)?;
     }

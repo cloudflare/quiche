@@ -342,7 +342,7 @@ pub extern "C" fn quiche_h3_parse_extensible_priority(
 ) -> c_int {
     let priority = unsafe { slice::from_raw_parts(priority, priority_len) };
 
-    match h3::Priority::try_from(priority) {
+    match Priority::try_from(priority) {
         Ok(v) => {
             parsed.urgency = v.urgency;
             parsed.incremental = v.incremental;

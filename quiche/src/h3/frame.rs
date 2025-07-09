@@ -412,7 +412,7 @@ impl Frame {
                     }
                 }
 
-                qlog::events::h3::Http3Frame::Settings { settings }
+                Http3Frame::Settings { settings }
             },
 
             // Qlog expects the `headers` to be represented as an array of

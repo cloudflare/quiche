@@ -310,7 +310,7 @@ impl Recovery {
     }
 
     #[cfg(test)]
-    pub fn new(config: &crate::Config) -> Self {
+    pub fn new(config: &Config) -> Self {
         Self::new_with_config(&RecoveryConfig::from_config(config))
     }
 }
@@ -662,7 +662,6 @@ pub enum StartupExitReason {
 mod tests {
     use super::*;
     use crate::packet;
-    use crate::ranges;
     use crate::recovery::congestion::PACING_MULTIPLIER;
     use crate::test_utils;
     use crate::CongestionControlAlgorithm;
@@ -671,7 +670,7 @@ mod tests {
     use std::str::FromStr;
 
     fn recovery_for_alg(algo: CongestionControlAlgorithm) -> Recovery {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(algo);
         Recovery::new(&cfg)
     }
@@ -721,7 +720,7 @@ mod tests {
         #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
@@ -857,7 +856,7 @@ mod tests {
         now += Duration::from_millis(10);
 
         // Only the first 2 packets are acked.
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(0..2);
 
         assert_eq!(
@@ -958,7 +957,7 @@ mod tests {
         now += Duration::from_millis(10);
 
         // PTO packets are acked.
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(4..6);
 
         assert_eq!(
@@ -1008,7 +1007,7 @@ mod tests {
         #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
@@ -1142,7 +1141,7 @@ mod tests {
         now += Duration::from_millis(10);
 
         // Only the first 2 packets and the last one are acked.
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(0..2);
         acked.insert(3..4);
 
@@ -1205,7 +1204,7 @@ mod tests {
         #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
@@ -1339,7 +1338,7 @@ mod tests {
         now += Duration::from_millis(10);
 
         // ACKs are reordered.
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(2..4);
 
         assert_eq!(
@@ -1363,7 +1362,7 @@ mod tests {
 
         now += Duration::from_millis(10);
 
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(0..2);
 
         assert_eq!(r.pkt_thresh(), INITIAL_PACKET_THRESHOLD);
@@ -1420,7 +1419,7 @@ mod tests {
         #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
@@ -1477,7 +1476,7 @@ mod tests {
         // Wait 50ms for ACK.
         now += Duration::from_millis(50);
 
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(0..10);
 
         assert_eq!(
@@ -1672,7 +1671,7 @@ mod tests {
     fn validate_ack_range_on_ack_received(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
 
         let epoch = packet::Epoch::Application;
@@ -1684,8 +1683,7 @@ mod tests {
         let pkt_size = 1000;
         let pkt_count = 4;
         for pkt_num in 0..pkt_count {
-            let sent =
-                crate::test_utils::helper_packet_sent(pkt_num, now, pkt_size);
+            let sent = test_utils::helper_packet_sent(pkt_num, now, pkt_size);
             r.on_packet_sent(sent, epoch, HandshakeStatus::default(), now, "");
         }
         assert_eq!(r.sent_packets_len(epoch), pkt_count as usize);
@@ -1697,7 +1695,7 @@ mod tests {
         now += Duration::from_millis(10);
 
         // ACK 2 packets
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(0..2);
 
         assert_eq!(
@@ -1726,7 +1724,7 @@ mod tests {
         assert_eq!(r.largest_sent_pkt_num_on_path(epoch).unwrap(), 3);
 
         // ACK large range
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(0..10);
         assert_eq!(
             r.on_ack_received(
@@ -1758,7 +1756,7 @@ mod tests {
         #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
@@ -1863,7 +1861,7 @@ mod tests {
         now += Duration::from_millis(10);
 
         // Only the first  packets and the last one are acked.
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(0..1);
         acked.insert(2..3);
 
@@ -1932,7 +1930,7 @@ mod tests {
     fn congestion_delivery_rate(
         #[values("reno", "cubic", "bbr", "bbr2")] cc_algorithm_name: &str,
     ) {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
@@ -1958,7 +1956,7 @@ mod tests {
 
         // Ack
         let interval = Duration::from_secs(10);
-        let mut acked = ranges::RangeSet::default();
+        let mut acked = RangeSet::default();
         acked.insert(0..10);
         assert_eq!(
             r.on_ack_received(
