@@ -1054,6 +1054,9 @@ impl Http3Conn {
                     ":authority and host missing".to_string(),
                 )),
 
+            // Use Host if :authority is not set
+            (Some("") | None, Some(host)) => host,
+
             // Any other combo, prefer :authority
             (..) => authority.unwrap(),
         };
