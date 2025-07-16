@@ -39,6 +39,9 @@ boringssl-boring-crate = ["boring", "foreign-types-shared"]
 # Build quiche against OpenSSL instead of BoringSSL.
 openssl = ["pkg-config"]
 
+# Build quiche with relaxed boringssl aead, not FIPS compliant
+relax-aead = []
+
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []
 
