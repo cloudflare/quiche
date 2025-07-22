@@ -1468,7 +1468,7 @@ mod tests {
         if cc_algorithm_name != "bbr2_gcongestion" {
             assert_eq!(r.pacing_rate(), 0);
         } else {
-            assert_eq!(r.pacing_rate(), 99927);
+            assert_eq!(r.pacing_rate(), 33276000);
         }
         assert_eq!(r.get_packet_send_time(now), now);
 

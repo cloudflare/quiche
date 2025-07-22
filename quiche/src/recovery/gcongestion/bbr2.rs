@@ -421,8 +421,13 @@ impl BBRv2 {
         BBRv2 {
             mode: Mode::startup(BBRv2NetworkModel::new(&params, initial_rtt)),
             cwnd,
-            pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, initial_rtt) *
-                params.startup_pacing_gain,
+            // sRTT is not known yet.  Compute the initial pacing rate by
+            // dividing cwnd by 1msec as recommented by draft-ietf-ccwg-bbr-03.
+            // https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-03.html#name-pacing-rate-cpacing_rate
+            pacing_rate: Bandwidth::from_bytes_and_time_delta(
+                cwnd,
+                Duration::from_millis(1),
+            ) * params.startup_pacing_gain,
             cwnd_limits: Limits {
                 lo: initial_congestion_window * max_segment_size,
                 hi: max_congestion_window * max_segment_size,
