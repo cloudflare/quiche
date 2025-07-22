@@ -422,7 +422,7 @@ impl BBRv2 {
             mode: Mode::startup(BBRv2NetworkModel::new(&params, smoothed_rtt)),
             cwnd,
             pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) *
-                2.885,
+                params.startup_pacing_gain,
             cwnd_limits: Limits {
                 lo: initial_congestion_window * max_segment_size,
                 hi: max_congestion_window * max_segment_size,
