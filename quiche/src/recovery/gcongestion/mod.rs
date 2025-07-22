@@ -224,6 +224,12 @@ pub struct BbrParams {
     /// Determines whether app limited rounds with no bandwidth growth count
     /// towards the rounds threshold to exit startup.
     pub ignore_app_limited_for_no_bandwidth_growth: Option<bool>,
+
+    /// Initial pacing rate for a new connection before an RTT
+    /// estimate is available.  This rate serves as an upper bound on
+    /// the initial pacing rate, which is calculated by dividing the
+    /// initial cwnd by the first RTT estimate.
+    pub initial_pacing_rate_bytes_per_second: Option<u64>,
 }
 
 /// Controls BBR's bandwidth reduction strategy on congestion event.
