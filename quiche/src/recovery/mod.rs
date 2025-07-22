@@ -1669,6 +1669,129 @@ mod tests {
         assert_eq!(r.startup_exit(), None);
     }
 
+    fn initial_pacing_rate_override_test(
+        initial_pacing_rate_hint: Bandwidth,
+        expected_pacing_with_rtt_measurement: Bandwidth,
+    ) {
+        let cc_algorithm_name = "bbr2_gcongestion";
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        cfg.set_custom_bbr_params(BbrParams {
+            initial_pacing_rate_bytes_per_second: Some(
+                initial_pacing_rate_hint.to_bytes_per_second(),
+            ),
+            ..Default::default()
+        });
+
+        let mut r = Recovery::new(&cfg);
+
+        let mut now = Instant::now();
+
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
+
+        // send out first packet burst (a full initcwnd).
+        for i in 0..10 {
+            let p = Sent {
+                pkt_num: i,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1200,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: true,
+                is_pmtud_probe: false,
+            };
+
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 10);
+        assert_eq!(r.bytes_in_flight(), 12000);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
+
+        // Initial pacing rate matches the override value.
+        assert_eq!(
+            r.pacing_rate(),
+            initial_pacing_rate_hint.to_bytes_per_second()
+        );
+        assert_eq!(r.get_packet_send_time(now), now);
+
+        assert_eq!(r.cwnd(), 12000);
+        assert_eq!(r.cwnd_available(), 0);
+
+        // Wait 50ms for ACK.
+        now += Duration::from_millis(50);
+
+        let mut acked = RangeSet::default();
+        acked.insert(0..10);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                10,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 12000,
+                spurious_losses: 0,
+            }
+        );
+
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
+        assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
+        assert_eq!(r.rtt(), Duration::from_millis(50));
+
+        // Pacing rate is recalculated based on initial cwnd when the
+        // first RTT estimate is available.
+        assert_eq!(
+            r.pacing_rate(),
+            expected_pacing_with_rtt_measurement.to_bytes_per_second()
+        );
+    }
+
+    #[rstest]
+    fn initial_pacing_rate_override_decrease_when_rtt_measured() {
+        let bw = Bandwidth::from_bytes_and_time_delta(
+            12000,
+            Duration::from_millis(50),
+        );
+        initial_pacing_rate_override_test(bw * 2.0, bw);
+    }
+
+    #[rstest]
+    fn initial_pacing_rate_override_does_not_increase_when_rtt_measured() {
+        let bw = Bandwidth::from_bytes_and_time_delta(
+            12000,
+            Duration::from_millis(50),
+        );
+        // In cases where the initial pacing rate is lower than the
+        // cwnd / first_rtt ratio, do not allow the pacing rate to be updated to a
+        // value larger than the initial pacing rate.
+        initial_pacing_rate_override_test(bw * 0.5, bw * 0.5);
+    }
+
     #[rstest]
     fn validate_ack_range_on_ack_received(
         #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
