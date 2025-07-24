@@ -401,6 +401,7 @@ impl ApplicationOverQuic for H3iDriver {
             _ = sleep_until(self.next_fire_time), if waiting => {
                 log::debug!("h3i: releasing wait timer");
             }
+            else => {}
         }
 
         Ok(())
