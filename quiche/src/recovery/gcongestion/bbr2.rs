@@ -354,7 +354,7 @@ fn initial_pacing_rate(cwnd_in_bytes: usize, params: &Params) -> Bandwidth {
     }
 
     // sRTT is not known yet.  Compute the initial pacing rate by
-    // dividing cwnd by 1msec as recommented by draft-ietf-ccwg-bbr-03.
+    // dividing cwnd by 1msec as recommended by draft-ietf-ccwg-bbr-03.
     // https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-03.html#name-pacing-rate-cpacing_rate
     Bandwidth::from_bytes_and_time_delta(cwnd_in_bytes, Duration::from_millis(1)) *
         params.startup_pacing_gain
