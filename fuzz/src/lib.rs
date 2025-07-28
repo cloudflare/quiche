@@ -40,15 +40,17 @@ impl<'a> PktsData<'a> {
     }
 }
 
-pub fn server_process(pkt: &[u8], conn: &mut quiche::Connection, h3_conn: &mut Option<quiche::h3::Connection>, info: quiche::RecvInfo) {
+pub fn server_process(
+    pkt: &[u8], conn: &mut quiche::Connection,
+    h3_conn: &mut Option<quiche::h3::Connection>, info: quiche::RecvInfo,
+) {
     let mut buf = pkt.to_vec();
     conn.recv(&mut buf, info).ok();
     if (conn.is_in_early_data() || conn.is_established()) && h3_conn.is_none() {
         let h3_config = quiche::h3::Config::new().unwrap();
-        *h3_conn = Some(
-            quiche::h3::Connection::with_transport(conn, &h3_config)
-                .unwrap(),
-        );
+        if let Ok(c) = quiche::h3::Connection::with_transport(conn, &h3_config) {
+            *h3_conn = Some(c);
+        }
     }
     if h3_conn.is_some() {
         let h3c = h3_conn.as_mut().unwrap();
