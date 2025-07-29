@@ -1677,7 +1677,10 @@ mod tests {
     // bw to 1.0 * bw.
     #[case::bw_estimate_decrease_after_first_rtt(2.0, 1.0)]
     // initial_cwnd / first_rtt > initial_pacing_rate from 0.5 * bw to 1.0 * bw.
-    // Initial pacing remains 0.5 * bw.
+    // Initial pacing remains 0.5 * bw because the initial_pacing_rate parameter
+    // is used an upper bound for the pacing rate after the first RTT.
+    // Pacing rate after the first ACK should be:
+    // min(initial_pacing_rate_bytes_per_second, init_cwnd / first_rtt)
     #[case::bw_estimate_increase_after_first_rtt(0.5, 0.5)]
     fn initial_pacing_rate_override(
         #[case] initial_multipler: f64, #[case] expected_multiplier: f64,
