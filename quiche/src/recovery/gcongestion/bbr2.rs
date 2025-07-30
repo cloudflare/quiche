@@ -173,6 +173,12 @@ struct Params {
     /// Determines whether app limited rounds with no bandwidth growth count
     /// towards the rounds threshold to exit startup.
     ignore_app_limited_for_no_bandwidth_growth: bool,
+
+    /// Initial pacing rate for a new connection before an RTT
+    /// estimate is available.  This rate serves as an upper bound on
+    /// the initial pacing rate, which is calculated by dividing the
+    /// initial cwnd by the first RTT estimate.
+    initial_pacing_rate_bytes_per_second: Option<u64>,
 }
 
 impl Params {
@@ -181,6 +187,14 @@ impl Params {
             ($field:ident) => {
                 if let Some(custom_value) = custom_bbr_settings.$field {
                     self.$field = custom_value;
+                }
+            };
+        }
+
+        macro_rules! apply_optional_override {
+            ($field:ident) => {
+                if let Some(custom_value) = custom_bbr_settings.$field {
+                    self.$field = Some(custom_value);
                 }
             };
         }
@@ -202,6 +216,7 @@ impl Params {
         apply_override!(use_bytes_delivered_for_inflight_hi);
         apply_override!(decrease_startup_pacing_at_end_of_round);
         apply_override!(ignore_app_limited_for_no_bandwidth_growth);
+        apply_optional_override!(initial_pacing_rate_bytes_per_second);
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
             self.bw_lo_mode = custom_value.into();
@@ -283,6 +298,8 @@ const DEFAULT_PARAMS: Params = Params {
     bw_lo_mode: BwLoMode::InflightReduction,
 
     ignore_app_limited_for_no_bandwidth_growth: false,
+
+    initial_pacing_rate_bytes_per_second: None,
 };
 
 #[derive(Debug, PartialEq)]
@@ -329,6 +346,16 @@ impl<T: Ord + Clone + Copy + From<u8>> Limits<T> {
             hi: val,
         }
     }
+}
+
+fn initial_pacing_rate(
+    cwnd_in_bytes: usize, smoothed_rtt: Duration, params: &Params,
+) -> Bandwidth {
+    if let Some(pacing_rate) = params.initial_pacing_rate_bytes_per_second {
+        return Bandwidth::from_bytes_per_second(pacing_rate);
+    }
+
+    Bandwidth::from_bytes_and_time_delta(cwnd_in_bytes, smoothed_rtt) * 2.885
 }
 
 #[derive(Debug)]
@@ -421,8 +448,7 @@ impl BBRv2 {
         BBRv2 {
             mode: Mode::startup(BBRv2NetworkModel::new(&params, smoothed_rtt)),
             cwnd,
-            pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) *
-                2.885,
+            pacing_rate: initial_pacing_rate(cwnd, smoothed_rtt, &params),
             cwnd_limits: Limits {
                 lo: initial_congestion_window * max_segment_size,
                 hi: max_congestion_window * max_segment_size,
@@ -464,6 +490,18 @@ impl BBRv2 {
                 self.cwnd,
                 self.mode.min_rtt(),
             );
+
+            if let Some(pacing_rate) =
+                self.params.initial_pacing_rate_bytes_per_second
+            {
+                // Do not allow the pacing rate calculated from the first RTT
+                // measurement to be higher than the configured initial pacing
+                // rate.
+                let initial_pacing_rate =
+                    Bandwidth::from_bytes_per_second(pacing_rate);
+                self.pacing_rate = self.pacing_rate.min(initial_pacing_rate);
+            }
+
             return;
         }
 
