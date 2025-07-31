@@ -354,6 +354,9 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
                 debug_panic!("legacy implementation, not gcongestion");
                 &bbr2::BBR2
             },
+            #[cfg(feature = "congestion_window_unchecked_available")]
+            CongestionControlAlgorithm::CwndUnchecked =>
+                &cwnd_unchecked::CONGESTION_WINDOW_UNCHECKED,
         }
     }
 }
@@ -411,6 +414,8 @@ mod tests {
 mod bbr;
 mod bbr2;
 mod cubic;
+#[cfg(feature = "congestion_window_unchecked_available")]
+mod cwnd_unchecked;
 mod delivery_rate;
 mod hystart;
 pub(crate) mod pacer;
