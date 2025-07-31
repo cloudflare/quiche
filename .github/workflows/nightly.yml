@@ -7,7 +7,7 @@ permissions:
   pull-requests: write
 
 env:
-  FEATURES: "async,ffi,qlog"
+  FEATURES: "async,ffi,qlog,congestion_window_unchecked_available"
   RUSTFLAGS: "-D warnings"
   RUSTDOCFLAGS: "--cfg docsrs"
   RUSTTOOLCHAIN: "nightly"

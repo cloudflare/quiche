@@ -373,9 +373,11 @@ pub enum CongestionControlAlgorithm {
     /// BBRv2 congestion control algorithm implementation from gcongestion
     /// branch. `bbr2_gcongestion` in a string form.
     Bbr2Gcongestion = 4,
-    /// Disabled congestion control. `cc_disabled` in a string form.
-    #[cfg(feature = "cc_disabled")]
-    CcDisabled      = 5,
+    /// An alteration of the reno congestion control algorithm where the
+    /// congestion window is essentially unbounded.
+    /// `congestion_window_unchecked` in a string form.
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    CwndUnchecked   = 5,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -394,8 +396,9 @@ impl FromStr for CongestionControlAlgorithm {
             #[cfg(feature = "gcongestion")]
             "bbr2" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
-            #[cfg(feature = "cc_disabled")]
-            "cc_disabled" => Ok(CongestionControlAlgorithm::CcDisabled),
+            #[cfg(feature = "congestion_window_unchecked_available")]
+            "congestion_window_unchecked" =>
+                Ok(CongestionControlAlgorithm::CwndUnchecked),
             _ => Err(crate::Error::CongestionControl),
         }
     }
@@ -761,6 +764,16 @@ mod tests {
             CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
         assert!(recovery_for_alg(algo).gcongestion_enabled());
+
+        #[cfg(feature = "congestion_window_unchecked_available")]
+        {
+            let algo = CongestionControlAlgorithm::from_str(
+                "congestion_window_unchecked",
+            )
+            .unwrap();
+            assert_eq!(algo, CongestionControlAlgorithm::CwndUnchecked);
+            assert!(!recovery_for_alg(algo).gcongestion_enabled());
+        }
     }
 
     #[test]

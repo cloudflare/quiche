@@ -9,21 +9,24 @@ use crate::recovery::Sent;
 use super::Congestion;
 use super::CongestionControlOps;
 
-pub(crate) static CC_DISABLED: CongestionControlOps = CongestionControlOps {
-    on_init,
-    on_packet_sent,
-    on_packets_acked,
-    congestion_event,
-    checkpoint,
-    rollback,
-    has_custom_pacing,
-    #[cfg(feature = "qlog")]
-    state_str,
-    debug_fmt,
-};
+const GIGABYTE: usize = 1usize << 30;
+
+pub(crate) static CONGESTION_WINDOW_UNCHECKED: CongestionControlOps =
+    CongestionControlOps {
+        on_init,
+        on_packet_sent,
+        on_packets_acked,
+        congestion_event,
+        checkpoint,
+        rollback,
+        has_custom_pacing,
+        #[cfg(feature = "qlog")]
+        state_str,
+        debug_fmt,
+    };
 
 pub fn on_init(r: &mut Congestion) {
-    r.congestion_window = usize::MAX;
+    r.congestion_window = 16 * GIGABYTE;
 }
 
 pub fn on_packet_sent(
@@ -53,11 +56,11 @@ fn on_packet_acked(
     }
 
     if r.congestion_window < r.ssthresh.get() {
-        // In Slow slart, bytes_acked_sl is used for counting
+        // In Slow start, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
 
-        r.congestion_window = usize::MAX;
+        r.congestion_window = 16 * GIGABYTE;
 
         if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
@@ -84,7 +87,7 @@ fn congestion_event(
 
     if !r.in_congestion_recovery(time_sent) {
         r.congestion_recovery_start_time = Some(now);
-        r.congestion_window = usize::MAX;
+        r.congestion_window = 16 * GIGABYTE;
 
         r.bytes_acked_ca = (r.congestion_window as f64 *
             recovery::LOSS_REDUCTION_FACTOR) as usize;
@@ -109,7 +112,7 @@ fn has_custom_pacing() -> bool {
 
 #[cfg(feature = "qlog")]
 fn state_str(_r: &Congestion, _now: Instant) -> &'static str {
-    "cc_disabled"
+    "congestion_window_unchecked"
 }
 
 fn debug_fmt(_r: &Congestion, _f: &mut std::fmt::Formatter) -> std::fmt::Result {

@@ -14,7 +14,7 @@ readme = "README.md"
 # Forwarded quiche features for re-exports
 fuzzing = ["quiche/fuzzing"]
 quiche_internal = ["quiche/internal"]
-cc_disabled = ["quiche/cc_disabled"]
+congestion_window_unchecked = ["quiche/congestion_window_unchecked_available"]
 
 # Enable extra timing instrumentation for QUIC handshakes, including protocol
 # overhead and network delays.
