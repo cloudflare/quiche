@@ -7077,6 +7077,12 @@ impl<F: BufFactory> Connection<F> {
         self.handshake_completed
     }
 
+    /// Returns true if the connection handshake has been confirmed.
+    #[inline]
+    pub fn is_handshake_confirmed(&self) -> bool {
+        self.handshake_confirmed
+    }
+
     /// Returns true if the connection is resumed.
     #[inline]
     pub fn is_resumed(&self) -> bool {
