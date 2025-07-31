@@ -79,6 +79,7 @@ const GSO_THRESHOLD: usize = 1_000;
 pub struct WriterConfig {
     pub pending_cid: Option<ConnectionId<'static>>,
     pub peer_addr: SocketAddr,
+    pub local_addr: SocketAddr,
     pub with_gso: bool,
     pub pacing_offload: bool,
     pub with_pktinfo: bool,
@@ -95,9 +96,11 @@ pub(crate) struct WriteState {
     // If pacer schedules packets too far into the future, we want to pause
     // sending, until the future arrives
     next_release_time: Option<Instant>,
-    // If set, outgoing packets will be sent to the peer from the `send_from`
-    // address rather than the listening socket.
-    send_from: Option<SocketAddr>,
+    // The selected source and destination addresses for the current write
+    // cycle.
+    selected_path: Option<(SocketAddr, SocketAddr)>,
+    // Iterator over the network paths that haven't been flushed yet.
+    pending_paths: quiche::SocketAddrIter,
 }
 
 pub(crate) struct IoWorkerParams<Tx, M> {
@@ -274,13 +277,6 @@ where
         }
     }
 
-    #[inline]
-    fn gather_data_from_quiche_conn(
-        &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
-    ) -> QuicResult<usize> {
-        self.fill_send_buffer(qconn, send_buf)
-    }
-
     #[cfg(feature = "perf-quic-listener-metrics")]
     fn measure_complete_handshake_time(&mut self) {
         if let Some(init_rx_time) = self.init_rx_time.take() {
@@ -294,7 +290,7 @@ where
         }
     }
 
-    fn fill_send_buffer(
+    fn gather_data_from_quiche_conn(
         &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
     ) -> QuicResult<usize> {
         let mut segment_size = None;
@@ -302,6 +298,8 @@ where
 
         self.write_state.num_pkts = 0;
         self.write_state.bytes_written = 0;
+
+        self.write_state.selected_path = None;
 
         let now = Instant::now();
 
@@ -348,16 +346,10 @@ where
             );
 
             let packet_size = match outcome {
-                Ok(0) => {
-                    self.write_state.has_pending_data = false;
+                Ok(0) => break Ok(0),
 
-                    break Ok(0);
-                },
-                Ok(bytes_written) => {
-                    self.write_state.has_pending_data = true;
+                Ok(bytes_written) => bytes_written,
 
-                    bytes_written
-                },
                 Err(e) => break Err(e),
             };
 
@@ -458,6 +450,34 @@ where
         buffer_write_outcome
     }
 
+    /// Selects a network path, if none already selected.
+    ///
+    /// This will return the first path available in the write state's
+    /// `pending_paths` iterator. If that is empty a new iterator will be
+    /// created by querying quiche itself.
+    ///
+    /// Note that the connection's statically configured local address will be
+    /// used to query quiche for available paths, so this can't handle multiple
+    /// local addresses currently.
+    fn select_path(
+        &mut self, qconn: &QuicheConnection,
+    ) -> Option<(SocketAddr, SocketAddr)> {
+        if self.write_state.selected_path.is_some() {
+            return self.write_state.selected_path;
+        }
+
+        let from = self.cfg.local_addr;
+
+        // Initialize paths iterator.
+        if self.write_state.pending_paths.len() == 0 {
+            self.write_state.pending_paths = qconn.paths_iter(from);
+        }
+
+        let to = self.write_state.pending_paths.next()?;
+
+        Some((from, to))
+    }
+
     #[cfg(not(feature = "gcongestion"))]
     fn pacing_enabled(&self, qconn: &QuicheConnection) -> bool {
         self.cfg.pacing_offload && qconn.pacing_enabled()
@@ -475,26 +495,53 @@ where
         let mut send_buf = &mut send_buf[self.write_state.bytes_written..];
         if send_buf.len() > segment_size.unwrap_or(usize::MAX) {
             // Never let the buffer be longer than segment size, for GSO to
-            // function properly
+            // function properly.
             send_buf = &mut send_buf[..segment_size.unwrap_or(usize::MAX)];
         }
 
-        match qconn.send(send_buf) {
+        // On the first call to `select_path()` a path will be chosen based on
+        // the local address the connection initially landed on. Once a path is
+        // selected following calls to `select_path()` will return it, until it
+        // is reset at the start of the next write cycle.
+        //
+        // The path is then passed to `send_on_path()` which will only generate
+        // packets meant for that path, this way a single GSO buffer will only
+        // contain packets that belong to the same network path, which is
+        // required because the from/to addresses for each `sendmsg()` call
+        // apply to the whole GSO buffer.
+        let (from, to) = self.select_path(qconn).unzip();
+
+        match qconn.send_on_path(send_buf, from, to) {
             Ok((packet_size, info)) => {
                 let _ = send_info.get_or_insert(info);
 
                 self.write_state.bytes_written += packet_size;
                 self.write_state.num_pkts += 1;
-                self.write_state.send_from =
-                    send_info.as_ref().map(|info| info.from);
+
+                let from = send_info.as_ref().map(|info| info.from);
+                let to = send_info.as_ref().map(|info| info.to);
+
+                self.write_state.selected_path = from.zip(to);
+
+                self.write_state.has_pending_data = true;
 
                 Ok(packet_size)
             },
+
             Err(QuicheError::Done) => {
-                // Flush to network and yield when there are no
-                // more packets to write.
+                // Flush the current buffer to network. If no other path needs
+                // to be flushed to the network also yield the work loop task.
+                //
+                // Otherwise the write loop will start again and the next path
+                // will be selected.
+                let has_pending_paths = self.write_state.pending_paths.len() > 0;
+
+                // Keep writing if there are paths left to try.
+                self.write_state.has_pending_data = has_pending_paths;
+
                 Ok(0)
             },
+
             Err(e) => {
                 let error_code = if let Some(local_error) = qconn.local_error() {
                     local_error.error_code
@@ -517,14 +564,20 @@ where
     async fn flush_buffer_to_socket(&mut self, send_buf: &[u8]) {
         if self.write_state.bytes_written > 0 {
             let current_send_buf = &send_buf[..self.write_state.bytes_written];
+
+            let (from, to) = self.write_state.selected_path.unzip();
+
+            let to = to.unwrap_or(self.cfg.peer_addr);
+            let from = from.filter(|_| self.cfg.with_pktinfo);
+
             let send_res = if let (Some(udp_socket), true) =
                 (self.socket.as_udp_socket(), self.cfg.with_gso)
             {
-                // Only UDP supports GSO
+                // Only UDP supports GSO.
                 send_to(
                     udp_socket,
-                    self.cfg.peer_addr,
-                    self.write_state.send_from.filter(|_| self.cfg.with_pktinfo),
+                    to,
+                    from,
                     current_send_buf,
                     self.write_state.segment_size,
                     self.write_state.tx_time,
@@ -533,9 +586,7 @@ where
                 )
                 .await
             } else {
-                self.socket
-                    .send_to(current_send_buf, self.cfg.peer_addr)
-                    .await
+                self.socket.send_to(current_send_buf, to).await
             };
 
             #[cfg(feature = "perf-quic-listener-metrics")]
@@ -548,6 +599,7 @@ where
                             .write_errors(labels::QuicWriteError::Partial)
                             .inc();
                     },
+
                 Err(_) => {
                     self.metrics.write_errors(labels::QuicWriteError::Err).inc();
                 },
