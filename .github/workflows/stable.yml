@@ -55,7 +55,7 @@ jobs:
 
       - name: Run cargo test
         if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
-        run: cargo test --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }}
+        run: cargo test --verbose --all-targets --features=ffi,qlog,${{ matrix.tls-feature }},congestion_window_unchecked_available
 
       # tokio-quiche requires the `boring` crate, so don't run its tests when
       # building without it.
@@ -201,7 +201,7 @@ jobs:
 
       - name: Run cargo test
         if: endsWith(matrix.target, '-msvc')
-        run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog,boringssl-boring-crate
+        run: cargo test --target=${{ matrix.target }} --verbose --all-targets --features=ffi,qlog,boringssl-boring-crate,congestion_window_unchecked_available
 
   quiche_multiarch:
     runs-on: ubuntu-latest
