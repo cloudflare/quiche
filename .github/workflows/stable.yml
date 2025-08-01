@@ -300,7 +300,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cargo-ndk
-        run: cargo install cargo-ndk
+        run: cargo install cargo-ndk --version ^3.0.0
 
       - name: Run cargo ndk
-        run: cargo ndk --manifest-path quiche/Cargo.toml -t ${{ matrix.arch }} -p ${{ env.API_LEVEL }} -- build --verbose --features ffi
+        run: cargo ndk --manifest-path quiche/Cargo.toml --target ${{ matrix.arch }} --platform ${{ env.API_LEVEL }} -- build --verbose --features ffi
