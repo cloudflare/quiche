@@ -30,15 +30,15 @@
 
 use std::time::Instant;
 
+use crate::recovery::gcongestion::bbr2::BBRv2;
 use crate::recovery::gcongestion::Bandwidth;
+use crate::recovery::gcongestion::CongestionControl;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::RecoveryStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
 
 use super::Acked;
-use super::Congestion;
-use super::CongestionControl;
 use super::Lost;
 
 /// Congestion window fraction that the pacing sender allows in bursts during
@@ -63,7 +63,7 @@ pub struct Pacer {
     /// Should this [`Pacer`] be making any release decisions?
     enabled: bool,
     /// Underlying sender
-    sender: Congestion,
+    sender: BBRv2,
     /// The maximum rate the [`Pacer`] will use.
     max_pacing_rate: Option<Bandwidth>,
     /// Number of unpaced packets to be sent before packets are delayed.
@@ -84,7 +84,7 @@ impl Pacer {
     /// implementation, and an optional throttling as specified by
     /// `max_pacing_rate`.
     pub(crate) fn new(
-        enabled: bool, congestion: Congestion, max_pacing_rate: Option<Bandwidth>,
+        enabled: bool, congestion: BBRv2, max_pacing_rate: Option<Bandwidth>,
     ) -> Self {
         Pacer {
             enabled,

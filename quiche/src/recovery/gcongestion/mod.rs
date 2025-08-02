@@ -37,7 +37,6 @@ pub use self::recovery::GRecovery;
 use crate::recovery::bandwidth::Bandwidth;
 
 use crate::recovery::rtt::RttStats;
-use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryStats;
 
 #[derive(Debug)]
@@ -52,29 +51,6 @@ pub struct Acked {
     pub(super) time_sent: Instant,
 }
 
-#[enum_dispatch::enum_dispatch(CongestionControl)]
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub(crate) enum Congestion {
-    BBRv2(bbr2::BBRv2),
-}
-
-impl Congestion {
-    pub(super) fn bbrv2(
-        initial_tcp_congestion_window: usize, max_congestion_window: usize,
-        recovery_config: &RecoveryConfig,
-    ) -> Self {
-        Congestion::BBRv2(bbr2::BBRv2::new(
-            initial_tcp_congestion_window,
-            max_congestion_window,
-            recovery_config.max_send_udp_payload_size,
-            recovery_config.initial_rtt,
-            recovery_config.custom_bbr_params.as_ref(),
-        ))
-    }
-}
-
-#[enum_dispatch::enum_dispatch]
 pub(super) trait CongestionControl: Debug {
     /// Returns the name of the current state of the congestion control state
     /// machine. Used to annotate qlogs after state transitions.
