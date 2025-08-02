@@ -29,8 +29,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::ops::DerefMut;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -216,12 +214,8 @@ impl Mode {
             params,
         )
     }
-}
 
-impl Deref for Mode {
-    type Target = BBRv2NetworkModel;
-
-    fn deref(&self) -> &Self::Target {
+    pub fn network_model(&self) -> &BBRv2NetworkModel {
         match self {
             Mode::Startup(Startup { model }) => model,
             Mode::Drain(Drain { model, .. }) => model,
@@ -230,10 +224,8 @@ impl Deref for Mode {
             Mode::Placheolder(_) => unreachable!(),
         }
     }
-}
 
-impl DerefMut for Mode {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+    pub fn network_model_mut(&mut self) -> &mut BBRv2NetworkModel {
         match self {
             Mode::Startup(Startup { model }) => model,
             Mode::Drain(Drain { model, .. }) => model,
