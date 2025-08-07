@@ -7955,6 +7955,90 @@ fn connection_id_retire_limit(
     );
 }
 
+#[rstest]
+fn connection_id_retire_exotic_sequence(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(2);
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(15);
+    config.set_initial_max_stream_data_bidi_remote(15);
+    config.set_initial_max_stream_data_uni(10);
+    config.set_initial_max_streams_uni(3);
+    config.set_initial_max_streams_bidi(3);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Inject an exotic sequence of NEW_CONNECTION_ID frames, unbeknowst to
+    // quiche client connection object.
+    let frames = [
+        frame::Frame::NewConnectionId {
+            seq_num: 8,
+            retire_prior_to: 1,
+            conn_id: vec![0],
+            reset_token: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        },
+        frame::Frame::NewConnectionId {
+            seq_num: 1,
+            retire_prior_to: 0,
+            conn_id: vec![02],
+            reset_token: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+        },
+        frame::Frame::NewConnectionId {
+            seq_num: 6,
+            retire_prior_to: 6,
+            conn_id: vec![0x15],
+            reset_token: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3],
+        },
+        frame::Frame::NewConnectionId {
+            seq_num: 8,
+            retire_prior_to: 1,
+            conn_id: vec![0],
+            reset_token: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4],
+        },
+        frame::Frame::NewConnectionId {
+            seq_num: 48,
+            retire_prior_to: 8,
+            conn_id: vec![1],
+            reset_token: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5],
+        },
+    ];
+
+    let pkt_type = Type::Short;
+    pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    // Ensure operations continue to be allowed.
+    assert_eq!(pipe.client.stream_send(0, b"data", true), Ok(4));
+    assert_eq!(pipe.server.stream_send(1, b"data", true), Ok(4));
+    assert_eq!(pipe.client.stream_send(2, b"data", true), Ok(4));
+    assert_eq!(pipe.server.stream_send(3, b"data", true), Ok(4));
+
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut b = [0; 15];
+    assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((4, true)));
+    assert_eq!(pipe.server.stream_recv(2, &mut b), Ok((4, true)));
+
+    // The exotic sequence insertion messes with the client object's
+    // worldview so we can't check its side of things.
+}
+
 // Utility function.
 fn pipe_with_exchanged_cids(
     config: &mut Config, client_scid_len: usize, server_scid_len: usize,
