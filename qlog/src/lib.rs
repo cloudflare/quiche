@@ -25,7 +25,8 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //! The qlog crate is an implementation of the qlog [main logging schema],
-//! [QUIC event definitions], and [HTTP/3 and QPACK event definitions].
+//! [QUIC event definitions], [HTTP/3 and QPACK event definitions],
+//! and [Careful Resume event definitions].
 //! The crate provides a qlog data model that can be used for traces with
 //! events. It supports serialization and deserialization but defers logging IO
 //! choices to applications.
@@ -39,6 +40,8 @@
 //! https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-quic-events.html
 //! [HTTP/3 and QPACK event definitions]:
 //! https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-h3-events.html
+//! [Careful Resume event definitions]:
+//! https://datatracker.ietf.org/doc/html/draft-ietf-tsvwg-careful-resume-qlog
 //! [buffered mode]: #buffered-traces-with-standard-json
 //! [streaming mode]: #streaming-traces-with-json-seq
 //!
