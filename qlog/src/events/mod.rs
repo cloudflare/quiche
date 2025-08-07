@@ -262,6 +262,10 @@ impl From<EventType> for EventImportance {
             EventType::QuicEventType(QuicEventType::EcnStateUpdated) =>
                 EventImportance::Extra,
 
+            EventType::QuicEventType(
+                QuicEventType::CarefulResumePhaseUpdated,
+            ) => EventImportance::Extra,
+
             EventType::Http3EventType(Http3EventType::ParametersSet) =>
                 EventImportance::Base,
             EventType::Http3EventType(Http3EventType::StreamTypeSet) =>
@@ -374,6 +378,9 @@ impl From<&EventData> for EventType {
                 EventType::QuicEventType(QuicEventType::MarkedForRetransmit),
             EventData::QuicEcnStateUpdated { .. } =>
                 EventType::QuicEventType(QuicEventType::EcnStateUpdated),
+
+            EventData::CarefulResumePhaseUpdated { .. } =>
+                EventType::QuicEventType(QuicEventType::CarefulResumePhaseUpdated),
 
             EventData::Http3ParametersSet { .. } =>
                 EventType::Http3EventType(Http3EventType::ParametersSet),
@@ -545,6 +552,9 @@ pub enum EventData {
     #[serde(rename = "quic:ecn_state_updated")]
     QuicEcnStateUpdated(quic::EcnStateUpdated),
 
+    #[serde(rename = "recovery:careful_resume_phase_updated")]
+    CarefulResumePhaseUpdated(resume::CarefulResumePhaseUpdated),
+
     // HTTP/3
     #[serde(rename = "http3:parameters_set")]
     Http3ParametersSet(http3::ParametersSet),
@@ -696,3 +706,4 @@ pub struct TupleEndpointInfo {
 
 pub mod http3;
 pub mod quic;
+pub mod resume;
