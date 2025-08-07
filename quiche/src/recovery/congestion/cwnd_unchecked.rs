@@ -3,9 +3,9 @@ use std::time::Instant;
 use crate::recovery;
 
 use crate::recovery::congestion::Acked;
+use crate::recovery::congestion::UNCHECKED_WINDOW;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::Sent;
-use crate::recovery::GIGABYTE;
 
 use super::Congestion;
 use super::CongestionControlOps;
@@ -25,7 +25,7 @@ pub(crate) static CONGESTION_WINDOW_UNCHECKED: CongestionControlOps =
     };
 
 pub fn on_init(r: &mut Congestion) {
-    r.congestion_window = 16 * GIGABYTE;
+    r.congestion_window = UNCHECKED_WINDOW;
 }
 
 pub fn on_packet_sent(
@@ -59,7 +59,7 @@ fn on_packet_acked(
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
 
-        r.congestion_window = 16 * GIGABYTE;
+        r.congestion_window = UNCHECKED_WINDOW;
 
         if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
@@ -86,7 +86,7 @@ fn congestion_event(
 
     if !r.in_congestion_recovery(time_sent) {
         r.congestion_recovery_start_time = Some(now);
-        r.congestion_window = 16 * GIGABYTE;
+        r.congestion_window = UNCHECKED_WINDOW;
 
         r.bytes_acked_ca = (r.congestion_window as f64 *
             recovery::LOSS_REDUCTION_FACTOR) as usize;
