@@ -1682,6 +1682,7 @@ mod tests {
     // Pacing rate after the first ACK should be:
     // min(initial_pacing_rate_bytes_per_second, init_cwnd / first_rtt)
     #[case::bw_estimate_increase_after_first_rtt(0.5, 0.5)]
+    #[cfg(feature = "internal")]
     fn initial_pacing_rate_override(
         #[case] initial_multipler: f64, #[case] expected_multiplier: f64,
     ) {
