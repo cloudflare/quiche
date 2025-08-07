@@ -5,11 +5,10 @@ use crate::recovery;
 use crate::recovery::congestion::Acked;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::Sent;
+use crate::recovery::GIGABYTE;
 
 use super::Congestion;
 use super::CongestionControlOps;
-
-const GIGABYTE: usize = 1usize << 30;
 
 pub(crate) static CONGESTION_WINDOW_UNCHECKED: CongestionControlOps =
     CongestionControlOps {

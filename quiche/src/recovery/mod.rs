@@ -92,6 +92,9 @@ const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 // an ACK.
 pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
+#[cfg(any(test, feature = "congestion_window_unchecked_available"))]
+pub(crate) const GIGABYTE: usize = 1usize << 30;
+
 #[derive(Default)]
 struct LossDetectionTimer {
     time: Option<Instant>,
@@ -785,10 +788,16 @@ mod tests {
     }
 
     #[rstest]
-    fn loss_on_pto(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
-    ) {
+    #[case("reno")]
+    #[case("cubic")]
+    #[case("bbr")]
+    #[case("bbr2")]
+    #[case("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case("congestion_window_unchecked")
+    )]
+    fn loss_on_pto(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
@@ -1063,19 +1072,32 @@ mod tests {
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
-        if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
-            assert!(r.startup_exit().is_some());
-            assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
-        } else {
-            assert_eq!(r.startup_exit(), None);
+
+        match cc_algorithm_name {
+            "reno" | "cubic" | "congestion_window_unchecked" => {
+                assert!(r.startup_exit().is_some());
+                assert_eq!(
+                    r.startup_exit().unwrap().reason,
+                    StartupExitReason::Loss
+                );
+            },
+            _ => {
+                assert_eq!(r.startup_exit(), None);
+            },
         }
     }
 
     #[rstest]
-    fn loss_on_timer(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
-    ) {
+    #[case("reno")]
+    #[case("cubic")]
+    #[case("bbr")]
+    #[case("bbr2")]
+    #[case("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case("congestion_window_unchecked")
+    )]
+    fn loss_on_timer(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
@@ -1260,19 +1282,31 @@ mod tests {
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
-        if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
-            assert!(r.startup_exit().is_some());
-            assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
-        } else {
-            assert_eq!(r.startup_exit(), None);
+        match cc_algorithm_name {
+            "reno" | "cubic" | "congestion_window_unchecked" => {
+                assert!(r.startup_exit().is_some());
+                assert_eq!(
+                    r.startup_exit().unwrap().reason,
+                    StartupExitReason::Loss
+                );
+            },
+            _ => {
+                assert_eq!(r.startup_exit(), None);
+            },
         }
     }
 
     #[rstest]
-    fn loss_on_reordering(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
-    ) {
+    #[case("reno")]
+    #[case("cubic")]
+    #[case("bbr")]
+    #[case("bbr2")]
+    #[case("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case("congestion_window_unchecked")
+    )]
+    fn loss_on_reordering(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
@@ -1377,11 +1411,17 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
 
-        if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
-            assert!(r.startup_exit().is_some());
-            assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
-        } else {
-            assert_eq!(r.startup_exit(), None);
+        match cc_algorithm_name {
+            "reno" | "cubic" | "congestion_window_unchecked" => {
+                assert!(r.startup_exit().is_some());
+                assert_eq!(
+                    r.startup_exit().unwrap().reason,
+                    StartupExitReason::Loss
+                );
+            },
+            _ => {
+                assert_eq!(r.startup_exit(), None);
+            },
         }
     }
 
@@ -1756,10 +1796,16 @@ mod tests {
     }
 
     #[rstest]
-    fn pacing(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
-    ) {
+    #[case("reno")]
+    #[case("cubic")]
+    #[case("bbr")]
+    #[case("bbr2")]
+    #[case("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case("congestion_window_unchecked")
+    )]
+    fn pacing(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
@@ -1811,8 +1857,17 @@ mod tests {
         }
         assert_eq!(r.get_packet_send_time(now), now);
 
-        assert_eq!(r.cwnd(), 12000);
-        assert_eq!(r.cwnd_available(), 0);
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd(), 16 * GIGABYTE);
+        } else {
+            assert_eq!(r.cwnd(), 12000);
+        };
+
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd_available(), 16 * GIGABYTE - 12000);
+        } else {
+            assert_eq!(r.cwnd_available(), 0);
+        };
 
         // Wait 50ms for ACK.
         now += Duration::from_millis(50);
@@ -1844,8 +1899,12 @@ mod tests {
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
         assert_eq!(r.rtt(), Duration::from_millis(50));
 
-        // 10 MSS increased due to acks.
-        assert_eq!(r.cwnd(), 12000 + 1200 * 10);
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd(), 16 * GIGABYTE);
+        } else {
+            // 10 MSS increased due to acks.
+            assert_eq!(r.cwnd(), 12000 + 1200 * 10);
+        };
 
         // Send the second packet burst.
         let p = Sent {
@@ -2111,9 +2170,16 @@ mod tests {
     }
 
     #[rstest]
-    fn validate_ack_range_on_ack_received(
-        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-    ) {
+    #[case("reno")]
+    #[case("cubic")]
+    #[case("bbr")]
+    #[case("bbr2")]
+    #[case("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case("congestion_window_unchecked")
+    )]
+    fn validate_ack_range_on_ack_received(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
 
@@ -2195,15 +2261,26 @@ mod tests {
     }
 
     #[rstest]
-    fn pmtud_loss_on_timer(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
-    ) {
+    #[case("reno")]
+    #[case("cubic")]
+    #[case("bbr")]
+    #[case("bbr2")]
+    #[case("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case("congestion_window_unchecked")
+    )]
+    fn pmtud_loss_on_timer(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
-        assert_eq!(r.cwnd(), 12000);
+
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd(), 16 * GIGABYTE);
+        } else {
+            assert_eq!(r.cwnd(), 12000);
+        };
 
         let mut now = Instant::now();
 
@@ -2344,8 +2421,8 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_micros(11250));
         assert_eq!(r.cwnd(), match cc_algorithm_name {
-            "bbr" => 14000,
-            "bbr2" => 14000,
+            "bbr" | "bbr2" => 14000,
+            "congestion_window_unchecked" => 16 * GIGABYTE,
             _ => 12000,
         });
 
@@ -2370,14 +2447,25 @@ mod tests {
     // Modeling delivery_rate for gcongestion is non-trivial so we only test the
     // congestion specific algorithms.
     #[rstest]
-    fn congestion_delivery_rate(
-        #[values("reno", "cubic", "bbr", "bbr2")] cc_algorithm_name: &str,
-    ) {
+    #[case("reno")]
+    #[case("cubic")]
+    #[case("bbr")]
+    #[case("bbr2")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case("congestion_window_unchecked")
+    )]
+    fn congestion_delivery_rate(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
-        assert_eq!(r.cwnd(), 12000);
+
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd(), 16 * GIGABYTE);
+        } else {
+            assert_eq!(r.cwnd(), 12000);
+        };
 
         let now = Instant::now();
 
