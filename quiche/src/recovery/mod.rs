@@ -92,9 +92,6 @@ const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 // an ACK.
 pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
-#[cfg(any(test, feature = "congestion_window_unchecked_available"))]
-pub(crate) const GIGABYTE: usize = 1usize << 30;
-
 #[derive(Default)]
 struct LossDetectionTimer {
     time: Option<Instant>,
@@ -724,6 +721,7 @@ mod tests {
     use super::*;
     use crate::packet;
     use crate::recovery::congestion::PACING_MULTIPLIER;
+    use crate::recovery::congestion::UNCHECKED_WINDOW;
     use crate::test_utils;
     use crate::CongestionControlAlgorithm;
     use crate::DEFAULT_INITIAL_RTT;
@@ -1858,13 +1856,13 @@ mod tests {
         assert_eq!(r.get_packet_send_time(now), now);
 
         if cc_algorithm_name == "congestion_window_unchecked" {
-            assert_eq!(r.cwnd(), 16 * GIGABYTE);
+            assert_eq!(r.cwnd(), UNCHECKED_WINDOW);
         } else {
             assert_eq!(r.cwnd(), 12000);
         };
 
         if cc_algorithm_name == "congestion_window_unchecked" {
-            assert_eq!(r.cwnd_available(), 16 * GIGABYTE - 12000);
+            assert_eq!(r.cwnd_available(), UNCHECKED_WINDOW - 12000);
         } else {
             assert_eq!(r.cwnd_available(), 0);
         };
@@ -1900,7 +1898,7 @@ mod tests {
         assert_eq!(r.rtt(), Duration::from_millis(50));
 
         if cc_algorithm_name == "congestion_window_unchecked" {
-            assert_eq!(r.cwnd(), 16 * GIGABYTE);
+            assert_eq!(r.cwnd(), UNCHECKED_WINDOW);
         } else {
             // 10 MSS increased due to acks.
             assert_eq!(r.cwnd(), 12000 + 1200 * 10);
@@ -2277,7 +2275,7 @@ mod tests {
         let mut r = Recovery::new(&cfg);
 
         if cc_algorithm_name == "congestion_window_unchecked" {
-            assert_eq!(r.cwnd(), 16 * GIGABYTE);
+            assert_eq!(r.cwnd(), UNCHECKED_WINDOW);
         } else {
             assert_eq!(r.cwnd(), 12000);
         };
@@ -2422,7 +2420,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_micros(11250));
         assert_eq!(r.cwnd(), match cc_algorithm_name {
             "bbr" | "bbr2" => 14000,
-            "congestion_window_unchecked" => 16 * GIGABYTE,
+            "congestion_window_unchecked" => UNCHECKED_WINDOW,
             _ => 12000,
         });
 
@@ -2462,7 +2460,7 @@ mod tests {
         let mut r = Recovery::new(&cfg);
 
         if cc_algorithm_name == "congestion_window_unchecked" {
-            assert_eq!(r.cwnd(), 16 * GIGABYTE);
+            assert_eq!(r.cwnd(), UNCHECKED_WINDOW);
         } else {
             assert_eq!(r.cwnd(), 12000);
         };

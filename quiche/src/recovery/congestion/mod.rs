@@ -40,6 +40,16 @@ use crate::StartupExitReason;
 
 pub const PACING_MULTIPLIER: f64 = 1.25;
 
+/// 16 GiB
+#[cfg(any(test, feature = "congestion_window_unchecked_available"))]
+#[cfg(target_pointer_width = "64")]
+pub const UNCHECKED_WINDOW: usize = 16 << 30;
+
+/// 2 GiB
+#[cfg(any(test, feature = "congestion_window_unchecked_available"))]
+#[cfg(not(target_pointer_width = "64"))]
+pub const UNCHECKED_WINDOW: usize = 2 << 30;
+
 pub struct SsThresh {
     // Current slow start threshold.  Defaults to usize::MAX which
     // indicates we're still in the initial slow start phase.
