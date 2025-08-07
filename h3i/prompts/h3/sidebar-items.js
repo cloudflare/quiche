@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Error"],"fn":["prompt_connection_close","prompt_stream_bytes"],"struct":["Prompter"],"type":["PromptedFrame","Result"]};
