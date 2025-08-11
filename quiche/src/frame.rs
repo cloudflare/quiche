@@ -843,7 +843,7 @@ impl Frame {
                 update_max_ack_delay,
                 ..
             } => {
-                1 + // frame type
+                octets::varint_len(0xaf) + // frame type
                 octets::varint_len(*sequence_number) + // sequence_number
                 octets::varint_len(*packet_tolerance) + // packet_tolerance
                 octets::varint_len(*update_max_ack_delay) + // update_max_ack_delay
@@ -2179,5 +2179,38 @@ mod tests {
         };
 
         assert_eq!(frame_data, data);
+    }
+
+    #[test]
+    fn ack_frequency() {
+        let mut d = [42; 128];
+
+        let frame = Frame::AckFrequency {
+            sequence_number: 32,
+            packet_tolerance: 1,
+            update_max_ack_delay: 67,
+            ignore_order: false,
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 7);
+
+        assert_eq!(frame.wire_len(), wire_len);
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
     }
 }
