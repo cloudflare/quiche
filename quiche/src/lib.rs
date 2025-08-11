@@ -9190,7 +9190,7 @@ impl TransportParams {
                     tp.active_conn_id_limit = limit;
                 },
 
-                0xde1a => {
+                0xff04de1b => {
                     tp.min_ack_delay = Some(val.get_varint()?);
                 },
 
@@ -9384,7 +9384,7 @@ impl TransportParams {
         if let Some(min_ack_delay) = tp.min_ack_delay {
             TransportParams::encode_param(
                 &mut b,
-                0xde1a,
+                0xff04de1b,
                 octets::varint_len(min_ack_delay),
             )?;
             b.put_varint(min_ack_delay)?;
