@@ -191,6 +191,8 @@ pub enum Frame {
         update_max_ack_delay: u64,
         reordering_threshold: u64,
     },
+
+    ImmediateAck,
 }
 
 impl Frame {
@@ -335,6 +337,8 @@ impl Frame {
             },
 
             0x1e => Frame::HandshakeDone,
+
+            0x1f => Frame::ImmediateAck,
 
             0x30 | 0x31 => parse_datagram_frame(frame_type, b)?,
 
@@ -600,6 +604,10 @@ impl Frame {
                 b.put_varint(0x1e)?;
             },
 
+            Frame::ImmediateAck => {
+                b.put_varint(0x1f)?;
+            },
+
             Frame::Datagram { data } => {
                 encode_dgram_header(data.len() as u64, b)?;
 
@@ -822,6 +830,10 @@ impl Frame {
             },
 
             Frame::HandshakeDone => {
+                1 // frame type
+            },
+
+            Frame::ImmediateAck => {
                 1 // frame type
             },
 
@@ -1065,6 +1077,8 @@ impl Frame {
 
             Frame::HandshakeDone => QuicFrame::HandshakeDone,
 
+            Frame::ImmediateAck => todo!(),
+
             Frame::Datagram { data } => QuicFrame::Datagram {
                 length: data.len() as u64,
                 raw: None,
@@ -1239,6 +1253,10 @@ impl std::fmt::Debug for Frame {
 
             Frame::HandshakeDone => {
                 write!(f, "HANDSHAKE_DONE")?;
+            },
+
+            Frame::ImmediateAck => {
+                write!(f, "IMMEDIATE_ACK")?;
             },
 
             Frame::Datagram { data } => {
@@ -2198,6 +2216,34 @@ mod tests {
         };
 
         assert_eq!(wire_len, 7);
+
+        assert_eq!(frame.wire_len(), wire_len);
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn immediate_ack() {
+        let mut d = [42; 128];
+
+        let frame = Frame::ImmediateAck;
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 1);
 
         assert_eq!(frame.wire_len(), wire_len);
 

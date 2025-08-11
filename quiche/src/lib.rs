@@ -1705,6 +1705,8 @@ where
     ack_freq_seq_num: u64,
 
     is_ack_freq_received: bool,
+
+    immediate_ack_pending: bool,
 }
 
 #[derive(Default)]
@@ -2210,6 +2212,8 @@ impl<F: BufFactory> Connection<F> {
             ack_freq_seq_num: 0,
 
             is_ack_freq_received: false,
+
+            immediate_ack_pending: false,
         };
 
         if let Some(odcid) = odcid {
@@ -4251,6 +4255,7 @@ impl<F: BufFactory> Connection<F> {
         // ACK eliciting.
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
             (ack_elicit_required ||
+                self.immediate_ack_pending ||
                 pkt_space.ack_elicited &&
                     (!self.is_ack_freq_received ||
                         pkt_space.recv_pkt_need_ack.len() >= 5 ||
@@ -4286,6 +4291,7 @@ impl<F: BufFactory> Connection<F> {
                 // available cwnd.
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.last_send_ack_instant = now;
+                    self.immediate_ack_pending = false;
                     pkt_space.ack_elicited = false;
                 }
             }
@@ -4408,6 +4414,11 @@ impl<F: BufFactory> Connection<F> {
                         if push_frame_to_pkt!(b, frames, frame, left) {
                             ack_eliciting = true;
                             in_flight = true;
+
+                            let frame = frame::Frame::ImmediateAck;
+                            // Should we care if there was not enough space left
+                            // to send the ImmediateAck frame ?
+                            push_frame_to_pkt!(b, frames, frame, left);
                         }
                     }
 
@@ -8189,6 +8200,10 @@ impl<F: BufFactory> Connection<F> {
 
                 // Once the handshake is confirmed, we can drop Handshake keys.
                 self.drop_epoch_state(packet::Epoch::Handshake, now);
+            },
+
+            frame::Frame::ImmediateAck => {
+                self.immediate_ack_pending = true;
             },
 
             frame::Frame::Datagram { data } => {
