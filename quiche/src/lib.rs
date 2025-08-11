@@ -1703,6 +1703,8 @@ where
     last_send_ack_instant: Instant,
 
     ack_freq_seq_num: u64,
+
+    is_ack_freq_received: bool,
 }
 
 #[derive(Default)]
@@ -2206,6 +2208,8 @@ impl<F: BufFactory> Connection<F> {
             last_send_ack_instant: Instant::now(),
 
             ack_freq_seq_num: 0,
+
+            is_ack_freq_received: false,
         };
 
         if let Some(odcid) = odcid {
@@ -4248,12 +4252,11 @@ impl<F: BufFactory> Connection<F> {
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
             (ack_elicit_required ||
                 pkt_space.ack_elicited &&
-                    (pkt_space.recv_pkt_need_ack.len() >= 5 ||
+                    (!self.is_ack_freq_received ||
+                        pkt_space.recv_pkt_need_ack.len() >= 5 ||
                         self.last_send_ack_instant.elapsed() >
-                            cmp::min(
-                                Duration::from_micros(100),
-                                path.recovery.rtt(),
-                            ))) &&
+                            self.local_transport_params
+                                .max_ack_delay)) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -8246,6 +8249,8 @@ impl<F: BufFactory> Connection<F> {
                     }
 
                     self.recv_ack_frequency.ignore_order = ignore_order;
+
+                    self.is_ack_freq_received = true;
                 } else {
                     // AckFrequency Extension is not supported
                     return Err(Error::InvalidFrame);
