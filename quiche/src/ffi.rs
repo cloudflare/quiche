@@ -1332,7 +1332,7 @@ pub extern "C" fn quiche_conn_peer_transport_params(
     out.initial_max_streams_bidi = tps.initial_max_streams_bidi;
     out.initial_max_streams_uni = tps.initial_max_streams_uni;
     out.ack_delay_exponent = tps.ack_delay_exponent;
-    out.max_ack_delay = tps.max_ack_delay;
+    out.max_ack_delay = tps.max_ack_delay.as_millis() as u64;
     out.disable_active_migration = tps.disable_active_migration;
     out.active_conn_id_limit = tps.active_conn_id_limit;
     out.max_datagram_frame_size = match tps.max_datagram_frame_size {

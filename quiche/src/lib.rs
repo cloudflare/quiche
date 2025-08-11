@@ -1267,10 +1267,18 @@ impl Config {
         self.local_transport_params.ack_delay_exponent = v;
     }
 
-    /// Sets the `max_ack_delay` transport parameter.
+    /// Sets the `max_ack_delay` transport parameter in milliseconds.
+    /// Kept for compatibility, prefer using set_max_ack_delay_duration
     ///
     /// The default value is `25`.
     pub fn set_max_ack_delay(&mut self, v: u64) {
+        self.local_transport_params.max_ack_delay = Duration::from_millis(v);
+    }
+
+    /// Sets the `max_ack_delay` transport parameter.
+    ///
+    /// The default value is `25 ms`.
+    pub fn set_max_ack_delay_duration(&mut self, v: Duration) {
         self.local_transport_params.max_ack_delay = v;
     }
 
@@ -7389,7 +7397,7 @@ impl<F: BufFactory> Connection<F> {
         self.streams
             .update_peer_max_streams_uni(peer_params.initial_max_streams_uni);
 
-        let max_ack_delay = Duration::from_millis(peer_params.max_ack_delay);
+        let max_ack_delay = peer_params.max_ack_delay;
 
         self.recovery_config.max_ack_delay = max_ack_delay;
 
@@ -8234,7 +8242,7 @@ impl<F: BufFactory> Connection<F> {
 
                     if update_max_ack_delay >= min_ack_delay {
                         self.local_transport_params.max_ack_delay =
-                            update_max_ack_delay;
+                            Duration::from_micros(update_max_ack_delay);
                     }
 
                     self.recv_ack_frequency.ignore_order = ignore_order;
@@ -8976,7 +8984,7 @@ pub struct TransportParams {
     /// The ACK delay exponent.
     pub ack_delay_exponent: u64,
     /// The max ACK delay.
-    pub max_ack_delay: u64,
+    pub max_ack_delay: Duration,
     /// The min ACK delay.
     pub min_ack_delay: Option<u64>,
     /// Whether active migration is disabled.
@@ -9010,7 +9018,7 @@ impl Default for TransportParams {
             initial_max_streams_bidi: 0,
             initial_max_streams_uni: 0,
             ack_delay_exponent: 3,
-            max_ack_delay: 25,
+            max_ack_delay: Duration::from_millis(25),
             min_ack_delay: None,
             disable_active_migration: false,
             active_conn_id_limit: 2,
@@ -9136,7 +9144,7 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    tp.max_ack_delay = max_ack_delay;
+                    tp.max_ack_delay = Duration::from_millis(max_ack_delay);
                 },
 
                 0x000c => {
@@ -9307,13 +9315,13 @@ impl TransportParams {
             b.put_varint(tp.ack_delay_exponent)?;
         }
 
-        if tp.max_ack_delay != 0 {
+        if tp.max_ack_delay.as_millis() != 0 {
             TransportParams::encode_param(
                 &mut b,
                 0x000b,
-                octets::varint_len(tp.max_ack_delay),
+                octets::varint_len(tp.max_ack_delay.as_millis() as u64),
             )?;
-            b.put_varint(tp.max_ack_delay)?;
+            b.put_varint(tp.max_ack_delay.as_millis() as u64)?;
         }
 
         if tp.disable_active_migration {
@@ -9391,7 +9399,7 @@ impl TransportParams {
                 max_idle_timeout: Some(self.max_idle_timeout),
                 max_udp_payload_size: Some(self.max_udp_payload_size as u32),
                 ack_delay_exponent: Some(self.ack_delay_exponent as u16),
-                max_ack_delay: Some(self.max_ack_delay as u16),
+                max_ack_delay: Some(self.max_ack_delay.as_millis() as u16),
                 active_connection_id_limit: Some(
                     self.active_conn_id_limit as u32,
                 ),
