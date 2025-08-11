@@ -1711,7 +1711,7 @@ where
 struct AckFrequency {
     sequence_number: Option<u64>,
     packet_tolerance: u64,
-    ignore_order: bool,
+    reordering_threshold: u64,
 }
 
 /// Creates a new server-side connection.
@@ -4320,11 +4320,11 @@ impl<F: BufFactory> Connection<F> {
                 sequence_number: seq_num,
                 packet_tolerance: 1,
                 update_max_ack_delay,
-                ignore_order: true,
+                reordering_threshold: 1,
             };
 
             trace!(
-                "{} sending ack frequency seq_num={}, pkt_tol={}, max_ack_delay={}, ignore_order={}",
+                "{} sending ack frequency seq_num={}, pkt_tol={}, max_ack_delay={}, reordering_threshold={}",
                 self.trace_id,
                 seq_num,
                 1,
@@ -8221,7 +8221,7 @@ impl<F: BufFactory> Connection<F> {
                 sequence_number,
                 packet_tolerance,
                 update_max_ack_delay,
-                ignore_order,
+                reordering_threshold,
             } =>
                 if let Some(min_ack_delay) =
                     self.local_transport_params.min_ack_delay
@@ -8248,7 +8248,8 @@ impl<F: BufFactory> Connection<F> {
                             Duration::from_micros(update_max_ack_delay);
                     }
 
-                    self.recv_ack_frequency.ignore_order = ignore_order;
+                    self.recv_ack_frequency.reordering_threshold =
+                        reordering_threshold;
 
                     self.is_ack_freq_received = true;
                 } else {
