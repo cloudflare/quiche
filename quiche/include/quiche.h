@@ -222,6 +222,9 @@ void quiche_config_set_ack_delay_exponent(quiche_config *config, uint64_t v);
 // Sets the `max_ack_delay` transport parameter.
 void quiche_config_set_max_ack_delay(quiche_config *config, uint64_t v);
 
+// Extension: Sets the `min_ack_delay` transport parameter.
+void quiche_config_ext_set_min_ack_delay(quiche_config *config, uint64_t v);
+
 // Sets the `disable_active_migration` transport parameter.
 void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 

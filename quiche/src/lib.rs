@@ -1283,6 +1283,14 @@ impl Config {
         }
     }
 
+    /// Sets the `min_ack_delay` transport parameter in microsecond.
+    ///
+    /// The default value is `None` which disables the delayed ack from the
+    /// peer.
+    pub fn ext_set_min_ack_delay(&mut self, v: u64) {
+        self.local_transport_params.min_ack_delay = Some(v);
+    }
+
     /// Sets the `disable_active_migration` transport parameter.
     ///
     /// The default value is `false`.
@@ -1680,6 +1688,16 @@ where
 
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
+
+    /// Received ACK Frequency config
+    recv_ack_frequency: AckFrequency,
+}
+
+#[derive(Default)]
+struct AckFrequency {
+    sequence_number: Option<u64>,
+    packet_tolerance: u64,
+    ignore_order: bool,
 }
 
 /// Creates a new server-side connection.
@@ -2170,6 +2188,8 @@ impl<F: BufFactory> Connection<F> {
             stopped_stream_remote_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
+
+            recv_ack_frequency: Default::default(),
         };
 
         if let Some(odcid) = odcid {
@@ -4210,7 +4230,9 @@ impl<F: BufFactory> Connection<F> {
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
-            (pkt_space.ack_elicited || ack_elicit_required) &&
+            (pkt_space.ack_elicited ||
+                ack_elicit_required ||
+                self.next_pkt_num % 4 == 0) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -8126,6 +8148,42 @@ impl<F: BufFactory> Connection<F> {
             },
 
             frame::Frame::DatagramHeader { .. } => unreachable!(),
+
+            frame::Frame::AckFrequency {
+                sequence_number,
+                packet_tolerance,
+                update_max_ack_delay,
+                ignore_order,
+            } =>
+                if let Some(min_ack_delay) =
+                    self.local_transport_params.min_ack_delay
+                {
+                    // Check and update sequence_number if valid
+                    if let Some(seq) = self.recv_ack_frequency.sequence_number {
+                        if seq >= sequence_number {
+                            return Err(Error::InvalidFrame);
+                        }
+                    }
+                    self.recv_ack_frequency.sequence_number =
+                        Some(sequence_number);
+
+                    if packet_tolerance > 0 {
+                        self.recv_ack_frequency.packet_tolerance =
+                            packet_tolerance;
+                    } else {
+                        return Err(Error::InvalidFrame);
+                    }
+
+                    if update_max_ack_delay >= min_ack_delay {
+                        self.local_transport_params.max_ack_delay =
+                            update_max_ack_delay;
+                    }
+
+                    self.recv_ack_frequency.ignore_order = ignore_order;
+                } else {
+                    // AckFrequency Extension is not supported
+                    return Err(Error::InvalidFrame);
+                },
         }
 
         Ok(())
@@ -8861,6 +8919,8 @@ pub struct TransportParams {
     pub ack_delay_exponent: u64,
     /// The max ACK delay.
     pub max_ack_delay: u64,
+    /// The min ACK delay.
+    pub min_ack_delay: Option<u64>,
     /// Whether active migration is disabled.
     pub disable_active_migration: bool,
     /// The active connection ID limit.
@@ -8893,6 +8953,7 @@ impl Default for TransportParams {
             initial_max_streams_uni: 0,
             ack_delay_exponent: 3,
             max_ack_delay: 25,
+            min_ack_delay: None,
             disable_active_migration: false,
             active_conn_id_limit: 2,
             initial_source_connection_id: None,
@@ -9040,6 +9101,10 @@ impl TransportParams {
                     }
 
                     tp.active_conn_id_limit = limit;
+                },
+
+                0xde1a => {
+                    tp.min_ack_delay = Some(val.get_varint()?);
                 },
 
                 0x000f => {
@@ -9227,6 +9292,15 @@ impl TransportParams {
                 octets::varint_len(max_datagram_frame_size),
             )?;
             b.put_varint(max_datagram_frame_size)?;
+        }
+
+        if let Some(min_ack_delay) = tp.min_ack_delay {
+            TransportParams::encode_param(
+                &mut b,
+                0xde1a,
+                octets::varint_len(min_ack_delay),
+            )?;
+            b.put_varint(min_ack_delay)?;
         }
 
         let out_len = b.off();
