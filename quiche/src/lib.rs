@@ -465,6 +465,8 @@ const MAX_AMPLIFICATION_FACTOR: usize = 3;
 // This represents more or less how many ack blocks can fit in a typical packet.
 const MAX_ACK_RANGES: usize = 68;
 
+const MAX_UNREPORTED_MISSING_RANGES: usize = 256;
+
 // The highest possible stream ID allowed.
 const MAX_STREAM_ID: u64 = 1 << 60;
 
@@ -1707,6 +1709,12 @@ where
     is_ack_freq_received: bool,
 
     immediate_ack_pending: bool,
+
+    pkt_unreported_missing: ranges::RangeSet,
+
+    largest_pkt_acked: u64,
+
+    largest_pkt_unacked: u64,
 }
 
 #[derive(Default)]
@@ -2214,6 +2222,14 @@ impl<F: BufFactory> Connection<F> {
             is_ack_freq_received: false,
 
             immediate_ack_pending: false,
+
+            pkt_unreported_missing: ranges::RangeSet::new(
+                MAX_UNREPORTED_MISSING_RANGES,
+            ),
+
+            largest_pkt_acked: 0,
+
+            largest_pkt_unacked: 0,
         };
 
         if let Some(odcid) = odcid {
@@ -3258,6 +3274,29 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::InvalidPacket);
         }
 
+        if pn < self.largest_pkt_acked {
+            // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11 section 6.2
+            // When an ack-eliciting packet is received with a packet number less
+            // than Largest Acked, this still triggers an immediate
+            // acknowledgement in an effort to avoid the packet being spuriously
+            // declared lost.
+            self.immediate_ack_pending = true;
+        } else if self.recv_ack_frequency.reordering_threshold > 0 {
+            self.pkt_unreported_missing
+                .insert((self.largest_pkt_unacked + 1)..pn);
+
+            if let Some(min_unreported_missing) =
+                self.pkt_unreported_missing.first()
+            {
+                let gap = pn - min_unreported_missing;
+                if gap >= self.recv_ack_frequency.reordering_threshold {
+                    self.immediate_ack_pending = true;
+                }
+            }
+        }
+
+        self.largest_pkt_unacked = cmp::max(self.largest_pkt_unacked, pn);
+
         // Now that we decrypted the packet, let's see if we can map it to an
         // existing path.
         let recv_pid = if hdr.ty == Type::Short && self.got_peer_conn_id {
@@ -4294,6 +4333,17 @@ impl<F: BufFactory> Connection<F> {
                 // be bundled considering the buffer capacity only, and not the
                 // available cwnd.
                 if push_frame_to_pkt!(b, frames, frame, left) {
+                    // unwrap will not panic because .len() > 0 tested above
+                    self.largest_pkt_acked =
+                        pkt_space.recv_pkt_need_ack.last().unwrap();
+                    // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11 section 6.2.1
+                    // See the comment below table 1
+                    self.pkt_unreported_missing.remove_until(
+                        self.largest_pkt_acked.saturating_sub(
+                            self.recv_ack_frequency.reordering_threshold,
+                        ),
+                    );
+
                     self.last_send_ack_instant = now;
                     self.immediate_ack_pending = false;
                     pkt_space.ack_elicited = false;
@@ -4330,7 +4380,7 @@ impl<F: BufFactory> Connection<F> {
                 sequence_number: seq_num,
                 packet_tolerance: 1,
                 update_max_ack_delay,
-                reordering_threshold: 1,
+                reordering_threshold: 100,
             };
 
             trace!(
@@ -4339,7 +4389,7 @@ impl<F: BufFactory> Connection<F> {
                 seq_num,
                 1,
                 update_max_ack_delay,
-                1,
+                100,
             );
 
             if push_frame_to_pkt!(b, frames, frame, left) {
