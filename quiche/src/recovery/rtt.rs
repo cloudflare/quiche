@@ -146,6 +146,10 @@ impl RttStats {
         self.ack_freq_required
     }
 
+    pub(crate) fn mark_ack_freq_as_required(&mut self) {
+        self.ack_freq_required = true;
+    }
+
     pub(crate) fn rtt(&self) -> Duration {
         self.smoothed_rtt
     }

@@ -202,6 +202,8 @@ pub trait RecoveryOps {
 
     fn is_ack_freq_required(&self) -> bool;
 
+    fn mark_ack_freq_as_required(&mut self);
+
     fn rtt(&self) -> Duration;
 
     fn min_rtt(&self) -> Option<Duration>;

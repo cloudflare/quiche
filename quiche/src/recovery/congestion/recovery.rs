@@ -856,6 +856,10 @@ impl RecoveryOps for LegacyRecovery {
         self.rtt_stats.is_ack_freq_required()
     }
 
+    fn mark_ack_freq_as_required(&mut self) {
+        self.rtt_stats.mark_ack_freq_as_required();
+    }
+
     fn rtt(&self) -> Duration {
         self.rtt_stats.rtt()
     }
