@@ -31,6 +31,7 @@ use std::sync::Arc;
 use std::collections::hash_map;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 
 use intrusive_collections::intrusive_adapter;
 use intrusive_collections::KeyAdapter;
@@ -97,6 +98,12 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     /// streams to save memory, but we still need to keep track of previously
     /// created streams, to prevent peers from re-creating them.
     collected: StreamIdHashSet,
+
+    /// Sequence of streams which have been completed, but not yet reported.
+    ///
+    /// This is used to track streams that a higher layer may want to know
+    /// have closed so that they can be cleaned up.
+    pending_collected: VecDeque<u64>,
 
     /// Peer's maximum bidirectional stream count limit.
     peer_max_streams_bidi: u64,
@@ -557,6 +564,7 @@ impl<F: BufFactory> StreamMap<F> {
         self.remove_flushable(&s.priority_key);
 
         self.collected.insert(stream_id);
+        self.pending_collected.push_front(stream_id);
     }
 
     /// Creates an iterator over streams that have outstanding data to read.
@@ -645,6 +653,12 @@ impl<F: BufFactory> StreamMap<F> {
         self.local_max_streams_uni_next != self.local_max_streams_uni &&
             self.local_max_streams_uni_next / 2 >
                 self.local_max_streams_uni - self.peer_opened_streams_uni
+    }
+
+    /// Return streams we have collected but not yet notified the transport
+    /// about.
+    pub fn collected_streams<'a>(&'a mut self) -> impl Iterator<Item = u64> + 'a {
+        self.pending_collected.drain(..)
     }
 
     /// Returns the number of active streams in the map.
