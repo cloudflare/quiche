@@ -356,8 +356,9 @@ impl Frame {
             // PADDING and PING are allowed on all packet types.
             (_, Frame::Padding { .. }) | (_, Frame::Ping { .. }) => true,
 
-            // ACK, CRYPTO, HANDSHAKE_DONE, NEW_TOKEN, PATH_RESPONSE, and
-            // RETIRE_CONNECTION_ID can't be sent on 0-RTT packets.
+            // ACK, CRYPTO, HANDSHAKE_DONE, NEW_TOKEN, PATH_RESPONSE,
+            // RETIRE_CONNECTION_ID, CONNECTION_CLOSE, ACK_FREQUENCY and
+            // IMMEDIATE_ACK can't be sent on 0-RTT packets.
             (packet::Type::ZeroRTT, Frame::ACK { .. }) => false,
             (packet::Type::ZeroRTT, Frame::Crypto { .. }) => false,
             (packet::Type::ZeroRTT, Frame::HandshakeDone) => false,
@@ -365,6 +366,8 @@ impl Frame {
             (packet::Type::ZeroRTT, Frame::PathResponse { .. }) => false,
             (packet::Type::ZeroRTT, Frame::RetireConnectionId { .. }) => false,
             (packet::Type::ZeroRTT, Frame::ConnectionClose { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::AckFrequency { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::ImmediateAck) => false,
 
             // ACK, CRYPTO and CONNECTION_CLOSE can be sent on all other packet
             // types.
@@ -2226,7 +2229,7 @@ mod tests {
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
 
         let mut b = octets::Octets::with_slice(&d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
 
         let mut b = octets::Octets::with_slice(&d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
@@ -2254,7 +2257,7 @@ mod tests {
         assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
 
         let mut b = octets::Octets::with_slice(&d);
-        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_ok());
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
 
         let mut b = octets::Octets::with_slice(&d);
         assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
