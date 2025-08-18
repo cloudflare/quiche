@@ -4301,7 +4301,8 @@ impl<F: BufFactory> Connection<F> {
                 self.immediate_ack_pending ||
                 pkt_space.ack_elicited &&
                     (!self.is_ack_freq_received ||
-                        pkt_space.recv_pkt_need_ack.len() >= 5 ||
+                        pkt_space.recv_pkt_need_ack.len() as u64 >=
+                            self.recv_ack_frequency.packet_tolerance ||
                         self.last_send_ack_instant.elapsed() >
                             self.local_transport_params
                                 .max_ack_delay)) &&
@@ -4378,7 +4379,7 @@ impl<F: BufFactory> Connection<F> {
 
             let frame = frame::Frame::AckFrequency {
                 sequence_number: seq_num,
-                packet_tolerance: 1,
+                packet_tolerance: 5,
                 update_max_ack_delay,
                 reordering_threshold: 100,
             };
@@ -4387,7 +4388,7 @@ impl<F: BufFactory> Connection<F> {
                 "{} sending ack frequency seq_num={}, pkt_tol={}, max_ack_delay={}, reordering_threshold={}",
                 self.trace_id,
                 seq_num,
-                1,
+                5,
                 update_max_ack_delay,
                 100,
             );
