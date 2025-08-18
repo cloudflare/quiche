@@ -608,6 +608,7 @@ impl Frame {
             },
 
             Frame::ImmediateAck => {
+                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-immediate_ack-frame
                 b.put_varint(0x1f)?;
             },
 
@@ -625,6 +626,7 @@ impl Frame {
                 update_max_ack_delay,
                 reordering_threshold,
             } => {
+                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-ack_frequency-frame
                 b.put_varint(0xaf)?;
 
                 b.put_varint(*sequence_number)?;

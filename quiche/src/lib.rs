@@ -3313,6 +3313,7 @@ impl<F: BufFactory> Connection<F> {
                 // the packet being spuriously declared lost.
                 self.immediate_ack_pending = true;
             } else if freq.reordering_threshold > 0 {
+                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-response-to-out-of-order-pa
                 self.pkt_unreported_missing
                     .insert((self.largest_pkt_unacked + 1)..pn);
 
@@ -4322,6 +4323,16 @@ impl<F: BufFactory> Connection<F> {
 
         let left_before_packing_ack_frame = left;
 
+        // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-sending-acknowledgments
+        // Prior to receiving an ACK_FREQUENCY frame, endpoints send
+        // acknowledgments as specified in Section 13.2.1 of [QUIC-TRANSPORT].
+        //
+        // The data receiver sends an acknowledgment when one of the following
+        // conditions are met since the last acknowledgement was sent:
+        // * The number of received ack-eliciting packets is greater than the
+        //   Ack-Eliciting Threshold.
+        // * max_ack_delay amount of time has passed and at least one
+        //   ack-eliciting packet has been received.
         let mut should_delay_ack = false;
         if let Some(freq) = &self.recv_ack_frequency {
             should_delay_ack = (pkt_space.recv_pkt_need_ack.len() as u64) <
@@ -8338,6 +8349,11 @@ impl<F: BufFactory> Connection<F> {
                     if let Some(freq) = &self.recv_ack_frequency {
                         if freq.sequence_number >= sequence_number {
                             // already received, ignore
+                            // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-ack_frequency-frame
+                            // A receiving endpoint MUST ignore a received
+                            // ACK_FREQUENCY frame unless the Sequence Number
+                            // value in the frame is greater than the largest
+                            // processed value.
                             return Ok(());
                         }
                     }

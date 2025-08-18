@@ -133,6 +133,13 @@ impl RttStats {
             // send AckFrequency frame if the smoothed rtt is modified by at least
             // 50% since the last AckFrequency frame was sent
             // This value is arbitrary since the draft don't specify anything
+            // apart from "a relevant change":
+            // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-congestion-control
+            // Ideally, an ACK_FREQUENCY frame is sent only when a relevant change
+            // in the congestion window or smoothed RTT is detected that impacts
+            // the local setting of the reordering threshold or locally-selected
+            // calculation of the either Ack-Eliciting Threshold or the Requested
+            // Max Ack Delay.
             self.ack_freq_required = true;
         }
     }
