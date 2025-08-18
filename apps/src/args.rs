@@ -56,6 +56,7 @@ pub struct CommonArgs {
     pub qpack_blocked_streams: Option<u64>,
     pub initial_rtt: Duration,
     pub initial_cwnd_packets: u64,
+    pub min_ack_delay: Option<u64>,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
@@ -198,6 +199,12 @@ impl Args for CommonArgs {
             .parse::<u64>()
             .unwrap();
 
+        let min_ack_delay = if !args.get_str("--min-ack-delay").is_empty() {
+            Some(args.get_str("--min-ack-delay").parse::<u64>().unwrap())
+        } else {
+            None
+        };
+
         CommonArgs {
             alpns,
             max_data,
@@ -222,6 +229,7 @@ impl Args for CommonArgs {
             qpack_blocked_streams,
             initial_rtt,
             initial_cwnd_packets,
+            min_ack_delay,
         }
     }
 }
@@ -252,6 +260,7 @@ impl Default for CommonArgs {
             qpack_blocked_streams: None,
             initial_rtt: Duration::from_millis(333),
             initial_cwnd_packets: 10,
+            min_ack_delay: None,
         }
     }
 }
@@ -299,6 +308,7 @@ Options:
   --source-port PORT       Source port to use when connecting to the server [default: 0].
   --initial-rtt MILLIS     The initial RTT in milliseconds [default: 333].
   --initial-cwnd-packets PACKETS   The initial congestion window size in terms of packet count [default: 10].
+  --min-ack-delay MICROSECONDS  Enable the delayed ack extension with the specified min_ack_delay.
   -h --help                Show this screen.
 ";
 
@@ -475,6 +485,7 @@ Options:
   --disable-pacing            Disable pacing (linux only).
   --initial-rtt MILLIS     The initial RTT in milliseconds [default: 333].
   --initial-cwnd-packets PACKETS      The initial congestion window size in terms of packet count [default: 10].
+  --min-ack-delay MICROSECONDS  Enable the delayed ack extension with the specified min_ack_delay.
   -h --help                   Show this screen.
 ";
 
