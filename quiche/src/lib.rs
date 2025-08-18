@@ -1700,13 +1700,11 @@ where
     max_amplification_factor: usize,
 
     /// Received ACK Frequency config
-    recv_ack_frequency: AckFrequency,
+    recv_ack_frequency: Option<AckFrequency>,
 
     last_send_ack_instant: Instant,
 
     ack_freq_seq_num: u64,
-
-    is_ack_freq_received: bool,
 
     immediate_ack_pending: bool,
 
@@ -1719,7 +1717,7 @@ where
 
 #[derive(Default)]
 struct AckFrequency {
-    sequence_number: Option<u64>,
+    sequence_number: u64,
     packet_tolerance: u64,
     reordering_threshold: u64,
 }
@@ -2213,13 +2211,11 @@ impl<F: BufFactory> Connection<F> {
 
             max_amplification_factor: config.max_amplification_factor,
 
-            recv_ack_frequency: Default::default(),
+            recv_ack_frequency: None,
 
             last_send_ack_instant: Instant::now(),
 
             ack_freq_seq_num: 0,
-
-            is_ack_freq_received: false,
 
             immediate_ack_pending: false,
 
@@ -3274,23 +3270,25 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::InvalidPacket);
         }
 
-        if pn < self.largest_pkt_acked {
-            // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11 section 6.2
-            // When an ack-eliciting packet is received with a packet number less
-            // than Largest Acked, this still triggers an immediate
-            // acknowledgement in an effort to avoid the packet being spuriously
-            // declared lost.
-            self.immediate_ack_pending = true;
-        } else if self.recv_ack_frequency.reordering_threshold > 0 {
-            self.pkt_unreported_missing
-                .insert((self.largest_pkt_unacked + 1)..pn);
+        if let Some(freq) = &self.recv_ack_frequency {
+            if pn < self.largest_pkt_acked {
+                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11 section 6.2
+                // When an ack-eliciting packet is received with a packet number
+                // less than Largest Acked, this still triggers an
+                // immediate acknowledgement in an effort to avoid
+                // the packet being spuriously declared lost.
+                self.immediate_ack_pending = true;
+            } else if freq.reordering_threshold > 0 {
+                self.pkt_unreported_missing
+                    .insert((self.largest_pkt_unacked + 1)..pn);
 
-            if let Some(min_unreported_missing) =
-                self.pkt_unreported_missing.first()
-            {
-                let gap = pn - min_unreported_missing;
-                if gap >= self.recv_ack_frequency.reordering_threshold {
-                    self.immediate_ack_pending = true;
+                if let Some(min_unreported_missing) =
+                    self.pkt_unreported_missing.first()
+                {
+                    let gap = pn - min_unreported_missing;
+                    if gap >= freq.reordering_threshold {
+                        self.immediate_ack_pending = true;
+                    }
                 }
             }
         }
@@ -4290,6 +4288,14 @@ impl<F: BufFactory> Connection<F> {
 
         let left_before_packing_ack_frame = left;
 
+        let mut should_delay_ack = false;
+        if let Some(freq) = &self.recv_ack_frequency {
+            should_delay_ack = (pkt_space.recv_pkt_need_ack.len() as u64) <
+                freq.packet_tolerance &&
+                self.last_send_ack_instant.elapsed() <
+                    self.local_transport_params.max_ack_delay;
+        }
+
         // Create ACK frame.
         //
         // When we need to explicitly elicit an ACK via PING later, go ahead and
@@ -4299,13 +4305,7 @@ impl<F: BufFactory> Connection<F> {
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
             (ack_elicit_required ||
                 self.immediate_ack_pending ||
-                pkt_space.ack_elicited &&
-                    (!self.is_ack_freq_received ||
-                        pkt_space.recv_pkt_need_ack.len() as u64 >=
-                            self.recv_ack_frequency.packet_tolerance ||
-                        self.last_send_ack_instant.elapsed() >
-                            self.local_transport_params
-                                .max_ack_delay)) &&
+                pkt_space.ack_elicited && !should_delay_ack) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -4339,12 +4339,12 @@ impl<F: BufFactory> Connection<F> {
                         pkt_space.recv_pkt_need_ack.last().unwrap();
                     // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11 section 6.2.1
                     // See the comment below table 1
-                    self.pkt_unreported_missing.remove_until(
-                        self.largest_pkt_acked.saturating_sub(
-                            self.recv_ack_frequency.reordering_threshold,
-                        ),
-                    );
-
+                    if let Some(freq) = &self.recv_ack_frequency {
+                        self.pkt_unreported_missing.remove_until(
+                            self.largest_pkt_acked
+                                .saturating_sub(freq.reordering_threshold),
+                        );
+                    }
                     self.last_send_ack_instant = now;
                     self.immediate_ack_pending = false;
                     pkt_space.ack_elicited = false;
@@ -8296,19 +8296,19 @@ impl<F: BufFactory> Connection<F> {
                 if let Some(min_ack_delay) =
                     self.local_transport_params.min_ack_delay
                 {
+                    let mut ack_freq = AckFrequency::default();
+
                     // Check and update sequence_number if valid
-                    if let Some(seq) = self.recv_ack_frequency.sequence_number {
-                        if seq >= sequence_number {
+                    if let Some(freq) = &self.recv_ack_frequency {
+                        if freq.sequence_number >= sequence_number {
                             // already received, ignore
                             return Ok(());
                         }
                     }
-                    self.recv_ack_frequency.sequence_number =
-                        Some(sequence_number);
+                    ack_freq.sequence_number = sequence_number;
 
                     if packet_tolerance > 0 {
-                        self.recv_ack_frequency.packet_tolerance =
-                            packet_tolerance;
+                        ack_freq.packet_tolerance = packet_tolerance;
                     } else {
                         return Err(Error::InvalidFrame);
                     }
@@ -8318,10 +8318,18 @@ impl<F: BufFactory> Connection<F> {
                             Duration::from_micros(update_max_ack_delay);
                     }
 
-                    self.recv_ack_frequency.reordering_threshold =
-                        reordering_threshold;
+                    ack_freq.reordering_threshold = reordering_threshold;
 
-                    self.is_ack_freq_received = true;
+                    trace!(
+                        "{} receiving ack frequency seq_num={}, pkt_tol={}, max_ack_delay={:?}, reordering_threshold={}",
+                        self.trace_id,
+                        ack_freq.sequence_number,
+                        ack_freq.packet_tolerance,
+                        self.local_transport_params.max_ack_delay,
+                        ack_freq.reordering_threshold,
+                    );
+
+                    self.recv_ack_frequency = Some(ack_freq);
                 } else {
                     // AckFrequency Extension is not supported
                     return Err(Error::InvalidFrame);
