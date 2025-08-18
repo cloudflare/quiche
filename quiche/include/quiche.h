@@ -225,6 +225,12 @@ void quiche_config_set_max_ack_delay(quiche_config *config, uint64_t v);
 // Extension: Sets the `min_ack_delay` transport parameter.
 void quiche_config_ext_set_min_ack_delay(quiche_config *config, uint64_t v);
 
+// Extension: Set the reordering threshold value that will be requested in AckFrequency frames
+void quiche_config_ext_set_ack_freq_reordering_threshold(quiche_config *config, uint64_t v);
+
+// Extension: Set the packet tolerance value that will be requested in AckFrequency frames
+void quiche_config_ext_set_ack_freq_packet_tolerance(quiche_config *config, uint64_t v);
+
 // Sets the `disable_active_migration` transport parameter.
 void quiche_config_set_disable_active_migration(quiche_config *config, bool v);
 
