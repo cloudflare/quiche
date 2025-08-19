@@ -202,6 +202,7 @@ impl Params {
         apply_override!(startup_cwnd_gain);
         apply_override!(startup_pacing_gain);
         apply_override!(full_bw_threshold);
+        apply_override!(startup_full_bw_rounds);
         apply_override!(startup_full_loss_count);
         apply_override!(drain_cwnd_gain);
         apply_override!(drain_pacing_gain);
