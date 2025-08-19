@@ -181,8 +181,17 @@ pub struct BbrParams {
     /// Controls the BBR bandwidth probe down pacing gain.
     pub probe_bw_probe_down_pacing_gain: Option<f32>,
 
-    /// Controls the BBR probe bandwidth cwnd gain.
+    /// Controls the BBR probe bandwidth DOWN/CRUISE/REFILL cwnd gain.
     pub probe_bw_cwnd_gain: Option<f32>,
+
+    /// Controls the BBR probe bandwidth UP cwnd gain.
+    pub probe_bw_up_cwnd_gain: Option<f32>,
+
+    /// Controls the BBR probe RTT pacing gain.
+    pub probe_rtt_pacing_gain: Option<f32>,
+
+    /// Controls the BBR probe RTT cwnd gain.
+    pub probe_rtt_cwnd_gain: Option<f32>,
 
     /// Controls the number of rounds BBR should stay in probe up if
     /// bytes_in_flight doesn't drop below target.

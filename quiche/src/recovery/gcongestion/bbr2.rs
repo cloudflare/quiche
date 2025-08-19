@@ -107,7 +107,11 @@ struct Params {
     probe_bw_probe_down_pacing_gain: f32,
     probe_bw_default_pacing_gain: f32,
 
+    /// cwnd_gain for probe bw phases other than ProbeBW_UP
     probe_bw_cwnd_gain: f32,
+
+    /// cwnd_gain for ProbeBW_UP
+    probe_bw_up_cwnd_gain: f32,
 
     // PROBE_UP parameters.
     probe_up_ignore_inflight_hi: bool,
@@ -125,6 +129,9 @@ struct Params {
     probe_rtt_period: Duration,
 
     probe_rtt_duration: Duration,
+
+    probe_rtt_pacing_gain: f32,
+    probe_rtt_cwnd_gain: f32,
 
     // Parameters used by multiple modes.
     /// The initial value of the max ack height filter's window length.
@@ -212,6 +219,9 @@ impl Params {
         apply_override!(probe_bw_probe_up_pacing_gain);
         apply_override!(probe_bw_probe_down_pacing_gain);
         apply_override!(probe_bw_cwnd_gain);
+        apply_override!(probe_bw_up_cwnd_gain);
+        apply_override!(probe_rtt_pacing_gain);
+        apply_override!(probe_rtt_cwnd_gain);
         apply_override!(max_probe_up_queue_rounds);
         apply_override!(loss_threshold);
         apply_override!(use_bytes_delivered_for_inflight_hi);
@@ -262,6 +272,8 @@ const DEFAULT_PARAMS: Params = Params {
 
     probe_bw_cwnd_gain: 2.25, // BBRv3
 
+    probe_bw_up_cwnd_gain: 2.25, // BBRv3
+
     probe_up_ignore_inflight_hi: false,
 
     max_probe_up_queue_rounds: 2,
@@ -271,6 +283,10 @@ const DEFAULT_PARAMS: Params = Params {
     probe_rtt_period: Duration::from_millis(10000),
 
     probe_rtt_duration: Duration::from_millis(200),
+
+    probe_rtt_pacing_gain: 1.0,
+
+    probe_rtt_cwnd_gain: 1.0,
 
     initial_max_ack_height_filter_window: 10,
 
