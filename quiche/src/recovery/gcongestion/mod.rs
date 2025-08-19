@@ -151,6 +151,10 @@ pub struct BbrParams {
     /// Controls the BBR full bandwidth threshold.
     pub full_bw_threshold: Option<f32>,
 
+    /// Controls the number of rounds to stay in STARTUP before
+    /// exiting due to bandwidth plateau.
+    pub startup_full_bw_rounds: Option<usize>,
+
     /// Controls the BBR startup loss count necessary to exit startup.
     pub startup_full_loss_count: Option<usize>,
 
