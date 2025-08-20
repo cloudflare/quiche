@@ -3312,7 +3312,9 @@ impl<F: BufFactory> Connection<F> {
                 // immediate acknowledgement in an effort to avoid
                 // the packet being spuriously declared lost.
                 self.immediate_ack_pending = true;
-            } else if freq.reordering_threshold > 0 {
+            } else if freq.reordering_threshold > 0 &&
+                epoch == packet::Epoch::Application
+            {
                 // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-response-to-out-of-order-pa
                 self.pkt_unreported_missing
                     .insert((self.largest_pkt_unacked + 1)..pn);
@@ -3328,7 +3330,9 @@ impl<F: BufFactory> Connection<F> {
             }
         }
 
-        self.largest_pkt_unacked = cmp::max(self.largest_pkt_unacked, pn);
+        if epoch == packet::Epoch::Application {
+            self.largest_pkt_unacked = cmp::max(self.largest_pkt_unacked, pn);
+        }
 
         // Now that we decrypted the packet, let's see if we can map it to an
         // existing path.
@@ -4335,8 +4339,9 @@ impl<F: BufFactory> Connection<F> {
         //   ack-eliciting packet has been received.
         let mut should_delay_ack = false;
         if let Some(freq) = &self.recv_ack_frequency {
-            should_delay_ack = (pkt_space.recv_pkt_need_ack.len() as u64) <
-                freq.packet_tolerance &&
+            should_delay_ack = epoch == packet::Epoch::Application &&
+                (pkt_space.recv_pkt_need_ack.len() as u64) <
+                    freq.packet_tolerance &&
                 self.last_send_ack_instant.elapsed() <
                     self.local_transport_params.max_ack_delay;
         }
@@ -4380,15 +4385,19 @@ impl<F: BufFactory> Connection<F> {
                 // available cwnd.
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     // unwrap will not panic because .len() > 0 tested above
-                    self.largest_pkt_acked =
-                        pkt_space.recv_pkt_need_ack.last().unwrap();
-                    // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11 section 6.2.1
-                    // See the comment below table 1
-                    if let Some(freq) = &self.recv_ack_frequency {
-                        self.pkt_unreported_missing.remove_until(
-                            self.largest_pkt_acked
-                                .saturating_sub(freq.reordering_threshold),
+                    if epoch == packet::Epoch::Application {
+                        self.largest_pkt_acked = cmp::max(
+                            self.largest_pkt_acked,
+                            pkt_space.recv_pkt_need_ack.last().unwrap(),
                         );
+                        // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11 section 6.2.1
+                        // See the comment below table 1
+                        if let Some(freq) = &self.recv_ack_frequency {
+                            self.pkt_unreported_missing.remove_until(
+                                self.largest_pkt_acked
+                                    .saturating_sub(freq.reordering_threshold),
+                            );
+                        }
                     }
                     self.last_send_ack_instant = now;
                     self.immediate_ack_pending = false;
@@ -4407,7 +4416,7 @@ impl<F: BufFactory> Connection<F> {
         if pkt_type == Type::Short &&
             path.active() &&
             path.recovery.is_ack_freq_required() &&
-            self.handshake_completed &&
+            epoch == packet::Epoch::Application &&
             self.peer_transport_params.min_ack_delay.is_some()
         {
             let rtt = path.recovery.rtt();
