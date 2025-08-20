@@ -33,7 +33,7 @@ jobs:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
 
       - name: Run cargo test
-        run: cargo test --verbose --all-targets --features=boringssl-boring-crate,ffi,qlog
+        run: cargo test --verbose --all-targets --features=boringssl-boring-crate,ffi,qlog,congestion_window_unchecked_available
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
