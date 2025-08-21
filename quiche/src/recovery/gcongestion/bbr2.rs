@@ -107,7 +107,11 @@ struct Params {
     probe_bw_probe_down_pacing_gain: f32,
     probe_bw_default_pacing_gain: f32,
 
+    /// cwnd_gain for probe bw phases other than ProbeBW_UP
     probe_bw_cwnd_gain: f32,
+
+    /// cwnd_gain for ProbeBW_UP
+    probe_bw_up_cwnd_gain: f32,
 
     // PROBE_UP parameters.
     probe_up_ignore_inflight_hi: bool,
@@ -125,6 +129,9 @@ struct Params {
     probe_rtt_period: Duration,
 
     probe_rtt_duration: Duration,
+
+    probe_rtt_pacing_gain: f32,
+    probe_rtt_cwnd_gain: f32,
 
     // Parameters used by multiple modes.
     /// The initial value of the max ack height filter's window length.
@@ -173,6 +180,12 @@ struct Params {
     /// Determines whether app limited rounds with no bandwidth growth count
     /// towards the rounds threshold to exit startup.
     ignore_app_limited_for_no_bandwidth_growth: bool,
+
+    /// Initial pacing rate for a new connection before an RTT
+    /// estimate is available.  This rate serves as an upper bound on
+    /// the initial pacing rate, which is calculated by dividing the
+    /// initial cwnd by the first RTT estimate.
+    initial_pacing_rate_bytes_per_second: Option<u64>,
 }
 
 impl Params {
@@ -185,9 +198,18 @@ impl Params {
             };
         }
 
+        macro_rules! apply_optional_override {
+            ($field:ident) => {
+                if let Some(custom_value) = custom_bbr_settings.$field {
+                    self.$field = Some(custom_value);
+                }
+            };
+        }
+
         apply_override!(startup_cwnd_gain);
         apply_override!(startup_pacing_gain);
         apply_override!(full_bw_threshold);
+        apply_override!(startup_full_bw_rounds);
         apply_override!(startup_full_loss_count);
         apply_override!(drain_cwnd_gain);
         apply_override!(drain_pacing_gain);
@@ -197,11 +219,15 @@ impl Params {
         apply_override!(probe_bw_probe_up_pacing_gain);
         apply_override!(probe_bw_probe_down_pacing_gain);
         apply_override!(probe_bw_cwnd_gain);
+        apply_override!(probe_bw_up_cwnd_gain);
+        apply_override!(probe_rtt_pacing_gain);
+        apply_override!(probe_rtt_cwnd_gain);
         apply_override!(max_probe_up_queue_rounds);
         apply_override!(loss_threshold);
         apply_override!(use_bytes_delivered_for_inflight_hi);
         apply_override!(decrease_startup_pacing_at_end_of_round);
         apply_override!(ignore_app_limited_for_no_bandwidth_growth);
+        apply_optional_override!(initial_pacing_rate_bytes_per_second);
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
             self.bw_lo_mode = custom_value.into();
@@ -246,6 +272,8 @@ const DEFAULT_PARAMS: Params = Params {
 
     probe_bw_cwnd_gain: 2.25, // BBRv3
 
+    probe_bw_up_cwnd_gain: 2.25, // BBRv3
+
     probe_up_ignore_inflight_hi: false,
 
     max_probe_up_queue_rounds: 2,
@@ -255,6 +283,10 @@ const DEFAULT_PARAMS: Params = Params {
     probe_rtt_period: Duration::from_millis(10000),
 
     probe_rtt_duration: Duration::from_millis(200),
+
+    probe_rtt_pacing_gain: 1.0,
+
+    probe_rtt_cwnd_gain: 1.0,
 
     initial_max_ack_height_filter_window: 10,
 
@@ -283,6 +315,8 @@ const DEFAULT_PARAMS: Params = Params {
     bw_lo_mode: BwLoMode::InflightReduction,
 
     ignore_app_limited_for_no_bandwidth_growth: false,
+
+    initial_pacing_rate_bytes_per_second: None,
 };
 
 #[derive(Debug, PartialEq)]
@@ -329,6 +363,16 @@ impl<T: Ord + Clone + Copy + From<u8>> Limits<T> {
             hi: val,
         }
     }
+}
+
+fn initial_pacing_rate(
+    cwnd_in_bytes: usize, smoothed_rtt: Duration, params: &Params,
+) -> Bandwidth {
+    if let Some(pacing_rate) = params.initial_pacing_rate_bytes_per_second {
+        return Bandwidth::from_bytes_per_second(pacing_rate);
+    }
+
+    Bandwidth::from_bytes_and_time_delta(cwnd_in_bytes, smoothed_rtt) * 2.885
 }
 
 #[derive(Debug)]
@@ -421,8 +465,7 @@ impl BBRv2 {
         BBRv2 {
             mode: Mode::startup(BBRv2NetworkModel::new(&params, smoothed_rtt)),
             cwnd,
-            pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) *
-                2.885,
+            pacing_rate: initial_pacing_rate(cwnd, smoothed_rtt, &params),
             cwnd_limits: Limits {
                 lo: initial_congestion_window * max_segment_size,
                 hi: max_congestion_window * max_segment_size,
@@ -447,41 +490,55 @@ impl BBRv2 {
     }
 
     fn get_target_congestion_window(&self, gain: f32) -> usize {
-        self.mode
-            .bdp(self.mode.bandwidth_estimate(), gain)
+        let network_model = self.mode.network_model();
+        network_model
+            .bdp(network_model.bandwidth_estimate(), gain)
             .max(self.cwnd_limits.min())
     }
 
     fn update_pacing_rate(&mut self, bytes_acked: usize) {
-        let bandwidth_estimate = match self.mode.bandwidth_estimate() {
+        let network_model = self.mode.network_model();
+        let bandwidth_estimate = match network_model.bandwidth_estimate() {
             e if e == Bandwidth::zero() => return,
             e => e,
         };
 
-        if self.mode.total_bytes_acked() == bytes_acked {
+        if network_model.total_bytes_acked() == bytes_acked {
             // After the first ACK, cwnd is still the initial congestion window.
             self.pacing_rate = Bandwidth::from_bytes_and_time_delta(
                 self.cwnd,
-                self.mode.min_rtt(),
+                network_model.min_rtt(),
             );
+
+            if let Some(pacing_rate) =
+                self.params.initial_pacing_rate_bytes_per_second
+            {
+                // Do not allow the pacing rate calculated from the first RTT
+                // measurement to be higher than the configured initial pacing
+                // rate.
+                let initial_pacing_rate =
+                    Bandwidth::from_bytes_per_second(pacing_rate);
+                self.pacing_rate = self.pacing_rate.min(initial_pacing_rate);
+            }
+
             return;
         }
 
-        let target_rate = bandwidth_estimate * self.mode.pacing_gain();
-        if self.mode.full_bandwidth_reached() {
+        let target_rate = bandwidth_estimate * network_model.pacing_gain();
+        if network_model.full_bandwidth_reached() {
             self.pacing_rate = target_rate;
             return;
         }
 
         if self.params.decrease_startup_pacing_at_end_of_round &&
-            self.mode.pacing_gain() < self.params.startup_pacing_gain
+            network_model.pacing_gain() < self.params.startup_pacing_gain
         {
             self.pacing_rate = target_rate;
             return;
         }
 
         if self.params.bw_lo_mode != BwLoMode::Default &&
-            self.mode.loss_events_in_round() > 0
+            network_model.loss_events_in_round() > 0
         {
             self.pacing_rate = target_rate;
             return;
@@ -492,12 +549,13 @@ impl BBRv2 {
     }
 
     fn update_congestion_window(&mut self, bytes_acked: usize) {
+        let network_model = self.mode.network_model();
         let mut target_cwnd =
-            self.get_target_congestion_window(self.mode.cwnd_gain());
+            self.get_target_congestion_window(network_model.cwnd_gain());
 
         let prior_cwnd = self.cwnd;
-        if self.mode.full_bandwidth_reached() {
-            target_cwnd += self.mode.max_ack_height();
+        if network_model.full_bandwidth_reached() {
+            target_cwnd += network_model.max_ack_height();
             self.cwnd = target_cwnd.min(prior_cwnd + bytes_acked);
         } else if prior_cwnd < target_cwnd || prior_cwnd < 2 * self.initial_cwnd {
             self.cwnd = prior_cwnd + bytes_acked;
@@ -515,7 +573,8 @@ impl BBRv2 {
     }
 
     fn target_bytes_inflight(&self) -> usize {
-        let bdp = self.mode.bdp1(self.mode.bandwidth_estimate());
+        let network_model = &self.mode.network_model();
+        let bdp = network_model.bdp1(network_model.bandwidth_estimate());
         bdp.min(self.get_congestion_window())
     }
 }
@@ -547,7 +606,8 @@ impl CongestionControl for BBRv2 {
             self.on_exit_quiescence(sent_time);
         }
 
-        self.mode.on_packet_sent(
+        let network_model = self.mode.network_model_mut();
+        network_model.on_packet_sent(
             sent_time,
             bytes_in_flight,
             packet_number,
@@ -570,7 +630,8 @@ impl CongestionControl for BBRv2 {
             self.mode.is_probing_for_bandwidth(),
         );
 
-        self.mode.on_congestion_event_start(
+        let network_model = self.mode.network_model_mut();
+        network_model.on_congestion_event_start(
             acked_packets,
             lost_packets,
             &mut congestion_event,
@@ -599,7 +660,8 @@ impl CongestionControl for BBRv2 {
 
         self.update_congestion_window(congestion_event.bytes_acked);
 
-        self.mode
+        let network_model = self.mode.network_model_mut();
+        network_model
             .on_congestion_event_finish(least_unacked, &congestion_event);
         self.last_sample_is_app_limited =
             congestion_event.last_packet_send_state.is_app_limited;
@@ -614,7 +676,8 @@ impl CongestionControl for BBRv2 {
     }
 
     fn on_packet_neutered(&mut self, packet_number: u64) {
-        self.mode.on_packet_neutered(packet_number);
+        let network_model = self.mode.network_model_mut();
+        network_model.on_packet_neutered(packet_number);
     }
 
     fn on_retransmission_timeout(&mut self, _packets_retransmitted: bool) {}
@@ -637,7 +700,8 @@ impl CongestionControl for BBRv2 {
     }
 
     fn bandwidth_estimate(&self, _rtt_stats: &RttStats) -> Bandwidth {
-        self.mode.bandwidth_estimate()
+        let network_model = self.mode.network_model();
+        network_model.bandwidth_estimate()
     }
 
     fn update_mss(&mut self, new_mss: usize) {
@@ -657,7 +721,8 @@ impl CongestionControl for BBRv2 {
             return;
         }
 
-        self.mode.on_app_limited()
+        let network_model = self.mode.network_model_mut();
+        network_model.on_app_limited()
     }
 
     fn limit_cwnd(&mut self, max_cwnd: usize) {

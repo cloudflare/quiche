@@ -71,10 +71,6 @@ impl BoundedConnectionIdSeqSet {
         self.inner.remove(e)
     }
 
-    fn front(&self) -> Option<u64> {
-        self.inner.iter().next().copied()
-    }
-
     fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -757,14 +753,15 @@ impl ConnectionIdentifiers {
         self.advertise_new_scid_seqs.front().copied()
     }
 
-    /// Gets a destination Connection IDs's sequence number that need to send
-    /// RETIRE_CONNECTION_ID frames.
+    /// Returns a copy of the set of destination Connection IDs's sequence
+    /// numbers to send RETIRE_CONNECTION_ID frames.
     ///
-    /// If `Some`, it always returns the same value until it has been removed
-    /// using `mark_retire_dcid_seq`.
+    /// Note that the set includes sequence numbers at the time the copy was
+    /// created. To account for newly inserted or removed sequence numbers, a
+    /// new copy needs to be created.
     #[inline]
-    pub fn next_retire_dcid_seq(&self) -> Option<u64> {
-        self.retire_dcid_seqs.front()
+    pub fn retire_dcid_seqs(&self) -> HashSet<u64> {
+        self.retire_dcid_seqs.inner.clone()
     }
 
     /// Returns true if there are new source Connection IDs to advertise.
@@ -927,12 +924,12 @@ mod tests {
         assert_eq!(ids.available_dcids(), 1);
         assert_eq!(ids.dcids.len(), 2);
         assert!(ids.has_retire_dcids());
-        assert_eq!(ids.next_retire_dcid_seq(), Some(0));
+        assert_eq!(ids.retire_dcid_seqs().iter().next(), Some(&0));
 
         // Fake RETIRE_CONNECTION_ID sending.
         let _ = ids.mark_retire_dcid_seq(0, false);
         assert!(!ids.has_retire_dcids());
-        assert_eq!(ids.next_retire_dcid_seq(), None);
+        assert_eq!(ids.retire_dcid_seqs().iter().next(), None);
 
         // Now tries to experience CID retirement. If the server tries to remove
         // non-existing DCIDs, it fails.
@@ -947,13 +944,13 @@ mod tests {
         ids.link_dcid_to_path_id(2, 0).unwrap();
         assert_eq!(ids.available_dcids(), 0);
         assert!(ids.has_retire_dcids());
-        assert_eq!(ids.next_retire_dcid_seq(), Some(1));
+        assert_eq!(ids.retire_dcid_seqs().iter().next(), Some(&1));
         assert_eq!(ids.dcids.len(), 1);
 
         // Fake RETIRE_CONNECTION_ID sending.
         let _ = ids.mark_retire_dcid_seq(1, false);
         assert!(!ids.has_retire_dcids());
-        assert_eq!(ids.next_retire_dcid_seq(), None);
+        assert_eq!(ids.retire_dcid_seqs().iter().next(), None);
 
         // Trying to remove the last DCID triggers an error.
         assert_eq!(ids.retire_dcid(2), Err(Error::OutOfIdentifiers));

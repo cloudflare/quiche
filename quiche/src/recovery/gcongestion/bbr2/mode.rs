@@ -29,8 +29,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::ops::DerefMut;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -58,11 +56,18 @@ pub(super) enum CyclePhase {
 }
 
 impl CyclePhase {
-    pub(super) fn gain(&self, params: &Params) -> f32 {
+    pub(super) fn pacing_gain(&self, params: &Params) -> f32 {
         match self {
             CyclePhase::Up => params.probe_bw_probe_up_pacing_gain,
             CyclePhase::Down => params.probe_bw_probe_down_pacing_gain,
             _ => params.probe_bw_default_pacing_gain,
+        }
+    }
+
+    pub(super) fn cwnd_gain(&self, params: &Params) -> f32 {
+        match self {
+            CyclePhase::Up => params.probe_bw_up_cwnd_gain,
+            _ => params.probe_bw_cwnd_gain,
         }
     }
 }
@@ -216,12 +221,8 @@ impl Mode {
             params,
         )
     }
-}
 
-impl Deref for Mode {
-    type Target = BBRv2NetworkModel;
-
-    fn deref(&self) -> &Self::Target {
+    pub fn network_model(&self) -> &BBRv2NetworkModel {
         match self {
             Mode::Startup(Startup { model }) => model,
             Mode::Drain(Drain { model, .. }) => model,
@@ -230,10 +231,8 @@ impl Deref for Mode {
             Mode::Placheolder(_) => unreachable!(),
         }
     }
-}
 
-impl DerefMut for Mode {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+    pub fn network_model_mut(&mut self) -> &mut BBRv2NetworkModel {
         match self {
             Mode::Startup(Startup { model }) => model,
             Mode::Drain(Drain { model, .. }) => model,
@@ -283,5 +282,37 @@ impl ModeImpl for Placeholder {
         self, _: Instant, _: Instant, _params: &Params,
     ) -> Mode {
         unreachable!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
+    use crate::BbrParams;
+
+    #[test]
+    fn cycle_params() {
+        let custom_bbr_settings = BbrParams {
+            probe_bw_up_cwnd_gain: Some(2.25),
+            probe_bw_cwnd_gain: Some(2.0),
+            ..Default::default()
+        };
+        let params = &DEFAULT_PARAMS.with_overrides(&custom_bbr_settings);
+
+        assert_eq!(CyclePhase::Up.pacing_gain(params), 1.25);
+        assert_eq!(CyclePhase::Up.cwnd_gain(params), 2.25);
+
+        assert_eq!(CyclePhase::Down.pacing_gain(params), 0.9);
+        assert_eq!(CyclePhase::Down.cwnd_gain(params), 2.0);
+
+        assert_eq!(CyclePhase::NotStarted.pacing_gain(params), 1.0);
+        assert_eq!(CyclePhase::NotStarted.cwnd_gain(params), 2.0);
+
+        assert_eq!(CyclePhase::Cruise.pacing_gain(params), 1.0);
+        assert_eq!(CyclePhase::Cruise.cwnd_gain(params), 2.0);
+
+        assert_eq!(CyclePhase::Refill.pacing_gain(params), 1.0);
+        assert_eq!(CyclePhase::Refill.cwnd_gain(params), 2.0);
     }
 }

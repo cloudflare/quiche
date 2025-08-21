@@ -136,10 +136,10 @@ impl ModeImpl for ProbeRTT {
 
     fn enter(
         &mut self, _now: Instant,
-        _congestion_event: Option<&BBRv2CongestionEvent>, _params: &Params,
+        _congestion_event: Option<&BBRv2CongestionEvent>, params: &Params,
     ) {
-        self.model.set_pacing_gain(1.0);
-        self.model.set_cwnd_gain(1.0);
+        self.model.set_pacing_gain(params.probe_rtt_pacing_gain);
+        self.model.set_cwnd_gain(params.probe_rtt_cwnd_gain);
         self.exit_time = None;
     }
 
@@ -147,5 +147,29 @@ impl ModeImpl for ProbeRTT {
         &mut self, _now: Instant,
         _congestion_event: Option<&BBRv2CongestionEvent>,
     ) {
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
+    use crate::BbrParams;
+    use std::time::Duration;
+
+    #[test]
+    fn probe_rtt_params() {
+        let custom_bbr_settings = BbrParams {
+            probe_rtt_pacing_gain: Some(0.8),
+            probe_rtt_cwnd_gain: Some(0.5),
+            ..Default::default()
+        };
+        let params = &DEFAULT_PARAMS.with_overrides(&custom_bbr_settings);
+
+        let model = BBRv2NetworkModel::new(params, Duration::from_millis(333));
+        let mut probe_rtt = ProbeRTT::new(model, Cycle::default());
+        probe_rtt.enter(Instant::now(), None, params);
+        assert_eq!(probe_rtt.model.pacing_gain(), 0.8);
+        assert_eq!(probe_rtt.model.cwnd_gain(), 0.5);
     }
 }

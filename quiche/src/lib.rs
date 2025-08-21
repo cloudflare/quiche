@@ -4564,7 +4564,9 @@ impl<F: BufFactory> Connection<F> {
             }
 
             // Create RETIRE_CONNECTION_ID frames as needed.
-            while let Some(seq_num) = self.ids.next_retire_dcid_seq() {
+            let retire_dcid_seqs = self.ids.retire_dcid_seqs();
+
+            for seq_num in retire_dcid_seqs {
                 // The sequence number specified in a RETIRE_CONNECTION_ID frame
                 // MUST NOT refer to the Destination Connection ID field of the
                 // packet in which the frame is contained.
