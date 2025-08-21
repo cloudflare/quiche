@@ -11,6 +11,7 @@ env:
   NO_BORING_OPTIONS: "--features=ffi,qlog --workspace --exclude h3i --exclude tokio-quiche"
   RUSTFLAGS: "-D warnings"
   RUSTTOOLCHAIN: "stable"
+  CROSS_CONTAINER_IN_CONTAINER: "true"
 
 concurrency:
   group: ${{ github.ref }}-stable
