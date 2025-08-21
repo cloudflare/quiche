@@ -9962,3 +9962,204 @@ fn disable_pmtud_mid_handshake(
     let active_path = pipe.server.paths.get_active_mut().unwrap();
     assert!(active_path.pmtud.is_none());
 }
+
+fn setup_ack_freq_config(
+    config: &mut Config, cc_algorithm_name: &str,
+) -> Result<()> {
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config.load_cert_chain_from_pem_file("examples/cert.crt")?;
+    config.load_priv_key_from_pem_file("examples/cert.key")?;
+    config.set_application_protos(&[b"proto1", b"proto2"])?;
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(15);
+    config.set_initial_max_stream_data_bidi_remote(15);
+    config.set_initial_max_stream_data_uni(10);
+    config.set_initial_max_streams_bidi(3);
+    config.set_initial_max_streams_uni(3);
+    config.set_max_idle_timeout(180_000);
+    config.verify_peer(false);
+    config.set_ack_delay_exponent(8);
+
+    Ok(())
+}
+
+#[rstest]
+fn ack_frequency_update_max_delay(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert!(setup_ack_freq_config(&mut config, cc_algorithm_name).is_ok());
+    config.ext_set_min_ack_delay(2);
+    config.set_max_ack_delay(100);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends stream data.
+    // An AckFrequency frame should be sended, updating the max_ack_delay to less
+    // than the first value of 100ms
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(
+        pipe.server.local_transport_params.max_ack_delay <
+            Duration::from_millis(100)
+    );
+
+    assert!(
+        pipe.client.local_transport_params.max_ack_delay <
+            Duration::from_millis(100)
+    );
+}
+
+#[rstest]
+fn ack_frequency_update_max_delay_limit(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert!(setup_ack_freq_config(&mut config, cc_algorithm_name).is_ok());
+    config.ext_set_min_ack_delay(2000000);
+    config.set_max_ack_delay(4000);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends stream data.
+    // An AckFrequency frame should be sended, updating the max_ack_delay to the
+    // min_ack_delay limit since this limit is way bigger than the RTT
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(
+        pipe.server.local_transport_params.max_ack_delay,
+        Duration::from_millis(2000)
+    );
+
+    assert_eq!(
+        pipe.client.local_transport_params.max_ack_delay,
+        Duration::from_millis(2000)
+    );
+
+    let mut buf = [0; 65535];
+
+    // This frame should be ignored since the sequence_number is not new
+    let frames = [frame::Frame::AckFrequency {
+        sequence_number: pipe.client.to_send_ack_frequency.sequence_number,
+        packet_tolerance: pipe.client.to_send_ack_frequency.packet_tolerance,
+        update_max_ack_delay: 3000000,
+        reordering_threshold: pipe
+            .client
+            .to_send_ack_frequency
+            .reordering_threshold,
+    }];
+
+    let pkt_type = Type::Short;
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    assert_eq!(
+        pipe.server.local_transport_params.max_ack_delay,
+        Duration::from_millis(2000)
+    );
+
+    // However this frame should not be ignored
+    let frames = [frame::Frame::AckFrequency {
+        sequence_number: pipe.client.to_send_ack_frequency.sequence_number + 1,
+        packet_tolerance: pipe.client.to_send_ack_frequency.packet_tolerance,
+        update_max_ack_delay: 3000000,
+        reordering_threshold: pipe
+            .client
+            .to_send_ack_frequency
+            .reordering_threshold,
+    }];
+
+    let pkt_type = Type::Short;
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    assert_eq!(
+        pipe.server.local_transport_params.max_ack_delay,
+        Duration::from_millis(3000)
+    );
+}
+
+#[rstest]
+fn ack_frequency_disabled_no_update_max_delay(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert!(setup_ack_freq_config(&mut config, cc_algorithm_name).is_ok());
+    config.set_max_ack_delay(100);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends stream data.
+    // No AckFrequency frame should be sended because extension is disabled
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(
+        pipe.server.local_transport_params.max_ack_delay,
+        Duration::from_millis(100)
+    );
+
+    assert_eq!(
+        pipe.client.local_transport_params.max_ack_delay,
+        Duration::from_millis(100)
+    );
+}
+
+#[rstest]
+fn ack_frequency_delay_ack(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert!(setup_ack_freq_config(&mut config, cc_algorithm_name).is_ok());
+    config.ext_set_min_ack_delay(2000000);
+    config.set_max_ack_delay(4000);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends stream data.
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // No pkt in the App epoch should have been acked yet.
+    assert_eq!(pipe.server.largest_pkt_acked, 0);
+}
+
+#[rstest]
+fn ack_frequency_no_delay_ack(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert!(setup_ack_freq_config(&mut config, cc_algorithm_name).is_ok());
+    config.set_max_ack_delay(4000);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends stream data.
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Pkts in the App epoch should have been acked yet.
+    assert!(pipe.server.largest_pkt_acked > 0);
+}
+
+#[test]
+fn ack_frequency_wrong_min_ack_delay() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert!(setup_ack_freq_config(&mut config, "cubic").is_ok());
+    config.ext_set_min_ack_delay(2000000);
+    config.set_max_ack_delay(10);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    assert_eq!(pipe.handshake(), Err(Error::InvalidTransportParam));
+}
