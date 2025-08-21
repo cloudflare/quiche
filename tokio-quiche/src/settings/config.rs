@@ -204,6 +204,10 @@ fn make_quiche_config(
         config.log_keys();
     }
 
+    if let Some(min_ack_delay) = params.min_ack_delay {
+        config.ext_set_min_ack_delay(min_ack_delay);
+    }
+
     Ok(config)
 }
 
