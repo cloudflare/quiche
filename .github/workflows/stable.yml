@@ -223,11 +223,8 @@ jobs:
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
       - name: Install cross
-        run: cargo-binstall -y cross
+        run: RUSTFLAGS="-A warnings" cargo install cross --git https://github.com/cross-rs/cross # cross has UB ;(
 
       - name: Run cargo test using cross
         run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }}
