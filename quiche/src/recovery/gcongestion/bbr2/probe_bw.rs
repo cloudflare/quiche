@@ -144,8 +144,9 @@ impl ModeImpl for ProbeBW {
         // Do not need to set the gains if switching to PROBE_RTT, they will be
         // set when `ProbeRTT::enter` is called.
         if !switch_to_probe_rtt {
-            self.model.set_pacing_gain(self.cycle.phase.gain(params));
-            self.model.set_cwnd_gain(params.probe_bw_cwnd_gain);
+            self.model
+                .set_pacing_gain(self.cycle.phase.pacing_gain(params));
+            self.model.set_cwnd_gain(self.cycle.phase.cwnd_gain(params));
         }
 
         if switch_to_probe_rtt {
