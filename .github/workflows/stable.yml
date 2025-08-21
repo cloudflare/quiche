@@ -11,7 +11,6 @@ env:
   NO_BORING_OPTIONS: "--features=ffi,qlog --workspace --exclude h3i --exclude tokio-quiche"
   RUSTFLAGS: "-D warnings"
   RUSTTOOLCHAIN: "stable"
-  CROSS_CONTAINER_IN_CONTAINER: "true"
 
 concurrency:
   group: ${{ github.ref }}-stable
@@ -209,11 +208,30 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: ["aarch64-unknown-linux-gnu","i686-unknown-linux-gnu"]
+        targets: [
+          ["aarch64-unknown-linux-gnu", "arm64", "aarch64"],
+          ["i686-unknown-linux-gnu", "i386", "i686"],
+        ]
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
+      - name: Debian cross setup ${{ matrix.targets[1] }}
+        run: |
+          sudo dpkg --add-architecture ${{ matrix.targets[1] }}
+          sudo rm /etc/apt/sources.list.d/*
+          cat /etc/apt/sources.list
+          sudo sed -i -E "/deb(-src)?\s+\[/!s/deb(-src)?/deb\ [arch=$(dpkg --print-architecture)]/" /etc/apt/sources.list
+          echo "deb [arch=${{ matrix.targets[1] }}] http://ports.ubuntu.com/ubuntu-ports/ $(lsb_release -sc)-updates main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/cross-${{ matrix.targets[1] }}.list
+          sudo apt-get update || true
+          sudo apt-get -y -o Dpkg::Options::="--force-overwrite" install crossbuild-essential-${{ matrix.targets[1] }} libclang-dev:${{ matrix.targets[1] }}
+
+          ls /usr/bin/${{ matrix.targets[2] }}-linux-gnu-gcc
+          echo >> $GITHUB_ENV CC_${{ matrix.targets[0] }}=/usr/bin/${{ matrix.targets[2] }}-linux-gnu-gcc
+          echo >> $GITHUB_ENV CXX_${{ matrix.targets[0] }}=/usr/bin/${{ matrix.targets[2] }}-linux-gnu-g++
+          echo >> $GITHUB_ENV CARGO_TARGET_$(echo ${{ matrix.targets[0] }} | tr '[:lower:]-' '[:upper:]_')_LINKER=/usr/bin/${{ matrix.targets[2] }}-linux-gnu-gcc
+          cat $GITHUB_ENV
+
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
@@ -223,15 +241,10 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
+          targets: ${{ matrix.targets[0] }}
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install cross
-        run: cargo-binstall -y cross
-
-      - name: Run cargo test using cross
-        run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }}
+      - name: Run cargo test ${{ matrix.targets[1] }}
+        run: cargo test --target=${{ matrix.targets[0] }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }}
 
   http3_test:
     runs-on: ubuntu-latest
