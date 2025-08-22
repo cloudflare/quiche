@@ -27,6 +27,13 @@
 use std::time::Duration;
 use std::time::Instant;
 
+/// Estimate the total duration a connection has bytes-in-flight.
+///
+/// There can be multiple transitions from bytes-in-flight >0 to 0 and 0 to >0
+/// during a connection's lifetime. Total bytes-in-flight duration is the sum of
+/// all intervals that transition from idle to not-idle and back to idle. Close
+/// intervals are the ones that transitioned back to idle. The open one is the
+/// most recent interval for which we only have a start time, but no end time.
 #[derive(Default)]
 pub struct BytesInFlight {
     // Current bytes in flight.
