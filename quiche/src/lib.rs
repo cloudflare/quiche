@@ -9191,6 +9191,8 @@ impl TransportParams {
             });
         }
 
+        let mut temp_min_ack_delay: Option<u64> = None;
+
         while params.cap() > 0 {
             let id = params.get_varint()?;
 
@@ -9315,7 +9317,7 @@ impl TransportParams {
                 },
 
                 0xff04de1b => {
-                    tp.min_ack_delay = Some(val.get_varint()?);
+                    temp_min_ack_delay = Some(val.get_varint()?);
                 },
 
                 0x000f => {
@@ -9346,6 +9348,13 @@ impl TransportParams {
                     }
                 },
             }
+        }
+
+        if let Some(min_ack_delay) = temp_min_ack_delay {
+            if min_ack_delay > tp.max_ack_delay.as_micros() as u64 {
+                return Err(Error::InvalidTransportParam);
+            }
+            tp.min_ack_delay = temp_min_ack_delay;
         }
 
         Ok(tp)
