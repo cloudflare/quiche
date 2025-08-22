@@ -372,6 +372,8 @@ pub enum QuicFrameTypeName {
     ConnectionClose,
     ApplicationClose,
     HandshakeDone,
+    ImmediateAck,
+    AckFrequency,
     Datagram,
     #[default]
     Unknown,
@@ -501,6 +503,15 @@ pub enum QuicFrame {
     },
 
     HandshakeDone,
+
+    ImmediateAck,
+
+    AckFrequency {
+        sequence_number: u64,
+        packet_tolerance: u64,
+        update_max_ack_delay: u64,
+        reordering_threshold: u64,
+    },
 
     Datagram {
         length: u64,

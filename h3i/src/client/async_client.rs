@@ -79,8 +79,12 @@ pub async fn connect(
     close_trigger_frames: Option<CloseTriggerFrames>,
 ) -> std::result::Result<BuildingConnectionSummary, ClientError> {
     let quic_settings = create_config(args);
-    let connection_params =
-        ConnectionParams::new_client(quic_settings, None, Hooks::default());
+    let connection_params = ConnectionParams::new_client(
+        quic_settings,
+        None,
+        Hooks::default(),
+        args.min_ack_delay,
+    );
 
     let ParsedArgs {
         connect_url,

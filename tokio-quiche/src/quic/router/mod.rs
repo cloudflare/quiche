@@ -843,6 +843,7 @@ mod tests {
             quic_settings,
             tls_cert_settings,
             Hooks::default(),
+            None,
         );
         let config = Config::new(&params, SocketCapabilities::default()).unwrap();
 

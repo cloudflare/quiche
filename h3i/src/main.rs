@@ -196,6 +196,12 @@ fn config_from_clap() -> std::result::Result<Config, String> {
                 .default_value("16777216"),
         )
         .arg(
+            Arg::with_name("min-ack-delay")
+                .long("min-ack-delay")
+                .help("Enable the delayed ack extension.")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("replay-host-override")
                 .long("replay-host-override")
                 .help("Override the host or authority field in any replayed request headers.")
@@ -263,6 +269,16 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         .parse::<u64>()
         .map_err(|e| format!("max-stream-window input error {e}"))?;
 
+    let min_ack_delay = if let Some(delay) = matches.value_of("min-ack-delay") {
+        Some(
+            delay
+                .parse::<u64>()
+                .map_err(|e| format!("min-ack-delay input error {e}"))?,
+        )
+    } else {
+        None
+    };
+
     let qlog_actions_output = !matches.is_present("no-qlog-actions-output");
     let qlog_input = matches.value_of("qlog-input").and_then(|q| {
         std::path::Path::new(q)
@@ -291,6 +307,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         max_streams_uni,
         max_window,
         max_stream_window,
+        min_ack_delay,
     };
 
     Ok(Config {
