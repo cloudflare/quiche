@@ -20,7 +20,6 @@ pub enum CarefulResumeTrigger {
     /// When sender has confirmed the RTT, has received an ACK for the initial
     /// data without reported congestion and has more data to send than the CWND
     /// would allow.
-    #[serde(rename = "cwnd_limited")]
     CongestionWindowLimited,
 
     /// From [Reconnaissance][CarefulResumePhase::Reconnaissance]/
