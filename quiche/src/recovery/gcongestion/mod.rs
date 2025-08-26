@@ -219,6 +219,9 @@ pub struct BbrParams {
     /// the initial pacing rate, which is calculated by dividing the
     /// initial cwnd by the first RTT estimate.
     pub initial_pacing_rate_bytes_per_second: Option<u64>,
+
+    /// If true, scale the pacing rate when updating mss when doing pmtud.
+    pub scale_pacing_rate_by_mss: Option<bool>,
 }
 
 /// Controls BBR's bandwidth reduction strategy on congestion event.
