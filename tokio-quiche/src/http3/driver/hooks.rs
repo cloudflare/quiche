@@ -99,4 +99,13 @@ pub trait DriverHooks: Sized + Send + 'static {
     ) -> impl Future<Output = H3ConnectionResult<()>> + Send {
         std::future::pending()
     }
+
+    /// Called by the driver just before it is processing outgoing writes.
+    /// Enables e.g., the client hook to try to resend requests that were
+    /// blocked due to flow or congestion control
+    fn on_process_writes(
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
+    ) -> H3ConnectionResult<()> {
+        Ok(())
+    }
 }

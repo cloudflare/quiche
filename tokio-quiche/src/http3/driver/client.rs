@@ -90,6 +90,12 @@ pub enum ClientH3Event {
         stream_id: u64,
         request_id: u64,
     },
+    /// The request with the given `request_id` could not be sent to the
+    /// peer due to `error`.
+    OutboundRequestFailed {
+        request_id: u64,
+        error: H3ConnectionError,
+    },
 }
 
 impl From<H3Event> for ClientH3Event {
@@ -139,6 +145,9 @@ struct PendingClientRequest {
 pub struct ClientHooks {
     /// Mapping from stream IDs to the associated [`PendingClientRequest`].
     pending_requests: BTreeMap<u64, PendingClientRequest>,
+    /// Client requests that previously failed to send due flow or
+    /// congestion control limits.
+    unsend_requests: Vec<NewClientRequest>,
 }
 
 impl ClientHooks {
@@ -149,14 +158,60 @@ impl ClientHooks {
         driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         request: NewClientRequest,
     ) -> H3ConnectionResult<()> {
+        let request_id = request.request_id;
+        // Wrap `initiate_request_inner()`. This allows us to inspect errors
+        // and send them back to the requestor with a meaningful error message.
+        Self::initiate_request_inner(driver, qconn, request).inspect_err(
+            |error| {
+                let _ = driver.h3_event_sender.send(
+                    ClientH3Event::OutboundRequestFailed {
+                        request_id,
+                        error: error.clone(),
+                    },
+                );
+            },
+        )
+    }
+
+    /// Does the actual client-side request. Called by `initiate_request()` to
+    /// allow `initiate_request()` to inspect errors and send back to the
+    /// client.
+    fn initiate_request_inner(
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
+        request: NewClientRequest,
+    ) -> H3ConnectionResult<()> {
         let body_finished = request.body_writer.is_none();
 
-        // TODO: retry the request if the error is not fatal
-        let stream_id = driver.conn_mut()?.send_request(
+        let stream_id = match driver.conn_mut()?.send_request(
             qconn,
             &request.headers,
             body_finished,
-        )?;
+        ) {
+            Ok(stream_id) => stream_id,
+            Err(h3::Error::StreamBlocked) | Err(h3::Error::Done) => {
+                // Flow or congestion control limited. Retry once we have
+                // capacity
+                driver.hooks.unsend_requests.push(request);
+                return Ok(());
+            },
+            Err(e @ h3::Error::TransportError(quiche::Error::StreamLimit)) => {
+                // We do not retry on StreamLimit, a stream being blocked due to
+                // flowor cong control should resolve within a short
+                // amount of time, but StreamLimit might be a more longer-lived
+                // condition. So, return an error but don't terminate the
+                // connection.
+                let _ = driver.h3_event_sender.send(
+                    ClientH3Event::OutboundRequestFailed {
+                        request_id: request.request_id,
+                        error: e.into(),
+                    },
+                );
+                return Ok(());
+            },
+            Err(e) => {
+                return Err(e.into());
+            },
+        };
 
         // log::info!("sent h3 request"; "stream_id" => stream_id);
         let (mut stream_ctx, send, recv) =
@@ -230,6 +285,16 @@ impl ClientHooks {
             .send(H3Event::IncomingHeaders(headers).into())
             .map_err(|_| H3ConnectionError::ControllerWentAway)
     }
+
+    #[cfg(test)]
+    pub fn unsend_requests(&self) -> &[NewClientRequest] {
+        &self.unsend_requests
+    }
+
+    #[cfg(test)]
+    pub fn pending_requests_stream_ids(&self) -> Vec<u64> {
+        self.pending_requests.keys().cloned().collect()
+    }
 }
 
 #[allow(private_interfaces)]
@@ -240,6 +305,7 @@ impl DriverHooks for ClientHooks {
     fn new(_settings: &Http3Settings) -> Self {
         Self {
             pending_requests: BTreeMap::new(),
+            unsend_requests: Vec::new(),
         }
     }
 
@@ -277,6 +343,20 @@ impl DriverHooks for ClientHooks {
             ClientH3Command::ClientRequest(req) =>
                 Self::initiate_request(driver, qconn, req),
         }
+    }
+
+    fn on_process_writes(
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
+    ) -> H3ConnectionResult<()> {
+        let unsend_requests = std::mem::take(&mut driver.hooks.unsend_requests);
+        for request in unsend_requests {
+            // Note, if `initiate_request()` returns an error, we will drop all
+            // remaining `unsend_requests`. But since we're terminating the
+            // connection in this case, it's no different than the connection
+            // dropping otherwise.
+            Self::initiate_request(driver, qconn, request)?
+        }
+        Ok(())
     }
 }
 
