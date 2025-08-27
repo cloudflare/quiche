@@ -873,6 +873,11 @@ impl RecoveryOps for LegacyRecovery {
         self.congestion.delivery_rate()
     }
 
+    fn max_bandwidth(&self) -> Option<Bandwidth> {
+        // TODO implement
+        None
+    }
+
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit> {
         self.congestion.ssthresh.startup_exit()

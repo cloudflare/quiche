@@ -255,6 +255,10 @@ impl Pacer {
         self.sender.bandwidth_estimate(rtt_stats)
     }
 
+    pub fn max_bandwidth(&self) -> Bandwidth {
+        self.sender.max_bandwidth()
+    }
+
     pub fn on_app_limited(&mut self, bytes_in_flight: usize) {
         self.pacing_limited = false;
         self.sender.on_app_limited(bytes_in_flight);

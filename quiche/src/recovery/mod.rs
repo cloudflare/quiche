@@ -31,7 +31,7 @@ use std::time::Instant;
 use crate::frame;
 use crate::packet;
 use crate::ranges::RangeSet;
-use crate::recovery::bandwidth::Bandwidth;
+pub(crate) use crate::recovery::bandwidth::Bandwidth;
 use crate::Config;
 use crate::Result;
 
@@ -209,6 +209,9 @@ pub trait RecoveryOps {
 
     /// The most recent data delivery rate estimate.
     fn delivery_rate(&self) -> Bandwidth;
+
+    /// Maximum bandwidth estimate, if one is available.
+    fn max_bandwidth(&self) -> Option<Bandwidth>;
 
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit>;
@@ -637,13 +640,23 @@ pub struct StartupExit {
     /// The congestion_window recorded at Startup exit.
     pub cwnd: usize,
 
+    /// The bandwidth estimate recorded at Startup exit.
+    pub bandwidth: Option<u64>,
+
     /// The reason a CCA exited the startup phase.
     pub reason: StartupExitReason,
 }
 
 impl StartupExit {
-    fn new(cwnd: usize, reason: StartupExitReason) -> Self {
-        Self { cwnd, reason }
+    fn new(
+        cwnd: usize, bandwidth: Option<Bandwidth>, reason: StartupExitReason,
+    ) -> Self {
+        let bandwidth = bandwidth.map(Bandwidth::to_bytes_per_second);
+        Self {
+            cwnd,
+            bandwidth,
+            reason,
+        }
     }
 }
 

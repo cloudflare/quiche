@@ -70,6 +70,7 @@ pub struct SocketStats {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StartupExit {
     pub cwnd: usize,
+    pub bandwidth: Option<u64>,
     pub reason: StartupExitReason,
 }
 

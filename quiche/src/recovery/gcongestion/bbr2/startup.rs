@@ -78,6 +78,7 @@ impl ModeImpl for Startup {
         if self.model.full_bandwidth_reached() {
             recovery_stats.set_startup_exit(StartupExit::new(
                 cwnd,
+                Some(self.model.max_bandwidth()),
                 StartupExitReason::BandwidthPlateau,
             ));
         }
@@ -93,6 +94,7 @@ impl ModeImpl for Startup {
             if self.model.full_bandwidth_reached() {
                 recovery_stats.set_startup_exit(StartupExit::new(
                     cwnd,
+                    Some(self.model.max_bandwidth()),
                     StartupExitReason::PersistentQueue,
                 ));
             }
@@ -112,6 +114,7 @@ impl ModeImpl for Startup {
             if self.model.full_bandwidth_reached() {
                 recovery_stats.set_startup_exit(StartupExit::new(
                     cwnd,
+                    Some(self.model.max_bandwidth()),
                     StartupExitReason::Loss,
                 ));
             }
