@@ -2103,6 +2103,7 @@ mod tests {
         acked.insert(0..2);
 
         assert_eq!(r.pkt_thresh, INITIAL_PACKET_THRESHOLD);
+        assert_eq!(r.time_thresh, INITIAL_TIME_THRESHOLD);
 
         assert_eq!(
             r.on_ack_received(
@@ -2126,6 +2127,7 @@ mod tests {
 
         // Packet threshold was increased.
         assert_eq!(r.pkt_thresh, 4);
+        assert_eq!(r.time_thresh, 5_f64 / 4_f64);
 
         // Wait 1 RTT.
         now += r.rtt();
