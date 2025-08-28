@@ -52,6 +52,19 @@ const MAX_PACKET_THRESHOLD: u64 = 20;
 
 const INITIAL_TIME_THRESHOLD: f64 = 9.0 / 8.0;
 
+// Reduce the sensitivity to packet reordering after the first reordering event.
+//
+// Packet reorder is not a real loss event so quickly reduce the sensitivity to
+// avoid penializing subsequent packet reordering.
+//
+// https://www.rfc-editor.org/rfc/rfc9002.html#section-6.1.2
+//
+// Implementations MAY experiment with absolute thresholds, thresholds from
+// previous connections, adaptive thresholds, or the including of RTT variation.
+// Smaller thresholds reduce reordering resilience and increase spurious
+// retransmissions, and larger thresholds increase loss detection delay.
+const PACKET_REORDER_TIME_THRESHOLD: f64 = 5.0 / 4.0;
+
 const GRANULARITY: Duration = Duration::from_millis(1);
 
 const MAX_PTO_PROBES_COUNT: usize = 2;
@@ -251,6 +264,9 @@ pub trait RecoveryOps {
 
     #[cfg(test)]
     fn pkt_thresh(&self) -> u64;
+
+    #[cfg(test)]
+    fn time_thresh(&self) -> f64;
 
     #[cfg(test)]
     fn lost_spurious_count(&self) -> usize;
@@ -1381,6 +1397,7 @@ mod tests {
         acked.insert(0..2);
 
         assert_eq!(r.pkt_thresh(), INITIAL_PACKET_THRESHOLD);
+        assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
 
         assert_eq!(
             r.on_ack_received(
@@ -1411,6 +1428,7 @@ mod tests {
 
         // Packet threshold was increased.
         assert_eq!(r.pkt_thresh(), 4);
+        assert_eq!(r.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
 
         // Wait 1 RTT.
         now += r.rtt();
