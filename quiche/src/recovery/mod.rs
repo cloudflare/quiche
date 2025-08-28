@@ -1245,133 +1245,30 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
 
         // Start by sending a few packets.
-        let p = Sent {
-            pkt_num: 0,
-            frames: smallvec![],
-            time_sent: now,
-            time_acked: None,
-            time_lost: None,
-            size: 1000,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: now,
-            first_sent_time: now,
-            is_app_limited: false,
-            tx_in_flight: 0,
-            lost: 0,
-            has_data: false,
-            is_pmtud_probe: false,
-        };
+        //
+        // pkt number: [0, 1, 2, 3]
+        for i in 0..4 {
+            let p = test_utils::helper_packet_sent(i, now, 1000);
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
 
-        r.on_packet_sent(
-            p,
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-            now,
-            "",
-        );
-        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
-        assert_eq!(r.bytes_in_flight(), 1000);
-        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
+            let pkt_count = (i + 1) as usize;
+            assert_eq!(r.sent_packets_len(packet::Epoch::Application), pkt_count);
+            assert_eq!(r.bytes_in_flight(), pkt_count * 1000);
+            assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
+        }
 
-        let p = Sent {
-            pkt_num: 1,
-            frames: smallvec![],
-            time_sent: now,
-            time_acked: None,
-            time_lost: None,
-            size: 1000,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: now,
-            first_sent_time: now,
-            is_app_limited: false,
-            tx_in_flight: 0,
-            lost: 0,
-            has_data: false,
-            is_pmtud_probe: false,
-        };
-
-        r.on_packet_sent(
-            p,
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-            now,
-            "",
-        );
-        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
-        assert_eq!(r.bytes_in_flight(), 2000);
-        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
-
-        let p = Sent {
-            pkt_num: 2,
-            frames: smallvec![],
-            time_sent: now,
-            time_acked: None,
-            time_lost: None,
-            size: 1000,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: now,
-            first_sent_time: now,
-            is_app_limited: false,
-            tx_in_flight: 0,
-            lost: 0,
-            has_data: false,
-            is_pmtud_probe: false,
-        };
-
-        r.on_packet_sent(
-            p,
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-            now,
-            "",
-        );
-        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 3);
-        assert_eq!(r.bytes_in_flight(), 3000);
-        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
-
-        let p = Sent {
-            pkt_num: 3,
-            frames: smallvec![],
-            time_sent: now,
-            time_acked: None,
-            time_lost: None,
-            size: 1000,
-            ack_eliciting: true,
-            in_flight: true,
-            delivered: 0,
-            delivered_time: now,
-            first_sent_time: now,
-            is_app_limited: false,
-            tx_in_flight: 0,
-            lost: 0,
-            has_data: false,
-            is_pmtud_probe: false,
-        };
-
-        r.on_packet_sent(
-            p,
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-            now,
-            "",
-        );
-        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
-        assert_eq!(r.bytes_in_flight(), 4000);
-        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
-
-        // Wait for 10ms.
+        // Wait for 10ms after sending.
         now += Duration::from_millis(10);
 
-        // ACKs are reordered.
+        // Recieve reordered ACKs, i.e. pkt_num [2, 3]
         let mut acked = RangeSet::default();
         acked.insert(2..4);
-
         assert_eq!(
             r.on_ack_received(
                 &acked,
@@ -1390,15 +1287,18 @@ mod tests {
                 spurious_losses: 0,
             }
         );
-
-        now += Duration::from_millis(10);
-
-        let mut acked = RangeSet::default();
-        acked.insert(0..2);
-
+        // Since we only remove packets from the back to avoid compaction, the
+        // send length remains the same after receiving reordered ACKs
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
         assert_eq!(r.pkt_thresh(), INITIAL_PACKET_THRESHOLD);
         assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
 
+        // Wait for 10ms after receiving first set of ACKs.
+        now += Duration::from_millis(10);
+
+        // Recieve remaining ACKs, i.e. pkt_num [0, 1]
+        let mut acked = RangeSet::default();
+        acked.insert(0..2);
         assert_eq!(
             r.on_ack_received(
                 &acked,
@@ -1417,7 +1317,6 @@ mod tests {
                 spurious_losses: 1,
             }
         );
-
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(20));
@@ -1433,12 +1332,13 @@ mod tests {
         // Wait 1 RTT.
         now += r.rtt();
 
+        // All packets have been ACKed so dont expect additional lost packets
         assert_eq!(
             r.detect_lost_packets_for_test(packet::Epoch::Application, now),
             (0, 0)
         );
-
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
+
         if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
             assert!(r.startup_exit().is_some());
             assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
