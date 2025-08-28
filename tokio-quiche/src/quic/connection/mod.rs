@@ -107,6 +107,7 @@ impl QuicConnectionStats {
 
         datagram_socket::StartupExit {
             cwnd: value.cwnd,
+            bandwidth: value.bandwidth,
             reason,
         }
     }

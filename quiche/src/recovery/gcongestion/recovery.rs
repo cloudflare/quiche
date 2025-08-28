@@ -930,6 +930,10 @@ impl RecoveryOps for GRecovery {
         self.pacer.bandwidth_estimate(&self.rtt_stats)
     }
 
+    fn max_bandwidth(&self) -> Option<Bandwidth> {
+        Some(self.pacer.max_bandwidth())
+    }
+
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit> {
         self.recovery_stats.startup_exit

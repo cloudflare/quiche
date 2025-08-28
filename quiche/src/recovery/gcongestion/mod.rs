@@ -120,6 +120,8 @@ pub(super) trait CongestionControl: Debug {
 
     fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth;
 
+    fn max_bandwidth(&self) -> Bandwidth;
+
     fn update_mss(&mut self, new_mss: usize);
 
     fn on_app_limited(&mut self, _bytes_in_flight: usize) {}

@@ -710,6 +710,10 @@ impl CongestionControl for BBRv2 {
         network_model.bandwidth_estimate()
     }
 
+    fn max_bandwidth(&self) -> Bandwidth {
+        self.mode.network_model().max_bandwidth()
+    }
+
     fn update_mss(&mut self, new_mss: usize) {
         self.cwnd_limits.hi = (self.cwnd_limits.hi as u64 * new_mss as u64 /
             self.mss as u64) as usize;
