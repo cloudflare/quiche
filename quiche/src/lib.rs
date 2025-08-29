@@ -359,11 +359,8 @@
 //! quiche defines a number of [feature flags] to reduce the amount of compiled
 //! code and dependencies:
 //!
-//! * `boringssl-vendored` (default): Build the vendored BoringSSL library.
-//!
-//! * `boringssl-boring-crate`: Use the BoringSSL library provided by the
-//!   [boring] crate. It takes precedence over `boringssl-vendored` if both
-//!   features are enabled.
+//! * `boringssl-boring-crate` (default): Use the BoringSSL library provided by
+//!   the [boring] crate.
 //!
 //! * `pkg-config-meta`: Generate pkg-config metadata file for libquiche.
 //!
