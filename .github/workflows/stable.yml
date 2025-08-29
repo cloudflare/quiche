@@ -18,13 +18,14 @@ concurrency:
 
 jobs:
   quiche:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         tls-feature:
           - "" # default, boringssl-vendored
           - "boringssl-boring-crate"
           - "openssl"
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
