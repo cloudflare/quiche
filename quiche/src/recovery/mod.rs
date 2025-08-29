@@ -1313,7 +1313,11 @@ mod tests {
         assert_eq!(r.lost_spurious_count(), 1);
 
         // Packet threshold was increased.
-        assert_eq!(r.pkt_thresh(), 4);
+        if cc_algorithm_name == "bbr2_gcongestion" {
+            assert_eq!(r.pkt_thresh(), u64::max_value());
+        } else {
+            assert_eq!(r.pkt_thresh(), 4);
+        }
         assert_eq!(r.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
 
         // Wait 1 RTT.

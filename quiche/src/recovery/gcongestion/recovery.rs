@@ -73,6 +73,7 @@ impl SentStatus {
         std::mem::replace(self, SentStatus::Acked)
     }
 
+    // Update the status to Lost unless it has been ACKed.
     fn lose(&mut self) -> Self {
         if !matches!(self, SentStatus::Acked) {
             std::mem::replace(self, SentStatus::Lost)
@@ -258,7 +259,7 @@ impl RecoveryEpoch {
     }
 
     fn detect_and_remove_lost_packets(
-        &mut self, loss_delay: Duration, pkt_thresh: u64, now: Instant,
+        &mut self, loss_delay: Duration, pkt_thresh: Option<u64>, now: Instant,
         newly_lost: &mut Vec<Lost>,
     ) -> LossDetectionResult {
         newly_lost.clear();
@@ -276,9 +277,15 @@ impl RecoveryEpoch {
             }
 
             if let SentStatus::Sent { time_sent, .. } = status {
-                if *time_sent <= lost_send_time ||
+                let loss_by_time = *time_sent <= lost_send_time;
+                let loss_by_packet = if let Some(pkt_thresh) = pkt_thresh {
                     largest_acked >= *pkt_num + pkt_thresh
-                {
+                } else {
+                    // packet threshold based loss detection is disabled
+                    false
+                };
+
+                if loss_by_time || loss_by_packet {
                     if let SentStatus::Sent {
                         in_flight,
                         sent_bytes,
@@ -366,8 +373,19 @@ pub struct GRecovery {
 
     pub lost_spurious_count: usize,
 
-    pkt_thresh: u64,
+    // Packet threshold used for loss detection.
+    //
+    // Spurious loss, caused by packet re-ordering, negatively impacts
+    // performance, so we disable packet threshold based detection upon
+    // seeing a spurious loss. `None` indicates that packet threshold based
+    // loss detection is disabled.
+    //
+    // https://www.rfc-editor.org/rfc/rfc9002.html#section-6.1.1
+    pkt_thresh: Option<u64>,
 
+    // Time threshold used for loss detection.
+    //
+    // https://www.rfc-editor.org/rfc/rfc9002.html#section-6.1.2
     time_thresh: f64,
 
     bytes_in_flight: BytesInFlight,
@@ -423,7 +441,7 @@ impl GRecovery {
             lost_count: 0,
             lost_spurious_count: 0,
 
-            pkt_thresh: INITIAL_PACKET_THRESHOLD,
+            pkt_thresh: Some(INITIAL_PACKET_THRESHOLD),
             time_thresh: INITIAL_TIME_THRESHOLD,
 
             bytes_in_flight: Default::default(),
@@ -704,10 +722,17 @@ impl RecoveryOps for GRecovery {
         )?;
 
         self.lost_spurious_count += spurious_losses;
-        if let Some(thresh) = spurious_pkt_thresh {
-            self.pkt_thresh =
-                self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
+        if let Some(_thresh) = spurious_pkt_thresh {
+            if self.pkt_thresh.is_some() {
+                // disable packet threshold based loss detection
+                self.pkt_thresh = None;
+                // } else {
+            }
+
             self.time_thresh = PACKET_REORDER_TIME_THRESHOLD;
+            // self.pkt_thresh =
+            //     self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
+            // self.time_thresh = PACKET_REORDER_TIME_THRESHOLD;
         }
 
         if self.newly_acked.is_empty() {
@@ -994,7 +1019,9 @@ impl RecoveryOps for GRecovery {
 
     #[cfg(test)]
     fn pkt_thresh(&self) -> u64 {
-        self.pkt_thresh
+        // TODO returning max value since pkt_thresh is disabled. Replace with
+        // returning Option
+        self.pkt_thresh.unwrap_or(u64::max_value())
     }
 
     #[cfg(test)]
