@@ -53,6 +53,8 @@ pub struct ConnectionParams<'a> {
     pub tls_cert: Option<TlsCertificatePaths<'a>>,
     /// Hooks to use for the connection.
     pub hooks: Hooks,
+    // Enable delayed ack extension
+    pub min_ack_delay: Option<u64>,
 }
 
 impl<'a> ConnectionParams<'a> {
@@ -61,11 +63,13 @@ impl<'a> ConnectionParams<'a> {
     #[inline]
     pub fn new_server(
         settings: QuicSettings, tls_cert: TlsCertificatePaths<'a>, hooks: Hooks,
+        min_ack_delay: Option<u64>,
     ) -> Self {
         Self {
             settings,
             tls_cert: Some(tls_cert),
             hooks,
+            min_ack_delay,
         }
     }
 
@@ -74,12 +78,13 @@ impl<'a> ConnectionParams<'a> {
     #[inline]
     pub fn new_client(
         settings: QuicSettings, tls_cert: Option<TlsCertificatePaths<'a>>,
-        hooks: Hooks,
+        hooks: Hooks, min_ack_delay: Option<u64>,
     ) -> Self {
         Self {
             settings,
             tls_cert,
             hooks,
+            min_ack_delay,
         }
     }
 }
