@@ -33,6 +33,8 @@ mod datagram;
 mod hooks;
 mod server;
 mod streams;
+#[cfg(test)]
+pub mod tests;
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -124,7 +126,7 @@ pub type InboundFrameStream = mpsc::Receiver<InboundFrame>;
 ///
 /// Note that [`ApplicationOverQuic`] errors are not exposed to users at this
 /// time. The type is public to document the failure modes in [H3Driver].
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum H3ConnectionError {
     /// The controller task was shut down and is no longer listening.
@@ -1041,6 +1043,7 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
     /// all sources. This will attempt to write any queued frames into their
     /// respective streams, if writable.
     fn process_writes(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()> {
+        H::on_process_writes(self, qconn)?;
         while let Some(stream_id) = qconn.stream_writable_next() {
             self.process_writable_stream(qconn, stream_id)?;
         }
