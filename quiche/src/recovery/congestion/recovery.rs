@@ -850,6 +850,10 @@ impl RecoveryOps for LegacyRecovery {
             self.congestion.prr.snd_cnt
     }
 
+    fn latest_rtt(&self) -> Duration {
+        self.rtt_stats.latest_rtt()
+    }
+
     fn rtt(&self) -> Duration {
         self.rtt_stats.rtt()
     }

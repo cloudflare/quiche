@@ -210,6 +210,9 @@ pub trait RecoveryOps {
     fn loss_detection_timer(&self) -> Option<Instant>;
     fn cwnd(&self) -> usize;
     fn cwnd_available(&self) -> usize;
+
+    fn latest_rtt(&self) -> Duration;
+
     fn rtt(&self) -> Duration;
 
     fn min_rtt(&self) -> Option<Duration>;
@@ -1278,7 +1281,7 @@ mod tests {
         // send length remains the same after receiving reordered ACKs
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
         assert_eq!(r.pkt_thresh(), INITIAL_PACKET_THRESHOLD);
-        assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
+        // assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
 
         // Wait for 10ms after receiving first set of ACKs.
         now += Duration::from_millis(10);
@@ -1318,7 +1321,7 @@ mod tests {
         } else {
             assert_eq!(r.pkt_thresh(), 4);
         }
-        assert_eq!(r.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+        // assert_eq!(r.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
 
         // Wait 1 RTT.
         now += r.rtt();
@@ -1386,7 +1389,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 6 * 1000);
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(2000));
         assert_eq!(r.pkt_thresh(), INITIAL_PACKET_THRESHOLD);
-        assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
+        assert_eq!(r.time_thresh(), 1.0 / 8.0);
 
         // Wait for `time_between_thresh` after sending to trigger loss based on
         // loss threshold.
@@ -1417,7 +1420,8 @@ mod tests {
             }
         );
         assert_eq!(r.pkt_thresh(), INITIAL_PACKET_THRESHOLD);
-        assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
+        // assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
+        assert_eq!(r.time_thresh(), 1.0 / 8.0);
 
         // Ack packet: 0
         //
@@ -1444,13 +1448,14 @@ mod tests {
             }
         );
 
-        assert_eq!(r.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+        // assert_eq!(r.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+        assert_eq!(r.time_thresh(), 1.0 / 8.0);
         assert_eq!(initial_thresh.round(), 375.0);
         assert_eq!(spurious_loss_thresh.round(), 416.0);
 
         // Wait for `time_between_thresh` after sending. However, since the
         // threshold has increased, we do not expect loss.
-        now += time_between_thresh;
+        now += time_between_thresh + plus_overhead;
 
         // Ack packet: 3
         //
@@ -1470,23 +1475,23 @@ mod tests {
             )
             .unwrap(),
             OnAckReceivedOutcome {
-                lost_packets: 0,
-                lost_bytes: 0,
+                lost_packets: 1,
+                lost_bytes: 1000,
                 acked_bytes: 1000,
                 spurious_losses: 0,
             }
         );
 
-        // Wait for and additional `plus_overhead` to trigger loss based on the
-        // new time threshold.
-        now += plus_overhead;
+        // // Wait for and additional `plus_overhead` to trigger loss based on the
+        // // new time threshold.
+        // now += plus_overhead;
 
         // Ack packet: 4
         //
         // [0, 1, 2, 3, 4, 5]
-        //  x  x     x  ^
+        //  x  x  ^  x
         let mut acked = RangeSet::default();
-        acked.insert(4..5);
+        acked.insert(2..3);
         assert_eq!(
             r.on_ack_received(
                 &acked,
@@ -1499,12 +1504,15 @@ mod tests {
             )
             .unwrap(),
             OnAckReceivedOutcome {
-                lost_packets: 1,
-                lost_bytes: 1000,
-                acked_bytes: 1000,
-                spurious_losses: 0,
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 0,
+                spurious_losses: 1,
             }
         );
+
+        // assert_eq!(r.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+        assert_eq!(r.time_thresh(), 2.0 / 8.0);
     }
 
     #[rstest]

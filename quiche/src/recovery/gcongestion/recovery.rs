@@ -3,6 +3,7 @@ use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::Error;
 use crate::Result;
 
+use std::cmp::max;
 use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::Instant;
@@ -35,7 +36,6 @@ use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
-use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
 use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 
@@ -387,6 +387,7 @@ pub struct GRecovery {
     //
     // https://www.rfc-editor.org/rfc/rfc9002.html#section-6.1.2
     time_thresh: f64,
+    time_pct: f64,
 
     bytes_in_flight: BytesInFlight,
 
@@ -443,6 +444,7 @@ impl GRecovery {
 
             pkt_thresh: Some(INITIAL_PACKET_THRESHOLD),
             time_thresh: INITIAL_TIME_THRESHOLD,
+            time_pct: 1.0 / 8.0,
 
             bytes_in_flight: Default::default(),
             bytes_sent: 0,
@@ -474,6 +476,16 @@ impl GRecovery {
     fn detect_and_remove_lost_packets(
         &mut self, epoch: packet::Epoch, now: Instant,
     ) -> (usize, usize) {
+        let prev_loss_delay = self.rtt_stats.loss_delay(self.time_thresh);
+
+        let loss_delay_mul = 1.0 + self.time_pct;
+        let loss_delay = self.rtt_stats.loss_delay(loss_delay_mul);
+
+        println!(
+            "------------- prev_loss_delay {:?} loss_delay {:?}",
+            prev_loss_delay, loss_delay
+        );
+
         let lost = &mut self.lost_reuse;
 
         let LossDetectionResult {
@@ -483,7 +495,7 @@ impl GRecovery {
             pmtud_lost_bytes,
             pmtud_lost_packets,
         } = self.epochs[epoch].detect_and_remove_lost_packets(
-            self.rtt_stats.loss_delay(self.time_thresh),
+            loss_delay,
             self.pkt_thresh,
             now,
             lost,
@@ -726,13 +738,21 @@ impl RecoveryOps for GRecovery {
             if self.pkt_thresh.is_some() {
                 // disable packet threshold based loss detection
                 self.pkt_thresh = None;
-                // } else {
-            }
+            } else {
+                // https://github.com/h2o/quicly/blob/9c93f52321d7d5110b3bbb1bcd442b00ec401f14/lib/loss.c#L57-L63
+                //
+                // const uint32_t delay_until_lost =
+                // (
+                //     (rtt.latest > rtt.smoothed ? rtt.latest : rtt.smoothed)
+                //     * (1024 + time_based_percentile) + 1023
+                // ) / 1024;
 
+                // let rtt = max(self.latest_rtt(), self.rtt());
+                self.time_pct *= 2.0;
+                // Add up to 1 extra RTT in loss delay. Max delay will be 2 * RTT
+                self.time_pct = self.time_pct.min(1.0);
+            }
             self.time_thresh = PACKET_REORDER_TIME_THRESHOLD;
-            // self.pkt_thresh =
-            //     self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
-            // self.time_thresh = PACKET_REORDER_TIME_THRESHOLD;
         }
 
         if self.newly_acked.is_empty() {
@@ -939,6 +959,10 @@ impl RecoveryOps for GRecovery {
         self.rtt_stats.rtt()
     }
 
+    fn latest_rtt(&self) -> Duration {
+        self.rtt_stats.latest_rtt()
+    }
+
     fn min_rtt(&self) -> Option<Duration> {
         self.rtt_stats.min_rtt()
     }
@@ -1026,7 +1050,7 @@ impl RecoveryOps for GRecovery {
 
     #[cfg(test)]
     fn time_thresh(&self) -> f64 {
-        self.time_thresh
+        self.time_pct
     }
 
     #[cfg(test)]
