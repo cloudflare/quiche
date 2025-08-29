@@ -696,6 +696,7 @@ mod tests {
     use crate::recovery::congestion::PACING_MULTIPLIER;
     use crate::test_utils;
     use crate::CongestionControlAlgorithm;
+    use crate::DEFAULT_INITIAL_RTT;
     use rstest::rstest;
     use smallvec::smallvec;
     use std::str::FromStr;
@@ -1345,6 +1346,182 @@ mod tests {
         } else {
             assert_eq!(r.startup_exit(), None);
         }
+    }
+
+    // TODO: This should run agains both `congestion` and `gcongestion`.
+    // `congestion` and `gcongestion` behave differently. That might be ok
+    // given the different algorithms but it would be ideal to merge and share
+    // the logic.
+    #[rstest]
+    fn time_thresholds_on_reordering(
+        #[values("bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let mut now = Instant::now();
+        let mut r = Recovery::new(&cfg);
+        assert_eq!(r.rtt(), DEFAULT_INITIAL_RTT);
+
+        // Pick time between and above thresholds for testing threshold increase.
+        //
+        //```
+        //              between_thresh_ms
+        //                         |
+        //    initial_thresh_ms    |     spurious_thresh_ms
+        //      v                  v             v
+        // --------------------------------------------------
+        //      | ................ | ..................... |
+        //            THRESH_GAP         THRESH_GAP
+        // ```
+        // 
+        // Threshold gap time.
+        const THRESH_GAP: Duration = Duration::from_millis(30);
+        // Initial time theshold based on inital RTT.
+        let initial_thresh_ms =
+            DEFAULT_INITIAL_RTT.mul_f64(INITIAL_TIME_THRESHOLD);
+        // The time threshold after spurious loss.
+        let spurious_thresh_ms: Duration =
+            DEFAULT_INITIAL_RTT.mul_f64(PACKET_REORDER_TIME_THRESHOLD);
+        // Time between the two thresholds
+        let between_thresh_ms = initial_thresh_ms + THRESH_GAP;
+        assert!(between_thresh_ms > initial_thresh_ms);
+        assert!(between_thresh_ms < spurious_thresh_ms);
+        assert!(between_thresh_ms + THRESH_GAP > spurious_thresh_ms);
+
+        for i in 0..6 {
+            let send_time = now + i * between_thresh_ms;
+
+            let p = test_utils::helper_packet_sent(i.into(), send_time, 1000);
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                send_time,
+                "",
+            );
+        }
+
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 6);
+        assert_eq!(r.bytes_in_flight(), 6 * 1000);
+        assert_eq!(r.pkt_thresh(), INITIAL_PACKET_THRESHOLD);
+        assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
+
+        // Wait for `between_thresh_ms` after sending to trigger loss based on
+        // loss threshold.
+        now += between_thresh_ms;
+
+        // Ack packet: 1
+        //
+        // [0, 1, 2, 3, 4, 5]
+        //     ^
+        let mut acked = RangeSet::default();
+        acked.insert(1..2);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 1,
+                lost_bytes: 1000,
+                acked_bytes: 1000,
+                spurious_losses: 0,
+            }
+        );
+        assert_eq!(r.pkt_thresh(), INITIAL_PACKET_THRESHOLD);
+        assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
+
+        // Ack packet: 0
+        //
+        // [0, 1, 2, 3, 4, 5]
+        //  ^  x
+        let mut acked = RangeSet::default();
+        acked.insert(0..1);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 0,
+                spurious_losses: 1,
+            }
+        );
+        // The time_thresh after spurious loss
+        assert_eq!(r.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+
+        // Wait for `between_thresh_ms` after sending. However, since the
+        // threshold has increased, we do not expect loss.
+        now += between_thresh_ms;
+
+        // Ack packet: 3
+        //
+        // [2, 3, 4, 5]
+        //     ^
+        let mut acked = RangeSet::default();
+        acked.insert(3..4);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 1000,
+                spurious_losses: 0,
+            }
+        );
+
+        // Wait for and additional `plus_overhead` to trigger loss based on the
+        // new time threshold.
+        now += THRESH_GAP;
+
+        // Ack packet: 4
+        //
+        // [2, 3, 4, 5]
+        //     x  ^
+        let mut acked = RangeSet::default();
+        acked.insert(4..5);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 1,
+                lost_bytes: 1000,
+                acked_bytes: 1000,
+                spurious_losses: 0,
+            }
+        );
     }
 
     #[rstest]

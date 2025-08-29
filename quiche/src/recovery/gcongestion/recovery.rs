@@ -711,7 +711,11 @@ impl RecoveryOps for GRecovery {
         }
 
         if self.newly_acked.is_empty() {
-            return Ok(OnAckReceivedOutcome::default());
+            return Ok(OnAckReceivedOutcome {
+                acked_bytes,
+                spurious_losses,
+                ..Default::default()
+            });
         }
 
         self.bytes_in_flight.saturating_subtract(acked_bytes, now);
