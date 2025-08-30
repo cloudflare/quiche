@@ -227,7 +227,7 @@ pub extern "C" fn quiche_h3_send_request(
     let req_headers = headers_from_ptr(headers, headers_len);
 
     match conn.send_request(quic_conn, &req_headers, fin) {
-        Ok(v) => v as i64,
+        Ok((stream_id, _hdrs_fully_sent)) => stream_id as i64,
 
         Err(e) => e.to_c() as i64,
     }
