@@ -1,5 +1,7 @@
 use crate::packet;
 use crate::recovery::OnLossDetectionTimeoutOutcome;
+use crate::Error;
+use crate::Result;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -35,8 +37,7 @@ use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
-use crate::Error;
-use crate::Result;
+use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 
 use super::bbr2::BBRv2;
 use super::pacer::Pacer;
@@ -706,10 +707,15 @@ impl RecoveryOps for GRecovery {
         if let Some(thresh) = spurious_pkt_thresh {
             self.pkt_thresh =
                 self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
+            self.time_thresh = PACKET_REORDER_TIME_THRESHOLD;
         }
 
         if self.newly_acked.is_empty() {
-            return Ok(OnAckReceivedOutcome::default());
+            return Ok(OnAckReceivedOutcome {
+                acked_bytes,
+                spurious_losses,
+                ..Default::default()
+            });
         }
 
         self.bytes_in_flight.saturating_subtract(acked_bytes, now);
@@ -993,6 +999,11 @@ impl RecoveryOps for GRecovery {
     #[cfg(test)]
     fn pkt_thresh(&self) -> u64 {
         self.pkt_thresh
+    }
+
+    #[cfg(test)]
+    fn time_thresh(&self) -> f64 {
+        self.time_thresh
     }
 
     #[cfg(test)]
