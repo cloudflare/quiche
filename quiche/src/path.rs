@@ -382,7 +382,6 @@ impl Path {
         };
 
         (hs_confirmed && hs_done) &&
-            pmtud.get_probe_size() > pmtud.get_current_mtu() &&
             self.recovery.cwnd_available() > pmtud.get_probe_size() &&
             out_len >= pmtud.get_probe_size() &&
             pmtud.should_probe() &&
