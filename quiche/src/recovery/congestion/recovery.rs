@@ -947,8 +947,8 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     #[cfg(test)]
-    fn pkt_thresh(&self) -> u64 {
-        self.pkt_thresh
+    fn pkt_thresh(&self) -> Option<u64> {
+        Some(self.pkt_thresh)
     }
 
     #[cfg(test)]
