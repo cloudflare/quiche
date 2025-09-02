@@ -39,6 +39,7 @@ use std::error::Error;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Instant;
 
 use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
@@ -636,7 +637,7 @@ impl<H: DriverHooks> H3Driver<H> {
             OutboundFrame::Headers(headers, priority) => {
                 let prio = priority.as_ref().unwrap_or(&DEFAULT_PRIO);
 
-                if ctx.initial_headers_sent {
+                let res = if ctx.initial_headers_sent {
                     // Initial headers were already sent, send additional
                     // headers now.
                     conn.send_additional_headers_with_priority(
@@ -648,7 +649,24 @@ impl<H: DriverHooks> H3Driver<H> {
                         qconn, stream_id, headers, prio, false,
                     )
                     .inspect(|_| ctx.initial_headers_sent = true)
+                };
+
+                if let Err(h3::Error::StreamBlocked) = res {
+                    ctx.first_full_headers_flush_fail_time
+                        .get_or_insert(Instant::now());
                 }
+
+                if res.is_ok() {
+                    if let Some(first) =
+                        ctx.first_full_headers_flush_fail_time.take()
+                    {
+                        ctx.audit_stats.add_header_flush_duration(
+                            Instant::now().duration_since(first),
+                        );
+                    }
+                }
+
+                res
             },
 
             OutboundFrame::Body(body, fin) => {

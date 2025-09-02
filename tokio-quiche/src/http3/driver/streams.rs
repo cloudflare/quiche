@@ -29,6 +29,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Instant;
 
 use tokio::sync::mpsc;
 use tokio_util::sync::PollSender;
@@ -52,6 +53,8 @@ pub(crate) struct StreamCtx {
     pub(crate) audit_stats: Arc<H3AuditStats>,
     /// Indicates the stream sent initial headers.
     pub(crate) initial_headers_sent: bool,
+    /// First time that a HEADERS frame was not fully flushed.
+    pub(crate) first_full_headers_flush_fail_time: Option<Instant>,
     /// Indicates the stream received fin. No more data will be received.
     pub(crate) fin_recv: bool,
     /// Indicates the stream sent fin. No more data will be sent.
@@ -77,6 +80,7 @@ impl StreamCtx {
             audit_stats: Arc::new(H3AuditStats::new(stream_id)),
 
             initial_headers_sent: false,
+            first_full_headers_flush_fail_time: None,
 
             fin_recv: false,
             fin_sent: false,
