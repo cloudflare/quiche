@@ -1112,13 +1112,29 @@ typedef struct {
     bool incremental;
 } quiche_h3_priority;
 
+// send_request2 return values.
+typedef struct {
+    uint64_t stream_id;
+    bool headers_fully_sent;
+} send_request2_result;
+
 // Sends an HTTP/3 request.
 int64_t quiche_h3_send_request(quiche_h3_conn *conn, quiche_conn *quic_conn,
                                const quiche_h3_header *headers, size_t headers_len,
                                bool fin);
 
+// Sends an HTTP/3 request.
+int64_t quiche_h3_send_request2(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                               const quiche_h3_header *headers, size_t headers_len,
+                               bool fin, send_request2_result* result);
+
 // Sends an HTTP/3 response on the specified stream with default priority.
 int quiche_h3_send_response(quiche_h3_conn *conn, quiche_conn *quic_conn,
+                            uint64_t stream_id, const quiche_h3_header *headers,
+                            size_t headers_len, bool fin);
+
+// Sends an HTTP/3 response on the specified stream with default priority.
+int quiche_h3_send_response2(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, const quiche_h3_header *headers,
                             size_t headers_len, bool fin);
 
@@ -1128,11 +1144,27 @@ int quiche_h3_send_response_with_priority(quiche_h3_conn *conn,
                             const quiche_h3_header *headers, size_t headers_len,
                             quiche_h3_priority *priority, bool fin);
 
+// Sends an HTTP/3 response on the specified stream with specified priority.
+int quiche_h3_send_response_with_priority2(quiche_h3_conn *conn,
+                            quiche_conn *quic_conn, uint64_t stream_id,
+                            const quiche_h3_header *headers, size_t headers_len,
+                            quiche_h3_priority *priority, bool fin);
+
 // Sends additional HTTP/3 headers on the specified stream.
 int quiche_h3_send_additional_headers(quiche_h3_conn *conn,
                             quiche_conn *quic_conn, uint64_t stream_id,
                             quiche_h3_header *headers, size_t headers_len,
                             bool is_trailer_section, bool fin);
+
+// Sends additional HTTP/3 headers on the specified stream.
+int quiche_h3_send_additional_headers2(quiche_h3_conn *conn,
+                            quiche_conn *quic_conn, uint64_t stream_id,
+                            quiche_h3_header *headers, size_t headers_len,
+                            bool is_trailer_section, bool fin);
+
+// Continues sending headers on the given stream.
+int quiche_h3_continue_partial_headers(quiche_h3_conn *conn,
+                            quiche_conn *quic_conn, uint64_t stream_id);
 
 // Sends an HTTP/3 body chunk on the given stream.
 ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
