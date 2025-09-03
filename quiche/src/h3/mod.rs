@@ -424,6 +424,9 @@ pub enum Error {
     /// The requested operation cannot be served over HTTP/3. Peer should retry
     /// over HTTP/1.1.
     VersionFallback,
+
+    /// TODO
+    PartialHeader,
 }
 
 /// HTTP/3 error codes sent on the wire.
@@ -503,6 +506,7 @@ impl Error {
             Error::MessageError => WireErrorCode::MessageError as u64,
             Error::ConnectError => WireErrorCode::ConnectError as u64,
             Error::VersionFallback => WireErrorCode::VersionFallback as u64,
+            Error::PartialHeader => 0x1000,
         }
     }
 
@@ -529,6 +533,7 @@ impl Error {
             Error::MessageError => -18,
             Error::ConnectError => -19,
             Error::VersionFallback => -20,
+            Error::PartialHeader => -21,
 
             Error::TransportError(quic_error) => quic_error.to_c() - 1000,
         }
@@ -1138,7 +1143,7 @@ impl Connection {
             return Err(e.into());
         };
 
-        self.send_headers(conn, stream_id, headers, fin)?;
+        self.send_headers(conn, stream_id, headers, false, fin, false)?;
 
         // To avoid skipping stream IDs, we only calculate the next available
         // stream ID when a request has been successfully buffered.
@@ -1148,6 +1153,71 @@ impl Connection {
             .ok_or(Error::IdError)?;
 
         Ok(stream_id)
+    }
+
+    /// Sends an HTTP/3 request.
+    ///
+    /// The request is encoded from the provided list of headers without a body,
+    /// and sent on a newly allocated stream. To include a body, set `fin` as
+    /// `false` and subsequently call [`send_body()`] with the same `conn` and
+    /// the `stream_id` returned from this method.
+    ///
+    /// On success the newly allocated stream ID is returned, together with a
+    /// bool that indicates if the headers were fully sent or not. If this value
+    /// is false, it indicates the underlying stream or connection does not have
+    /// enough capacity to send the entire remaining header bytes.
+    ///
+    /// The application must call [`continue_partial_headers()`] once the stream
+    /// is reported as writable again.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`send_body()`]: struct.Connection.html#method.send_body
+    /// [`continue_partial_headers()`]:
+    ///     struct.Connection.html#method.continue_partial_headers
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
+    pub fn send_request2<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, headers: &[T], fin: bool,
+    ) -> Result<(u64, bool)> {
+        // If we received a GOAWAY from the peer, MUST NOT initiate new
+        // requests.
+        if self.peer_goaway_id.is_some() {
+            return Err(Error::FrameUnexpected);
+        }
+
+        let stream_id = self.next_request_stream_id;
+        let stream = stream::Stream::new(stream_id, true);
+
+        // The underlying QUIC stream does not exist yet, so calls to e.g.
+        // stream_capacity() will fail. By writing a 0-length buffer, we force
+        // the creation of the QUIC stream state, without actually writing
+        // anything. Errors on this call don't make sense to bubble up.
+        conn.stream_send(stream_id, b"", false).ok();
+        self.streams.insert(stream_id, stream);
+
+        self.next_request_stream_id = self
+            .next_request_stream_id
+            .checked_add(4)
+            .ok_or(Error::IdError)?;
+
+        if let Err(e) =
+            self.send_headers(conn, stream_id, headers, false, fin, true)
+        {
+            match e {
+                // At this stage, even Error::Done in the transport layer is a
+                // partial send because we committed the stream state changes to
+                // the connection.
+                Error::PartialHeader | Error::Done =>
+                    return Ok((stream_id, false)),
+
+                _ => return Err(e),
+            }
+        }
+
+        Ok((stream_id, true))
     }
 
     /// Sends an HTTP/3 response on the specified stream with default priority.
@@ -1175,18 +1245,20 @@ impl Connection {
     /// error is returned if this method, or [`send_response_with_priority()`],
     /// are called multiple times with the same `stream_id` value.
     ///
-    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// The [`PartialHeader`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
-    /// happens the application should retry the operation once the stream is
-    /// reported as writable again.
+    /// happens the application must call [`continue_partial_headers()`] once
+    /// the stream is reported as writable again.
     ///
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`send_additional_headers()`]:
     ///     struct.Connection.html#method.send_additional_headers
     /// [`send_response_with_priority()`]:
     ///     struct.Connection.html#method.send_response_with_priority
+    /// [`continue_partial_headers()`]:
+    ///     struct.Connection.html#method.continue_partial_headers
     /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
-    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
+    /// [`PartialHeader`]: enum.Error.html#variant.PartialHeader
     pub fn send_response<T: NameValue, F: BufFactory>(
         &mut self, conn: &mut super::Connection<F>, stream_id: u64,
         headers: &[T], fin: bool,
@@ -1194,6 +1266,58 @@ impl Connection {
         let priority = Default::default();
 
         self.send_response_with_priority(
+            conn, stream_id, headers, &priority, fin,
+        )?;
+
+        Ok(())
+    }
+
+    /// Sends an HTTP/3 response on the specified stream with default priority.
+    ///
+    /// This method sends the provided `headers` as a single initial response
+    /// without a body.
+    ///
+    /// To send a non-final 1xx, then a final 200+ without body:
+    ///   * send_response() with `fin` set to `false`.
+    ///   * [`send_additional_headers()`] with fin set to `true` using the same
+    ///     `stream_id` value.
+    ///
+    /// To send a non-final 1xx, then a final 200+ with body:
+    ///   * send_response() with `fin` set to `false`.
+    ///   * [`send_additional_headers()`] with fin set to `false` and same
+    ///     `stream_id` value.
+    ///   * [`send_body()`] with same `stream_id`.
+    ///
+    /// To send a final 200+ with body:
+    ///   * send_response() with `fin` set to `false`.
+    ///   * [`send_body()`] with same `stream_id`.
+    ///
+    /// Additional headers can only be sent during certain phases of an HTTP/3
+    /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
+    /// error is returned if this method, or [`send_response_with_priority()`],
+    /// are called multiple times with the same `stream_id` value.
+    ///
+    /// The [`PartialHeader`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application must call [`continue_partial_headers()`] once
+    /// the stream is reported as writable again.
+    ///
+    /// [`send_body()`]: struct.Connection.html#method.send_body
+    /// [`send_additional_headers()`]:
+    ///     struct.Connection.html#method.send_additional_headers
+    /// [`send_response_with_priority()`]:
+    ///     struct.Connection.html#method.send_response_with_priority
+    /// [`continue_partial_headers()`]:
+    ///     struct.Connection.html#method.continue_partial_headers
+    /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
+    /// [`PartialHeader`]: enum.Error.html#variant.PartialHeader
+    pub fn send_response2<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        headers: &[T], fin: bool,
+    ) -> Result<()> {
+        let priority = Default::default();
+
+        self.send_response_with_priority2(
             conn, stream_id, headers, &priority, fin,
         )?;
 
@@ -1247,20 +1371,83 @@ impl Connection {
         &mut self, conn: &mut super::Connection<F>, stream_id: u64,
         headers: &[T], priority: &Priority, fin: bool,
     ) -> Result<()> {
-        match self.streams.get(&stream_id) {
-            Some(s) => {
-                // Only one initial HEADERS allowed.
-                if s.local_initialized() {
-                    return Err(Error::FrameUnexpected);
-                }
+        let stream =
+            self.streams.get(&stream_id).ok_or(Error::FrameUnexpected)?;
 
-                s
-            },
+        // Only one initial HEADERS allowed.
+        if stream.local_initialized() {
+            return Err(Error::FrameUnexpected);
+        }
 
-            None => return Err(Error::FrameUnexpected),
-        };
+        self.send_headers(conn, stream_id, headers, false, fin, false)?;
 
-        self.send_headers(conn, stream_id, headers, fin)?;
+        // Clamp and shift urgency into quiche-priority space
+        let urgency = priority
+            .urgency
+            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
+            PRIORITY_URGENCY_OFFSET;
+
+        conn.stream_priority(stream_id, urgency, priority.incremental)?;
+
+        Ok(())
+    }
+
+    /// Sends an HTTP/3 response on the specified stream with specified
+    /// priority.
+    ///
+    /// This method sends the provided `headers` as a single initial response
+    /// without a body.
+    ///
+    /// To send a non-final 1xx, then a final 200+ without body:
+    ///   * send_response_with_priority() with `fin` set to `false`.
+    ///   * [`send_additional_headers()`] with fin set to `true` using the same
+    ///     `stream_id` value.
+    ///
+    /// To send a non-final 1xx, then a final 200+ with body:
+    ///   * send_response_with_priority() with `fin` set to `false`.
+    ///   * [`send_additional_headers()`] with fin set to `false` and same
+    ///     `stream_id` value.
+    ///   * [`send_body()`] with same `stream_id`.
+    ///
+    /// To send a final 200+ with body:
+    ///   * send_response_with_priority() with `fin` set to `false`.
+    ///   * [`send_body()`] with same `stream_id`.
+    ///
+    /// The `priority` parameter represents [Extensible Priority]
+    /// parameters. If the urgency is outside the range 0-7, it will be clamped
+    /// to 7.
+    ///
+    /// Additional headers can only be sent during certain phases of an HTTP/3
+    /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
+    /// error is returned if this method, or [`send_response()`],
+    /// are called multiple times with the same `stream_id` value.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`send_body()`]: struct.Connection.html#method.send_body
+    /// [`send_additional_headers()`]:
+    ///     struct.Connection.html#method.send_additional_headers
+    /// [`send_response()`]:
+    ///     struct.Connection.html#method.send_response
+    /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
+    /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
+    pub fn send_response_with_priority2<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        headers: &[T], priority: &Priority, fin: bool,
+    ) -> Result<()> {
+        let stream =
+            self.streams.get(&stream_id).ok_or(Error::FrameUnexpected)?;
+
+        // Only one initial HEADERS allowed.
+        if stream.local_initialized() {
+            return Err(Error::FrameUnexpected);
+        }
+
+        self.send_headers(conn, stream_id, headers, false, fin, true)?;
 
         // Clamp and shift urgency into quiche-priority space
         let urgency = priority
@@ -1326,15 +1513,79 @@ impl Connection {
             None => return Err(Error::FrameUnexpected),
         };
 
-        self.send_headers(conn, stream_id, headers, fin)?;
+        self.send_headers(
+            conn,
+            stream_id,
+            headers,
+            is_trailer_section,
+            fin,
+            false,
+        )?;
 
-        if is_trailer_section {
-            // send_headers() might have tidied the stream away, so we need to
-            // check again.
-            if let Some(s) = self.streams.get_mut(&stream_id) {
-                s.mark_trailers_sent();
-            }
+        Ok(())
+    }
+
+    /// Sends additional HTTP/3 headers.
+    ///
+    /// After the initial request or response headers have been sent, using
+    /// [`send_request()`] or [`send_response()`] respectively, this method can
+    /// be used send an additional HEADERS frame. For example, to send a single
+    /// instance of trailers after a request with a body, or to issue another
+    /// non-final 1xx after a preceding 1xx, or to issue a final response after
+    /// a preceding 1xx.
+    ///
+    /// Additional headers can only be sent during certain phases of an HTTP/3
+    /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
+    /// error is returned when this method is called during the wrong phase,
+    /// such as before initial headers have been sent, or if trailers have
+    /// already been sent.
+    ///
+    /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`send_request()`]: struct.Connection.html#method.send_request
+    /// [`send_response()`]: struct.Connection.html#method.send_response
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
+    /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
+    /// [Section 4.1 of RFC 9114]:
+    ///     https://www.rfc-editor.org/rfc/rfc9114.html#section-4.1.
+    pub fn send_additional_headers2<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        headers: &[T], is_trailer_section: bool, fin: bool,
+    ) -> Result<()> {
+        // Clients can only send trailer headers.
+        if !self.is_server && !is_trailer_section {
+            return Err(Error::FrameUnexpected);
         }
+
+        match self.streams.get(&stream_id) {
+            Some(s) => {
+                // Initial HEADERS must have been sent.
+                if !s.local_initialized() {
+                    return Err(Error::FrameUnexpected);
+                }
+
+                // Only one trailing HEADERS allowed.
+                if s.trailers_sent() {
+                    return Err(Error::FrameUnexpected);
+                }
+
+                s
+            },
+
+            None => return Err(Error::FrameUnexpected),
+        };
+
+        self.send_headers(
+            conn,
+            stream_id,
+            headers,
+            is_trailer_section,
+            fin,
+            true,
+        )?;
 
         Ok(())
     }
@@ -1393,70 +1644,73 @@ impl Connection {
         Ok(())
     }
 
-    fn encode_header_block<T: NameValue>(
-        &mut self, headers: &[T],
-    ) -> Result<Vec<u8>> {
+    fn send_headers<T: NameValue, F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        headers: &[T], is_trailer_section: bool, fin: bool, streaming_mode: bool,
+    ) -> Result<()> {
+        // Try to send grease once and don't error if it fails.
+        if !self.frames_greased && conn.grease {
+            self.send_grease_frames(conn, stream_id).ok();
+            self.frames_greased = true;
+        }
+
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(Error::FrameUnexpected)?;
+
         let headers_len = headers
             .iter()
             .fold(0, |acc, h| acc + h.value().len() + h.name().len() + 32);
 
-        let mut header_block = vec![0; headers_len];
-        let len = self
+        let mut frame_payload = vec![0; headers_len];
+        let payload_len = self
             .qpack_encoder
-            .encode(headers, &mut header_block)
+            .encode(headers, &mut frame_payload)
             .map_err(|_| Error::InternalError)?;
 
-        header_block.truncate(len);
+        let frame_header_size = octets::varint_len(frame::HEADERS_FRAME_TYPE_ID) +
+            octets::varint_len(payload_len as u64);
 
-        Ok(header_block)
-    }
+        if !streaming_mode {
+            // Headers need to be sent atomically, so make sure the stream has
+            // enough capacity.
+            match conn.stream_writable(stream_id, frame_header_size + payload_len)
+            {
+                Ok(true) => (),
 
-    fn send_headers<T: NameValue, F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
-        headers: &[T], fin: bool,
-    ) -> Result<()> {
-        let mut d = [42; 10];
-        let mut b = octets::OctetsMut::with_slice(&mut d);
+                Ok(false) => return Err(Error::StreamBlocked),
 
-        if !self.frames_greased && conn.grease {
-            self.send_grease_frames(conn, stream_id)?;
-            self.frames_greased = true;
+                Err(e) => {
+                    if conn.stream_finished(stream_id) {
+                        self.streams.remove(&stream_id);
+                    }
+
+                    return Err(e.into());
+                },
+            };
         }
 
-        let header_block = self.encode_header_block(headers)?;
+        let mut frame_header = vec![0; frame_header_size];
 
-        let overhead = octets::varint_len(frame::HEADERS_FRAME_TYPE_ID) +
-            octets::varint_len(header_block.len() as u64);
-
-        // Headers need to be sent atomically, so make sure the stream has
-        // enough capacity.
-        match conn.stream_writable(stream_id, overhead + header_block.len()) {
-            Ok(true) => (),
-
-            Ok(false) => return Err(Error::StreamBlocked),
-
-            Err(e) => {
-                if conn.stream_finished(stream_id) {
-                    self.streams.remove(&stream_id);
-                }
-
-                return Err(e.into());
-            },
-        };
-
+        let mut b = octets::OctetsMut::with_slice(&mut frame_header);
         b.put_varint(frame::HEADERS_FRAME_TYPE_ID)?;
-        b.put_varint(header_block.len() as u64)?;
-        let off = b.off();
-        conn.stream_send(stream_id, &d[..off], false)?;
+        b.put_varint(payload_len as u64)?;
 
-        // Sending header block separately avoids unnecessary copy.
-        conn.stream_send(stream_id, &header_block, fin)?;
+        stream.outgoing_frame_header = frame_header;
+        stream.outgoing_frame_header_off = 0;
+
+        frame_payload.truncate(payload_len);
+
+        stream.outgoing_frame_payload = frame_payload;
+        stream.outgoing_frame_payload_off = 0;
+        stream.fin_after_outgoing_frame = fin;
 
         trace!(
             "{} tx frm HEADERS stream={} len={} fin={}",
             conn.trace_id(),
             stream_id,
-            header_block.len(),
+            payload_len,
             fin
         );
 
@@ -1474,7 +1728,7 @@ impl Connection {
             };
             let ev_data = EventData::H3FrameCreated(H3FrameCreated {
                 stream_id,
-                length: Some(header_block.len() as u64),
+                length: Some(payload_len as u64),
                 frame,
                 ..Default::default()
             });
@@ -1482,11 +1736,160 @@ impl Connection {
             q.add_event_data_now(ev_data).ok();
         });
 
-        if let Some(s) = self.streams.get_mut(&stream_id) {
-            s.initialize_local();
+        match conn.stream_send(stream_id, &stream.outgoing_frame_header, false) {
+            Ok(v) =>
+                if v != stream.outgoing_frame_header.len() {
+                    stream.outgoing_frame_header_off += v;
+                    if is_trailer_section {
+                        stream.mark_trailers_in_flight();
+                    }
+                    trace!(
+                        "only sent {} of {} frame header bytes",
+                        v,
+                        stream.outgoing_frame_header.len()
+                    );
+                    return Err(Error::PartialHeader);
+                },
+
+            Err(e) => {
+                // TODO: check its actually sensible to return all errors
+                return Err(e.into());
+            },
         }
 
-        if fin && conn.stream_finished(stream_id) {
+        stream.outgoing_frame_header.clear();
+        stream.outgoing_frame_header_off = 0;
+
+        // Sending header block separately avoids unnecessary copy.
+        match conn.stream_send(
+            stream_id,
+            &stream.outgoing_frame_payload,
+            stream.fin_after_outgoing_frame,
+        ) {
+            Ok(v) =>
+                if v != stream.outgoing_frame_payload.len() {
+                    stream.outgoing_frame_payload_off += v;
+                    if is_trailer_section {
+                        stream.mark_trailers_in_flight();
+                    }
+                    trace!(
+                        "only sent {} of {} frame payload bytes",
+                        v,
+                        stream.outgoing_frame_payload.len()
+                    );
+                    return Err(Error::PartialHeader);
+                },
+
+            Err(..) => {
+                // TODO: check its actually sensible to capture all errors
+                // this case is slightly different because the frame's
+                // headers would have been sent at this point
+                return Err(Error::PartialHeader);
+            },
+        }
+
+        stream.outgoing_frame_payload.clear();
+        stream.outgoing_frame_payload_off = 0;
+
+        stream.initialize_local();
+
+        if is_trailer_section {
+            stream.mark_trailers_sent();
+        }
+
+        if stream.fin_after_outgoing_frame && conn.stream_finished(stream_id) {
+            self.streams.remove(&stream_id);
+        }
+
+        Ok(())
+    }
+
+    /// Continues sending headers on the given stream.
+    ///
+    /// The [`PartialHeader`] error is returned when the underlying QUIC stream
+    /// doesn't have enough capacity for the operation to complete. When this
+    /// happens the application should retry the operation once the stream is
+    /// reported as writable again.
+    ///
+    /// [`PartialHeader`]: enum.Error.html#variant.PartialHeaders
+    pub fn continue_partial_headers(
+        &mut self, conn: &mut super::Connection, stream_id: u64,
+    ) -> Result<()> {
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or(Error::FrameUnexpected)?;
+
+        if stream.outgoing_frame_header.is_empty() &&
+            stream.outgoing_frame_payload.is_empty()
+        {
+            // Can't continue when there is nothing to do.
+            return Err(Error::Done);
+        }
+
+        if !stream.outgoing_frame_header.is_empty() {
+            match conn.stream_send(
+                stream_id,
+                &stream.outgoing_frame_header[stream.outgoing_frame_header_off..],
+                false,
+            ) {
+                Ok(v) =>
+                    if v != stream.outgoing_frame_header.len() {
+                        stream.outgoing_frame_header_off += v;
+                        trace!(
+                            "only sent {} of {} frame header bytes",
+                            v,
+                            stream.outgoing_frame_header.len()
+                        );
+                        return Err(Error::PartialHeader);
+                    },
+
+                Err(e) => {
+                    error!("continue_partial_headers frame header fail {:?}", e);
+                    // TODO: check its actually sensible to capture all errors
+                    return Err(Error::PartialHeader);
+                },
+            }
+        }
+
+        stream.outgoing_frame_header.clear();
+        stream.outgoing_frame_header_off = 0;
+
+        match conn.stream_send(
+            stream_id,
+            &stream.outgoing_frame_payload[stream.outgoing_frame_payload_off..],
+            stream.fin_after_outgoing_frame,
+        ) {
+            Ok(sent) => {
+                stream.outgoing_frame_payload_off += sent;
+                if stream.outgoing_frame_payload_off !=
+                    stream.outgoing_frame_payload.len()
+                {
+                    trace!(
+                        "only sent {} of {} frame payload bytes",
+                        sent,
+                        stream.outgoing_frame_payload.len()
+                    );
+                    return Err(Error::PartialHeader);
+                }
+            },
+
+            Err(e) => {
+                // TODO: check its actually sensible to capture all errors
+                error!("continue_partial_headers frame payload fail {:?}", e);
+                return Err(Error::PartialHeader);
+            },
+        }
+
+        stream.outgoing_frame_payload.clear();
+        stream.outgoing_frame_payload_off = 0;
+
+        stream.initialize_local();
+        if stream.trailers_trailers_in_flight() {
+            stream.mark_trailers_sent();
+        }
+
+        if stream.fin_after_outgoing_frame && conn.stream_finished(stream_id) {
             self.streams.remove(&stream_id);
         }
 
@@ -3369,12 +3772,12 @@ pub mod testing {
                 Header::new(b"user-agent", b"quiche-test"),
             ];
 
-            let stream =
+            let stream_id =
                 self.client.send_request(&mut self.pipe.client, &req, fin)?;
 
             self.advance().ok();
 
-            Ok((stream, req))
+            Ok((stream_id, req))
         }
 
         /// Sends a response from server with default headers.
@@ -4541,7 +4944,7 @@ mod tests {
 
         let (stream, req) = s.send_request(false).unwrap();
 
-        let header_block = s.client.encode_header_block(&req).unwrap();
+        let header_block = vec![42; 10];
 
         s.send_frame_client(
             frame::Frame::PushPromise {
@@ -5583,14 +5986,14 @@ mod tests {
             Header::new(b"aaaaaaa", b"aaaaaaaa"),
         ];
 
-        let stream = s
+        let res = s
             .client
             .send_request(&mut s.pipe.client, &req, true)
             .unwrap();
 
         s.advance().ok();
 
-        assert_eq!(stream, 0);
+        assert_eq!(res, 0);
 
         assert_eq!(s.poll_server(), Err(Error::ExcessiveLoad));
 
@@ -5687,7 +6090,6 @@ mod tests {
     }
 
     #[test]
-    /// Tests that we limit sending HEADERS based on the stream capacity.
     fn headers_blocked() {
         let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         config
@@ -5737,6 +6139,74 @@ mod tests {
         // request.
         assert_eq!(s.pipe.client.stream_writable_next(), Some(4));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(4));
+    }
+
+    #[test]
+    /// Tests that we limit sending HEADERS based on the stream capacity.
+    fn headers_blocked2() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
+        ];
+
+        let ev_headers = Event::Headers {
+            list: req.clone(),
+            more_frames: false,
+        };
+
+        assert_eq!(
+            s.client.send_request2(&mut s.pipe.client, &req, true),
+            Ok((0, true))
+        );
+
+        assert_eq!(
+            s.client.send_request2(&mut s.pipe.client, &req, true),
+            Ok((4, false))
+        );
+
+        assert_eq!(s.pipe.client.stream_writable_next(), None);
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Ok((0, ev_headers.clone())));
+        assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Once the server gives flow control credits back, we can send the
+        // remaining part of request.
+        s.client
+            .continue_partial_headers(&mut s.pipe.client, 4)
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Ok((4, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((4, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
     }
 
     #[test]
@@ -5795,6 +6265,438 @@ mod tests {
         assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
+    }
+
+    #[test]
+    /// Ensure request headers recover when connection flow control prevents
+    /// them.
+    fn headers_blocked_on_conn2() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        // After the HTTP handshake, some bytes of connection flow control have
+        // been consumed. Fill the connection with more grease data on the control
+        // stream.
+        let d = [42; 28];
+        assert_eq!(s.pipe.client.stream_send(2, &d, false), Ok(23));
+
+        let req = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
+        ];
+
+        // There is 0 connection-level flow control, so sending a request is
+        // blocked.
+        let (stream_id, hdrs_completely_sent) = s
+            .client
+            .send_request2(&mut s.pipe.client, &req, true)
+            .unwrap();
+        assert_eq!(stream_id, 0);
+        assert!(!hdrs_completely_sent);
+        assert_eq!(s.pipe.client.stream_writable_next(), None);
+
+        // Emit the control stream data and drain it at the server via poll() to
+        // consumes it via poll() and gives back flow control.
+        s.advance().ok();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        s.advance().ok();
+
+        // Now we can send the request.
+        // The writable iterator prefers higher-priority streams, so
+        // the request stream comes last
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(10));
+        assert_eq!(s.pipe.client.stream_writable_next(), Some(0));
+        assert_eq!(s.pipe.client.stream_writable_next(), None);
+
+        assert_eq!(
+            s.client
+                .continue_partial_headers(&mut s.pipe.client, stream_id),
+            Ok(())
+        );
+    }
+
+    #[test]
+    /// Tests that we prevent other work while partial request HEADERS are in
+    /// progress.
+    fn headers_blocked_prevents_more_client_work() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
+        ];
+
+        let ev_headers_1 = Event::Headers {
+            list: req.clone(),
+            more_frames: false,
+        };
+
+        let ev_headers_2 = Event::Headers {
+            list: req.clone(),
+            more_frames: true,
+        };
+
+        assert_eq!(
+            s.client.send_request2(&mut s.pipe.client, &req, true),
+            Ok((0, true))
+        );
+
+        assert_eq!(
+            s.client.send_request2(&mut s.pipe.client, &req, false),
+            Ok((4, false))
+        );
+
+        assert_eq!(s.pipe.client.stream_writable_next(), None);
+
+        s.advance().ok();
+
+        // Although partial HEADERS was sent on stream 4, server does not generate
+        // event until entire HEADERS are received.
+        assert_eq!(s.poll_server(), Ok((0, ev_headers_1.clone())));
+        assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        s.advance().ok();
+
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(3));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(7));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(0));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(4));
+        assert_eq!(s.pipe.server.stream_writable_next(), None);
+
+        // The server has given back flow control credits but sending other things
+        // should fail until we complete initial headers.
+        assert_eq!(
+            s.client.send_body(&mut s.pipe.client, 4, b"hello", false),
+            Err(Error::FrameUnexpected),
+        );
+
+        let trailers = vec![Header::new(b"trailer-foo", b"yes")];
+        let ev_trailers = Event::Headers {
+            list: trailers.clone(),
+            more_frames: false,
+        };
+
+        assert_eq!(
+            s.client.send_additional_headers2(
+                &mut s.pipe.client,
+                4,
+                &trailers,
+                true,
+                true
+            ),
+            Err(Error::FrameUnexpected),
+        );
+
+        assert_eq!(
+            s.client.continue_partial_headers(&mut s.pipe.client, 4),
+            Ok(())
+        );
+
+        // Partial headers finished
+        assert_eq!(
+            s.client.continue_partial_headers(&mut s.pipe.client, 4),
+            Err(Error::Done)
+        );
+
+        // Now we can do remaining work
+        assert_eq!(
+            s.client.send_body(&mut s.pipe.client, 4, b"hello", false),
+            Ok(5),
+        );
+
+        assert_eq!(
+            s.client.send_additional_headers2(
+                &mut s.pipe.client,
+                4,
+                &trailers,
+                true,
+                true
+            ),
+            Ok(()),
+        );
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Ok((4, ev_headers_2)));
+        assert_eq!(s.poll_server(), Ok((4, Event::Data)));
+
+        let mut recv_buf = [0; 5];
+        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(5));
+
+        assert_eq!(s.poll_server(), Ok((4, ev_trailers)));
+
+        assert_eq!(s.poll_server(), Ok((4, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Tests that we prevent other work while partial response HEADERS are in
+    /// progress.
+    fn headers_blocked_prevents_more_server_work() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(150);
+        config.set_initial_max_stream_data_bidi_local(200);
+        config.set_initial_max_stream_data_bidi_remote(200);
+        config.set_initial_max_stream_data_uni(200);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
+        ];
+
+        let ev_headers = Event::Headers {
+            list: req.clone(),
+            more_frames: false,
+        };
+
+        assert_eq!(
+            s.client.send_request2(&mut s.pipe.client, &req, true),
+            Ok((0, true))
+        );
+        assert_eq!(
+            s.client.send_request2(&mut s.pipe.client, &req, true),
+            Ok((4, true))
+        );
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Ok((0, ev_headers.clone())));
+        assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
+        assert_eq!(s.poll_server(), Ok((4, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((4, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let info_resp = vec![
+            Header::new(b":status", b"103"),
+            Header::new(b"link", b"<https://example1.com>; rel=\"preconnect\""),
+        ];
+
+        let resp = vec![
+            Header::new(b":status", b"200"),
+            Header::new(b"server", b"quiche-test"),
+        ];
+
+        assert_eq!(
+            s.server.send_response2(
+                &mut s.pipe.server,
+                0,
+                &info_resp.clone(),
+                false
+            ),
+            Ok(())
+        );
+
+        assert_eq!(
+            s.server.send_response2(
+                &mut s.pipe.server,
+                4,
+                &info_resp.clone(),
+                false
+            ),
+            Err(Error::PartialHeader)
+        );
+
+        // Attempting to send another informational response fails
+        assert_eq!(
+            s.server.send_additional_headers2(
+                &mut s.pipe.server,
+                4,
+                &info_resp.clone(),
+                false,
+                false,
+            ),
+            Err(Error::FrameUnexpected)
+        );
+
+        // Attempting to send final response headers fails
+        assert_eq!(
+            s.server.send_additional_headers2(
+                &mut s.pipe.server,
+                4,
+                &resp.clone(),
+                false,
+                false,
+            ),
+            Err(Error::FrameUnexpected)
+        );
+
+        // Attempting to send response body fails
+        assert_eq!(
+            s.server.send_body(&mut s.pipe.server, 4, b"hello", true),
+            Err(Error::FrameUnexpected),
+        );
+
+        s.advance().ok();
+
+        let ev_info_headers = Event::Headers {
+            list: info_resp.clone(),
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((0, ev_info_headers.clone())));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        s.advance().ok();
+
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(3));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(7));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(11));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(0));
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(4));
+        assert_eq!(s.pipe.server.stream_writable_next(), None);
+
+        // The client has given back flow control credits but other actions still
+        // fail until parital headers are completed.
+        assert_eq!(
+            s.server.send_additional_headers2(
+                &mut s.pipe.server,
+                4,
+                &info_resp.clone(),
+                false,
+                false,
+            ),
+            Err(Error::FrameUnexpected)
+        );
+
+        assert_eq!(
+            s.server.send_additional_headers2(
+                &mut s.pipe.server,
+                4,
+                &resp.clone(),
+                false,
+                false,
+            ),
+            Err(Error::FrameUnexpected)
+        );
+
+        assert_eq!(
+            s.server.send_body(&mut s.pipe.server, 4, b"hello", true),
+            Err(Error::FrameUnexpected),
+        );
+
+        assert_eq!(
+            s.server.continue_partial_headers(&mut s.pipe.server, 4),
+            Ok(())
+        );
+
+        s.advance().ok();
+
+        assert_eq!(s.pipe.server.stream_writable_next(), Some(4));
+        assert_eq!(s.pipe.server.stream_writable_next(), None);
+
+        assert_eq!(s.poll_client(), Ok((4, ev_info_headers.clone())));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // Send second informational response now
+        assert_eq!(
+            s.server.send_additional_headers2(
+                &mut s.pipe.server,
+                4,
+                &info_resp.clone(),
+                false,
+                false,
+            ),
+            Ok(())
+        );
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Ok((4, ev_info_headers)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        s.advance().ok();
+
+        // Now final headers and body
+        assert_eq!(
+            s.server.send_additional_headers2(
+                &mut s.pipe.server,
+                4,
+                &resp.clone(),
+                false,
+                false,
+            ),
+            Ok(())
+        );
+
+        assert_eq!(
+            s.server.send_body(&mut s.pipe.server, 4, b"hello", true),
+            Ok(5),
+        );
+
+        s.advance().ok();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((4, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((4, Event::Data)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
     }
 
     #[test]
@@ -6953,7 +7855,7 @@ mod tests {
         let trailers = vec![Header::new(b"hello", b"world")];
 
         s.client
-            .send_headers(&mut s.pipe.client, r1_id, &trailers, true)
+            .send_headers(&mut s.pipe.client, r1_id, &trailers, true, true, false)
             .unwrap();
 
         let r1_ev_trailers = Event::Headers {
@@ -6974,7 +7876,14 @@ mod tests {
         let r2_body = s.send_body_client(r2_id, false).unwrap();
 
         s.client
-            .send_headers(&mut s.pipe.client, r2_id, &trailers, false)
+            .send_headers(
+                &mut s.pipe.client,
+                r2_id,
+                &trailers,
+                true,
+                false,
+                false,
+            )
             .unwrap();
 
         let r2_ev_trailers = Event::Headers {
