@@ -977,6 +977,18 @@ impl RecoveryOps for GRecovery {
         self.cwnd().saturating_sub(self.bytes_in_flight.get())
     }
 
+    fn set_ack_freq_send(&mut self, used_rtt: Duration) {
+        self.rtt_stats.set_ack_freq_send(used_rtt);
+    }
+
+    fn is_ack_freq_required(&self) -> bool {
+        self.rtt_stats.is_ack_freq_required()
+    }
+
+    fn mark_ack_freq_as_required(&mut self) {
+        self.rtt_stats.mark_ack_freq_as_required();
+    }
+
     fn rtt(&self) -> Duration {
         self.rtt_stats.rtt()
     }

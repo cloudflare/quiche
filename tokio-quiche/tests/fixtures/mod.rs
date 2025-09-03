@@ -240,8 +240,12 @@ where
         connection_hook: Some(hook),
     };
 
-    let params =
-        ConnectionParams::new_server(quic_settings, tls_cert_settings, hooks);
+    let params = ConnectionParams::new_server(
+        quic_settings,
+        tls_cert_settings,
+        hooks,
+        None,
+    );
     let mut stream = listen(
         vec![socket],
         params,
