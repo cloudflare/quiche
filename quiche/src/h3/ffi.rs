@@ -289,6 +289,37 @@ pub extern "C" fn quiche_h3_send_additional_headers(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_h3_stream_headers(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
+    headers: *const Header, headers_len: size_t, is_trailer_section: bool,
+    fin: bool,
+) -> c_int {
+    let headers = headers_from_ptr(headers, headers_len);
+
+    match conn.stream_headers(
+        quic_conn,
+        stream_id,
+        &headers,
+        is_trailer_section,
+        fin,
+    ) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_h3_continue_partial_headers(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
+) -> c_int {
+    match conn.continue_partial_headers(quic_conn, stream_id) {
+        Ok(_) => 0,
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_h3_send_body(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
     body: *const u8, body_len: size_t, fin: bool,
@@ -329,6 +360,17 @@ pub extern "C" fn quiche_h3_send_goaway(
     conn: &mut h3::Connection, quic_conn: &mut Connection, id: u64,
 ) -> c_int {
     match conn.send_goaway(quic_conn, id) {
+        Ok(()) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_h3_stream_priority(
+    quic_conn: &mut Connection, id: u64, priority: &Priority,
+) -> c_int {
+    match h3::Connection::stream_priority(quic_conn, id, priority) {
         Ok(()) => 0,
 
         Err(e) => e.to_c() as c_int,
