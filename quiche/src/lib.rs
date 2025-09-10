@@ -512,6 +512,9 @@ const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
 // The send capacity factor.
 const TX_CAP_FACTOR: f64 = 1.0;
 
+// Maximum value that can be encoded via varint.
+const MAX_VAR_INT: u64 = 4_611_686_018_427_387_903;
+
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -1137,14 +1140,15 @@ impl Config {
     ///
     /// The default value is infinite, that is, no timeout is used.
     pub fn set_max_idle_timeout(&mut self, v: u64) {
-        self.local_transport_params.max_idle_timeout = v;
+        self.local_transport_params.max_idle_timeout = cmp::min(v, MAX_VAR_INT);
     }
 
     /// Sets the `max_udp_payload_size transport` parameter.
     ///
     /// The default value is `65527`.
     pub fn set_max_recv_udp_payload_size(&mut self, v: usize) {
-        self.local_transport_params.max_udp_payload_size = v as u64;
+        self.local_transport_params.max_udp_payload_size =
+            cmp::min(v as u64, MAX_VAR_INT);
     }
 
     /// Sets the maximum outgoing UDP payload size.
@@ -1167,7 +1171,7 @@ impl Config {
     ///
     /// The default value is `0`.
     pub fn set_initial_max_data(&mut self, v: u64) {
-        self.local_transport_params.initial_max_data = v;
+        self.local_transport_params.initial_max_data = cmp::min(v, MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_stream_data_bidi_local` transport parameter.
@@ -1185,7 +1189,7 @@ impl Config {
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u64) {
         self.local_transport_params
-            .initial_max_stream_data_bidi_local = v;
+            .initial_max_stream_data_bidi_local = cmp::min(v, MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_stream_data_bidi_remote` transport parameter.
@@ -1203,7 +1207,7 @@ impl Config {
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u64) {
         self.local_transport_params
-            .initial_max_stream_data_bidi_remote = v;
+            .initial_max_stream_data_bidi_remote = cmp::min(v, MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_stream_data_uni` transport parameter.
@@ -1219,7 +1223,8 @@ impl Config {
     ///
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_uni(&mut self, v: u64) {
-        self.local_transport_params.initial_max_stream_data_uni = v;
+        self.local_transport_params.initial_max_stream_data_uni =
+            cmp::min(v, MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_streams_bidi` transport parameter.
@@ -1240,7 +1245,8 @@ impl Config {
     ///
     /// The default value is `0`.
     pub fn set_initial_max_streams_bidi(&mut self, v: u64) {
-        self.local_transport_params.initial_max_streams_bidi = v;
+        self.local_transport_params.initial_max_streams_bidi =
+            cmp::min(v, MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_streams_uni` transport parameter.
@@ -1259,21 +1265,22 @@ impl Config {
     ///
     /// The default value is `0`.
     pub fn set_initial_max_streams_uni(&mut self, v: u64) {
-        self.local_transport_params.initial_max_streams_uni = v;
+        self.local_transport_params.initial_max_streams_uni =
+            cmp::min(v, MAX_VAR_INT);
     }
 
     /// Sets the `ack_delay_exponent` transport parameter.
     ///
     /// The default value is `3`.
     pub fn set_ack_delay_exponent(&mut self, v: u64) {
-        self.local_transport_params.ack_delay_exponent = v;
+        self.local_transport_params.ack_delay_exponent = cmp::min(v, MAX_VAR_INT);
     }
 
     /// Sets the `max_ack_delay` transport parameter.
     ///
     /// The default value is `25`.
     pub fn set_max_ack_delay(&mut self, v: u64) {
-        self.local_transport_params.max_ack_delay = v;
+        self.local_transport_params.max_ack_delay = cmp::min(v, MAX_VAR_INT);
     }
 
     /// Sets the `active_connection_id_limit` transport parameter.
@@ -1281,7 +1288,8 @@ impl Config {
     /// The default value is `2`. Lower values will be ignored.
     pub fn set_active_connection_id_limit(&mut self, v: u64) {
         if v >= 2 {
-            self.local_transport_params.active_conn_id_limit = v;
+            self.local_transport_params.active_conn_id_limit =
+                cmp::min(v, MAX_VAR_INT);
         }
     }
 
@@ -2375,7 +2383,7 @@ impl<F: BufFactory> Connection<F> {
     /// The default value is infinite, that is, no timeout is used unless
     /// already configured when creating the connection.
     pub fn set_max_idle_timeout(&mut self, v: u64) -> Result<()> {
-        self.local_transport_params.max_idle_timeout = v;
+        self.local_transport_params.max_idle_timeout = cmp::min(v, MAX_VAR_INT);
 
         self.encode_transport_params()
     }
