@@ -9960,3 +9960,77 @@ fn disable_pmtud_mid_handshake(
     let active_path = pipe.server.paths.get_active_mut().unwrap();
     assert!(active_path.pmtud.is_none());
 }
+
+#[rstest]
+fn configuration_values_are_limited_to_max_varint() {
+    let mut config = Config::new(0x1).unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    let v = octets::MAX_VAR_INT + 1;
+    let uv = v as usize;
+    config.set_max_idle_timeout(v);
+    config.set_max_recv_udp_payload_size(uv);
+    config.set_initial_max_data(v);
+    config.set_initial_max_stream_data_bidi_local(v);
+    config.set_initial_max_stream_data_bidi_remote(v);
+    config.set_initial_max_stream_data_uni(v);
+    config.set_initial_max_streams_bidi(v);
+    config.set_initial_max_streams_uni(v);
+    config.set_ack_delay_exponent(v);
+    config.set_max_ack_delay(v);
+    config.set_active_connection_id_limit(v);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    assert_eq!(
+        pipe.client.local_transport_params.max_idle_timeout,
+        octets::MAX_VAR_INT
+    );
+    assert_eq!(
+        pipe.client.local_transport_params.max_udp_payload_size,
+        cmp::min(octets::MAX_VAR_INT, uv as u64)
+    );
+    assert_eq!(
+        pipe.client.local_transport_params.initial_max_data,
+        octets::MAX_VAR_INT
+    );
+    assert_eq!(
+        pipe.client
+            .local_transport_params
+            .initial_max_stream_data_bidi_local,
+        octets::MAX_VAR_INT
+    );
+    assert_eq!(
+        pipe.client
+            .local_transport_params
+            .initial_max_stream_data_bidi_remote,
+        octets::MAX_VAR_INT
+    );
+    assert_eq!(
+        pipe.client
+            .local_transport_params
+            .initial_max_stream_data_uni,
+        octets::MAX_VAR_INT
+    );
+    assert_eq!(
+        pipe.client.local_transport_params.initial_max_streams_bidi,
+        octets::MAX_VAR_INT
+    );
+    assert_eq!(
+        pipe.client.local_transport_params.initial_max_streams_uni,
+        octets::MAX_VAR_INT
+    );
+    assert_eq!(
+        pipe.client.local_transport_params.ack_delay_exponent,
+        octets::MAX_VAR_INT
+    );
+    assert_eq!(
+        pipe.client.local_transport_params.active_conn_id_limit,
+        octets::MAX_VAR_INT
+    );
+
+    // It's fine that this will fail with an error. We just want to ensure we
+    // do not panic because of too large values that we try to encode via varint.
+    assert_eq!(pipe.handshake(), Err(Error::InvalidTransportParam));
+}
