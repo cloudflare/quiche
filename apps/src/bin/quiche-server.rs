@@ -128,6 +128,10 @@ fn main() {
     config.set_max_connection_window(conn_args.max_window);
     config.set_max_stream_window(conn_args.max_stream_window);
 
+    if let Some(min_ack_delay) = conn_args.min_ack_delay {
+        config.ext_set_min_ack_delay(min_ack_delay);
+    }
+
     config.enable_pacing(pacing);
 
     let mut keylog = None;

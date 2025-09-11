@@ -316,6 +316,27 @@ pub extern "C" fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_ext_set_min_ack_delay(
+    config: &mut Config, v: u64,
+) {
+    config.ext_set_min_ack_delay(v);
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_config_ext_set_ack_freq_reordering_threshold(
+    config: &mut Config, v: u64,
+) {
+    config.ext_set_ack_freq_reordering_threshold(v);
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_config_ext_set_ack_freq_packet_tolerance(
+    config: &mut Config, v: u64,
+) {
+    config.ext_set_ack_freq_packet_tolerance(v);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_set_disable_active_migration(
     config: &mut Config, v: bool,
 ) {
@@ -1325,7 +1346,7 @@ pub extern "C" fn quiche_conn_peer_transport_params(
     out.initial_max_streams_bidi = tps.initial_max_streams_bidi;
     out.initial_max_streams_uni = tps.initial_max_streams_uni;
     out.ack_delay_exponent = tps.ack_delay_exponent;
-    out.max_ack_delay = tps.max_ack_delay;
+    out.max_ack_delay = tps.max_ack_delay.as_millis() as u64;
     out.disable_active_migration = tps.disable_active_migration;
     out.active_conn_id_limit = tps.active_conn_id_limit;
     out.max_datagram_frame_size = match tps.max_datagram_frame_size {

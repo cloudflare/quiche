@@ -465,6 +465,8 @@ const MAX_AMPLIFICATION_FACTOR: usize = 3;
 // This represents more or less how many ack blocks can fit in a typical packet.
 const MAX_ACK_RANGES: usize = 68;
 
+const MAX_UNREPORTED_MISSING_RANGES: usize = 256;
+
 // The highest possible stream ID allowed.
 const MAX_STREAM_ID: u64 = 1 << 60;
 
@@ -511,6 +513,16 @@ const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
 
 // The send capacity factor.
 const TX_CAP_FACTOR: f64 = 1.0;
+
+// The default reordering threshold that will be sent to the peer on
+// AckFrequency frame
+// It can be set the same as recovery::INITIAL_PACKET_THRESHOLD (3)
+// https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-setting-the-reordering-thre
+const DEFAULT_ACK_FREQ_REORDERING_THRESHOLD: u64 = 3;
+
+// The default packet tolerance that will be sent to the peer on AckFrequency
+// frame
+const DEFAULT_ACK_FREQ_PACKET_TOLERANCE: u64 = 5;
 
 /// A specialized [`Result`] type for quiche operations.
 ///
@@ -849,6 +861,9 @@ pub struct Config {
     track_unknown_transport_params: Option<usize>,
 
     initial_rtt: Duration,
+
+    ack_freq_reordering_threshold: u64,
+    ack_freq_packet_tolerance: u64,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -923,7 +938,11 @@ impl Config {
             disable_dcid_reuse: false,
 
             track_unknown_transport_params: None,
+
             initial_rtt: DEFAULT_INITIAL_RTT,
+
+            ack_freq_reordering_threshold: DEFAULT_ACK_FREQ_REORDERING_THRESHOLD,
+            ack_freq_packet_tolerance: DEFAULT_ACK_FREQ_PACKET_TOLERANCE,
         })
     }
 
@@ -1269,10 +1288,18 @@ impl Config {
         self.local_transport_params.ack_delay_exponent = v;
     }
 
-    /// Sets the `max_ack_delay` transport parameter.
+    /// Sets the `max_ack_delay` transport parameter in milliseconds.
+    /// Kept for compatibility, prefer using set_max_ack_delay_duration
     ///
     /// The default value is `25`.
     pub fn set_max_ack_delay(&mut self, v: u64) {
+        self.local_transport_params.max_ack_delay = Duration::from_millis(v);
+    }
+
+    /// Sets the `max_ack_delay` transport parameter.
+    ///
+    /// The default value is `25 ms`.
+    pub fn set_max_ack_delay_duration(&mut self, v: Duration) {
         self.local_transport_params.max_ack_delay = v;
     }
 
@@ -1283,6 +1310,26 @@ impl Config {
         if v >= 2 {
             self.local_transport_params.active_conn_id_limit = v;
         }
+    }
+
+    /// Sets the `min_ack_delay` transport parameter in microsecond.
+    ///
+    /// The default value is `None` which disables the delayed ack from the
+    /// peer.
+    pub fn ext_set_min_ack_delay(&mut self, v: u64) {
+        self.local_transport_params.min_ack_delay = Some(v);
+    }
+
+    /// Set the reordering threshold value that will be requested in
+    /// AckFrequency frames
+    pub fn ext_set_ack_freq_reordering_threshold(&mut self, v: u64) {
+        self.ack_freq_reordering_threshold = v;
+    }
+
+    /// Set the packet tolerance value that will be requested in AckFrequency
+    /// frames
+    pub fn ext_set_ack_freq_packet_tolerance(&mut self, v: u64) {
+        self.ack_freq_packet_tolerance = v;
     }
 
     /// Sets the `disable_active_migration` transport parameter.
@@ -1689,6 +1736,29 @@ where
 
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
+
+    /// Received ACK Frequency config
+    recv_ack_frequency: Option<AckFrequency>,
+
+    // ACK Frequency config to send to the peer
+    to_send_ack_frequency: AckFrequency,
+
+    last_send_ack_instant: Instant,
+
+    immediate_ack_pending: bool,
+
+    pkt_unreported_missing: ranges::RangeSet,
+
+    largest_pkt_acked: u64,
+
+    largest_pkt_unacked: u64,
+}
+
+#[derive(Default)]
+struct AckFrequency {
+    sequence_number: u64,
+    packet_tolerance: u64,
+    reordering_threshold: u64,
 }
 
 /// Creates a new server-side connection.
@@ -2179,6 +2249,26 @@ impl<F: BufFactory> Connection<F> {
             stopped_stream_remote_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
+
+            recv_ack_frequency: None,
+
+            to_send_ack_frequency: AckFrequency {
+                sequence_number: 0,
+                packet_tolerance: config.ack_freq_packet_tolerance,
+                reordering_threshold: config.ack_freq_reordering_threshold,
+            },
+
+            last_send_ack_instant: Instant::now(),
+
+            immediate_ack_pending: false,
+
+            pkt_unreported_missing: ranges::RangeSet::new(
+                MAX_UNREPORTED_MISSING_RANGES,
+            ),
+
+            largest_pkt_acked: 0,
+
+            largest_pkt_unacked: 0,
         };
 
         if let Some(odcid) = odcid {
@@ -3244,6 +3334,36 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::InvalidPacket);
         }
 
+        if let Some(freq) = &self.recv_ack_frequency {
+            if pn < self.largest_pkt_acked {
+                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11 section 6.2
+                // When an ack-eliciting packet is received with a packet number
+                // less than Largest Acked, this still triggers an
+                // immediate acknowledgement in an effort to avoid
+                // the packet being spuriously declared lost.
+                self.immediate_ack_pending = true;
+            } else if freq.reordering_threshold > 0 &&
+                epoch == packet::Epoch::Application
+            {
+                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-response-to-out-of-order-pa
+                self.pkt_unreported_missing
+                    .insert((self.largest_pkt_unacked + 1)..pn);
+
+                if let Some(min_unreported_missing) =
+                    self.pkt_unreported_missing.first()
+                {
+                    let gap = pn - min_unreported_missing;
+                    if gap >= freq.reordering_threshold {
+                        self.immediate_ack_pending = true;
+                    }
+                }
+            }
+        }
+
+        if epoch == packet::Epoch::Application {
+            self.largest_pkt_unacked = cmp::max(self.largest_pkt_unacked, pn);
+        }
+
         // Now that we decrypted the packet, let's see if we can map it to an
         // existing path.
         let recv_pid = if hdr.ty == Type::Short && self.got_peer_conn_id {
@@ -4080,6 +4200,10 @@ impl<F: BufFactory> Connection<F> {
                             pmtud.failed_probe(failed_probe);
                         },
 
+                    frame::Frame::AckFrequency { .. } => {
+                        p.recovery.mark_ack_freq_as_required();
+                    },
+
                     _ => (),
                 }
             }
@@ -4233,6 +4357,25 @@ impl<F: BufFactory> Connection<F> {
 
         let left_before_packing_ack_frame = left;
 
+        // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-sending-acknowledgments
+        // Prior to receiving an ACK_FREQUENCY frame, endpoints send
+        // acknowledgments as specified in Section 13.2.1 of [QUIC-TRANSPORT].
+        //
+        // The data receiver sends an acknowledgment when one of the following
+        // conditions are met since the last acknowledgement was sent:
+        // * The number of received ack-eliciting packets is greater than the
+        //   Ack-Eliciting Threshold.
+        // * max_ack_delay amount of time has passed and at least one
+        //   ack-eliciting packet has been received.
+        let mut should_delay_ack = false;
+        if let Some(freq) = &self.recv_ack_frequency {
+            should_delay_ack = epoch == packet::Epoch::Application &&
+                (pkt_space.recv_pkt_need_ack.len() as u64) <
+                    freq.packet_tolerance &&
+                self.last_send_ack_instant.elapsed() <
+                    self.local_transport_params.max_ack_delay;
+        }
+
         // Create ACK frame.
         //
         // When we need to explicitly elicit an ACK via PING later, go ahead and
@@ -4240,7 +4383,9 @@ impl<F: BufFactory> Connection<F> {
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
-            (pkt_space.ack_elicited || ack_elicit_required) &&
+            (ack_elicit_required ||
+                self.immediate_ack_pending ||
+                pkt_space.ack_elicited && !should_delay_ack) &&
             (!is_closing ||
                 (pkt_type == Type::Handshake &&
                     self.local_error
@@ -4269,6 +4414,23 @@ impl<F: BufFactory> Connection<F> {
                 // be bundled considering the buffer capacity only, and not the
                 // available cwnd.
                 if push_frame_to_pkt!(b, frames, frame, left) {
+                    // unwrap will not panic because .len() > 0 tested above
+                    if epoch == packet::Epoch::Application {
+                        self.largest_pkt_acked = cmp::max(
+                            self.largest_pkt_acked,
+                            pkt_space.recv_pkt_need_ack.last().unwrap(),
+                        );
+                        // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11 section 6.2.1
+                        // See the comment below table 1
+                        if let Some(freq) = &self.recv_ack_frequency {
+                            self.pkt_unreported_missing.remove_until(
+                                self.largest_pkt_acked
+                                    .saturating_sub(freq.reordering_threshold),
+                            );
+                        }
+                    }
+                    self.last_send_ack_instant = now;
+                    self.immediate_ack_pending = false;
                     pkt_space.ack_elicited = false;
                 }
             }
@@ -4280,6 +4442,51 @@ impl<F: BufFactory> Connection<F> {
             // Bytes consumed by ACK frames.
             cwnd_available.saturating_sub(left_before_packing_ack_frame - left),
         );
+
+        if pkt_type == Type::Short &&
+            path.active() &&
+            path.recovery.is_ack_freq_required() &&
+            epoch == packet::Epoch::Application &&
+            self.peer_transport_params.min_ack_delay.is_some()
+        {
+            let rtt = path.recovery.rtt();
+
+            let seq_num = self.to_send_ack_frequency.sequence_number + 1;
+
+            // We use 3/4 of the smoothed_rtt, it's an arbitrary value but it's
+            // less than the smoothed_rtt on purpose. Like this, we can sure that
+            // delaying packets will not have an effect on the congestion control.
+            let update_max_ack_delay = cmp::max(
+                self.peer_transport_params.min_ack_delay.unwrap(),
+                (3 * rtt.as_micros() / 4) as u64,
+            );
+
+            let frame = frame::Frame::AckFrequency {
+                sequence_number: seq_num,
+                packet_tolerance: self.to_send_ack_frequency.packet_tolerance,
+                update_max_ack_delay,
+                reordering_threshold: self
+                    .to_send_ack_frequency
+                    .reordering_threshold,
+            };
+
+            trace!(
+                "{} sending ack frequency seq_num={}, pkt_tol={}, max_ack_delay={}, reordering_threshold={}",
+                self.trace_id,
+                seq_num,
+                self.to_send_ack_frequency.packet_tolerance,
+                update_max_ack_delay,
+                self.to_send_ack_frequency.reordering_threshold,
+            );
+
+            if push_frame_to_pkt!(b, frames, frame, left) {
+                path.recovery.set_ack_freq_send(rtt);
+                self.to_send_ack_frequency.sequence_number = seq_num;
+
+                ack_eliciting = true;
+                in_flight = true;
+            }
+        }
 
         let mut challenge_data = None;
 
@@ -4348,6 +4555,11 @@ impl<F: BufFactory> Connection<F> {
                         if push_frame_to_pkt!(b, frames, frame, left) {
                             ack_eliciting = true;
                             in_flight = true;
+
+                            let frame = frame::Frame::ImmediateAck;
+                            // Should we care if there was not enough space left
+                            // to send the ImmediateAck frame ?
+                            push_frame_to_pkt!(b, frames, frame, left);
                         }
                     }
 
@@ -7340,7 +7552,7 @@ impl<F: BufFactory> Connection<F> {
         self.streams
             .update_peer_max_streams_uni(peer_params.initial_max_streams_uni);
 
-        let max_ack_delay = Duration::from_millis(peer_params.max_ack_delay);
+        let max_ack_delay = peer_params.max_ack_delay;
 
         self.recovery_config.max_ack_delay = max_ack_delay;
 
@@ -8131,6 +8343,10 @@ impl<F: BufFactory> Connection<F> {
                 self.drop_epoch_state(packet::Epoch::Handshake, now);
             },
 
+            frame::Frame::ImmediateAck => {
+                self.immediate_ack_pending = true;
+            },
+
             frame::Frame::Datagram { data } => {
                 // Close the connection if DATAGRAMs are not enabled.
                 // quiche always advertises support for 64K sized DATAGRAM
@@ -8156,6 +8372,59 @@ impl<F: BufFactory> Connection<F> {
             },
 
             frame::Frame::DatagramHeader { .. } => unreachable!(),
+
+            frame::Frame::AckFrequency {
+                sequence_number,
+                packet_tolerance,
+                update_max_ack_delay,
+                reordering_threshold,
+            } =>
+                if let Some(min_ack_delay) =
+                    self.local_transport_params.min_ack_delay
+                {
+                    let mut ack_freq = AckFrequency::default();
+
+                    // Check and update sequence_number if valid
+                    if let Some(freq) = &self.recv_ack_frequency {
+                        if freq.sequence_number >= sequence_number {
+                            // already received, ignore
+                            // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-ack_frequency-frame
+                            // A receiving endpoint MUST ignore a received
+                            // ACK_FREQUENCY frame unless the Sequence Number
+                            // value in the frame is greater than the largest
+                            // processed value.
+                            return Ok(());
+                        }
+                    }
+                    ack_freq.sequence_number = sequence_number;
+
+                    if packet_tolerance > 0 {
+                        ack_freq.packet_tolerance = packet_tolerance;
+                    } else {
+                        return Err(Error::InvalidFrame);
+                    }
+
+                    if update_max_ack_delay >= min_ack_delay {
+                        self.local_transport_params.max_ack_delay =
+                            Duration::from_micros(update_max_ack_delay);
+                    }
+
+                    ack_freq.reordering_threshold = reordering_threshold;
+
+                    trace!(
+                        "{} receiving ack frequency seq_num={}, pkt_tol={}, max_ack_delay={:?}, reordering_threshold={}",
+                        self.trace_id,
+                        ack_freq.sequence_number,
+                        ack_freq.packet_tolerance,
+                        self.local_transport_params.max_ack_delay,
+                        ack_freq.reordering_threshold,
+                    );
+
+                    self.recv_ack_frequency = Some(ack_freq);
+                } else {
+                    // AckFrequency Extension is not supported
+                    return Err(Error::InvalidFrame);
+                },
         }
 
         Ok(())
@@ -8890,7 +9159,9 @@ pub struct TransportParams {
     /// The ACK delay exponent.
     pub ack_delay_exponent: u64,
     /// The max ACK delay.
-    pub max_ack_delay: u64,
+    pub max_ack_delay: Duration,
+    /// The min ACK delay.
+    pub min_ack_delay: Option<u64>,
     /// Whether active migration is disabled.
     pub disable_active_migration: bool,
     /// The active connection ID limit.
@@ -8922,7 +9193,8 @@ impl Default for TransportParams {
             initial_max_streams_bidi: 0,
             initial_max_streams_uni: 0,
             ack_delay_exponent: 3,
-            max_ack_delay: 25,
+            max_ack_delay: Duration::from_millis(25),
+            min_ack_delay: None,
             disable_active_migration: false,
             active_conn_id_limit: 2,
             initial_source_connection_id: None,
@@ -8948,6 +9220,8 @@ impl TransportParams {
                 parameters: vec![],
             });
         }
+
+        let mut temp_min_ack_delay: Option<u64> = None;
 
         while params.cap() > 0 {
             let id = params.get_varint()?;
@@ -9047,7 +9321,7 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
-                    tp.max_ack_delay = max_ack_delay;
+                    tp.max_ack_delay = Duration::from_millis(max_ack_delay);
                 },
 
                 0x000c => {
@@ -9070,6 +9344,10 @@ impl TransportParams {
                     }
 
                     tp.active_conn_id_limit = limit;
+                },
+
+                0xff04de1b => {
+                    temp_min_ack_delay = Some(val.get_varint()?);
                 },
 
                 0x000f => {
@@ -9100,6 +9378,13 @@ impl TransportParams {
                     }
                 },
             }
+        }
+
+        if let Some(min_ack_delay) = temp_min_ack_delay {
+            if min_ack_delay > tp.max_ack_delay.as_micros() as u64 {
+                return Err(Error::InvalidTransportParam);
+            }
+            tp.min_ack_delay = temp_min_ack_delay;
         }
 
         Ok(tp)
@@ -9214,13 +9499,13 @@ impl TransportParams {
             b.put_varint(tp.ack_delay_exponent)?;
         }
 
-        if tp.max_ack_delay != 0 {
+        if tp.max_ack_delay.as_millis() != 0 {
             TransportParams::encode_param(
                 &mut b,
                 0x000b,
-                octets::varint_len(tp.max_ack_delay),
+                octets::varint_len(tp.max_ack_delay.as_millis() as u64),
             )?;
-            b.put_varint(tp.max_ack_delay)?;
+            b.put_varint(tp.max_ack_delay.as_millis() as u64)?;
         }
 
         if tp.disable_active_migration {
@@ -9259,6 +9544,15 @@ impl TransportParams {
             b.put_varint(max_datagram_frame_size)?;
         }
 
+        if let Some(min_ack_delay) = tp.min_ack_delay {
+            TransportParams::encode_param(
+                &mut b,
+                0xff04de1b,
+                octets::varint_len(min_ack_delay),
+            )?;
+            b.put_varint(min_ack_delay)?;
+        }
+
         let out_len = b.off();
 
         Ok(&mut out[..out_len])
@@ -9289,7 +9583,7 @@ impl TransportParams {
                 max_idle_timeout: Some(self.max_idle_timeout),
                 max_udp_payload_size: Some(self.max_udp_payload_size as u32),
                 ack_delay_exponent: Some(self.ack_delay_exponent as u16),
-                max_ack_delay: Some(self.max_ack_delay as u16),
+                max_ack_delay: Some(self.max_ack_delay.as_millis() as u16),
                 active_connection_id_limit: Some(
                     self.active_conn_id_limit as u32,
                 ),

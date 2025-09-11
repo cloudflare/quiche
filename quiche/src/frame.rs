@@ -184,6 +184,15 @@ pub enum Frame {
     DatagramHeader {
         length: usize,
     },
+
+    AckFrequency {
+        sequence_number: u64,
+        packet_tolerance: u64,
+        update_max_ack_delay: u64,
+        reordering_threshold: u64,
+    },
+
+    ImmediateAck,
 }
 
 impl Frame {
@@ -329,7 +338,16 @@ impl Frame {
 
             0x1e => Frame::HandshakeDone,
 
+            0x1f => Frame::ImmediateAck,
+
             0x30 | 0x31 => parse_datagram_frame(frame_type, b)?,
+
+            0xaf => Frame::AckFrequency {
+                sequence_number: b.get_varint()?,
+                packet_tolerance: b.get_varint()?,
+                update_max_ack_delay: b.get_varint()?,
+                reordering_threshold: b.get_varint()?,
+            },
 
             _ => return Err(Error::InvalidFrame),
         };
@@ -338,8 +356,9 @@ impl Frame {
             // PADDING and PING are allowed on all packet types.
             (_, Frame::Padding { .. }) | (_, Frame::Ping { .. }) => true,
 
-            // ACK, CRYPTO, HANDSHAKE_DONE, NEW_TOKEN, PATH_RESPONSE, and
-            // RETIRE_CONNECTION_ID can't be sent on 0-RTT packets.
+            // ACK, CRYPTO, HANDSHAKE_DONE, NEW_TOKEN, PATH_RESPONSE,
+            // RETIRE_CONNECTION_ID, CONNECTION_CLOSE, ACK_FREQUENCY and
+            // IMMEDIATE_ACK can't be sent on 0-RTT packets.
             (packet::Type::ZeroRTT, Frame::ACK { .. }) => false,
             (packet::Type::ZeroRTT, Frame::Crypto { .. }) => false,
             (packet::Type::ZeroRTT, Frame::HandshakeDone) => false,
@@ -347,6 +366,8 @@ impl Frame {
             (packet::Type::ZeroRTT, Frame::PathResponse { .. }) => false,
             (packet::Type::ZeroRTT, Frame::RetireConnectionId { .. }) => false,
             (packet::Type::ZeroRTT, Frame::ConnectionClose { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::AckFrequency { .. }) => false,
+            (packet::Type::ZeroRTT, Frame::ImmediateAck) => false,
 
             // ACK, CRYPTO and CONNECTION_CLOSE can be sent on all other packet
             // types.
@@ -586,6 +607,11 @@ impl Frame {
                 b.put_varint(0x1e)?;
             },
 
+            Frame::ImmediateAck => {
+                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-immediate_ack-frame
+                b.put_varint(0x1f)?;
+            },
+
             Frame::Datagram { data } => {
                 encode_dgram_header(data.len() as u64, b)?;
 
@@ -593,6 +619,21 @@ impl Frame {
             },
 
             Frame::DatagramHeader { .. } => (),
+
+            Frame::AckFrequency {
+                sequence_number,
+                packet_tolerance,
+                update_max_ack_delay,
+                reordering_threshold,
+            } => {
+                // https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-11#name-ack_frequency-frame
+                b.put_varint(0xaf)?;
+
+                b.put_varint(*sequence_number)?;
+                b.put_varint(*packet_tolerance)?;
+                b.put_varint(*update_max_ack_delay)?;
+                b.put_varint(*reordering_threshold)?;
+            },
         }
 
         Ok(before - b.cap())
@@ -797,6 +838,10 @@ impl Frame {
                 1 // frame type
             },
 
+            Frame::ImmediateAck => {
+                1 // frame type
+            },
+
             Frame::Datagram { data } => {
                 1 + // frame type
                 2 + // length, always encode as 2-byte varint
@@ -807,6 +852,19 @@ impl Frame {
                 1 + // frame type
                 2 + // length, always encode as 2-byte varint
                 *length // data
+            },
+
+            Frame::AckFrequency {
+                sequence_number,
+                packet_tolerance,
+                update_max_ack_delay,
+                reordering_threshold,
+            } => {
+                octets::varint_len(0xaf) + // frame type
+                octets::varint_len(*sequence_number) + // sequence_number
+                octets::varint_len(*packet_tolerance) + // packet_tolerance
+                octets::varint_len(*update_max_ack_delay) + // update_max_ack_delay
+                octets::varint_len(*reordering_threshold) // reordering_threshold
             },
         }
     }
@@ -1024,6 +1082,8 @@ impl Frame {
 
             Frame::HandshakeDone => QuicFrame::HandshakeDone,
 
+            Frame::ImmediateAck => QuicFrame::ImmediateAck,
+
             Frame::Datagram { data } => QuicFrame::Datagram {
                 length: data.len() as u64,
                 raw: None,
@@ -1032,6 +1092,18 @@ impl Frame {
             Frame::DatagramHeader { length } => QuicFrame::Datagram {
                 length: *length as u64,
                 raw: None,
+            },
+
+            Frame::AckFrequency {
+                sequence_number,
+                packet_tolerance,
+                update_max_ack_delay,
+                reordering_threshold,
+            } => QuicFrame::AckFrequency {
+                sequence_number: *sequence_number,
+                packet_tolerance: *packet_tolerance,
+                update_max_ack_delay: *update_max_ack_delay,
+                reordering_threshold: *reordering_threshold,
             },
         }
     }
@@ -1193,12 +1265,29 @@ impl std::fmt::Debug for Frame {
                 write!(f, "HANDSHAKE_DONE")?;
             },
 
+            Frame::ImmediateAck => {
+                write!(f, "IMMEDIATE_ACK")?;
+            },
+
             Frame::Datagram { data } => {
                 write!(f, "DATAGRAM len={}", data.len())?;
             },
 
             Frame::DatagramHeader { length } => {
                 write!(f, "DATAGRAM len={length}")?;
+            },
+
+            Frame::AckFrequency {
+                sequence_number,
+                packet_tolerance,
+                update_max_ack_delay,
+                reordering_threshold,
+            } => {
+                write!(
+                    f,
+                    "ACK_FREQUENCY sequence_number={} packet_tolerenace={} update_max_ack_delay={} reordering_threshold={}",
+                    sequence_number, packet_tolerance, update_max_ack_delay, reordering_threshold
+                )?;
             },
         }
 
@@ -2118,5 +2207,66 @@ mod tests {
         };
 
         assert_eq!(frame_data, data);
+    }
+
+    #[test]
+    fn ack_frequency() {
+        let mut d = [42; 128];
+
+        let frame = Frame::AckFrequency {
+            sequence_number: 32,
+            packet_tolerance: 1,
+            update_max_ack_delay: 67,
+            reordering_threshold: 1,
+        };
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 7);
+
+        assert_eq!(frame.wire_len(), wire_len);
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
+    }
+
+    #[test]
+    fn immediate_ack() {
+        let mut d = [42; 128];
+
+        let frame = Frame::ImmediateAck;
+
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        assert_eq!(wire_len, 1);
+
+        assert_eq!(frame.wire_len(), wire_len);
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert_eq!(Frame::from_bytes(&mut b, packet::Type::Short), Ok(frame));
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Initial).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::ZeroRTT).is_err());
+
+        let mut b = octets::Octets::with_slice(&d);
+        assert!(Frame::from_bytes(&mut b, packet::Type::Handshake).is_err());
     }
 }

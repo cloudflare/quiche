@@ -61,6 +61,8 @@ pub struct Config {
     pub max_window: u64,
     /// Receiver window limit for a stream in bytes.
     pub max_stream_window: u64,
+    /// Enable the delayed ack extension.
+    pub min_ack_delay: Option<u64>,
 }
 
 impl Config {
@@ -143,6 +145,11 @@ impl Config {
         self
     }
 
+    pub fn with_min_ack_delay(mut self, min_ack_delay: u64) -> Self {
+        self.min_ack_delay = Some(min_ack_delay);
+        self
+    }
+
     pub fn build(self) -> Result<Self, io::Error> {
         if self.host_port.is_empty() {
             return Err(io::Error::new(
@@ -166,6 +173,7 @@ impl Config {
             max_streams_uni: self.max_streams_uni,
             max_window: self.max_window,
             max_stream_window: self.max_stream_window,
+            min_ack_delay: self.min_ack_delay,
         })
     }
 }
@@ -188,6 +196,7 @@ impl Default for Config {
             max_streams_uni: 100,
             max_window: 25165824,
             max_stream_window: 16777216,
+            min_ack_delay: None,
         }
     }
 }

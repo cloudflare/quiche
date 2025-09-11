@@ -227,6 +227,13 @@ pub trait RecoveryOps {
     fn loss_detection_timer(&self) -> Option<Instant>;
     fn cwnd(&self) -> usize;
     fn cwnd_available(&self) -> usize;
+
+    fn set_ack_freq_send(&mut self, used_rtt: Duration);
+
+    fn is_ack_freq_required(&self) -> bool;
+
+    fn mark_ack_freq_as_required(&mut self);
+
     fn rtt(&self) -> Duration;
 
     fn min_rtt(&self) -> Option<Duration>;
