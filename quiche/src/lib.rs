@@ -512,9 +512,6 @@ const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
 // The send capacity factor.
 const TX_CAP_FACTOR: f64 = 1.0;
 
-// Maximum value that can be encoded via varint.
-const MAX_VAR_INT: u64 = 4_611_686_018_427_387_903;
-
 /// A specialized [`Result`] type for quiche operations.
 ///
 /// This type is used throughout quiche's public API for any operation that
@@ -1140,7 +1137,7 @@ impl Config {
     ///
     /// The default value is infinite, that is, no timeout is used.
     pub fn set_max_idle_timeout(&mut self, v: u64) {
-        self.local_transport_params.max_idle_timeout = cmp::min(v, MAX_VAR_INT);
+        self.local_transport_params.max_idle_timeout = cmp::min(v, octets::MAX_VAR_INT);
     }
 
     /// Sets the `max_udp_payload_size transport` parameter.
@@ -1148,7 +1145,7 @@ impl Config {
     /// The default value is `65527`.
     pub fn set_max_recv_udp_payload_size(&mut self, v: usize) {
         self.local_transport_params.max_udp_payload_size =
-            cmp::min(v as u64, MAX_VAR_INT);
+            cmp::min(v as u64, octets::MAX_VAR_INT);
     }
 
     /// Sets the maximum outgoing UDP payload size.
@@ -1171,7 +1168,7 @@ impl Config {
     ///
     /// The default value is `0`.
     pub fn set_initial_max_data(&mut self, v: u64) {
-        self.local_transport_params.initial_max_data = cmp::min(v, MAX_VAR_INT);
+        self.local_transport_params.initial_max_data = cmp::min(v, octets::MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_stream_data_bidi_local` transport parameter.
@@ -1189,7 +1186,7 @@ impl Config {
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_local(&mut self, v: u64) {
         self.local_transport_params
-            .initial_max_stream_data_bidi_local = cmp::min(v, MAX_VAR_INT);
+            .initial_max_stream_data_bidi_local = cmp::min(v, octets::MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_stream_data_bidi_remote` transport parameter.
@@ -1207,7 +1204,7 @@ impl Config {
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_bidi_remote(&mut self, v: u64) {
         self.local_transport_params
-            .initial_max_stream_data_bidi_remote = cmp::min(v, MAX_VAR_INT);
+            .initial_max_stream_data_bidi_remote = cmp::min(v, octets::MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_stream_data_uni` transport parameter.
@@ -1224,7 +1221,7 @@ impl Config {
     /// The default value is `0`.
     pub fn set_initial_max_stream_data_uni(&mut self, v: u64) {
         self.local_transport_params.initial_max_stream_data_uni =
-            cmp::min(v, MAX_VAR_INT);
+            cmp::min(v, octets::MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_streams_bidi` transport parameter.
@@ -1246,7 +1243,7 @@ impl Config {
     /// The default value is `0`.
     pub fn set_initial_max_streams_bidi(&mut self, v: u64) {
         self.local_transport_params.initial_max_streams_bidi =
-            cmp::min(v, MAX_VAR_INT);
+            cmp::min(v, octets::MAX_VAR_INT);
     }
 
     /// Sets the `initial_max_streams_uni` transport parameter.
@@ -1266,21 +1263,21 @@ impl Config {
     /// The default value is `0`.
     pub fn set_initial_max_streams_uni(&mut self, v: u64) {
         self.local_transport_params.initial_max_streams_uni =
-            cmp::min(v, MAX_VAR_INT);
+            cmp::min(v, octets::MAX_VAR_INT);
     }
 
     /// Sets the `ack_delay_exponent` transport parameter.
     ///
     /// The default value is `3`.
     pub fn set_ack_delay_exponent(&mut self, v: u64) {
-        self.local_transport_params.ack_delay_exponent = cmp::min(v, MAX_VAR_INT);
+        self.local_transport_params.ack_delay_exponent = cmp::min(v, octets::MAX_VAR_INT);
     }
 
     /// Sets the `max_ack_delay` transport parameter.
     ///
     /// The default value is `25`.
     pub fn set_max_ack_delay(&mut self, v: u64) {
-        self.local_transport_params.max_ack_delay = cmp::min(v, MAX_VAR_INT);
+        self.local_transport_params.max_ack_delay = cmp::min(v, octets::MAX_VAR_INT);
     }
 
     /// Sets the `active_connection_id_limit` transport parameter.
@@ -1289,7 +1286,7 @@ impl Config {
     pub fn set_active_connection_id_limit(&mut self, v: u64) {
         if v >= 2 {
             self.local_transport_params.active_conn_id_limit =
-                cmp::min(v, MAX_VAR_INT);
+                cmp::min(v, octets::MAX_VAR_INT);
         }
     }
 
@@ -2383,7 +2380,7 @@ impl<F: BufFactory> Connection<F> {
     /// The default value is infinite, that is, no timeout is used unless
     /// already configured when creating the connection.
     pub fn set_max_idle_timeout(&mut self, v: u64) -> Result<()> {
-        self.local_transport_params.max_idle_timeout = cmp::min(v, MAX_VAR_INT);
+        self.local_transport_params.max_idle_timeout = cmp::min(v, octets::MAX_VAR_INT);
 
         self.encode_transport_params()
     }
@@ -9135,6 +9132,7 @@ impl TransportParams {
         };
 
         if tp.max_idle_timeout != 0 {
+            assert!(tp.max_idle_timeout <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x0001,
@@ -9151,6 +9149,7 @@ impl TransportParams {
         }
 
         if tp.max_udp_payload_size != 0 {
+            assert!(tp.max_udp_payload_size <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x0003,
@@ -9160,6 +9159,7 @@ impl TransportParams {
         }
 
         if tp.initial_max_data != 0 {
+            assert!(tp.initial_max_data <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x0004,
@@ -9169,6 +9169,7 @@ impl TransportParams {
         }
 
         if tp.initial_max_stream_data_bidi_local != 0 {
+            assert!(tp.initial_max_stream_data_bidi_local <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x0005,
@@ -9178,6 +9179,7 @@ impl TransportParams {
         }
 
         if tp.initial_max_stream_data_bidi_remote != 0 {
+            assert!(tp.initial_max_stream_data_bidi_remote <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x0006,
@@ -9187,6 +9189,7 @@ impl TransportParams {
         }
 
         if tp.initial_max_stream_data_uni != 0 {
+            assert!(tp.initial_max_stream_data_uni <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x0007,
@@ -9196,6 +9199,7 @@ impl TransportParams {
         }
 
         if tp.initial_max_streams_bidi != 0 {
+            assert!(tp.initial_max_streams_bidi <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x0008,
@@ -9205,6 +9209,7 @@ impl TransportParams {
         }
 
         if tp.initial_max_streams_uni != 0 {
+            assert!(tp.initial_max_streams_uni <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x0009,
@@ -9214,6 +9219,7 @@ impl TransportParams {
         }
 
         if tp.ack_delay_exponent != 0 {
+            assert!(tp.ack_delay_exponent <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x000a,
@@ -9223,6 +9229,7 @@ impl TransportParams {
         }
 
         if tp.max_ack_delay != 0 {
+            assert!(tp.max_ack_delay <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x000b,
@@ -9238,6 +9245,7 @@ impl TransportParams {
         // TODO: encode preferred_address
 
         if tp.active_conn_id_limit != 2 {
+            assert!(tp.active_conn_id_limit <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x000e,
@@ -9259,6 +9267,7 @@ impl TransportParams {
         }
 
         if let Some(max_datagram_frame_size) = tp.max_datagram_frame_size {
+            assert!(max_datagram_frame_size <= octets::MAX_VAR_INT);
             TransportParams::encode_param(
                 &mut b,
                 0x0020,
