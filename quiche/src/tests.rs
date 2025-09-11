@@ -9968,8 +9968,9 @@ fn configuration_values_are_limited_to_max_varint() {
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
     let v = octets::MAX_VAR_INT + 1;
+    let uv = v as usize;
     config.set_max_idle_timeout(v);
-    config.set_max_recv_udp_payload_size(v as usize);
+    config.set_max_recv_udp_payload_size(uv);
     config.set_initial_max_data(v);
     config.set_initial_max_stream_data_bidi_local(v);
     config.set_initial_max_stream_data_bidi_remote(v);
@@ -9988,7 +9989,7 @@ fn configuration_values_are_limited_to_max_varint() {
     );
     assert_eq!(
         pipe.client.local_transport_params.max_udp_payload_size,
-        octets::MAX_VAR_INT
+        cmp::min(octets::MAX_VAR_INT, uv as u64)
     );
     assert_eq!(
         pipe.client.local_transport_params.initial_max_data,
