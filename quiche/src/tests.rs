@@ -10029,7 +10029,7 @@ fn configuration_values_are_limited_to_max_varint() {
         octets::MAX_VAR_INT
     );
 
-    // It's fine that this will fail with an error. We just want to ensure we not panic because
-    // of too large values that we try to encode via varint.
+    // It's fine that this will fail with an error. We just want to ensure we
+    // do not panic because of too large values that we try to encode via varint.
     assert_eq!(pipe.handshake(), Err(Error::InvalidTransportParam));
 }
