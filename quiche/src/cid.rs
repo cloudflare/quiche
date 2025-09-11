@@ -26,6 +26,7 @@
 
 use crate::Error;
 use crate::Result;
+use std::cmp;
 
 use crate::frame;
 
@@ -39,7 +40,7 @@ use smallvec::SmallVec;
 /// Used to calculate the cap for the queue of retired connection IDs for which
 /// a RETIRED_CONNECTION_ID frame have not been sent, as a multiple of
 /// `active_conn_id_limit` (see RFC 9000, section 5.1.2).
-const RETIRED_CONN_ID_LIMIT_MULTIPLIER: usize = 3;
+const RETIRED_CONN_ID_LIMIT_MULTIPLIER: u64 = 3;
 
 #[derive(Default)]
 struct BoundedConnectionIdSeqSet {
@@ -282,14 +283,16 @@ impl ConnectionIdentifiers {
             },
         );
 
+        // Guard against overflow.
+        let value =
+            (destination_conn_id_limit as u64) * RETIRED_CONN_ID_LIMIT_MULTIPLIER;
+        let size = cmp::min(usize::MAX as u64, value) as usize;
         // Because we already inserted the initial SCID.
         let next_scid_seq = 1;
         ConnectionIdentifiers {
             scids,
             dcids,
-            retire_dcid_seqs: BoundedConnectionIdSeqSet::new(
-                destination_conn_id_limit * RETIRED_CONN_ID_LIMIT_MULTIPLIER,
-            ),
+            retire_dcid_seqs: BoundedConnectionIdSeqSet::new(size),
             next_scid_seq,
             source_conn_id_limit,
             zero_length_scid,
@@ -300,7 +303,7 @@ impl ConnectionIdentifiers {
     /// Sets the maximum number of source connection IDs our peer allows us.
     pub fn set_source_conn_id_limit(&mut self, v: u64) {
         // Bound conn id limit so our scids queue sizing is valid.
-        let v = std::cmp::min(v, (usize::MAX / 2) as u64) as usize;
+        let v = cmp::min(v, (usize::MAX / 2) as u64) as usize;
 
         // It must be at least 2.
         if v >= 2 {
