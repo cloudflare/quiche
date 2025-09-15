@@ -1102,11 +1102,6 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
             Some(dgram) = self.dgram_recv.recv() => self.dgram_ready(qconn, dgram),
             Some(cmd) = self.cmd_recv.recv() => H::conn_command(self, qconn, cmd),
             r = self.hooks.wait_for_action(qconn), if H::has_wait_action(self) => r,
-            _ = self.h3_event_sender.closed() => {
-                let _ = qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
-                // Allow the IOW to continue until quiche reports the connection closed.
-                Ok(())
-            }
         }?;
 
         // Make sure controller is not starved, but also not prioritized in the
