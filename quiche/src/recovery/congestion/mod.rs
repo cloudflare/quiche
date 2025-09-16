@@ -78,7 +78,7 @@ impl SsThresh {
                 // In normal slow start, attribute the exit to loss.
                 StartupExitReason::Loss
             };
-            self.startup_exit = Some(StartupExit::new(ssthresh, reason));
+            self.startup_exit = Some(StartupExit::new(ssthresh, None, reason));
         }
         self.ssthresh = ssthresh;
     }
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn ssthresh_in_css() {
         let expected_startup_exit =
-            StartupExit::new(1000, StartupExitReason::PersistentQueue);
+            StartupExit::new(1000, None, StartupExitReason::PersistentQueue);
         let mut ssthresh: SsThresh = Default::default();
         ssthresh.update(1000, true);
         assert_eq!(ssthresh.get(), 1000);
@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn ssthresh_in_slow_start() {
         let expected_startup_exit =
-            StartupExit::new(1000, StartupExitReason::Loss);
+            StartupExit::new(1000, None, StartupExitReason::Loss);
         let mut ssthresh: SsThresh = Default::default();
         ssthresh.update(1000, false);
         assert_eq!(ssthresh.get(), 1000);

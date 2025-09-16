@@ -303,6 +303,7 @@ where
         let scid = conn.source_id().into_owned();
         let writer_cfg = WriterConfig {
             peer_addr,
+            local_addr,
             pending_cid: pending_cid.clone(),
             with_gso: self.config.has_gso,
             pacing_offload: self.config.pacing_offload,

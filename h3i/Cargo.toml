@@ -15,10 +15,7 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [features]
-default = ["sync"]
-
-sync = ["dep:quiche"]
-async = ["dep:tokio-quiche", "dep:buffer-pool", "dep:tokio"]
+async = ["dep:buffer-pool", "dep:tokio", "dep:tokio-quiche"]
 
 [dependencies]
 clap = "3"
@@ -29,7 +26,7 @@ mio = { workspace = true, features = ["net", "os-poll"] }
 multimap = "0.10"
 octets = { workspace = true }
 qlog = { workspace = true }
-quiche = { features = ["internal", "qlog"], optional = true, workspace = true }
+quiche = { features = ["internal", "qlog"], workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

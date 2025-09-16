@@ -343,9 +343,9 @@ impl ApplicationOverQuic for H3iDriver {
         }
 
         // Re-create the iterator so we can mutably borrow the stream parser map
-        let mut iter =
-            self.actions.clone().into_iter().skip(self.actions_executed);
-        while let Some(action) = iter.next() {
+        let iter = self.actions.clone().into_iter().skip(self.actions_executed);
+
+        for action in iter {
             match action {
                 Action::SendFrame { .. } |
                 Action::StreamBytes { .. } |
@@ -401,6 +401,7 @@ impl ApplicationOverQuic for H3iDriver {
             _ = sleep_until(self.next_fire_time), if waiting => {
                 log::debug!("h3i: releasing wait timer");
             }
+            else => {}
         }
 
         Ok(())
@@ -416,7 +417,7 @@ impl ApplicationOverQuic for H3iDriver {
     ) {
         let _ = self
             .record_tx
-            .send(ConnectionRecord::Close(ConnectionCloseDetails::new(&qconn)));
+            .send(ConnectionRecord::Close(ConnectionCloseDetails::new(qconn)));
 
         let _ = self
             .record_tx

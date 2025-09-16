@@ -107,6 +107,7 @@ impl QuicConnectionStats {
 
         datagram_socket::StartupExit {
             cwnd: value.cwnd,
+            bandwidth: value.bandwidth,
             reason,
         }
     }
@@ -166,6 +167,7 @@ impl AsSocketStats for QuicConnectionStats {
                 .as_ref()
                 .map(|p| p.delivery_rate)
                 .unwrap_or_default(),
+            max_bandwidth: self.path_stats.as_ref().and_then(|p| p.max_bandwidth),
             startup_exit: self
                 .path_stats
                 .as_ref()

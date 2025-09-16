@@ -107,7 +107,11 @@ struct Params {
     probe_bw_probe_down_pacing_gain: f32,
     probe_bw_default_pacing_gain: f32,
 
+    /// cwnd_gain for probe bw phases other than ProbeBW_UP
     probe_bw_cwnd_gain: f32,
+
+    /// cwnd_gain for ProbeBW_UP
+    probe_bw_up_cwnd_gain: f32,
 
     // PROBE_UP parameters.
     probe_up_ignore_inflight_hi: bool,
@@ -125,6 +129,9 @@ struct Params {
     probe_rtt_period: Duration,
 
     probe_rtt_duration: Duration,
+
+    probe_rtt_pacing_gain: f32,
+    probe_rtt_cwnd_gain: f32,
 
     // Parameters used by multiple modes.
     /// The initial value of the max ack height filter's window length.
@@ -179,6 +186,9 @@ struct Params {
     /// the initial pacing rate, which is calculated by dividing the
     /// initial cwnd by the first RTT estimate.
     initial_pacing_rate_bytes_per_second: Option<u64>,
+
+    /// If true, scale the pacing rate when updating mss when doing pmtud.
+    scale_pacing_rate_by_mss: bool,
 }
 
 impl Params {
@@ -202,6 +212,7 @@ impl Params {
         apply_override!(startup_cwnd_gain);
         apply_override!(startup_pacing_gain);
         apply_override!(full_bw_threshold);
+        apply_override!(startup_full_bw_rounds);
         apply_override!(startup_full_loss_count);
         apply_override!(drain_cwnd_gain);
         apply_override!(drain_pacing_gain);
@@ -211,11 +222,15 @@ impl Params {
         apply_override!(probe_bw_probe_up_pacing_gain);
         apply_override!(probe_bw_probe_down_pacing_gain);
         apply_override!(probe_bw_cwnd_gain);
+        apply_override!(probe_bw_up_cwnd_gain);
+        apply_override!(probe_rtt_pacing_gain);
+        apply_override!(probe_rtt_cwnd_gain);
         apply_override!(max_probe_up_queue_rounds);
         apply_override!(loss_threshold);
         apply_override!(use_bytes_delivered_for_inflight_hi);
         apply_override!(decrease_startup_pacing_at_end_of_round);
         apply_override!(ignore_app_limited_for_no_bandwidth_growth);
+        apply_override!(scale_pacing_rate_by_mss);
         apply_optional_override!(initial_pacing_rate_bytes_per_second);
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
@@ -261,6 +276,8 @@ const DEFAULT_PARAMS: Params = Params {
 
     probe_bw_cwnd_gain: 2.25, // BBRv3
 
+    probe_bw_up_cwnd_gain: 2.25, // BBRv3
+
     probe_up_ignore_inflight_hi: false,
 
     max_probe_up_queue_rounds: 2,
@@ -270,6 +287,10 @@ const DEFAULT_PARAMS: Params = Params {
     probe_rtt_period: Duration::from_millis(10000),
 
     probe_rtt_duration: Duration::from_millis(200),
+
+    probe_rtt_pacing_gain: 1.0,
+
+    probe_rtt_cwnd_gain: 1.0,
 
     initial_max_ack_height_filter_window: 10,
 
@@ -300,6 +321,8 @@ const DEFAULT_PARAMS: Params = Params {
     ignore_app_limited_for_no_bandwidth_growth: false,
 
     initial_pacing_rate_bytes_per_second: None,
+
+    scale_pacing_rate_by_mss: false,
 };
 
 #[derive(Debug, PartialEq)]
@@ -687,6 +710,10 @@ impl CongestionControl for BBRv2 {
         network_model.bandwidth_estimate()
     }
 
+    fn max_bandwidth(&self) -> Bandwidth {
+        self.mode.network_model().max_bandwidth()
+    }
+
     fn update_mss(&mut self, new_mss: usize) {
         self.cwnd_limits.hi = (self.cwnd_limits.hi as u64 * new_mss as u64 /
             self.mss as u64) as usize;
@@ -696,6 +723,10 @@ impl CongestionControl for BBRv2 {
             (self.cwnd as u64 * new_mss as u64 / self.mss as u64) as usize;
         self.initial_cwnd = (self.initial_cwnd as u64 * new_mss as u64 /
             self.mss as u64) as usize;
+        if self.params.scale_pacing_rate_by_mss {
+            self.pacing_rate =
+                self.pacing_rate * (new_mss as f64 / self.mss as f64);
+        }
         self.mss = new_mss;
     }
 
@@ -710,5 +741,61 @@ impl CongestionControl for BBRv2 {
 
     fn limit_cwnd(&mut self, max_cwnd: usize) {
         self.cwnd_limits.hi = max_cwnd
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    fn update_mss(#[values(false, true)] scale_pacing_rate_by_mss: bool) {
+        const INIT_PACKET_SIZE: usize = 1200;
+        const INIT_WINDOW_PACKETS: usize = 10;
+        const MAX_WINDOW_PACKETS: usize = 10000;
+        const INIT_CWND: usize = INIT_WINDOW_PACKETS * INIT_PACKET_SIZE;
+        const MAX_CWND: usize = MAX_WINDOW_PACKETS * INIT_PACKET_SIZE;
+        let initial_rtt = Duration::from_millis(333);
+        let bbr_params = &BbrParams {
+            scale_pacing_rate_by_mss: Some(scale_pacing_rate_by_mss),
+            ..Default::default()
+        };
+
+        const NEW_PACKET_SIZE: usize = 1450;
+        const NEW_CWND: usize = INIT_WINDOW_PACKETS * NEW_PACKET_SIZE;
+        const NEW_MAX_CWND: usize = MAX_WINDOW_PACKETS * NEW_PACKET_SIZE;
+
+        let mut bbr2 = BBRv2::new(
+            INIT_WINDOW_PACKETS,
+            MAX_WINDOW_PACKETS,
+            INIT_PACKET_SIZE,
+            initial_rtt,
+            Some(bbr_params),
+        );
+
+        assert_eq!(bbr2.cwnd_limits.lo, INIT_CWND);
+        assert_eq!(bbr2.cwnd_limits.hi, MAX_CWND);
+        assert_eq!(bbr2.cwnd, INIT_CWND);
+        assert_eq!(
+            bbr2.pacing_rate.to_bytes_per_period(initial_rtt),
+            (2.88499 * INIT_CWND as f64) as u64
+        );
+
+        bbr2.update_mss(NEW_PACKET_SIZE);
+
+        assert_eq!(bbr2.cwnd_limits.lo, NEW_CWND);
+        assert_eq!(bbr2.cwnd_limits.hi, NEW_MAX_CWND);
+        assert_eq!(bbr2.cwnd, NEW_CWND);
+        let pacing_cwnd = if scale_pacing_rate_by_mss {
+            NEW_CWND
+        } else {
+            INIT_CWND
+        };
+        assert_eq!(
+            bbr2.pacing_rate.to_bytes_per_period(initial_rtt),
+            (2.88499 * pacing_cwnd as f64) as u64
+        );
     }
 }

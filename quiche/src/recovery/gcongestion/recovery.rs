@@ -1,5 +1,9 @@
 use crate::packet;
 use crate::recovery::OnLossDetectionTimeoutOutcome;
+use crate::recovery::INITIAL_TIME_THRESHOLD_OVERHEAD;
+use crate::recovery::TIME_THRESHOLD_OVERHEAD_MULTIPLIER;
+use crate::Error;
+use crate::Result;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -35,8 +39,7 @@ use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
-use crate::Error;
-use crate::Result;
+use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 
 use super::bbr2::BBRv2;
 use super::pacer::Pacer;
@@ -257,7 +260,7 @@ impl RecoveryEpoch {
     }
 
     fn detect_and_remove_lost_packets(
-        &mut self, loss_delay: Duration, pkt_thresh: u64, now: Instant,
+        &mut self, loss_delay: Duration, pkt_thresh: Option<u64>, now: Instant,
         newly_lost: &mut Vec<Lost>,
     ) -> LossDetectionResult {
         newly_lost.clear();
@@ -275,9 +278,13 @@ impl RecoveryEpoch {
             }
 
             if let SentStatus::Sent { time_sent, .. } = status {
-                if *time_sent <= lost_send_time ||
-                    largest_acked >= *pkt_num + pkt_thresh
-                {
+                let loss_by_time = *time_sent <= lost_send_time;
+                let loss_by_pkt = match pkt_thresh {
+                    Some(pkt_thresh) => largest_acked >= *pkt_num + pkt_thresh,
+                    None => false,
+                };
+
+                if loss_by_time || loss_by_pkt {
                     if let SentStatus::Sent {
                         in_flight,
                         sent_bytes,
@@ -350,6 +357,72 @@ impl RecoveryEpoch {
     }
 }
 
+struct LossThreshold {
+    pkt_thresh: Option<u64>,
+    time_thresh: f64,
+
+    // # Experiment: enable_relaxed_loss_threshold
+    //
+    // If `Some` this will disable pkt_thresh on the first loss and then double
+    // time_thresh on subsequent loss.
+    //
+    // The actual threshold is calcualted as `1.0 +
+    // INITIAL_TIME_THRESHOLD_OVERHEAD` and equivalent to the initial value
+    // of INITIAL_TIME_THRESHOLD.
+    time_thresh_overhead: Option<f64>,
+}
+
+impl LossThreshold {
+    fn new(recovery_config: &RecoveryConfig) -> Self {
+        let time_thresh_overhead =
+            if recovery_config.enable_relaxed_loss_threshold {
+                Some(INITIAL_TIME_THRESHOLD_OVERHEAD)
+            } else {
+                None
+            };
+        LossThreshold {
+            pkt_thresh: Some(INITIAL_PACKET_THRESHOLD),
+            time_thresh: INITIAL_TIME_THRESHOLD,
+            time_thresh_overhead,
+        }
+    }
+
+    fn pkt_thresh(&self) -> Option<u64> {
+        self.pkt_thresh
+    }
+
+    fn time_thresh(&self) -> f64 {
+        self.time_thresh
+    }
+
+    fn on_spurious_loss(&mut self, new_pkt_thresh: u64) {
+        match &mut self.time_thresh_overhead {
+            Some(time_thresh_overhead) => {
+                if self.pkt_thresh.is_some() {
+                    // Disable packet threshold on first spurious loss.
+                    self.pkt_thresh = None;
+                } else {
+                    // Double time threshold but cap it at `1.0`, which ends up
+                    // being 2x the RTT.
+                    *time_thresh_overhead *= TIME_THRESHOLD_OVERHEAD_MULTIPLIER;
+                    *time_thresh_overhead = time_thresh_overhead.min(1.0);
+
+                    self.time_thresh = 1.0 + *time_thresh_overhead;
+                }
+            },
+            None => {
+                let new_packet_threshold = self
+                    .pkt_thresh
+                    .expect("packet threshold should always be Some when `enable_relaxed_loss_threshold` is false")
+                    .max(new_pkt_thresh.min(MAX_PACKET_THRESHOLD));
+                self.pkt_thresh = Some(new_packet_threshold);
+
+                self.time_thresh = PACKET_REORDER_TIME_THRESHOLD;
+            },
+        }
+    }
+}
+
 pub struct GRecovery {
     epochs: [RecoveryEpoch; packet::Epoch::count()],
 
@@ -365,9 +438,7 @@ pub struct GRecovery {
 
     pub lost_spurious_count: usize,
 
-    pkt_thresh: u64,
-
-    time_thresh: f64,
+    loss_thresh: LossThreshold,
 
     bytes_in_flight: BytesInFlight,
 
@@ -422,9 +493,7 @@ impl GRecovery {
             lost_count: 0,
             lost_spurious_count: 0,
 
-            pkt_thresh: INITIAL_PACKET_THRESHOLD,
-            time_thresh: INITIAL_TIME_THRESHOLD,
-
+            loss_thresh: LossThreshold::new(recovery_config),
             bytes_in_flight: Default::default(),
             bytes_sent: 0,
             bytes_lost: 0,
@@ -455,17 +524,18 @@ impl GRecovery {
     fn detect_and_remove_lost_packets(
         &mut self, epoch: packet::Epoch, now: Instant,
     ) -> (usize, usize) {
+        let loss_delay =
+            self.rtt_stats.loss_delay(self.loss_thresh.time_thresh());
         let lost = &mut self.lost_reuse;
 
         let LossDetectionResult {
             lost_bytes,
             lost_packets,
-
             pmtud_lost_bytes,
             pmtud_lost_packets,
         } = self.epochs[epoch].detect_and_remove_lost_packets(
-            self.rtt_stats.loss_delay(self.time_thresh),
-            self.pkt_thresh,
+            loss_delay,
+            self.loss_thresh.pkt_thresh(),
             now,
             lost,
         );
@@ -704,12 +774,15 @@ impl RecoveryOps for GRecovery {
 
         self.lost_spurious_count += spurious_losses;
         if let Some(thresh) = spurious_pkt_thresh {
-            self.pkt_thresh =
-                self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
+            self.loss_thresh.on_spurious_loss(thresh);
         }
 
         if self.newly_acked.is_empty() {
-            return Ok(OnAckReceivedOutcome::default());
+            return Ok(OnAckReceivedOutcome {
+                acked_bytes,
+                spurious_losses,
+                ..Default::default()
+            });
         }
 
         self.bytes_in_flight.saturating_subtract(acked_bytes, now);
@@ -930,6 +1003,10 @@ impl RecoveryOps for GRecovery {
         self.pacer.bandwidth_estimate(&self.rtt_stats)
     }
 
+    fn max_bandwidth(&self) -> Option<Bandwidth> {
+        Some(self.pacer.max_bandwidth())
+    }
+
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit> {
         self.recovery_stats.startup_exit
@@ -987,8 +1064,13 @@ impl RecoveryOps for GRecovery {
     }
 
     #[cfg(test)]
-    fn pkt_thresh(&self) -> u64 {
-        self.pkt_thresh
+    fn pkt_thresh(&self) -> Option<u64> {
+        self.loss_thresh.pkt_thresh()
+    }
+
+    #[cfg(test)]
+    fn time_thresh(&self) -> f64 {
+        self.loss_thresh.time_thresh()
     }
 
     #[cfg(test)]
@@ -1096,5 +1178,112 @@ impl std::fmt::Debug for GRecovery {
         write!(f, "bytes_in_flight={} ", self.bytes_in_flight.get())?;
         write!(f, "{:?} ", self.pacer)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Config;
+
+    #[test]
+    fn loss_threshold() {
+        let config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let recovery_config = RecoveryConfig::from_config(&config);
+        assert_eq!(recovery_config.enable_relaxed_loss_threshold, false);
+
+        let mut loss_thresh = LossThreshold::new(&recovery_config);
+        assert_eq!(loss_thresh.time_thresh_overhead, None);
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), INITIAL_TIME_THRESHOLD);
+
+        // First spurious loss.
+        loss_thresh.on_spurious_loss(INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+
+        // Packet gaps < INITIAL_PACKET_THRESHOLD will NOT change packet
+        // threshold.
+        for packet_gap in 0..INITIAL_PACKET_THRESHOLD {
+            loss_thresh.on_spurious_loss(packet_gap);
+
+            // Packet threshold only increases once the packet gap increases.
+            assert_eq!(
+                loss_thresh.pkt_thresh().unwrap(),
+                INITIAL_PACKET_THRESHOLD
+            );
+            assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+        }
+
+        // Subsequent spurious loss with packet_gaps > INITIAL_PACKET_THRESHOLD.
+        // Test values much larger than MAX_PACKET_THRESHOLD, i.e.
+        // `MAX_PACKET_THRESHOLD * 2`
+        for packet_gap in INITIAL_PACKET_THRESHOLD + 1..MAX_PACKET_THRESHOLD * 2 {
+            loss_thresh.on_spurious_loss(packet_gap);
+
+            // Packet threshold is equal to packet gap beyond
+            // INITIAL_PACKET_THRESHOLD, but capped
+            // at MAX_PACKET_THRESHOLD.
+            let new_packet_threshold = if packet_gap < MAX_PACKET_THRESHOLD {
+                packet_gap
+            } else {
+                MAX_PACKET_THRESHOLD
+            };
+            assert_eq!(loss_thresh.pkt_thresh().unwrap(), new_packet_threshold);
+            assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+        }
+        // Packet threshold is capped at MAX_PACKET_THRESHOLD
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), MAX_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+
+        // Packet threshold is monotonically increasing
+        loss_thresh.on_spurious_loss(INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), MAX_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+    }
+
+    #[test]
+    fn relaxed_loss_threshold() {
+        // The max time threshold when operating in relaxed loss mode.
+        const MAX_TIME_THRESHOLD: f64 = 2.0;
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.set_enable_relaxed_loss_threshold(true);
+        let recovery_config = RecoveryConfig::from_config(&config);
+        assert!(recovery_config.enable_relaxed_loss_threshold);
+
+        let mut loss_thresh = LossThreshold::new(&recovery_config);
+        assert_eq!(
+            loss_thresh.time_thresh_overhead,
+            Some(INITIAL_TIME_THRESHOLD_OVERHEAD)
+        );
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), INITIAL_TIME_THRESHOLD);
+
+        // First spurious loss.
+        loss_thresh.on_spurious_loss(INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.pkt_thresh(), None);
+        assert_eq!(loss_thresh.time_thresh(), INITIAL_TIME_THRESHOLD);
+
+        // Subsequent spurious loss.
+        for subsequent_loss_count in 1..100 {
+            // Double the overhead until it caps at `2.0`.
+            //
+            // It takes `3` rounds of doubling for INITIAL_TIME_THRESHOLD_OVERHEAD
+            // to equal `1.0`.
+            let new_time_threshold = if subsequent_loss_count <= 3 {
+                1.0 + INITIAL_TIME_THRESHOLD_OVERHEAD *
+                    2_f64.powi(subsequent_loss_count as i32)
+            } else {
+                2.0
+            };
+
+            loss_thresh.on_spurious_loss(subsequent_loss_count);
+            assert_eq!(loss_thresh.pkt_thresh(), None);
+            assert_eq!(loss_thresh.time_thresh(), new_time_threshold);
+        }
+        // Time threshold is capped at 2.0.
+        assert_eq!(loss_thresh.pkt_thresh(), None);
+        assert_eq!(loss_thresh.time_thresh(), MAX_TIME_THRESHOLD);
     }
 }

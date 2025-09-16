@@ -108,6 +108,7 @@ where
     let writer_cfg = WriterConfig {
         pending_cid: None, // only used for unmapping in IPR
         peer_addr,
+        local_addr,
         // TODO: try to read Tx' SocketCaps. false is always a safe default.
         with_gso: false,
         pacing_offload: false,

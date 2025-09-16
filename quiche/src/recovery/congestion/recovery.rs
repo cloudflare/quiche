@@ -66,6 +66,7 @@ use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
+use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 
 #[derive(Default)]
 struct RecoveryEpoch {
@@ -658,6 +659,7 @@ impl RecoveryOps for LegacyRecovery {
         if let Some(thresh) = spurious_pkt_thresh {
             self.pkt_thresh =
                 self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
+            self.time_thresh = PACKET_REORDER_TIME_THRESHOLD;
         }
 
         // Undo congestion window update.
@@ -873,6 +875,11 @@ impl RecoveryOps for LegacyRecovery {
         self.congestion.delivery_rate()
     }
 
+    fn max_bandwidth(&self) -> Option<Bandwidth> {
+        // TODO implement
+        None
+    }
+
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit> {
         self.congestion.ssthresh.startup_exit()
@@ -940,8 +947,13 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     #[cfg(test)]
-    fn pkt_thresh(&self) -> u64 {
-        self.pkt_thresh
+    fn pkt_thresh(&self) -> Option<u64> {
+        Some(self.pkt_thresh)
+    }
+
+    #[cfg(test)]
+    fn time_thresh(&self) -> f64 {
+        self.time_thresh
     }
 
     #[cfg(test)]

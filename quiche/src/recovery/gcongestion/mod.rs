@@ -120,6 +120,8 @@ pub(super) trait CongestionControl: Debug {
 
     fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth;
 
+    fn max_bandwidth(&self) -> Bandwidth;
+
     fn update_mss(&mut self, new_mss: usize);
 
     fn on_app_limited(&mut self, _bytes_in_flight: usize) {}
@@ -151,6 +153,10 @@ pub struct BbrParams {
     /// Controls the BBR full bandwidth threshold.
     pub full_bw_threshold: Option<f32>,
 
+    /// Controls the number of rounds to stay in STARTUP before
+    /// exiting due to bandwidth plateau.
+    pub startup_full_bw_rounds: Option<usize>,
+
     /// Controls the BBR startup loss count necessary to exit startup.
     pub startup_full_loss_count: Option<usize>,
 
@@ -177,8 +183,17 @@ pub struct BbrParams {
     /// Controls the BBR bandwidth probe down pacing gain.
     pub probe_bw_probe_down_pacing_gain: Option<f32>,
 
-    /// Controls the BBR probe bandwidth cwnd gain.
+    /// Controls the BBR probe bandwidth DOWN/CRUISE/REFILL cwnd gain.
     pub probe_bw_cwnd_gain: Option<f32>,
+
+    /// Controls the BBR probe bandwidth UP cwnd gain.
+    pub probe_bw_up_cwnd_gain: Option<f32>,
+
+    /// Controls the BBR probe RTT pacing gain.
+    pub probe_rtt_pacing_gain: Option<f32>,
+
+    /// Controls the BBR probe RTT cwnd gain.
+    pub probe_rtt_cwnd_gain: Option<f32>,
 
     /// Controls the number of rounds BBR should stay in probe up if
     /// bytes_in_flight doesn't drop below target.
@@ -206,6 +221,9 @@ pub struct BbrParams {
     /// the initial pacing rate, which is calculated by dividing the
     /// initial cwnd by the first RTT estimate.
     pub initial_pacing_rate_bytes_per_second: Option<u64>,
+
+    /// If true, scale the pacing rate when updating mss when doing pmtud.
+    pub scale_pacing_rate_by_mss: Option<bool>,
 }
 
 /// Controls BBR's bandwidth reduction strategy on congestion event.
