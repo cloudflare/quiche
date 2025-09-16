@@ -5174,13 +5174,6 @@ impl<F: BufFactory> Connection<F> {
             self.ack_eliciting_sent = true;
         }
 
-        let active_path = self.paths.get_active_mut()?;
-        if let Some(pmtud) = active_path.pmtud.as_mut() {
-            active_path
-                .recovery
-                .pmtud_update_max_datagram_size(pmtud.get_current_mtu());
-        }
-
         Ok((pkt_type, written))
     }
 
