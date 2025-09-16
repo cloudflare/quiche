@@ -1,6 +1,6 @@
 [package]
 name = "tokio-quiche"
-version = "0.6.1"
+version = "0.7.0"
 repository = { workspace = true }
 license = { workspace = true }
 description = "Asynchronous wrapper around quiche"
