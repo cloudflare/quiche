@@ -28,6 +28,9 @@
 use std::mem;
 use std::ptr;
 
+/// Maximum value that can be encoded via varint.
+pub const MAX_VAR_INT: u64 = 4_611_686_018_427_387_903;
+
 /// A specialized [`Result`] type for [`OctetsMut`] operations.
 ///
 /// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
@@ -685,7 +688,7 @@ pub const fn varint_len(v: u64) -> usize {
         2
     } else if v <= 1_073_741_823 {
         4
-    } else if v <= 4_611_686_018_427_387_903 {
+    } else if v <= MAX_VAR_INT {
         8
     } else {
         unreachable!()
