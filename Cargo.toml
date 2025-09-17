@@ -36,7 +36,7 @@ buffer-pool = { version = "0.1.0", path = "./buffer-pool" }
 crossbeam = { version = "0.8.1", default-features = false }
 datagram-socket = { version = "0.4.0", path = "./datagram-socket" }
 env_logger = "0.10"
-foundations = { version = "4", default-features = false }
+foundations = { version = "5", default-features = false }
 futures = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false }
 h3i = { version = "0.5", path = "./h3i" }
