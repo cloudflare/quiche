@@ -189,6 +189,10 @@ struct Params {
 
     /// If true, scale the pacing rate when updating mss when doing pmtud.
     scale_pacing_rate_by_mss: bool,
+
+    /// Disable `has_stayed_long_enough_in_probe_down` which can cause ProbeDown
+    /// to exit early.
+    disable_probe_down_early_exit: bool,
 }
 
 impl Params {
@@ -231,6 +235,7 @@ impl Params {
         apply_override!(decrease_startup_pacing_at_end_of_round);
         apply_override!(ignore_app_limited_for_no_bandwidth_growth);
         apply_override!(scale_pacing_rate_by_mss);
+        apply_override!(disable_probe_down_early_exit);
         apply_optional_override!(initial_pacing_rate_bytes_per_second);
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
@@ -323,6 +328,8 @@ const DEFAULT_PARAMS: Params = Params {
     initial_pacing_rate_bytes_per_second: None,
 
     scale_pacing_rate_by_mss: false,
+
+    disable_probe_down_early_exit: false,
 };
 
 #[derive(Debug, PartialEq)]

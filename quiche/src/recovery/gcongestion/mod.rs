@@ -224,6 +224,10 @@ pub struct BbrParams {
 
     /// If true, scale the pacing rate when updating mss when doing pmtud.
     pub scale_pacing_rate_by_mss: Option<bool>,
+
+    /// Disable `has_stayed_long_enough_in_probe_down` which can cause ProbeDown
+    /// to exit early.
+    pub disable_probe_down_early_exit: Option<bool>,
 }
 
 /// Controls BBR's bandwidth reduction strategy on congestion event.
