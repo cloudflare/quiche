@@ -659,10 +659,12 @@ impl<H: DriverHooks> H3Driver<H> {
                     return Ok(());
                 }
                 if *fin {
-                    // If this is the last body frame, close the receiver in the
-                    // stream map to signal that we shouldn't
-                    // receive any more frames.
-                    ctx.recv.as_mut().expect("channel").close();
+                    // If this is the last body frame, drop the receiver in the
+                    // stream map to signal that we shouldn't receive any more
+                    // frames. NOTE: we can't use `mpsc::Receiver::close()`
+                    // due to an inconsistency in how tokio handles reading
+                    // from a closed mpsc channel https://github.com/tokio-rs/tokio/issues/7631
+                    ctx.recv = None;
                 }
                 #[cfg(feature = "zero-copy")]
                 let n = conn.send_body_zc(qconn, stream_id, body, *fin)?;
@@ -947,7 +949,9 @@ impl<H: DriverHooks> H3Driver<H> {
             }
 
             let Some(recv) = ctx.recv.as_mut() else {
-                return Ok(()); // This stream is already waiting for data
+                // This stream is already waiting for data or we wrote a fin and
+                // closed the channel.
+                return Ok(());
             };
 
             // Attempt to queue the next frame for processing. The corresponding
