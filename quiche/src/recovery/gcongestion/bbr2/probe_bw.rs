@@ -320,7 +320,10 @@ impl ProbeBW {
             return;
         }
 
-        if self.has_stayed_long_enough_in_probe_down(congestion_event) {
+        // This exit condition is experimental code from Google quiche which
+        // diverges from the RFC. Use `disable_probe_down_early_exit` to override
+        // the behavior.
+        if self.has_stayed_long_enough_in_probe_down(congestion_event, params) {
             self.enter_probe_cruise(congestion_event.event_time);
             return;
         }
@@ -559,11 +562,20 @@ impl ProbeBW {
 
     // Used to prevent a BBR2 flow from staying in PROBE_DOWN for too
     // long, as seen in some multi-sender simulator tests.
+    //
+    // This is experimental code from Google quiche and diverges from the RFC. Use
+    // `disable_probe_down_early_exit` to override the behavior.
+    // - RFC: https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-02.html#name-probebw_down
+    // - Google quiche: https://github.com/google/quiche/blob/b370e7a/quiche/quic/core/congestion_control/bbr2_probe_bw.cc#L142
     fn has_stayed_long_enough_in_probe_down(
-        &self, congestion_event: &BBRv2CongestionEvent,
+        &self, congestion_event: &BBRv2CongestionEvent, params: &Params,
     ) -> bool {
-        // Stay in PROBE_DOWN for at most the time of a min rtt, as it is done in
-        // BBRv1.
+        if params.disable_probe_down_early_exit {
+            return false;
+        }
+
+        // Stay in PROBE_DOWN for at most the time of a min rtt, as it is done
+        // in BBRv1.
         self.has_phase_lasted(self.model.min_rtt(), congestion_event)
     }
 
