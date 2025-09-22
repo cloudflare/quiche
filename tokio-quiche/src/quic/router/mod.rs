@@ -527,10 +527,9 @@ where
                                     // messages because
                                     // we set IP_PKTINFO on the socket.
                                 },
-                                _ => {
-                                    return Poll::Ready(
-                                        Err(Errno::EINVAL.into()),
-                                    );
+                                cmsg => {
+                                    let repr = format!("{cmsg:?}");
+                                    log::debug!("received unknown cmsg"; "cmsg"=>repr);
                                 },
                             };
                         }
