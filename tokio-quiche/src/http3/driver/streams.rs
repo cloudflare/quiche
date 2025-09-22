@@ -53,9 +53,9 @@ pub(crate) struct StreamCtx {
     /// Indicates the stream sent initial headers.
     pub(crate) initial_headers_sent: bool,
     /// Indicates the stream received fin. No more data will be received.
-    pub(crate) fin_recv: bool,
+    pub(crate) fin_or_reset_recv: bool,
     /// Indicates the stream sent fin. No more data will be sent.
-    pub(crate) fin_sent: bool,
+    pub(crate) fin_or_reset_sent: bool,
     /// The flow ID for proxying datagrams over this stream. If `None`,
     /// the stream has no associated DATAGRAM flow.
     pub(crate) associated_dgram_flow_id: Option<u64>,
@@ -78,8 +78,8 @@ impl StreamCtx {
 
             initial_headers_sent: false,
 
-            fin_recv: false,
-            fin_sent: false,
+            fin_or_reset_recv: false,
+            fin_or_reset_sent: false,
 
             associated_dgram_flow_id: None,
         };
@@ -101,6 +101,10 @@ impl StreamCtx {
             stream_id,
             chan: self.recv.take(),
         })
+    }
+
+    pub(crate) fn both_directions_done(&self) -> bool {
+        self.fin_or_reset_recv && self.fin_or_reset_sent
     }
 }
 
