@@ -61,8 +61,8 @@ pub struct AppConfig {
 
     pub dark_mode: bool,
 
-    pub start: Option<f32>,
-    pub end: Option<f32>,
+    pub start: Option<f64>,
+    pub end: Option<f64>,
 
     pub stream_y_max: Option<u64>,
     pub cwnd_y_max: Option<u64>,
@@ -209,8 +209,8 @@ impl AppConfig {
             .remove_one::<String>("charts_directory")
             .unwrap_or(format!("{filename}-charts"));
 
-        let start = matches.remove_one::<f32>("start");
-        let end = matches.remove_one::<f32>("end");
+        let start = matches.remove_one::<f64>("start");
+        let end = matches.remove_one::<f64>("end");
 
         if end.is_some() && end < start {
             return Err("End time cannot be earlier than start time.".into());

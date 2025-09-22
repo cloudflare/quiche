@@ -25,10 +25,10 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::*;
-use crate::events::quic::MetricsUpdated;
 use crate::events::quic::PacketSent;
 use crate::events::quic::PacketType;
 use crate::events::quic::QuicFrame;
+use crate::events::quic::RecoveryMetricsUpdated;
 use crate::events::EventData;
 use crate::events::ExData;
 use crate::events::RawInfo;
@@ -38,7 +38,7 @@ use crate::Event;
 fn packet_sent_event_no_frames() {
     let log_string = r#"{
   "time": 0.0,
-  "name": "transport:packet_sent",
+  "name": "quic:packet_sent",
   "data": {
     "header": {
       "packet_type": "initial",
@@ -69,14 +69,17 @@ fn packet_sent_event_no_frames() {
 
     let ev = Event::with_time(0.0, ev_data);
 
-    assert_eq!(serde_json::to_string_pretty(&ev).unwrap(), log_string);
+    pretty_assertions::assert_eq!(
+        serde_json::to_string_pretty(&ev).unwrap(),
+        log_string
+    );
 }
 
 #[test]
 fn packet_sent_event_some_frames() {
     let log_string = r#"{
   "time": 0.0,
-  "name": "transport:packet_sent",
+  "name": "quic:packet_sent",
   "data": {
     "header": {
       "packet_type": "initial",
@@ -94,7 +97,9 @@ fn packet_sent_event_some_frames() {
     "frames": [
       {
         "frame_type": "padding",
-        "payload_length": 1234
+        "raw": {
+          "payload_length": 1234
+        }
       },
       {
         "frame_type": "ping"
@@ -103,8 +108,10 @@ fn packet_sent_event_some_frames() {
         "frame_type": "stream",
         "stream_id": 0,
         "offset": 0,
-        "length": 100,
-        "fin": true
+        "fin": true,
+        "raw": {
+          "payload_length": 100
+        }
       }
     ]
   }
@@ -114,19 +121,22 @@ fn packet_sent_event_some_frames() {
 
     let frames = vec![
         QuicFrame::Padding {
-            payload_length: 1234,
-            length: None,
+            raw: Some(RawInfo {
+                length: None,
+                payload_length: Some(1234),
+                data: None,
+            }),
         },
-        QuicFrame::Ping {
-            payload_length: None,
-            length: None,
-        },
+        QuicFrame::Ping { raw: None },
         QuicFrame::Stream {
             stream_id: 0,
-            offset: 0,
-            length: 100,
+            offset: Some(0),
             fin: Some(true),
-            raw: None,
+            raw: Some(RawInfo {
+                length: None,
+                payload_length: Some(100),
+                data: None,
+            }),
         },
     ];
 
@@ -142,7 +152,10 @@ fn packet_sent_event_some_frames() {
     });
 
     let ev = Event::with_time(0.0, ev_data);
-    assert_eq!(serde_json::to_string_pretty(&ev).unwrap(), log_string);
+    pretty_assertions::assert_eq!(
+        serde_json::to_string_pretty(&ev).unwrap(),
+        log_string
+    );
 }
 
 // Test constants for MetricsUpdated tests
@@ -178,7 +191,7 @@ fn metrics_updated_with_ex_data() {
         serde_json::json!(DELIVERY_RATE),
     )]);
 
-    let metrics = MetricsUpdated {
+    let metrics = RecoveryMetricsUpdated {
         min_rtt: Some(MIN_RTT),
         congestion_window: Some(CONGESTION_WINDOW),
         ex_data,
@@ -207,7 +220,7 @@ fn metrics_updated_ex_data_collision() {
         serde_json::json!(COLLISION_VALUE),
     )]);
 
-    let metrics = MetricsUpdated {
+    let metrics = RecoveryMetricsUpdated {
         min_rtt: Some(MIN_RTT), // struct field value
         ex_data,                // ex_data also has min_rtt
         ..Default::default()
@@ -228,7 +241,7 @@ fn metrics_updated_round_trip() {
         serde_json::json!(DELIVERY_RATE),
     )]);
 
-    let original = MetricsUpdated {
+    let original = RecoveryMetricsUpdated {
         min_rtt: Some(MIN_RTT),
         smoothed_rtt: Some(SMOOTHED_RTT),
         congestion_window: Some(CONGESTION_WINDOW),
@@ -238,7 +251,8 @@ fn metrics_updated_round_trip() {
     };
 
     let json_str = serde_json::to_string(&original).unwrap();
-    let deserialized: MetricsUpdated = serde_json::from_str(&json_str).unwrap();
+    let deserialized: RecoveryMetricsUpdated =
+        serde_json::from_str(&json_str).unwrap();
 
     // Standard fields round-trip correctly
     assert_eq!(deserialized.min_rtt, original.min_rtt);
@@ -256,7 +270,7 @@ fn metrics_updated_round_trip() {
 #[test]
 fn metrics_updated_no_ex_data() {
     // Test that ex_data is not present when not used
-    let metrics = MetricsUpdated {
+    let metrics = RecoveryMetricsUpdated {
         min_rtt: Some(MIN_RTT),
         congestion_window: Some(CONGESTION_WINDOW),
         ..Default::default()

@@ -27,7 +27,7 @@
 use super::Result;
 
 #[cfg(feature = "qlog")]
-use qlog::events::h3::Http3Frame;
+use qlog::events::http3::Http3Frame;
 
 pub const DATA_FRAME_TYPE_ID: u64 = 0x0;
 pub const HEADERS_FRAME_TYPE_ID: u64 = 0x1;
@@ -362,51 +362,60 @@ impl Frame {
                 let mut settings = vec![];
 
                 if let Some(v) = max_field_section_size {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "MAX_FIELD_SECTION_SIZE".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some("MAX_FIELD_SECTION_SIZE".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = qpack_max_table_capacity {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "QPACK_MAX_TABLE_CAPACITY".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some("QPACK_MAX_TABLE_CAPACITY".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = qpack_blocked_streams {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "QPACK_BLOCKED_STREAMS".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some("QPACK_BLOCKED_STREAMS".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = connect_protocol_enabled {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "SETTINGS_ENABLE_CONNECT_PROTOCOL".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some(
+                            "SETTINGS_ENABLE_CONNECT_PROTOCOL".to_string(),
+                        ),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = h3_datagram {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "H3_DATAGRAM".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some("H3_DATAGRAM".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some((k, v)) = grease {
-                    settings.push(qlog::events::h3::Setting {
-                        name: k.to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some(k.to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(additional_settings) = additional_settings {
                     for (k, v) in additional_settings {
-                        settings.push(qlog::events::h3::Setting {
-                            name: k.to_string(),
+                        settings.push(qlog::events::http3::Setting {
+                            name: Some(k.to_string()),
+                            name_bytes: None,
                             value: *v,
                         });
                     }
@@ -433,7 +442,7 @@ impl Frame {
                 priority_field_value,
             } => Http3Frame::PriorityUpdate {
                 target_stream_type:
-                    qlog::events::h3::H3PriorityTargetStreamType::Request,
+                    qlog::events::http3::PriorityTargetStreamType::Request,
                 prioritized_element_id: *prioritized_element_id,
                 priority_field_value: String::from_utf8_lossy(
                     priority_field_value,
@@ -446,7 +455,7 @@ impl Frame {
                 priority_field_value,
             } => Http3Frame::PriorityUpdate {
                 target_stream_type:
-                    qlog::events::h3::H3PriorityTargetStreamType::Request,
+                    qlog::events::http3::PriorityTargetStreamType::Request,
                 prioritized_element_id: *prioritized_element_id,
                 priority_field_value: String::from_utf8_lossy(
                     priority_field_value,

@@ -38,7 +38,7 @@ use crate::MAX_STREAM_ID;
 #[cfg(feature = "qlog")]
 use crate::crypto;
 #[cfg(feature = "qlog")]
-use qlog::events::connectivity::TransportOwner;
+use qlog::events::quic::TransportInitiator;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
@@ -563,7 +563,7 @@ impl TransportParams {
     /// Creates a qlog event for connection transport parameters and TLS fields
     #[cfg(feature = "qlog")]
     pub fn to_qlog(
-        &self, owner: TransportOwner, cipher: Option<crypto::Algorithm>,
+        &self, initiator: TransportInitiator, cipher: Option<crypto::Algorithm>,
     ) -> EventData {
         let original_destination_connection_id = qlog::HexSlice::maybe_string(
             self.original_destination_connection_id.as_ref(),
@@ -575,39 +575,34 @@ impl TransportParams {
 
         let tls_cipher: Option<String> = cipher.map(|f| format!("{f:?}"));
 
-        EventData::TransportParametersSet(
-            qlog::events::quic::TransportParametersSet {
-                owner: Some(owner),
-                tls_cipher,
-                original_destination_connection_id,
-                stateless_reset_token,
-                disable_active_migration: Some(self.disable_active_migration),
-                max_idle_timeout: Some(self.max_idle_timeout),
-                max_udp_payload_size: Some(self.max_udp_payload_size as u32),
-                ack_delay_exponent: Some(self.ack_delay_exponent as u16),
-                max_ack_delay: Some(self.max_ack_delay as u16),
-                active_connection_id_limit: Some(
-                    self.active_conn_id_limit as u32,
-                ),
+        EventData::ParametersSet(qlog::events::quic::ParametersSet {
+            initiator: Some(initiator),
+            tls_cipher,
+            original_destination_connection_id,
+            stateless_reset_token,
+            disable_active_migration: Some(self.disable_active_migration),
+            max_idle_timeout: Some(self.max_idle_timeout),
+            max_udp_payload_size: Some(self.max_udp_payload_size),
+            ack_delay_exponent: Some(self.ack_delay_exponent),
+            max_ack_delay: Some(self.max_ack_delay),
+            active_connection_id_limit: Some(self.active_conn_id_limit),
 
-                initial_max_data: Some(self.initial_max_data),
-                initial_max_stream_data_bidi_local: Some(
-                    self.initial_max_stream_data_bidi_local,
-                ),
-                initial_max_stream_data_bidi_remote: Some(
-                    self.initial_max_stream_data_bidi_remote,
-                ),
-                initial_max_stream_data_uni: Some(
-                    self.initial_max_stream_data_uni,
-                ),
-                initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
-                initial_max_streams_uni: Some(self.initial_max_streams_uni),
+            initial_max_data: Some(self.initial_max_data),
+            initial_max_stream_data_bidi_local: Some(
+                self.initial_max_stream_data_bidi_local,
+            ),
+            initial_max_stream_data_bidi_remote: Some(
+                self.initial_max_stream_data_bidi_remote,
+            ),
+            initial_max_stream_data_uni: Some(self.initial_max_stream_data_uni),
+            initial_max_streams_bidi: Some(self.initial_max_streams_bidi),
+            initial_max_streams_uni: Some(self.initial_max_streams_uni),
 
-                unknown_parameters: self
-                    .unknown_params
-                    .as_ref()
-                    .map(|unknown_params| {
-                        unknown_params
+            unknown_parameters: self
+                .unknown_params
+                .as_ref()
+                .map(|unknown_params| {
+                    unknown_params
                             .into_iter()
                             .cloned()
                             .map(
@@ -616,11 +611,10 @@ impl TransportParams {
                                 >::into,
                             )
                             .collect()
-                    })
-                    .unwrap_or_default(),
+                })
+                .unwrap_or_default(),
 
-                ..Default::default()
-            },
-        )
+            ..Default::default()
+        })
     }
 }

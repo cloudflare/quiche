@@ -397,13 +397,11 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(feature = "qlog")]
-use qlog::events::connectivity::ConnectivityEventType;
+use qlog::events::quic::DataMovedAdditionalInfo;
 #[cfg(feature = "qlog")]
-use qlog::events::connectivity::TransportOwner;
+use qlog::events::quic::QuicEventType;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::RecoveryEventType;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::TransportEventType;
+use qlog::events::quic::TransportInitiator;
 #[cfg(feature = "qlog")]
 use qlog::events::DataRecipient;
 #[cfg(feature = "qlog")]
@@ -1830,27 +1828,27 @@ macro_rules! qlog_with_type {
 
 #[cfg(feature = "qlog")]
 const QLOG_PARAMS_SET: EventType =
-    EventType::TransportEventType(TransportEventType::ParametersSet);
+    EventType::QuicEventType(QuicEventType::ParametersSet);
 
 #[cfg(feature = "qlog")]
 const QLOG_PACKET_RX: EventType =
-    EventType::TransportEventType(TransportEventType::PacketReceived);
+    EventType::QuicEventType(QuicEventType::PacketReceived);
 
 #[cfg(feature = "qlog")]
 const QLOG_PACKET_TX: EventType =
-    EventType::TransportEventType(TransportEventType::PacketSent);
+    EventType::QuicEventType(QuicEventType::PacketSent);
 
 #[cfg(feature = "qlog")]
 const QLOG_DATA_MV: EventType =
-    EventType::TransportEventType(TransportEventType::DataMoved);
+    EventType::QuicEventType(QuicEventType::StreamDataMoved);
 
 #[cfg(feature = "qlog")]
 const QLOG_METRICS: EventType =
-    EventType::RecoveryEventType(RecoveryEventType::MetricsUpdated);
+    EventType::QuicEventType(QuicEventType::RecoveryMetricsUpdated);
 
 #[cfg(feature = "qlog")]
 const QLOG_CONNECTION_CLOSED: EventType =
-    EventType::ConnectivityEventType(ConnectivityEventType::ConnectionClosed);
+    EventType::QuicEventType(QuicEventType::ConnectionClosed);
 
 #[cfg(feature = "qlog")]
 struct QlogInfo {
@@ -2222,6 +2220,10 @@ impl<F: BufFactory> Connection<F> {
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String, qlog_level: QlogLevel,
     ) {
+        use qlog::events::quic::TransportInitiator;
+        use qlog::events::HTTP3_URI;
+        use qlog::events::QUIC_URI;
+
         let vp = if self.is_server {
             qlog::VantagePointType::Server
         } else {
@@ -2239,25 +2241,20 @@ impl<F: BufFactory> Connection<F> {
         self.qlog.level = level;
 
         let trace = qlog::TraceSeq::new(
-            qlog::VantagePoint {
+            Some(title.to_string()),
+            Some(description.to_string()),
+            None,
+            Some(qlog::VantagePoint {
                 name: None,
                 ty: vp,
                 flow: None,
-            },
-            Some(title.to_string()),
-            Some(description.to_string()),
-            Some(qlog::Configuration {
-                time_offset: Some(0.0),
-                original_uris: None,
             }),
-            None,
+            vec![QUIC_URI.to_string(), HTTP3_URI.to_string()],
         );
 
         let mut streamer = qlog::streamer::QlogStreamer::new(
-            qlog::QLOG_VERSION.to_string(),
             Some(title),
             Some(description),
-            None,
             Instant::now(),
             trace,
             self.qlog.level,
@@ -2268,7 +2265,7 @@ impl<F: BufFactory> Connection<F> {
 
         let ev_data = self
             .local_transport_params
-            .to_qlog(TransportOwner::Local, self.handshake.cipher());
+            .to_qlog(TransportInitiator::Local, self.handshake.cipher());
 
         // This event occurs very early, so just mark the relative time as 0.0.
         streamer.add_event(Event::with_time(0.0, ev_data)).ok();
@@ -3237,13 +3234,12 @@ impl<F: BufFactory> Connection<F> {
 
             qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
                 let trigger = Some(
-                    qlog::events::security::KeyUpdateOrRetiredTrigger::RemoteUpdate,
+                    qlog::events::quic::KeyUpdateOrRetiredTrigger::RemoteUpdate,
                 );
 
                 let ev_data_client =
-                    EventData::KeyUpdated(qlog::events::security::KeyUpdated {
-                        key_type:
-                            qlog::events::security::KeyType::Client1RttSecret,
+                    EventData::KeyUpdated(qlog::events::quic::KeyUpdated {
+                        key_type: qlog::events::quic::KeyType::Client1RttSecret,
                         trigger: trigger.clone(),
                         ..Default::default()
                     });
@@ -3251,9 +3247,8 @@ impl<F: BufFactory> Connection<F> {
                 q.add_event_data_with_instant(ev_data_client, now).ok();
 
                 let ev_data_server =
-                    EventData::KeyUpdated(qlog::events::security::KeyUpdated {
-                        key_type:
-                            qlog::events::security::KeyType::Server1RttSecret,
+                    EventData::KeyUpdated(qlog::events::quic::KeyUpdated {
+                        key_type: qlog::events::quic::KeyType::Server1RttSecret,
                         trigger,
                         ..Default::default()
                     });
@@ -3372,9 +3367,10 @@ impl<F: BufFactory> Connection<F> {
         if self.is_established() {
             qlog_with_type!(QLOG_PARAMS_SET, self.qlog, q, {
                 if !self.qlog.logged_peer_params {
-                    let ev_data = self
-                        .peer_transport_params
-                        .to_qlog(TransportOwner::Remote, self.handshake.cipher());
+                    let ev_data = self.peer_transport_params.to_qlog(
+                        TransportInitiator::Remote,
+                        self.handshake.cipher(),
+                    );
 
                     q.add_event_data_with_instant(ev_data, now).ok();
 
@@ -3390,7 +3386,7 @@ impl<F: BufFactory> Connection<F> {
                 match acked {
                     frame::Frame::Ping {
                         mtu_probe: Some(mtu_probe),
-                    } =>
+                    } => {
                         if let Some(pmtud) = p.pmtud.as_mut() {
                             trace!(
                                 "{} pmtud probe acked; probe size {:?}",
@@ -3404,19 +3400,19 @@ impl<F: BufFactory> Connection<F> {
                                 pmtud.successful_probe(mtu_probe)
                             {
                                 qlog_with_type!(
-                                    EventType::ConnectivityEventType(
-                                        ConnectivityEventType::MtuUpdated
+                                    EventType::QuicEventType(
+                                        QuicEventType::MtuUpdated
                                     ),
                                     self.qlog,
                                     q,
                                     {
                                         let pmtu_data = EventData::MtuUpdated(
-                                            qlog::events::connectivity::MtuUpdated {
+                                            qlog::events::quic::MtuUpdated {
                                                 old: Some(
                                                     p.recovery.max_datagram_size()
-                                                        as u16,
+                                                        as u32,
                                                 ),
-                                                new: current_mtu as u16,
+                                                new: current_mtu as u32,
                                                 done: Some(true),
                                             },
                                         );
@@ -3431,7 +3427,8 @@ impl<F: BufFactory> Connection<F> {
                                 p.recovery
                                     .pmtud_update_max_datagram_size(current_mtu);
                             }
-                        },
+                        }
+                    },
 
                     frame::Frame::ACK { ranges, .. } => {
                         // Stop acknowledging packets less than or equal to the
@@ -3465,11 +3462,14 @@ impl<F: BufFactory> Connection<F> {
                             self.tx_buffered.saturating_sub(length);
 
                         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-                            let ev_data = EventData::DataMoved(
-                                qlog::events::quic::DataMoved {
+                            let ev_data = EventData::StreamDataMoved(
+                                qlog::events::quic::StreamDataMoved {
                                     stream_id: Some(stream_id),
                                     offset: Some(offset),
-                                    length: Some(length as u64),
+                                    raw: Some(RawInfo {
+                                        length: Some(length as u64),
+                                        ..Default::default()
+                                    }),
                                     from: Some(DataRecipient::Transport),
                                     to: Some(DataRecipient::Dropped),
                                     ..Default::default()
@@ -4016,11 +4016,14 @@ impl<F: BufFactory> Connection<F> {
                                     self.tx_buffered.saturating_sub(length);
 
                                 qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-                                    let ev_data = EventData::DataMoved(
-                                        qlog::events::quic::DataMoved {
+                                    let ev_data = EventData::StreamDataMoved(
+                                        qlog::events::quic::StreamDataMoved {
                                             stream_id: Some(stream_id),
                                             offset: Some(offset),
-                                            length: Some(length as u64),
+                                            raw: Some(RawInfo {
+                                                length: Some(length as u64),
+                                                ..Default::default()
+                                            }),
                                             from: Some(DataRecipient::Transport),
                                             to: Some(DataRecipient::Dropped),
                                             ..Default::default()
@@ -5125,7 +5128,7 @@ impl<F: BufFactory> Connection<F> {
                 };
 
                 let send_at_time =
-                    now.duration_since(q.start_time()).as_secs_f32() * 1000.0;
+                    now.duration_since(q.start_time()).as_secs_f64() * 1000.0;
 
                 let ev_data =
                     EventData::PacketSent(qlog::events::quic::PacketSent {
@@ -5493,14 +5496,19 @@ impl<F: BufFactory> Connection<F> {
         }
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-            let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
-                stream_id: Some(stream_id),
-                offset: Some(offset),
-                length: Some(read as u64),
-                from: Some(DataRecipient::Transport),
-                to,
-                ..Default::default()
-            });
+            let ev_data =
+                EventData::StreamDataMoved(qlog::events::quic::StreamDataMoved {
+                    stream_id: Some(stream_id),
+                    offset: Some(offset),
+                    raw: Some(RawInfo {
+                        length: Some(read as u64),
+                        ..Default::default()
+                    }),
+                    from: Some(DataRecipient::Transport),
+                    to,
+                    additional_info: fin
+                        .then_some(DataMovedAdditionalInfo::FinSet),
+                });
 
             let now = Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
@@ -5749,14 +5757,19 @@ impl<F: BufFactory> Connection<F> {
         self.check_tx_buffered_invariant();
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-            let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
-                stream_id: Some(stream_id),
-                offset: Some(offset),
-                length: Some(sent as u64),
-                from: Some(DataRecipient::Application),
-                to: Some(DataRecipient::Transport),
-                ..Default::default()
-            });
+            let ev_data =
+                EventData::StreamDataMoved(qlog::events::quic::StreamDataMoved {
+                    stream_id: Some(stream_id),
+                    offset: Some(offset),
+                    raw: Some(RawInfo {
+                        length: Some(sent as u64),
+                        ..Default::default()
+                    }),
+                    from: Some(DataRecipient::Application),
+                    to: Some(DataRecipient::Transport),
+                    additional_info: fin
+                        .then_some(DataMovedAdditionalInfo::FinSet),
+                });
 
             let now = Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
@@ -5901,15 +5914,19 @@ impl<F: BufFactory> Connection<F> {
                 // a way to indicate when bytes were transmitted vs dropped
                 // without ever being sent.
                 qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-                    let ev_data =
-                        EventData::DataMoved(qlog::events::quic::DataMoved {
+                    let ev_data = EventData::StreamDataMoved(
+                        qlog::events::quic::StreamDataMoved {
                             stream_id: Some(stream_id),
                             offset: Some(final_size),
-                            length: Some(unsent),
+                            raw: Some(RawInfo {
+                                length: Some(unsent),
+                                ..Default::default()
+                            }),
                             from: Some(DataRecipient::Transport),
                             to: Some(DataRecipient::Dropped),
                             ..Default::default()
-                        });
+                        },
+                    );
 
                     q.add_event_data_with_instant(ev_data, Instant::now()).ok();
                 });
@@ -8038,15 +8055,19 @@ impl<F: BufFactory> Connection<F> {
                     // transition also as a way to indicate when bytes were
                     // transmitted vs dropped without ever being sent.
                     qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
-                        let ev_data =
-                            EventData::DataMoved(qlog::events::quic::DataMoved {
+                        let ev_data = EventData::StreamDataMoved(
+                            qlog::events::quic::StreamDataMoved {
                                 stream_id: Some(stream_id),
                                 offset: Some(final_size),
-                                length: Some(unsent),
+                                raw: Some(RawInfo {
+                                    length: Some(unsent),
+                                    ..Default::default()
+                                }),
                                 from: Some(DataRecipient::Transport),
                                 to: Some(DataRecipient::Dropped),
                                 ..Default::default()
-                            });
+                            },
+                        );
 
                         q.add_event_data_with_instant(ev_data, now).ok();
                     });
@@ -8780,41 +8801,45 @@ impl<F: BufFactory> Connection<F> {
         #[cfg(feature = "qlog")]
         {
             let cc = match (self.is_established(), self.timed_out, &self.peer_error, &self.local_error) {
-                (false, _, _, _) => qlog::events::connectivity::ConnectionClosed {
-                    owner: Some(TransportOwner::Local),
-                    connection_code: None,
-                    application_code: None,
+                (false, _, _, _) => qlog::events::quic::ConnectionClosed {
+                    initiator: Some(TransportInitiator::Local),
+                    connection_error: None,
+                    application_error: None,
+                    error_code: None,
                     internal_code: None,
                     reason: Some("Failed to establish connection".to_string()),
-                    trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::HandshakeTimeout)
+                    trigger: Some(qlog::events::quic::ConnectionClosedTrigger::HandshakeTimeout)
                 },
 
-                (true, true, _, _) => qlog::events::connectivity::ConnectionClosed {
-                    owner: Some(TransportOwner::Local),
-                    connection_code: None,
-                    application_code: None,
+                (true, true, _, _) => qlog::events::quic::ConnectionClosed {
+                    initiator: Some(TransportInitiator::Local),
+                    connection_error: None,
+                    application_error: None,
+                    error_code: None,
                     internal_code: None,
                     reason: Some("Idle timeout".to_string()),
-                    trigger: Some(qlog::events::connectivity::ConnectionClosedTrigger::IdleTimeout)
+                    trigger: Some(qlog::events::quic::ConnectionClosedTrigger::IdleTimeout)
                 },
 
                 (true, false, Some(peer_error), None) => {
-                    let (connection_code, application_code, trigger) = if peer_error.is_app {
-                        (None, Some(qlog::events::ApplicationErrorCode::Value(peer_error.error_code)), None)
+                    let (connection_code, application_error, trigger) = if peer_error.is_app {
+                        (None, Some(qlog::events::ApplicationError::Unknown), None)
                     } else {
                         let trigger = if peer_error.error_code == WireErrorCode::NoError as u64 {
-                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Clean)
+                            Some(qlog::events::quic::ConnectionClosedTrigger::Clean)
                         } else {
-                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Error)
+                            Some(qlog::events::quic::ConnectionClosedTrigger::Error)
                         };
 
-                        (Some(qlog::events::ConnectionErrorCode::Value(peer_error.error_code)), None, trigger)
+                        (Some(qlog::events::ConnectionClosedEventError::TransportError(qlog::events::quic::TransportError::Unknown)), None, trigger)
                     };
 
-                    qlog::events::connectivity::ConnectionClosed {
-                        owner: Some(TransportOwner::Remote),
-                        connection_code,
-                        application_code,
+                    // TODO: select more appopriate connection_code and application_error than unknown.
+                    qlog::events::quic::ConnectionClosed {
+                        initiator: Some(TransportInitiator::Remote),
+                        connection_error: connection_code,
+                        application_error,
+                        error_code: Some(peer_error.error_code),
                         internal_code: None,
                         reason: Some(String::from_utf8_lossy(&peer_error.reason).to_string()),
                         trigger,
@@ -8822,32 +8847,35 @@ impl<F: BufFactory> Connection<F> {
                 },
 
                 (true, false, None, Some(local_error)) => {
-                    let (connection_code, application_code, trigger) = if local_error.is_app {
-                        (None, Some(qlog::events::ApplicationErrorCode::Value(local_error.error_code)), None)
+                    let (connection_code, application_error, trigger) = if local_error.is_app {
+                        (None, Some(qlog::events::ApplicationError::Unknown), None)
                     } else {
                         let trigger = if local_error.error_code == WireErrorCode::NoError as u64 {
-                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Clean)
+                            Some(qlog::events::quic::ConnectionClosedTrigger::Clean)
                         } else {
-                            Some(qlog::events::connectivity::ConnectionClosedTrigger::Error)
+                            Some(qlog::events::quic::ConnectionClosedTrigger::Error)
                         };
 
-                        (Some(qlog::events::ConnectionErrorCode::Value(local_error.error_code)), None, trigger)
+                        (Some(qlog::events::ConnectionClosedEventError::TransportError(qlog::events::quic::TransportError::Unknown)), None, trigger)
                     };
 
-                    qlog::events::connectivity::ConnectionClosed {
-                        owner: Some(TransportOwner::Local),
-                        connection_code,
-                        application_code,
+                    // TODO: select more appopriate connection_code and application_error than unknown.
+                    qlog::events::quic::ConnectionClosed {
+                        initiator: Some(TransportInitiator::Local),
+                        connection_error: connection_code,
+                        application_error,
+                        error_code: Some(local_error.error_code),
                         internal_code: None,
                         reason: Some(String::from_utf8_lossy(&local_error.reason).to_string()),
                         trigger,
                     }
                 },
 
-                _ => qlog::events::connectivity::ConnectionClosed {
-                    owner: None,
-                    connection_code: None,
-                    application_code: None,
+                _ => qlog::events::quic::ConnectionClosed {
+                    initiator: None,
+                    connection_error: None,
+                    application_error: None,
+                    error_code: None,
                     internal_code: None,
                     reason: None,
                     trigger: None,

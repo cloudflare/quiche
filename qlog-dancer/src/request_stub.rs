@@ -24,7 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use qlog::events::h3::HttpHeader;
+use qlog::events::http3::HttpHeader;
 use std::borrow::Cow;
 use std::fmt::Display;
 
@@ -85,21 +85,21 @@ pub struct HttpRequestStub {
     pub server_pri_hdr: NaOption<String>,
     pub priority_updates: Vec<String>,
 
-    pub time_discovery: Option<f32>,
-    pub time_first_headers_rx: Option<f32>,
-    pub time_first_headers_tx: Option<f32>,
+    pub time_discovery: Option<f64>,
+    pub time_first_headers_rx: Option<f64>,
+    pub time_first_headers_tx: Option<f64>,
 
-    pub time_first_data_rx: Option<f32>,
-    pub time_first_data_tx: Option<f32>,
+    pub time_first_data_rx: Option<f64>,
+    pub time_first_data_tx: Option<f64>,
 
-    pub time_last_data_rx: Option<f32>,
-    pub time_last_data_tx: Option<f32>,
+    pub time_last_data_rx: Option<f64>,
+    pub time_last_data_tx: Option<f64>,
 
-    pub time_fin_rx: Option<f32>,
+    pub time_fin_rx: Option<f64>,
 
     // TODO, Option<u64>
-    pub time_data_rx_set: Vec<(f32, u64)>,
-    pub time_data_tx_set: Vec<(f32, u64)>,
+    pub time_data_rx_set: Vec<(f64, u64)>,
+    pub time_data_tx_set: Vec<(f64, u64)>,
 
     pub client_transferred_bytes: NaOption<u64>,
     pub server_transferred_bytes: NaOption<u64>,
@@ -326,8 +326,8 @@ impl tabled::Tabled for HttpRequestStub {
 
 pub fn find_header_value(hdrs: &[HttpHeader], name: &str) -> Option<String> {
     hdrs.iter()
-        .find(|&h| h.name == name)
-        .map(|h| h.value.clone())
+        .find(|&h| h.name.as_deref() == Some(name))
+        .and_then(|h| h.value.clone())
 }
 
 impl HttpRequestStub {
@@ -371,11 +371,11 @@ impl HttpRequestStub {
 
     // input times in milliseconds
     fn maybe_megabits_per_second(
-        start: Option<f32>, end: Option<f32>, bytes: Option<u64>,
+        start: Option<f64>, end: Option<f64>, bytes: Option<u64>,
     ) -> NaOption<f64> {
         match (end, start, bytes) {
             (Some(end), Some(start), Some(bytes)) => {
-                let mut total_time = (end - start) as f64;
+                let mut total_time = end - start;
                 // there might be only one frame, or it was sent super quick,
                 // clamp to 1ms
                 if total_time == 0.0 {
@@ -433,11 +433,11 @@ impl HttpRequestStub {
         }
     }
 
-    fn maybe_time_delta(start: Option<f32>, end: Option<f32>) -> NaOption<f32> {
+    fn maybe_time_delta(start: Option<f64>, end: Option<f64>) -> NaOption<f64> {
         match (start, end) {
             (Some(start), Some(end)) => NaOption::new(Some(end - start)),
 
-            _ => NaOption::<f32>::new(None),
+            _ => NaOption::<f64>::new(None),
         }
     }
 
@@ -497,7 +497,7 @@ impl HttpRequestStub {
                 ) {
                     (Some(end), Some(start)) => NaOption::new(Some(end - start)),
 
-                    _ => NaOption::<f32>::new(None),
+                    _ => NaOption::<f64>::new(None),
                 };
 
                 let rx_hdr_tx_first_data =
@@ -505,7 +505,7 @@ impl HttpRequestStub {
                         (Some(end), Some(start)) =>
                             NaOption::new(Some(end - start)),
 
-                        _ => NaOption::<f32>::new(None),
+                        _ => NaOption::<f64>::new(None),
                     };
 
                 let rx_hdr_tx_last_data =
@@ -513,7 +513,7 @@ impl HttpRequestStub {
                         (Some(end), Some(start)) =>
                             NaOption::new(Some(end - start)),
 
-                        _ => NaOption::<f32>::new(None),
+                        _ => NaOption::<f64>::new(None),
                     };
 
                 let tx_first_data_tx_last_data =
@@ -521,7 +521,7 @@ impl HttpRequestStub {
                         (Some(end), Some(start)) =>
                             NaOption::new(Some(end - start)),
 
-                        _ => NaOption::<f32>::new(None),
+                        _ => NaOption::<f64>::new(None),
                     };
 
                 self.at_server_deltas = Some(RequestAtServerDeltas {
