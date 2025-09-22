@@ -9623,6 +9623,9 @@ fn pmtud_probe_success(
     // Verify MTU was updated
     let current_mtu = pmtud.get_current_mtu();
     assert_eq!(current_mtu, 1400);
+
+    let path_stats = pipe.client.path_stats().next().unwrap();
+    assert_eq!(path_stats.pmtu, current_mtu);
 }
 
 #[rstest]
@@ -9777,6 +9780,9 @@ fn pmtud_probe_retry_after_loss(
     // second probe size=1300.
     assert_eq!(pmtud.get_probe_size(), 1250);
 
+    let path_stats = pipe.client.path_stats().next().unwrap();
+    assert_eq!(path_stats.pmtu, 1200);
+
     // Make probes succeed til pmtu is found
     assert_eq!(pipe.advance(), Ok(()));
 
@@ -9790,10 +9796,14 @@ fn pmtud_probe_retry_after_loss(
         .unwrap();
 
     // MTU should finally update
-    assert_eq!(pmtud.get_current_mtu(), 1299);
+    let current_mtu = pmtud.get_current_mtu();
+    assert_eq!(current_mtu, 1299);
 
     // Verify should_probe gets reset
     assert!(!pmtud.should_probe());
+
+    let path_stats = pipe.client.path_stats().next().unwrap();
+    assert_eq!(path_stats.pmtu, current_mtu);
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
@@ -9870,17 +9880,19 @@ fn enable_pmtud_mid_handshake(
 
     assert_eq!(pipe.advance(), Ok(()));
 
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .pmtud
-            .as_mut()
-            .unwrap()
-            .get_current_mtu(),
-        1350
-    );
+    let current_mtu = pipe
+        .server
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap()
+        .get_current_mtu();
+    assert_eq!(current_mtu, 1350);
+
+    let path_stats = pipe.server.path_stats().next().unwrap();
+    assert_eq!(path_stats.pmtu, current_mtu);
 }
 
 #[cfg(feature = "boringssl-boring-crate")]

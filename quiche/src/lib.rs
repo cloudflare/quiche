@@ -7084,9 +7084,10 @@ impl<F: BufFactory> Connection<F> {
         ConnectionId::from_ref(e.cid.as_ref())
     }
 
-    /// Returns the PMTU for the active path if it exists. This requires no
-    /// additonal packets to be sent but simply checks if PMTUD has completed
-    /// and has found a valid PMTU.
+    /// Returns the PMTU for the active path if it exists.
+    ///
+    /// This requires no additonal packets to be sent but simply checks if PMTUD
+    /// has completed and has found a valid PMTU.
     #[inline]
     pub fn pmtu(&self) -> Option<usize> {
         if let Ok(path) = self.paths.get_active() {
