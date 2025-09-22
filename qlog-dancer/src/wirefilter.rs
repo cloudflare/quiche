@@ -39,7 +39,7 @@ fn stream_ids(event: &Event) -> TypedArray<'_, i64> {
 
     match event {
         Event::Qlog(event) => match &event.data {
-            EventData::DataMoved(v) =>
+            EventData::StreamDataMoved(v) =>
                 if let Some(id) = v.stream_id {
                     ids.push(id as i64);
                 },
@@ -160,6 +160,8 @@ mod tests {
     use qlog::events::quic::PacketHeader;
     use qlog::events::quic::PacketType::Initial;
     use qlog::events::quic::QuicFrame;
+    use qlog::events::EventData::PacketSent;
+    use qlog::events::RawInfo;
     use qlog::reader::Event;
     use smallvec::smallvec;
 
@@ -168,10 +170,13 @@ mod tests {
     fn stream_frame(stream_id: u64) -> QuicFrame {
         QuicFrame::Stream {
             stream_id,
-            offset: 0,
-            length: 10,
+            offset: Some(0),
             fin: Some(true),
-            raw: None,
+            raw: Some(RawInfo {
+                length: None,
+                payload_length: Some(10),
+                data: None,
+            }),
         }
     }
 
@@ -186,21 +191,20 @@ mod tests {
             Some(0),
             None,
             None,
-            None,
             Some(1),
             Some(&scid),
             Some(&dcid),
         );
-        let raw = qlog::events::RawInfo {
-            length: Some(1251),
-            payload_length: Some(1224),
+        let raw = RawInfo {
+            length: None,
+            payload_length: Some(0),
             data: None,
         };
 
         let frames = vec![
             QuicFrame::Crypto {
                 offset: 0,
-                length: 0,
+                raw: Some(raw),
             },
             stream_frame(1),
             stream_frame(2),
@@ -209,19 +213,23 @@ mod tests {
             stream_frame(5),
         ];
 
-        let event_data =
-            qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
-                header: pkt_hdr.clone(),
-                frames: Some(frames.into()),
-                is_coalesced: None,
-                retry_token: None,
-                stateless_reset_token: None,
-                supported_versions: None,
-                raw: Some(raw.clone()),
-                datagram_id: None,
-                send_at_time: None,
-                trigger: None,
-            });
+        let raw = RawInfo {
+            length: Some(1251),
+            payload_length: Some(1224),
+            data: None,
+        };
+
+        let event_data = PacketSent(qlog::events::quic::PacketSent {
+            header: pkt_hdr.clone(),
+            frames: Some(frames.into()),
+            stateless_reset_token: None,
+            supported_versions: None,
+            raw: Some(raw.clone()),
+            datagram_id: None,
+            is_mtu_probe_packet: None,
+            send_at_time: None,
+            trigger: None,
+        });
 
         events.push(Event::Qlog(qlog::events::Event::with_time(0.0, event_data)));
 
@@ -233,19 +241,17 @@ mod tests {
             stream_frame(400),
         ];
 
-        let event_data =
-            qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
-                header: pkt_hdr.clone(),
-                frames: Some(frames.into()),
-                is_coalesced: None,
-                retry_token: None,
-                stateless_reset_token: None,
-                supported_versions: None,
-                raw: Some(raw.clone()),
-                datagram_id: None,
-                send_at_time: None,
-                trigger: None,
-            });
+        let event_data = PacketSent(qlog::events::quic::PacketSent {
+            header: pkt_hdr.clone(),
+            frames: Some(frames.into()),
+            stateless_reset_token: None,
+            supported_versions: None,
+            raw: Some(raw.clone()),
+            datagram_id: None,
+            is_mtu_probe_packet: None,
+            send_at_time: None,
+            trigger: None,
+        });
 
         events.push(Event::Qlog(qlog::events::Event::with_time(0.0, event_data)));
 
@@ -256,19 +262,17 @@ mod tests {
             stream_frame(200),
         ];
 
-        let event_data =
-            qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
-                header: pkt_hdr,
-                frames: Some(frames.into()),
-                is_coalesced: None,
-                retry_token: None,
-                stateless_reset_token: None,
-                supported_versions: None,
-                raw: Some(raw),
-                datagram_id: None,
-                send_at_time: None,
-                trigger: None,
-            });
+        let event_data = PacketSent(qlog::events::quic::PacketSent {
+            header: pkt_hdr,
+            frames: Some(frames.into()),
+            stateless_reset_token: None,
+            supported_versions: None,
+            raw: Some(raw),
+            datagram_id: None,
+            is_mtu_probe_packet: None,
+            send_at_time: None,
+            trigger: None,
+        });
 
         events.push(Event::Qlog(qlog::events::Event::with_time(0.0, event_data)));
 
@@ -299,7 +303,7 @@ mod tests {
             Event::Qlog(event) => {
                 // assert_eq!
                 match &event.data {
-                    qlog::events::EventData::PacketSent(packet_sent) => {
+                    PacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
                             Some(smallvec![
@@ -328,28 +332,32 @@ mod tests {
         assert_eq!(filtered_events.len(), 2);
 
         let ev = &filtered_events[0];
+
+        let raw = RawInfo {
+            length: None,
+            payload_length: Some(0),
+            data: None,
+        };
+
         match ev {
-            Event::Qlog(event) => {
-                // assert_eq!
-                match &event.data {
-                    qlog::events::EventData::PacketSent(packet_sent) => {
-                        assert_eq!(
-                            packet_sent.frames,
-                            Some(smallvec![
-                                QuicFrame::Crypto {
-                                    offset: 0,
-                                    length: 0,
-                                },
-                                stream_frame(1),
-                                stream_frame(2),
-                                stream_frame(3),
-                                stream_frame(4),
-                                stream_frame(5),
-                            ])
-                        );
-                    },
-                    _ => panic!("unexpected event data"),
-                }
+            Event::Qlog(event) => match &event.data {
+                PacketSent(packet_sent) => {
+                    assert_eq!(
+                        packet_sent.frames,
+                        Some(smallvec![
+                            QuicFrame::Crypto {
+                                offset: 0,
+                                raw: Some(raw),
+                            },
+                            stream_frame(1),
+                            stream_frame(2),
+                            stream_frame(3),
+                            stream_frame(4),
+                            stream_frame(5),
+                        ])
+                    );
+                },
+                _ => panic!("unexpected event data"),
             },
             Event::Json(_json_event) => panic!("unexpected type"),
         }
@@ -359,7 +367,7 @@ mod tests {
             Event::Qlog(event) => {
                 // assert_eq!
                 match &event.data {
-                    qlog::events::EventData::PacketSent(packet_sent) => {
+                    PacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
                             Some(smallvec![
@@ -386,18 +394,24 @@ mod tests {
         let filtered_events = filter_sqlog_events(events, filter);
         assert_eq!(filtered_events.len(), 2);
 
+        let raw = RawInfo {
+            length: None,
+            payload_length: Some(0),
+            data: None,
+        };
+
         let ev = &filtered_events[0];
         match ev {
             Event::Qlog(event) => {
                 // assert_eq!
                 match &event.data {
-                    qlog::events::EventData::PacketSent(packet_sent) => {
+                    PacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
                             Some(smallvec![
                                 QuicFrame::Crypto {
                                     offset: 0,
-                                    length: 0,
+                                    raw: Some(raw),
                                 },
                                 stream_frame(1),
                                 stream_frame(2),
@@ -418,7 +432,7 @@ mod tests {
             Event::Qlog(event) => {
                 // assert_eq!
                 match &event.data {
-                    qlog::events::EventData::PacketSent(packet_sent) => {
+                    PacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
                             Some(smallvec![

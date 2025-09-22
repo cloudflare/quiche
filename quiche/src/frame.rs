@@ -834,16 +834,19 @@ impl Frame {
 
     #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> QuicFrame {
+        use qlog::events::ConnectionClosedFrameError;
+        use qlog::events::RawInfo;
+
         match self {
             Frame::Padding { len } => QuicFrame::Padding {
-                length: None,
-                payload_length: *len as u32,
+                raw: Some(RawInfo {
+                    length: None,
+                    payload_length: Some(*len as u64),
+                    data: None,
+                }),
             },
 
-            Frame::Ping { .. } => QuicFrame::Ping {
-                length: None,
-                payload_length: None,
-            },
+            Frame::Ping { .. } => QuicFrame::Ping { raw: None },
 
             Frame::ACK {
                 ack_delay,
@@ -870,8 +873,7 @@ impl Frame {
                     ect1,
                     ect0,
                     ce,
-                    length: None,
-                    payload_length: None,
+                    raw: None,
                 }
             },
 
@@ -881,10 +883,10 @@ impl Frame {
                 final_size,
             } => QuicFrame::ResetStream {
                 stream_id: *stream_id,
-                error_code: *error_code,
+                error: qlog::events::ApplicationError::Unknown,
+                error_code: Some(*error_code),
                 final_size: *final_size,
-                length: None,
-                payload_length: None,
+                raw: None,
             },
 
             Frame::StopSending {
@@ -892,40 +894,52 @@ impl Frame {
                 error_code,
             } => QuicFrame::StopSending {
                 stream_id: *stream_id,
-                error_code: *error_code,
-                length: None,
-                payload_length: None,
+                error: qlog::events::ApplicationError::Unknown,
+                error_code: Some(*error_code),
+                raw: None,
             },
 
             Frame::Crypto { data } => QuicFrame::Crypto {
                 offset: data.off(),
-                length: data.len() as u64,
+                raw: Some(RawInfo {
+                    length: None,
+                    payload_length: Some(data.len() as u64),
+                    data: None,
+                }),
             },
 
             Frame::CryptoHeader { offset, length } => QuicFrame::Crypto {
                 offset: *offset,
-                length: *length as u64,
+                raw: Some(RawInfo {
+                    length: None,
+                    payload_length: Some(*length as u64),
+                    data: None,
+                }),
             },
 
             Frame::NewToken { token } => QuicFrame::NewToken {
                 token: qlog::Token {
                     // TODO: pick the token type some how
                     ty: Some(qlog::TokenType::Retry),
-                    raw: Some(qlog::events::RawInfo {
+                    raw: Some(RawInfo {
                         data: qlog::HexSlice::maybe_string(Some(token)),
                         length: Some(token.len() as u64),
                         payload_length: None,
                     }),
                     details: None,
                 },
+                raw: None,
             },
 
             Frame::Stream { stream_id, data } => QuicFrame::Stream {
                 stream_id: *stream_id,
-                offset: data.off(),
-                length: data.len() as u64,
+                offset: Some(data.off()),
                 fin: data.fin().then_some(true),
-                raw: None,
+                raw: Some(RawInfo {
+                    length: None,
+                    payload_length: Some(data.len() as u64),
+                    data: None,
+                }),
             },
 
             Frame::StreamHeader {
@@ -935,46 +949,60 @@ impl Frame {
                 fin,
             } => QuicFrame::Stream {
                 stream_id: *stream_id,
-                offset: *offset,
-                length: *length as u64,
+                offset: Some(*offset),
                 fin: fin.then(|| true),
-                raw: None,
+                raw: Some(RawInfo {
+                    length: None,
+                    payload_length: Some(*length as u64),
+                    data: None,
+                }),
             },
 
-            Frame::MaxData { max } => QuicFrame::MaxData { maximum: *max },
+            Frame::MaxData { max } => QuicFrame::MaxData {
+                maximum: *max,
+                raw: None,
+            },
 
             Frame::MaxStreamData { stream_id, max } => QuicFrame::MaxStreamData {
                 stream_id: *stream_id,
                 maximum: *max,
+                raw: None,
             },
 
             Frame::MaxStreamsBidi { max } => QuicFrame::MaxStreams {
                 stream_type: StreamType::Bidirectional,
                 maximum: *max,
+                raw: None,
             },
 
             Frame::MaxStreamsUni { max } => QuicFrame::MaxStreams {
                 stream_type: StreamType::Unidirectional,
                 maximum: *max,
+                raw: None,
             },
 
-            Frame::DataBlocked { limit } =>
-                QuicFrame::DataBlocked { limit: *limit },
+            Frame::DataBlocked { limit } => QuicFrame::DataBlocked {
+                limit: *limit,
+                raw: None,
+            },
 
             Frame::StreamDataBlocked { stream_id, limit } =>
                 QuicFrame::StreamDataBlocked {
                     stream_id: *stream_id,
                     limit: *limit,
+                    raw: None,
                 },
 
             Frame::StreamsBlockedBidi { limit } => QuicFrame::StreamsBlocked {
                 stream_type: StreamType::Bidirectional,
                 limit: *limit,
+                raw: None,
             },
 
             Frame::StreamsBlockedUni { limit } => QuicFrame::StreamsBlocked {
                 stream_type: StreamType::Unidirectional,
                 limit: *limit,
+                raw: None,
             },
 
             Frame::NewConnectionId {
@@ -983,55 +1011,75 @@ impl Frame {
                 conn_id,
                 reset_token,
             } => QuicFrame::NewConnectionId {
-                sequence_number: *seq_num as u32,
-                retire_prior_to: *retire_prior_to as u32,
+                sequence_number: *seq_num,
+                retire_prior_to: *retire_prior_to,
                 connection_id_length: Some(conn_id.len() as u8),
                 connection_id: format!("{}", qlog::HexSlice::new(conn_id)),
                 stateless_reset_token: qlog::HexSlice::maybe_string(Some(
                     reset_token,
                 )),
+                raw: None,
             },
 
             Frame::RetireConnectionId { seq_num } =>
                 QuicFrame::RetireConnectionId {
-                    sequence_number: *seq_num as u32,
+                    sequence_number: *seq_num,
+                    raw: None,
                 },
 
-            Frame::PathChallenge { .. } =>
-                QuicFrame::PathChallenge { data: None },
+            Frame::PathChallenge { .. } => QuicFrame::PathChallenge {
+                data: None,
+                raw: None,
+            },
 
-            Frame::PathResponse { .. } => QuicFrame::PathResponse { data: None },
+            Frame::PathResponse { .. } => QuicFrame::PathResponse {
+                data: None,
+                raw: None,
+            },
 
             Frame::ConnectionClose {
                 error_code, reason, ..
             } => QuicFrame::ConnectionClose {
+                // TODO: use actual variant not unknown
+                error: Some(ConnectionClosedFrameError::TransportError(
+                    qlog::events::quic::TransportError::Unknown,
+                )),
                 error_space: Some(ErrorSpace::TransportError),
                 error_code: Some(*error_code),
-                error_code_value: None, // raw error is no different for us
                 reason: Some(String::from_utf8_lossy(reason).into_owned()),
+                reason_bytes: None,
                 trigger_frame_type: None, // don't know trigger type
             },
 
             Frame::ApplicationClose { error_code, reason } => {
                 QuicFrame::ConnectionClose {
+                    error: Some(ConnectionClosedFrameError::ApplicationError(
+                        qlog::events::ApplicationError::Unknown,
+                    )),
                     error_space: Some(ErrorSpace::ApplicationError),
                     error_code: Some(*error_code),
-                    error_code_value: None, // raw error is no different for us
                     reason: Some(String::from_utf8_lossy(reason).into_owned()),
+                    reason_bytes: None,
                     trigger_frame_type: None, // don't know trigger type
                 }
             },
 
-            Frame::HandshakeDone => QuicFrame::HandshakeDone,
+            Frame::HandshakeDone => QuicFrame::HandshakeDone { raw: None },
 
             Frame::Datagram { data } => QuicFrame::Datagram {
-                length: data.len() as u64,
-                raw: None,
+                raw: Some(RawInfo {
+                    length: None,
+                    payload_length: Some(data.len() as u64),
+                    data: None,
+                }),
             },
 
             Frame::DatagramHeader { length } => QuicFrame::Datagram {
-                length: *length as u64,
-                raw: None,
+                raw: Some(RawInfo {
+                    length: None,
+                    payload_length: Some(*length as u64),
+                    data: None,
+                }),
             },
         }
     }

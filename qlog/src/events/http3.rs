@@ -27,18 +27,18 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::RawInfo;
+use crate::events::RawInfo;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum H3Owner {
+pub enum Initiator {
     Local,
     Remote,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum H3StreamType {
+pub enum StreamType {
     Request,
     Control,
     Push,
@@ -51,14 +51,14 @@ pub enum H3StreamType {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum H3PushDecision {
+pub enum PushDecision {
     Claimed,
     Abandoned,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum H3PriorityTargetStreamType {
+pub enum PriorityTargetStreamType {
     Request,
     Push,
 }
@@ -69,32 +69,12 @@ pub enum Http3EventType {
     ParametersSet,
     ParametersRestored,
     StreamTypeSet,
+    PriorityUpdated,
     FrameCreated,
     FrameParsed,
+    DatagramCreated,
+    DatagramParsed,
     PushResolved,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum ApplicationError {
-    HttpNoError,
-    HttpGeneralProtocolError,
-    HttpInternalError,
-    HttpRequestCancelled,
-    HttpIncompleteRequest,
-    HttpConnectError,
-    HttpFrameError,
-    HttpExcessiveLoad,
-    HttpVersionFallback,
-    HttpIdError,
-    HttpStreamCreationError,
-    HttpClosedCriticalStream,
-    HttpEarlyResponse,
-    HttpMissingSettings,
-    HttpUnexpectedFrame,
-    HttpRequestRejection,
-    HttpSettingsError,
-    Unknown,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -163,7 +143,7 @@ pub enum Http3Frame {
     },
 
     PriorityUpdate {
-        target_stream_type: H3PriorityTargetStreamType,
+        target_stream_type: PriorityTargetStreamType,
         prioritized_element_id: u64,
         priority_field_value: String,
     },
@@ -189,15 +169,15 @@ impl Default for Http3Frame {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct H3ParametersSet {
-    pub owner: Option<H3Owner>,
+pub struct ParametersSet {
+    pub initiator: Option<Initiator>,
 
     #[serde(alias = "max_header_list_size")]
     pub max_field_section_size: Option<u64>,
     pub max_table_capacity: Option<u64>,
     pub blocked_streams_count: Option<u64>,
-    pub enable_connect_protocol: Option<u64>,
-    pub h3_datagram: Option<u64>,
+    pub extended_connect: Option<u16>,
+    pub h3_datagram: Option<u16>,
 
     // qlog-defined
     pub waits_for_settings: Option<bool>,
@@ -205,28 +185,56 @@ pub struct H3ParametersSet {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct H3ParametersRestored {
+pub struct ParametersRestored {
     #[serde(alias = "max_header_list_size")]
     pub max_field_section_size: Option<u64>,
     pub max_table_capacity: Option<u64>,
     pub blocked_streams_count: Option<u64>,
-    pub enable_connect_protocol: Option<u64>,
-    pub h3_datagram: Option<u64>,
+    pub extended_connect: Option<u16>,
+    pub h3_datagram: Option<u16>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
-pub struct H3StreamTypeSet {
-    pub owner: Option<H3Owner>,
+pub struct StreamTypeSet {
+    pub owner: Option<Initiator>,
     pub stream_id: u64,
-    pub stream_type: H3StreamType,
-    pub stream_type_value: Option<u64>,
+    pub stream_type: StreamType,
+    pub stream_type_bytes: Option<u64>,
     pub associated_push_id: Option<u64>,
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum PriorityUpdatedTrigger {
+    ClientSignalReceived,
+    Local,
+    Other,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum PriorityUpdatedReason {
+    ClientSignalOnly,
+    ClientServerMerged,
+    LocalPolicy,
+    Other,
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
-pub struct H3FrameCreated {
+pub struct PriorityUpdated {
+    pub stream_id: Option<u64>,
+    pub push_id: Option<u64>,
+    pub old: Option<String>,
+    pub new: String,
+    pub trigger: Option<PriorityUpdatedTrigger>,
+    pub reason: Option<PriorityUpdatedReason>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct FrameCreated {
     pub stream_id: u64,
     pub length: Option<u64>,
     pub frame: Http3Frame,
@@ -236,19 +244,35 @@ pub struct H3FrameCreated {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
-pub struct H3FrameParsed {
+pub struct FrameParsed {
     pub stream_id: u64,
     pub length: Option<u64>,
     pub frame: Http3Frame,
 
+    pub raw: Option<RawInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct DatagramCreated {
+    pub quarter_stream_id: u64,
+    pub datagram: Option<Vec<String>>,
+    pub raw: Option<RawInfo>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct DatagramParsed {
+    pub quarter_stream_id: u64,
+    pub datagram: Option<Vec<String>>,
     pub raw: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-pub struct H3PushResolved {
+pub struct PushResolved {
     push_id: Option<u64>,
     stream_id: Option<u64>,
 
-    decision: Option<H3PushDecision>,
+    decision: Option<PushDecision>,
 }
