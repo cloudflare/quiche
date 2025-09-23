@@ -52,6 +52,8 @@ use foundations::telemetry::metrics::TimeHistogram;
 use libc::sockaddr_in;
 #[cfg(target_os = "linux")]
 use libc::sockaddr_in6;
+#[cfg(target_os = "linux")]
+use nix::sys::socket::ControlMessageOwned;
 use quiche::ConnectionId;
 use quiche::Header;
 use quiche::MAX_CONN_ID_LEN;
@@ -106,7 +108,7 @@ struct PollRecvData {
     // different from the local listening address, this will be `None`.
     dst_addr_override: Option<SocketAddr>,
     rx_time: Option<SystemTime>,
-    gro: Option<u16>,
+    gro: Option<i32>,
 }
 
 /// A message to the listener notifiying a mapping for a connection should be
@@ -413,8 +415,6 @@ where
                 return self.poll_recv_from(cx);
             };
 
-            self.reusable_cmsg_space.clear();
-
             loop {
                 let iov_s = &mut [io::IoSliceMut::new(&mut self.current_buf)];
                 match udp_socket.try_io(Interest::READABLE, || {
@@ -452,7 +452,18 @@ where
                         let mut gro = None;
                         let mut dst_addr_override = None;
 
-                        for cmsg in r.cmsgs() {
+                        let Ok(cmsgs) = r.cmsgs() else {
+                            // Best-effort if we can't read cmsgs.
+                            return Poll::Ready(Ok(PollRecvData {
+                                bytes,
+                                src_addr: peer_addr,
+                                dst_addr_override,
+                                rx_time,
+                                gro,
+                            }));
+                        };
+
+                        for cmsg in cmsgs {
                             match cmsg {
                                 ControlMessageOwned::RxqOvfl(c) => {
                                     if c != self.udp_drop_count {
@@ -494,9 +505,11 @@ where
                                     );
                                 },
                                 ControlMessageOwned::Ipv6OrigDstAddr(val) => {
-                                    // Don't have to flip IPv6 bytes since it's a
+                                    // Don't have to flip IPv6 bytes since
+                                    // it's a
                                     // byte array, not a
-                                    // series of bytes parsed as a u32 as in the
+                                    // series of bytes parsed as a u32 as in
+                                    // the
                                     // IPv4 case
                                     let source_addr = std::net::Ipv6Addr::from(
                                         val.sin6_addr.s6_addr,
@@ -522,8 +535,10 @@ where
                                 },
                                 ControlMessageOwned::Ipv4PacketInfo(_) |
                                 ControlMessageOwned::Ipv6PacketInfo(_) => {
-                                    // We only want the destination address from
-                                    // IP_RECVORIGDSTADDR, but we'll get these
+                                    // We only want the destination address
+                                    // from
+                                    // IP_RECVORIGDSTADDR, but we'll get
+                                    // these
                                     // messages because
                                     // we set IP_PKTINFO on the socket.
                                 },

@@ -54,7 +54,7 @@ mod linux_imports {
     pub use nix::sys::socket::SetSockOpt;
     pub use std::io;
     pub use std::os::fd::AsFd;
-    pub use std::os::fd::AsRawFd as _;
+    pub use std::os::fd::AsRawFd;
     pub use std::os::fd::BorrowedFd;
     pub use std::os::fd::RawFd;
 }
@@ -70,11 +70,11 @@ struct IpMtuDiscoverProbe;
 impl SetSockOpt for IpMtuDiscoverProbe {
     type Val = ();
 
-    fn set(&self, fd: RawFd, _val: &Self::Val) -> nix::Result<()> {
+    fn set<F: AsFd>(&self, fd: &F, _val: &Self::Val) -> nix::Result<()> {
         let pmtud_mode: c_int = IP_PMTUDISC_PROBE;
         let ret = unsafe {
             libc::setsockopt(
-                fd,
+                fd.as_fd().as_raw_fd(),
                 IPPROTO_IP,
                 IP_MTU_DISCOVER,
                 &pmtud_mode as *const c_int as *const c_void,
@@ -97,11 +97,11 @@ struct Ipv6MtuDiscoverProbe;
 impl SetSockOpt for Ipv6MtuDiscoverProbe {
     type Val = ();
 
-    fn set(&self, fd: RawFd, _val: &Self::Val) -> nix::Result<()> {
+    fn set<F: AsFd>(&self, fd: &F, _val: &Self::Val) -> nix::Result<()> {
         let pmtud_mode: c_int = IPV6_PMTUDISC_PROBE;
         let ret = unsafe {
             libc::setsockopt(
-                fd,
+                fd.as_fd().as_raw_fd(),
                 IPPROTO_IPV6,
                 IPV6_MTU_DISCOVER,
                 &pmtud_mode as *const c_int as *const c_void,
@@ -147,7 +147,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
         //
         // https://elixir.bootlin.com/linux/v6.14.6/source/net/ipv4/udp.c#L2998
         // https://elixir.bootlin.com/linux/v6.14.6/source/include/vdso/limits.h#L5
-        setsockopt(self.socket.as_raw_fd(), UdpGsoSegment, &(u16::MAX as i32))?;
+        setsockopt(&self.socket.as_fd(), UdpGsoSegment, &(u16::MAX as i32))?;
         self.cap.has_gso = true;
         Ok(())
     }
@@ -155,7 +155,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// Enables [`SO_RXQ_OVFL`](https://man7.org/linux/man-pages/man7/socket.7.html),
     /// which reports dropped packets due to insufficient buffer space.
     pub fn check_udp_drop(&mut self) -> io::Result<()> {
-        setsockopt(self.socket.as_raw_fd(), RxqOvfl, &1)?;
+        setsockopt(&self.socket.as_fd(), RxqOvfl, &1)?;
 
         self.cap.check_udp_drop = true;
         Ok(())
@@ -168,7 +168,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
             clockid: libc::CLOCK_MONOTONIC,
             flags: 0,
         };
-        setsockopt(self.socket.as_raw_fd(), TxTime, &cfg)?;
+        setsockopt(&self.socket.as_fd(), TxTime, &cfg)?;
 
         self.cap.has_txtime = true;
         Ok(())
@@ -178,7 +178,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// which records a wall-clock timestamp for each received packet.
     #[cfg(feature = "perf-quic-listener-metrics")]
     pub fn rxtime(&mut self) -> io::Result<()> {
-        setsockopt(self.socket.as_raw_fd(), ReceiveTimestampns, &true)?;
+        setsockopt(&self.socket.as_fd(), ReceiveTimestampns, &true)?;
 
         self.cap.has_rxtime = true;
         Ok(())
@@ -191,7 +191,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// multiple UDP packets in one [`recvmsg(2)`](https://man7.org/linux/man-pages/man2/recv.2.html)
     /// call. It is the equivalent of GSO for the receive path.
     pub fn gro(&mut self) -> io::Result<()> {
-        UdpGroSegment.set(self.socket.as_raw_fd(), &true)?;
+        UdpGroSegment.set(&self.socket.as_fd(), &true)?;
 
         self.cap.has_gro = true;
         Ok(())
@@ -200,7 +200,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// Enables [`IP_PKTINFO`](https://man7.org/linux/man-pages/man7/ip.7.html)
     /// to control the source IP in outbound IPv4 packets.
     pub fn ipv4_pktinfo(&mut self) -> io::Result<()> {
-        setsockopt(self.socket.as_raw_fd(), Ipv4PacketInfo, &true)?;
+        setsockopt(&self.socket.as_fd(), Ipv4PacketInfo, &true)?;
 
         self.cap.has_ippktinfo = true;
         Ok(())
@@ -212,7 +212,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// This can be different from the socket's local address due to netfilter
     /// TPROXY rules or eBPF redirects.
     pub fn ipv4_recvorigdstaddr(&mut self) -> io::Result<()> {
-        setsockopt(self.socket.as_raw_fd(), Ipv4OrigDstAddr, &true)?;
+        setsockopt(&self.socket.as_fd(), Ipv4OrigDstAddr, &true)?;
 
         self.cap.has_iprecvorigdstaddr = true;
         Ok(())
@@ -221,7 +221,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// Enables [`IPV6_RECVPKTINFO`](https://man7.org/linux/man-pages/man7/ipv6.7.html)
     /// to control the source IP in outbound IPv6 packets.
     pub fn ipv6_pktinfo(&mut self) -> io::Result<()> {
-        setsockopt(self.socket.as_raw_fd(), Ipv6RecvPacketInfo, &true)?;
+        setsockopt(&self.socket.as_fd(), Ipv6RecvPacketInfo, &true)?;
 
         self.cap.has_ipv6pktinfo = true;
         Ok(())
@@ -233,7 +233,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// This can be different from the socket's local address due to netfilter
     /// TPROXY rules or eBPF redirects.
     pub fn ipv6_recvorigdstaddr(&mut self) -> io::Result<()> {
-        setsockopt(self.socket.as_raw_fd(), Ipv6OrigDstAddr, &true)?;
+        setsockopt(&self.socket.as_fd(), Ipv6OrigDstAddr, &true)?;
 
         self.cap.has_ipv6recvorigdstaddr = true;
         Ok(())
@@ -243,7 +243,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// `IP_PMTUDISC_PROBE`, which disables kernel PMTUD and sets the `DF`
     /// (Don't Fragment) flag.
     pub fn ip_mtu_discover_probe(&mut self) -> io::Result<()> {
-        setsockopt(self.socket.as_raw_fd(), IpMtuDiscoverProbe, &())?;
+        setsockopt(&self.socket.as_fd(), IpMtuDiscoverProbe, &())?;
 
         self.cap.has_ip_mtu_discover_probe = true;
         Ok(())
@@ -253,7 +253,7 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// `IPV6_PMTUDISC_PROBE`, which disables kernel PMTUD and sets the `DF`
     /// (Don't Fragment) flag.
     pub fn ipv6_mtu_discover_probe(&mut self) -> io::Result<()> {
-        setsockopt(self.socket.as_raw_fd(), Ipv6MtuDiscoverProbe, &())?;
+        setsockopt(&self.socket.as_fd(), Ipv6MtuDiscoverProbe, &())?;
 
         self.cap.has_ipv6_mtu_discover_probe = true;
         Ok(())
@@ -268,8 +268,8 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// will only check their status. **If neither of them is enabled, the
     /// `PKTINFO` sockopts will cause errors when sending packets.**
     pub fn allows_nonlocal_source(&self) -> io::Result<bool> {
-        Ok(getsockopt(self.socket.as_raw_fd(), IpFreebind)? ||
-            getsockopt(self.socket.as_raw_fd(), IpTransparent)?)
+        Ok(getsockopt(&self.socket.as_fd(), IpFreebind)? ||
+            getsockopt(&self.socket.as_fd(), IpTransparent)?)
     }
 
     /// Consumes the builder and returns the configured [`SocketCapabilities`].
