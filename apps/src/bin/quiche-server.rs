@@ -778,14 +778,14 @@ fn handle_path_events(client: &mut Client) {
 fn set_txtime_sockopt(sock: &mio::net::UdpSocket) -> io::Result<()> {
     use nix::sys::socket::setsockopt;
     use nix::sys::socket::sockopt::TxTime;
-    use std::os::unix::io::AsRawFd;
+    use std::os::unix::io::AsFd;
 
     let config = nix::libc::sock_txtime {
         clockid: libc::CLOCK_MONOTONIC,
         flags: 0,
     };
 
-    setsockopt(sock.as_raw_fd(), TxTime, &config)?;
+    setsockopt(&sock.as_fd(), TxTime, &config)?;
 
     Ok(())
 }
