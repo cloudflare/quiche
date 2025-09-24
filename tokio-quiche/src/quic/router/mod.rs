@@ -71,9 +71,6 @@ use tokio::sync::mpsc;
 
 type ConnStream<Tx, M> = mpsc::Receiver<io::Result<InitialQuicConnection<Tx, M>>>;
 
-#[cfg(target_os = "linux")]
-const UNKNOWN_CMSG_LOG_LIMIT: u8 = 10;
-
 #[cfg(feature = "perf-quic-listener-metrics")]
 mod listener_stage_timer {
     use foundations::telemetry::metrics::TimeHistogram;
@@ -155,8 +152,6 @@ where
 
     #[cfg(target_os = "linux")]
     reusable_cmsg_space: Vec<u8>,
-    #[cfg(target_os = "linux")]
-    unknown_cmsg_logs: u8,
 
     current_buf: PooledBuf,
 
@@ -203,8 +198,6 @@ where
                 // re-used on graceful restart. As such, this vector should _only grow_, and care
                 // should be taken when adding new cmsgs.
                 reusable_cmsg_space: nix::cmsg_space!(u32, nix::sys::time::TimeSpec, u16, sockaddr_in, sockaddr_in6),
-                #[cfg(target_os = "linux")]
-                unknown_cmsg_logs: 0,
                 config,
 
                 current_buf: BufFactory::get_max_buf(),
@@ -534,18 +527,9 @@ where
                                     // messages because
                                     // we set IP_PKTINFO on the socket.
                                 },
-                                cmsg => {
-                                    // Rate-limit logging as this will get emitted
-                                    // per-packet, which could very easily
-                                    // overwhelm a logging pipeline.
-                                    if self.unknown_cmsg_logs <
-                                        UNKNOWN_CMSG_LOG_LIMIT
-                                    {
-                                        let repr = format!("{cmsg:?}");
-                                        log::debug!("received unknown cmsg"; "cmsg"=>repr);
-
-                                        self.unknown_cmsg_logs += 1;
-                                    }
+                                _ => {
+                                    // Unrecognized cmsg received, just ignore
+                                    // it.
                                 },
                             };
                         }
