@@ -2070,6 +2070,10 @@ impl Connection {
             return Ok((finished, Event::Finished));
         }
 
+        for stream_id in conn.streams.collected_streams() {
+            self.streams.remove(&stream_id);
+        }
+
         Err(Error::Done)
     }
 
@@ -3210,6 +3214,13 @@ impl Connection {
                 .peer_qpack_streams
                 .decoder_stream_bytes,
         }
+    }
+
+    #[cfg(test)]
+    /// Indicates how many streams are currently being tracked for use
+    /// in resource tests.
+    pub fn stream_count(&self) -> usize {
+        self.streams.len()
     }
 }
 
@@ -7348,6 +7359,68 @@ mod tests {
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    fn h3_cleanup_streams() {
+        let mut buf = [0; 65535];
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let init_streams_client = s.client.stream_count();
+        let init_streams_server = s.client.stream_count();
+
+        // Client sends HEADERS and doesn't fin
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server receives headers.
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert_eq!(s.client.stream_count(), init_streams_client + 1);
+        assert_eq!(s.server.stream_count(), init_streams_server + 1);
+
+        // Client sends body and fin
+        let body = s.send_body_client(stream, true).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        assert_eq!(s.client.stream_count(), init_streams_client + 1);
+        assert_eq!(s.server.stream_count(), init_streams_server + 1);
+
+        // Server sends response and finishes the stream
+        let resp_headers = s.send_response(stream, false).unwrap();
+        let resp_body = s.send_body_server(stream, true).unwrap();
+
+        let mut resp_recv_buf = vec![0; resp_body.len()];
+
+        let ev_headers = Event::Headers {
+            list: resp_headers,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_client(stream, &mut recv_buf), Ok(body.len()));
+
+        // The server stream should be gone now
+        assert_eq!(s.client.stream_count(), init_streams_client + 1);
+        assert_eq!(s.server.stream_count(), init_streams_server);
+
+        // Polling again should clean up the client
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.client.stream_count(), init_streams_client);
     }
 }
 
