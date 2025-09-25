@@ -36,7 +36,9 @@ pub mod connection_summary;
 pub mod sync_client;
 
 use connection_summary::*;
-use qlog::events::h3::HttpHeader;
+use qlog::events::http3::FrameParsed;
+use qlog::events::http3::HttpHeader;
+use quiche::ConnectionError;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -53,8 +55,7 @@ use crate::frame_parser::FrameParser;
 use crate::frame_parser::InterruptCause;
 use crate::recordreplay::qlog::QlogEvent;
 use crate::recordreplay::qlog::*;
-use qlog::events::h3::H3FrameParsed;
-use qlog::events::h3::Http3Frame;
+use qlog::events::http3::Http3Frame;
 use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
 use serde::Serialize;
@@ -63,7 +64,6 @@ use crate::quiche;
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
 use quiche::h3::NameValue;
-use quiche::ConnectionError;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 const QUIC_VERSION: u32 = 1;
@@ -73,7 +73,7 @@ fn handle_qlog(
     stream_id: u64,
 ) {
     if let Some(s) = qlog_streamer {
-        let ev_data = EventData::H3FrameParsed(H3FrameParsed {
+        let ev_data = EventData::H3FrameParsed(FrameParsed {
             stream_id,
             frame: qlog_frame,
             ..Default::default()
@@ -449,7 +449,7 @@ fn handle_response_frame<C: Client>(
             let qlog_headers: Vec<HttpHeader> = enriched_headers
                 .headers()
                 .iter()
-                .map(|h| qlog::events::h3::HttpHeader {
+                .map(|h| qlog::events::http3::HttpHeader {
                     name: String::from_utf8_lossy(h.name()).into_owned(),
                     value: String::from_utf8_lossy(h.value()).into_owned(),
                 })
