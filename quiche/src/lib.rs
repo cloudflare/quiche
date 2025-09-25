@@ -446,14 +446,7 @@ pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
 /// The default initial RTT.
 const DEFAULT_INITIAL_RTT: Duration = Duration::from_millis(333);
 
-#[cfg(not(feature = "fuzzing"))]
 const PAYLOAD_MIN_LEN: usize = 4;
-
-#[cfg(feature = "fuzzing")]
-// Due to the fact that in fuzzing mode we use a zero-length AEAD tag (which
-// would normally be 16 bytes), we need to adjust the minimum payload size to
-// account for that.
-const PAYLOAD_MIN_LEN: usize = 20;
 
 // PATH_CHALLENGE (9 bytes) + AEAD tag (16 bytes).
 const MIN_PROBING_SIZE: usize = 25;
@@ -3940,8 +3933,6 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        // Pad UDP datagram if it contains a QUIC Initial packet.
-        #[cfg(not(feature = "fuzzing"))]
         if has_initial && left > 0 && done < MIN_CLIENT_INITIAL_LEN {
             let pad_len = cmp::min(left, MIN_CLIENT_INITIAL_LEN - done);
 
@@ -4260,11 +4251,17 @@ impl<F: BufFactory> Connection<F> {
                         .is_some_and(|le| le.is_app))) &&
             path.active()
         {
+            #[cfg(not(feature = "fuzzing"))]
             let ack_delay = pkt_space.largest_rx_pkt_time.elapsed();
 
+            #[cfg(not(feature = "fuzzing"))]
             let ack_delay = ack_delay.as_micros() as u64 /
                 2_u64
                     .pow(self.local_transport_params.ack_delay_exponent as u32);
+
+            // pseudo-random reproducible ack delays when fuzzing
+            #[cfg(feature = "fuzzing")]
+            let ack_delay = rand::rand_u8() as u64 + 1;
 
             let frame = frame::Frame::ACK {
                 ack_delay,
