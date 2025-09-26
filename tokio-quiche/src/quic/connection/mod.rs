@@ -197,6 +197,15 @@ pub struct Incoming {
     /// If set, then `buf` is a GRO buffer containing multiple packets.
     /// Each individual packet has a size of `gso` (except for the last one).
     pub gro: Option<i32>,
+    /// [SO_MARK] control message value received from the socket.
+    ///
+    /// This will only be populated for the first packet on a given connection.
+    /// This will always be `None` after the connection has been spawned as
+    /// the message is `take()`d before spawning.
+    ///
+    /// [SO_MARK]: https://man7.org/linux/man-pages/man7/socket.7.html
+    #[cfg(target_os = "linux")]
+    pub so_mark_data: Option<Vec<u8>>,
 }
 
 /// A QUIC connection that has not performed a handshake yet.

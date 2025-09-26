@@ -730,6 +730,12 @@ where
         })
         .await;
 
+        #[cfg(target_os = "linux")]
+        if let Some(incoming) = ctx.in_pkt.as_mut() {
+            self.audit_log_stats
+                .set_initial_so_mark_data(incoming.so_mark_data.take());
+        }
+
         let mut work_loop_result = self.work_loop(&mut qconn, &mut ctx).await;
         if work_loop_result.is_ok() && qconn.is_closed() {
             work_loop_result = Err(HandshakeError::ConnectionClosed.into());

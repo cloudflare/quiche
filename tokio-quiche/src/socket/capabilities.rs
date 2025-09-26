@@ -36,6 +36,8 @@ mod linux_imports {
     pub use libc::IPV6_PMTUDISC_PROBE;
     pub use libc::IP_MTU_DISCOVER;
     pub use libc::IP_PMTUDISC_PROBE;
+    pub use libc::SOL_SOCKET;
+    pub use libc::SO_RCVMARK;
     pub use nix::errno::Errno;
     pub use nix::sys::socket::getsockopt;
     pub use nix::sys::socket::setsockopt;
@@ -56,7 +58,6 @@ mod linux_imports {
     pub use std::os::fd::AsFd;
     pub use std::os::fd::AsRawFd;
     pub use std::os::fd::BorrowedFd;
-    pub use std::os::fd::RawFd;
 }
 
 #[cfg(target_os = "linux")]
@@ -105,6 +106,32 @@ impl SetSockOpt for Ipv6MtuDiscoverProbe {
                 IPPROTO_IPV6,
                 IPV6_MTU_DISCOVER,
                 &pmtud_mode as *const c_int as *const c_void,
+                std::mem::size_of::<c_int>() as socklen_t,
+            )
+        };
+
+        match ret {
+            0 => Ok(()),
+            _ => Err(Errno::last()),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone)]
+struct RcvMark;
+
+#[cfg(target_os = "linux")]
+impl SetSockOpt for RcvMark {
+    type Val = ();
+
+    fn set<F: AsFd>(&self, fd: &F, _val: &Self::Val) -> nix::Result<()> {
+        let ret = unsafe {
+            libc::setsockopt(
+                fd.as_fd().as_raw_fd(),
+                SOL_SOCKET,
+                SO_RCVMARK,
+                &1 as *const c_int as *const c_void,
                 std::mem::size_of::<c_int>() as socklen_t,
             )
         };
@@ -272,6 +299,13 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
             getsockopt(&self.socket.as_fd(), IpTransparent)?)
     }
 
+    pub fn mark(&mut self) -> io::Result<()> {
+        setsockopt(&self.socket.as_fd(), RcvMark, &())?;
+
+        self.cap.has_mark = true;
+        Ok(())
+    }
+
     /// Consumes the builder and returns the configured [`SocketCapabilities`].
     pub fn finish(self) -> SocketCapabilities {
         self.cap
@@ -336,6 +370,11 @@ pub struct SocketCapabilities {
     // `IPV6_PMTUDISC_PROBE`.
     #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
     pub(crate) has_ipv6_mtu_discover_probe: bool,
+
+    /// Indicates if the socket is set to receive `SO_MARK` messages via
+    /// `SO_RCVMARK`.
+    #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
+    pub(crate) has_mark: bool,
 }
 
 impl SocketCapabilities {
@@ -353,6 +392,7 @@ impl SocketCapabilities {
         #[cfg(feature = "perf-quic-listener-metrics")]
         let _ = b.rxtime();
         let _ = b.gro();
+        let _ = b.mark();
 
         // We can't determine if this is an IPv4 or IPv6 socket, so try setting
         // the relevant options for both
