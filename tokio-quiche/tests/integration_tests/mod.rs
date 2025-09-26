@@ -206,3 +206,74 @@ async fn test_ioworker_state_machine_pause() {
 
     assert!(received_status_code_on_stream(&summary, 0, 200));
 }
+
+#[tokio::test]
+#[cfg(target_os = "linux")]
+async fn test_so_mark_receieve_data() {
+    use datagram_socket::QuicAuditStats;
+    use std::sync::Arc;
+    use std::sync::RwLock;
+
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://127.0.0.1:{}", socket.local_addr().unwrap().port());
+
+    let tls_cert_settings = TlsCertificatePaths {
+        cert: TEST_CERT_FILE,
+        private_key: TEST_KEY_FILE,
+        kind: tokio_quiche::settings::CertificateKind::X509,
+    };
+
+    let hooks = Hooks {
+        connection_hook: Some(TestConnectionHook::new()),
+    };
+
+    let params = ConnectionParams::new_server(
+        QuicSettings::default(),
+        tls_cert_settings,
+        hooks,
+    );
+    let mut stream = listen(
+        vec![socket],
+        params,
+        SimpleConnectionIdGenerator,
+        DefaultMetrics,
+    )
+    .unwrap()
+    .remove(0);
+
+    let audit_log: Arc<RwLock<Option<Arc<QuicAuditStats>>>> =
+        Arc::new(RwLock::new(None));
+    let clone = Arc::clone(&audit_log);
+
+    let _ = tokio::spawn(async move {
+        let (h3_driver, h3_controller) =
+            ServerH3Driver::new(Http3Settings::default());
+        let conn = stream.next().await.unwrap().unwrap();
+
+        let quic_connection = conn.start(h3_driver);
+        let h3_over_quic =
+            ServerH3Connection::new(quic_connection, h3_controller);
+
+        let audit_stats = Arc::clone(h3_over_quic.audit_log_stats());
+        *clone.write().unwrap() = Some(audit_stats);
+        let _ = tokio::spawn(async move {
+            handle_connection(h3_over_quic).await;
+        })
+        .await;
+    });
+
+    let url = format!("{url}/1");
+    let summary = timeout(Duration::from_secs(2), h3i_fixtures::request(&url, 1))
+        .await
+        .expect("request timed out")
+        .expect("request failed");
+
+    assert!(received_status_code_on_stream(&summary, 0, 200));
+
+    let audit_log = audit_log.read().unwrap();
+    let so_mark_data = audit_log.as_ref().unwrap().initial_so_mark_data();
+    // We don't actually set SO_MARK anywhere, so we just want to ensure that the
+    // data is `Some`, indicating that we at least received the cmsg from the
+    // socket.
+    assert_eq!(so_mark_data.unwrap(), &vec![0, 0, 0, 0]);
+}
