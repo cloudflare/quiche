@@ -40,20 +40,9 @@ use crate::metrics::labels;
 use crate::metrics::quic_expensive_metrics_ip_reduce;
 use crate::metrics::Metrics;
 use crate::settings::Config;
-
 use datagram_socket::DatagramSocketRecv;
 use datagram_socket::DatagramSocketSend;
 use foundations::telemetry::log;
-#[cfg(target_os = "linux")]
-use foundations::telemetry::metrics::Counter;
-#[cfg(target_os = "linux")]
-use foundations::telemetry::metrics::TimeHistogram;
-#[cfg(target_os = "linux")]
-use libc::sockaddr_in;
-#[cfg(target_os = "linux")]
-use libc::sockaddr_in6;
-#[cfg(target_os = "linux")]
-use nix::sys::socket::ControlMessageOwned;
 use quiche::ConnectionId;
 use quiche::Header;
 use quiche::MAX_CONN_ID_LEN;
@@ -70,6 +59,15 @@ use std::time::Instant;
 use std::time::SystemTime;
 use task_killswitch::spawn_with_killswitch;
 use tokio::sync::mpsc;
+
+#[cfg(target_os = "linux")]
+use foundations::telemetry::metrics::Counter;
+#[cfg(target_os = "linux")]
+use foundations::telemetry::metrics::TimeHistogram;
+#[cfg(target_os = "linux")]
+use libc::sockaddr_in;
+#[cfg(target_os = "linux")]
+use libc::sockaddr_in6;
 
 type ConnStream<Tx, M> = mpsc::Receiver<io::Result<InitialQuicConnection<Tx, M>>>;
 
@@ -109,6 +107,8 @@ struct PollRecvData {
     dst_addr_override: Option<SocketAddr>,
     rx_time: Option<SystemTime>,
     gro: Option<i32>,
+    #[cfg(target_os = "linux")]
+    so_mark_data: Option<[u8; 4]>,
 }
 
 /// A message to the listener notifiying a mapping for a connection should be
@@ -194,12 +194,18 @@ where
                 #[cfg(target_os = "linux")]
                 udp_drop_count: 0,
                 #[cfg(target_os = "linux")]
-                // Specify CMSG space for GRO, timestamp, drop count, IP_RECVORIGDSTADDR, and
-                // IPV6_RECVORIGDSTADDR. Even if they're not all currently used, the cmsg buffer
-                // may have been configured by a previous version of Tokio-Quiche with the socket
+                // Specify CMSG space. Even if they're not all currently used, the cmsg buffer may
+                // have been configured by a previous version of Tokio-Quiche with the socket
                 // re-used on graceful restart. As such, this vector should _only grow_, and care
                 // should be taken when adding new cmsgs.
-                reusable_cmsg_space: nix::cmsg_space!(u32, nix::sys::time::TimeSpec, u16, sockaddr_in, sockaddr_in6),
+                reusable_cmsg_space: nix::cmsg_space!(
+                    u32, // GRO
+                    nix::sys::time::TimeSpec, // timestamp
+                    u16, // drop count
+                    sockaddr_in, // IP_RECVORIGDSTADDR
+                    sockaddr_in6, // IPV6_RECVORIGDSTADDR
+                    u32 // SO_MARK
+                ),
                 config,
 
                 current_buf: BufFactory::get_max_buf(),
@@ -389,6 +395,8 @@ where
             rx_time: None,
             gro: None,
             dst_addr_override: None,
+            #[cfg(target_os = "linux")]
+            so_mark_data: None,
         }))
     }
 
@@ -402,6 +410,8 @@ where
 
         #[cfg(target_os = "linux")]
         {
+            use libc::SOL_SOCKET;
+            use libc::SO_MARK;
             use nix::errno::Errno;
             use nix::sys::socket::*;
             use std::net::SocketAddrV4;
@@ -451,6 +461,7 @@ where
                         let mut rx_time = None;
                         let mut gro = None;
                         let mut dst_addr_override = None;
+                        let mut mark_bytes: Option<[u8; 4]> = None;
 
                         let Ok(cmsgs) = r.cmsgs() else {
                             // Best-effort if we can't read cmsgs.
@@ -460,6 +471,7 @@ where
                                 dst_addr_override,
                                 rx_time,
                                 gro,
+                                so_mark_data: mark_bytes,
                             }));
                         };
 
@@ -505,11 +517,9 @@ where
                                     );
                                 },
                                 ControlMessageOwned::Ipv6OrigDstAddr(val) => {
-                                    // Don't have to flip IPv6 bytes since
-                                    // it's a
+                                    // Don't have to flip IPv6 bytes since it's a
                                     // byte array, not a
-                                    // series of bytes parsed as a u32 as in
-                                    // the
+                                    // series of bytes parsed as a u32 as in the
                                     // IPv4 case
                                     let source_addr = std::net::Ipv6Addr::from(
                                         val.sin6_addr.s6_addr,
@@ -535,12 +545,30 @@ where
                                 },
                                 ControlMessageOwned::Ipv4PacketInfo(_) |
                                 ControlMessageOwned::Ipv6PacketInfo(_) => {
-                                    // We only want the destination address
-                                    // from
-                                    // IP_RECVORIGDSTADDR, but we'll get
-                                    // these
-                                    // messages because
-                                    // we set IP_PKTINFO on the socket.
+                                    // We only want the destination address from
+                                    // IP_RECVORIGDSTADDR, but we'll get these
+                                    // messages because we set IP_PKTINFO on the
+                                    // socket.
+                                },
+                                ControlMessageOwned::Unknown(raw_cmsg) => {
+                                    let UnknownCmsg {
+                                        cmsg_header,
+                                        data_bytes,
+                                    } = raw_cmsg;
+
+                                    if cmsg_header.cmsg_level == SOL_SOCKET &&
+                                        cmsg_header.cmsg_type == SO_MARK
+                                    {
+                                        let Ok(arr) =
+                                            <[u8; 4]>::try_from(data_bytes)
+                                        else {
+                                            // Should be unreachable as SO_MARK is
+                                            // a u32: https://elixir.bootlin.com/linux/v6.17/source/include/net/sock.h#L487
+                                            continue;
+                                        };
+
+                                        let _ = mark_bytes.insert(arr);
+                                    }
                                 },
                                 _ => {
                                     // Unrecognized cmsg received, just ignore
@@ -555,6 +583,7 @@ where
                             dst_addr_override,
                             rx_time,
                             gro,
+                            so_mark_data: mark_bytes,
                         }));
                     },
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -656,6 +685,8 @@ where
                     dst_addr_override,
                     rx_time,
                     gro,
+                    #[cfg(target_os = "linux")]
+                    so_mark_data,
                 })) => {
                     let mut buf = std::mem::replace(
                         &mut self.current_buf,
@@ -676,6 +707,8 @@ where
                         buf,
                         rx_time,
                         gro,
+                        #[cfg(target_os = "linux")]
+                        so_mark_data,
                     });
 
                     if let Err(e) = res {
