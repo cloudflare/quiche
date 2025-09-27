@@ -110,6 +110,12 @@ pub struct QuicAuditStats {
     max_bandwidth: AtomicU64,
     /// Loss at max recorded bandwidth.
     max_loss_pct: AtomicU8,
+    /// The value of the first `SO_RECVMARK` control message received for the
+    /// connection.
+    ///
+    /// Linux-only.
+    #[cfg(target_os = "linux")]
+    initial_so_mark: Arc<RwLock<Option<Vec<u8>>>>,
     /// The server's chosen QUIC connection ID.
     ///
     /// The QUIC connection ID is presently an array of 20 bytes (160 bits)
@@ -129,6 +135,8 @@ impl QuicAuditStats {
             connection_close_reason: RwLock::new(None),
             max_bandwidth: AtomicU64::new(0),
             max_loss_pct: AtomicU8::new(0),
+            #[cfg(target_os = "linux")]
+            initial_so_mark: Arc::new(RwLock::new(None)),
             quic_connection_id,
         }
     }
@@ -241,6 +249,18 @@ impl QuicAuditStats {
     #[inline]
     pub fn max_loss_pct(&self) -> u8 {
         self.max_loss_pct.load(Ordering::Acquire)
+    }
+
+    #[inline]
+    #[cfg(target_os = "linux")]
+    pub fn set_initial_so_mark_data(&self, value: Option<Vec<u8>>) {
+        *self.initial_so_mark.write().unwrap() = value;
+    }
+
+    #[inline]
+    #[cfg(target_os = "linux")]
+    pub fn initial_so_mark_data(&self) -> Arc<RwLock<Option<Vec<u8>>>> {
+        Arc::clone(&self.initial_so_mark)
     }
 }
 
