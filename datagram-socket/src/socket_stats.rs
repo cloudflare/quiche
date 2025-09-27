@@ -117,7 +117,7 @@ pub struct QuicAuditStats {
     ///
     /// Linux-only.
     #[cfg(target_os = "linux")]
-    initial_so_mark: OnceLock<Vec<u8>>,
+    initial_so_mark: OnceLock<[u8; 4]>,
     /// The server's chosen QUIC connection ID.
     ///
     /// The QUIC connection ID is presently an array of 20 bytes (160 bits)
@@ -255,7 +255,7 @@ impl QuicAuditStats {
 
     #[inline]
     #[cfg(target_os = "linux")]
-    pub fn set_initial_so_mark_data(&self, value: Option<Vec<u8>>) {
+    pub fn set_initial_so_mark_data(&self, value: Option<[u8; 4]>) {
         if let Some(inner) = value {
             let _ = self.initial_so_mark.set(inner);
         }
@@ -263,7 +263,7 @@ impl QuicAuditStats {
 
     #[inline]
     #[cfg(target_os = "linux")]
-    pub fn initial_so_mark_data(&self) -> Option<&Vec<u8>> {
+    pub fn initial_so_mark_data(&self) -> Option<&[u8; 4]> {
         self.initial_so_mark.get()
     }
 }

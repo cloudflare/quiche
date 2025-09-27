@@ -108,7 +108,7 @@ struct PollRecvData {
     rx_time: Option<SystemTime>,
     gro: Option<i32>,
     #[cfg(target_os = "linux")]
-    so_mark_data: Option<Vec<u8>>,
+    so_mark_data: Option<[u8; 4]>,
 }
 
 /// A message to the listener notifiying a mapping for a connection should be
@@ -461,7 +461,7 @@ where
                         let mut rx_time = None;
                         let mut gro = None;
                         let mut dst_addr_override = None;
-                        let mut mark_bytes: Option<Vec<u8>> = None;
+                        let mut mark_bytes: Option<[u8; 4]> = None;
 
                         let Ok(cmsgs) = r.cmsgs() else {
                             // Best-effort if we can't read cmsgs.
@@ -559,7 +559,15 @@ where
                                     if cmsg_header.cmsg_level == SOL_SOCKET &&
                                         cmsg_header.cmsg_type == SO_MARK
                                     {
-                                        let _ = mark_bytes.insert(data_bytes);
+                                        let Ok(arr) =
+                                            <[u8; 4]>::try_from(data_bytes)
+                                        else {
+                                            // Should be unreachable as SO_MARK is
+                                            // a u32: https://elixir.bootlin.com/linux/v6.17/source/include/net/sock.h#L487
+                                            continue;
+                                        };
+
+                                        let _ = mark_bytes.insert(arr);
                                     }
                                 },
                                 _ => {

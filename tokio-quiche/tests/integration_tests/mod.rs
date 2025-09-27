@@ -275,5 +275,5 @@ async fn test_so_mark_receieve_data() {
     // We don't actually set SO_MARK anywhere, so we just want to ensure that the
     // data is `Some`, indicating that we at least received the cmsg from the
     // socket.
-    assert_eq!(so_mark_data.unwrap(), &vec![0, 0, 0, 0]);
+    assert_eq!(so_mark_data.unwrap(), &[0, 0, 0, 0]);
 }
