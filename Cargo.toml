@@ -63,7 +63,7 @@ smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.1.0", path = "./task-killswitch" }
 thiserror = { version = "1" }
 tokio = { version = "1.44", default-features = false }
-tokio-quiche = { version = "0.7.1", path = "./tokio-quiche" }
+tokio-quiche = { version = "0.8.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 triomphe = { version = "0.1" }
