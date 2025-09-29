@@ -54,10 +54,14 @@ fn default_private_key_path() -> String {
 }
 
 fn path_relative_to_manifest_dir(path: &str) -> String {
-    std::fs::canonicalize({
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
-    })
-    .unwrap()
-    .to_string_lossy()
-    .into_owned()
+    match std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path)) {
+        Ok(result) => result.to_string_lossy().into_owned(),
+        Err(_) => {
+            panic!(
+                "Example certificates not found in {}/{}",
+                env!("CARGO_MANIFEST_DIR"),
+                path
+            )
+        }
+    }
 }
