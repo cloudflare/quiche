@@ -38,7 +38,6 @@ use crate::metrics::Metrics;
 use foundations::telemetry::TelemetryContext;
 use pin_project::pin_project;
 use std::future::Future;
-use std::pin::pin;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
