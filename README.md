@@ -46,6 +46,8 @@ Getting Started
 Before diving into the quiche API, here are a few examples on how to use the
 quiche tools provided as part of the [quiche-apps](apps/) crate.
 
+⚠️ Please note `quiche-server` is a demo server that is intended to demonstrate how to use the quiche library API. It is not intended for to be used in production environments and offers no performance, security or reliability guarantees.
+
 After cloning the project according to the command mentioned in the [building](#building) section, the client can be run as follows:
 
 ```bash
@@ -448,6 +450,14 @@ Provides a server and client installed in /usr/local/bin.
 **cloudflare/quiche-qns**
 
 Provides the script to test quiche within the [quic-interop-runner](https://github.com/marten-seemann/quic-interop-runner).
+
+⚠️ Disclaimers & Notes
+---------
+
+* quiche-server is only a demo—for testing and examples. It is not production-ready and offers no performance, security or reliability guarantees.
+
+* FFI/C examples and server tools are proof-of-concept, intended to guide usage rather than serve in production.
+
 
 Copyright
 ---------
