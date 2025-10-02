@@ -55,6 +55,9 @@ ffi = ["dep:cdylib-link-lines"]
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
 
+# Enables post quantum experimental feature of boring crate
+pq-experimental = ["boring/pq-experimental"]
+
 [package.metadata.release]
 tag-prefix = ""
 
