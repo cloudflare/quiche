@@ -695,7 +695,7 @@ where
                     buf.truncate(bytes);
 
                     let send_from = if let Some(dst_addr) = dst_addr_override {
-                        log::trace!("overriding local address"; "actual_local" => format!("{:?}", dst_addr), "configured_local" => format!("{:?}", server_addr));
+                        log::trace!("overriding local address"; "actual_local" => dst_addr, "configured_local" => server_addr);
                         dst_addr
                     } else {
                         server_addr
