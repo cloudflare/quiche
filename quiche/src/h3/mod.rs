@@ -7263,8 +7263,53 @@ mod tests {
 
         assert_eq!(s.pipe.advance(), Ok(()));
 
-        // Server receives the reset and there are no more readable streams.
+        // The server does *not* attempt to read from the stream,
+        // but polls and receives the reset and there are no more
+        // readable streams.
         assert_eq!(s.poll_server(), Ok((stream, Event::Reset(0))));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.pipe.server.readable().len(), 0);
+    }
+
+    #[test]
+    fn reset_finished_at_server_with_data_pending_2() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends HEADERS and doesn't fin.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        assert!(s.send_body_client(stream, false).is_ok());
+
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server receives headers and data...
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+
+        // ..then Client sends RESET_STREAM.
+        assert_eq!(
+            s.pipe
+                .client
+                .stream_shutdown(stream, crate::Shutdown::Write, 0),
+            Ok(())
+        );
+
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        // Server reads from the stream and receives the reset while
+        // attempting to read.
+        assert_eq!(
+            s.recv_body_server(stream, &mut [0; 100]),
+            Err(Error::TransportError(crate::Error::StreamReset(0)))
+        );
+
+        // No more events and there are no more readable streams.
         assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.pipe.server.readable().len(), 0);
     }
