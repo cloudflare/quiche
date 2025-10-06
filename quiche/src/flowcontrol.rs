@@ -104,7 +104,7 @@ impl FlowControl {
     }
 
     /// Autotune the window size. When there is an another update
-    /// within RTT x 2, bump the window x 1.5, capped by
+    /// within RTT x 2, bump the window x 2, capped by
     /// max_window.
     pub fn autotune_window(&mut self, now: Instant, rtt: Duration) {
         if let Some(last_update) = self.last_update {
