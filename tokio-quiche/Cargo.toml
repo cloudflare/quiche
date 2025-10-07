@@ -74,6 +74,7 @@ triomphe = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
 clap = { version = "4.5.40", features = ["derive"] }
 env_logger = { workspace = true }
 h3i = { workspace = true }
