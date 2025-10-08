@@ -8867,6 +8867,19 @@ impl<'a> Iterator for UnknownTransportParameterIterator<'a> {
     }
 }
 
+/// QUIC Version Information Transport Parameter
+#[derive(Clone, Debug, PartialEq)]
+pub struct VersionNegotiationParameter {
+    /// Version of the QUIC protocol chosen by the sender for this connection.
+    pub chosen_version: u32,
+    /// Semantics depends upon identity of sender (client or server)
+    ///
+    /// If the sender is the client, available_versions lists the QUIC versions
+    /// compatible with the ongoing first flight. If the sender is the server,
+    /// available_versions lists all its fully deployed versions.
+    pub available_versions: Option<Vec<u32>>,
+}
+
 /// QUIC Transport Parameters
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransportParams {
@@ -8906,6 +8919,8 @@ pub struct TransportParams {
     pub retry_source_connection_id: Option<ConnectionId<'static>>,
     /// DATAGRAM frame extension parameter, if any.
     pub max_datagram_frame_size: Option<u64>,
+    /// Information for version negotiation, if any.
+    pub version_information: Option<VersionNegotiationParameter>,
     /// Unknown peer transport parameters and values, if any.
     pub unknown_params: Option<UnknownTransportParameters>,
     // pub preferred_address: ...,
@@ -8931,6 +8946,7 @@ impl Default for TransportParams {
             initial_source_connection_id: None,
             retry_source_connection_id: None,
             max_datagram_frame_size: None,
+            version_information: None,
             unknown_params: Default::default(),
         }
     }
@@ -9089,6 +9105,29 @@ impl TransportParams {
 
                 0x0020 => {
                     tp.max_datagram_frame_size = Some(val.get_varint()?);
+                },
+
+                0x0011 => {
+                    let mut version_information = VersionNegotiationParameter {
+                        chosen_version: val.get_u32()?,
+                        available_versions: None,
+                    };
+
+                    // It is semantically invalid to have an empty list of
+                    // available versions when this transport
+                    // parameter is sent by a client (RFC9538, Sec. 3, para. 6),
+                    // but there is no such restriction when
+                    // it is sent by a server. Therefore, this code
+                    // allows for an empty list and places the error-checking onus
+                    // on users.
+                    while val.off() < val.len() {
+                        let version = val.get_u32()?;
+                        version_information
+                            .available_versions
+                            .get_or_insert_default()
+                            .push(version);
+                    }
+                    tp.version_information = Some(version_information);
                 },
 
                 // Track unknown transport parameters specially.
