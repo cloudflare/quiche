@@ -51,12 +51,13 @@ fn transport_params() {
         initial_source_connection_id: Some(b"woot woot".to_vec().into()),
         retry_source_connection_id: Some(b"retry".to_vec().into()),
         max_datagram_frame_size: Some(32),
+        version_information: Some((72, Some(vec![81, 5, 9]))),
         unknown_params: Default::default(),
     };
 
     let mut raw_params = [42; 256];
     let raw_params = TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-    assert_eq!(raw_params.len(), 94);
+    assert_eq!(raw_params.len(), 112);
 
     let new_tp = TransportParams::decode(raw_params, false, None).unwrap();
 
@@ -81,13 +82,14 @@ fn transport_params() {
         initial_source_connection_id: Some(b"woot woot".to_vec().into()),
         retry_source_connection_id: None,
         max_datagram_frame_size: Some(32),
+        version_information: Some((72, None)),
         unknown_params: Default::default(),
     };
 
     let mut raw_params = [42; 256];
     let raw_params =
         TransportParams::encode(&tp, false, &mut raw_params).unwrap();
-    assert_eq!(raw_params.len(), 69);
+    assert_eq!(raw_params.len(), 75);
 
     let new_tp = TransportParams::decode(raw_params, true, None).unwrap();
 

@@ -1250,6 +1250,15 @@ impl Config {
             cmp::min(v, octets::MAX_VAR_INT);
     }
 
+    /// Sets the `version_information` transport parameter.
+    ///
+    /// When the value is None, the transport parameter will not be sent.
+    pub fn set_version_information(
+        &mut self, maybe_offered_version: Option<(u32, Option<Vec<u32>>)>,
+    ) {
+        self.local_transport_params.version_information = maybe_offered_version
+    }
+
     /// Sets the `initial_max_streams_uni` transport parameter.
     ///
     /// When set to a non-zero value quiche will only allow `v` number of
@@ -8909,6 +8918,8 @@ pub struct TransportParams {
     pub retry_source_connection_id: Option<ConnectionId<'static>>,
     /// DATAGRAM frame extension parameter, if any.
     pub max_datagram_frame_size: Option<u64>,
+    /// Information for version negotiation, if any.
+    pub version_information: Option<(u32, Option<Vec<u32>>)>,
     /// Unknown peer transport parameters and values, if any.
     pub unknown_params: Option<UnknownTransportParameters>,
     // pub preferred_address: ...,
@@ -8934,6 +8945,7 @@ impl Default for TransportParams {
             initial_source_connection_id: None,
             retry_source_connection_id: None,
             max_datagram_frame_size: None,
+            version_information: None,
             unknown_params: Default::default(),
         }
     }
@@ -9092,6 +9104,23 @@ impl TransportParams {
 
                 0x0020 => {
                     tp.max_datagram_frame_size = Some(val.get_varint()?);
+                },
+
+                0x0011 => {
+                    let chosen_version = val.get_u32()?;
+
+                    let mut available_versions: Option<Vec<u32>> = None;
+                    while val.off() < val.len() {
+                        let version = val.get_u32()?;
+                        if let Some(available_versions) = &mut available_versions
+                        {
+                            available_versions.push(version);
+                        } else {
+                            available_versions = Some(vec![version]);
+                        }
+                    }
+                    tp.version_information =
+                        Some((chosen_version, available_versions));
                 },
 
                 // Track unknown transport parameters specially.
@@ -9277,6 +9306,20 @@ impl TransportParams {
                 octets::varint_len(max_datagram_frame_size),
             )?;
             b.put_varint(max_datagram_frame_size)?;
+        }
+
+        if let Some((left, right)) = &tp.version_information {
+            TransportParams::encode_param(
+                &mut b,
+                0x0011,
+                4 + 4 * right.as_ref().map(|r| r.len()).unwrap_or_default(),
+            )?;
+            b.put_u32(*left)?;
+            if let Some(available_versions) = &right {
+                for available_version in available_versions {
+                    b.put_u32(*available_version)?;
+                }
+            }
         }
 
         let out_len = b.off();
