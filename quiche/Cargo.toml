@@ -55,6 +55,11 @@ ffi = ["dep:cdylib-link-lines"]
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
 
+# An alteration of the reno congestion control algorithm where the
+# congestion window is essentially unbounded. This is a dangerous feature
+# and should only be used with a full understanding of what this entails.
+congestion_window_unchecked_available = []
+
 [package.metadata.release]
 tag-prefix = ""
 
