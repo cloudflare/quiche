@@ -9,6 +9,10 @@ license = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 
+[features]
+# Build the Huffman encoding support as defined by HPACK (RFC7541).
+huffman_hpack = []
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(test_invalid_len_compilation_fail)',
