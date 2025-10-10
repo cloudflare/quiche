@@ -55,6 +55,9 @@ impl std::error::Error for BufferTooShortError {
     }
 }
 
+use self::huffman_table::DECODE_TABLE;
+use self::huffman_table::ENCODE_TABLE;
+
 /// Helper macro that asserts at compile time. It requires that
 /// `cond` is a const expression.
 macro_rules! static_assert {
@@ -246,6 +249,49 @@ impl<'a> Octets<'a> {
     pub fn get_bytes_with_varint_length(&mut self) -> Result<Octets<'a>> {
         let len = self.get_varint()?;
         self.get_bytes(len as usize)
+    }
+
+    /// Decodes a Huffman-encoded value from the current offset.
+    pub fn get_huffman_bytes(&mut self) -> Result<Vec<u8>> {
+        const FLAG_END: u8 = 1;
+        const FLAG_SYM: u8 = 2;
+        const FLAG_ERR: u8 = 4;
+
+        // Max compression ratio is >= 0.5.
+        let mut out = Vec::with_capacity(self.cap() << 1);
+
+        let mut state = 0;
+        let mut eos = false;
+
+        while let Ok(byte) = self.get_u8() {
+            let (next, sym, flags) = DECODE_TABLE[state][(byte >> 4) as usize];
+
+            if flags & FLAG_ERR == FLAG_ERR {
+                // Data followed the "end" marker.
+                return Err(BufferTooShortError);
+            } else if flags & FLAG_SYM == FLAG_SYM {
+                out.push(sym);
+            }
+
+            let (next, sym, flags) = DECODE_TABLE[next][(byte & 0xf) as usize];
+
+            if flags & FLAG_ERR == FLAG_ERR {
+                // Data followed the "end" marker.
+                return Err(BufferTooShortError);
+            } else if flags & FLAG_SYM == FLAG_SYM {
+                out.push(sym);
+            }
+
+            state = next;
+
+            eos = flags & FLAG_END == FLAG_END;
+        }
+
+        if state == 0 && eos {
+            return Err(BufferTooShortError);
+        }
+
+        Ok(out)
     }
 
     /// Reads `len` bytes from the current offset without copying and without
@@ -569,8 +615,7 @@ impl<'a> OctetsMut<'a> {
         Ok(out)
     }
 
-    /// Writes `len` bytes from the current offset without copying and advances
-    /// the buffer.
+    /// Writes `v` to the current offset.
     pub fn put_bytes(&mut self, v: &[u8]) -> Result<()> {
         let len = v.len();
 
@@ -585,6 +630,63 @@ impl<'a> OctetsMut<'a> {
         self.as_mut()[..len].copy_from_slice(v);
 
         self.off += len;
+
+        Ok(())
+    }
+
+    /// Writes `v` to the current offset after Huffman-encoding it.
+    pub fn put_huffman_bytes<const LOWER_CASE: bool>(
+        &mut self, v: &[u8],
+    ) -> Result<()> {
+        let mut bits: u64 = 0;
+        let mut pending = 0;
+
+        for &b in v {
+            let b = if LOWER_CASE {
+                b.to_ascii_lowercase()
+            } else {
+                b
+            };
+            let (nbits, code) = ENCODE_TABLE[b as usize];
+
+            pending += nbits;
+
+            if pending < 64 {
+                // Have room for the new token
+                bits |= code << (64 - pending);
+                continue;
+            }
+
+            pending -= 64;
+            // Take only the bits that fit
+            bits |= code >> pending;
+            self.put_u64(bits)?;
+
+            bits = if pending == 0 {
+                0
+            } else {
+                code << (64 - pending)
+            };
+        }
+
+        if pending == 0 {
+            return Ok(());
+        }
+
+        bits |= u64::MAX >> pending;
+        // TODO: replace with `next_multiple_of(8)` when stable
+        pending = (pending + 7) & !7; // Round up to a byte
+        bits >>= 64 - pending;
+
+        if pending >= 32 {
+            pending -= 32;
+            self.put_u32((bits >> pending) as u32)?;
+        }
+
+        while pending > 0 {
+            pending -= 8;
+            self.put_u8((bits >> pending) as u8)?;
+        }
 
         Ok(())
     }
@@ -704,6 +806,34 @@ pub const fn varint_parse_len(first: u8) -> usize {
         3 => 8,
         _ => unreachable!(),
     }
+}
+
+/// Returns how long the Huffman encoding of the given buffer will be.
+pub fn huffman_encoding_len<const LOWER_CASE: bool>(src: &[u8]) -> Result<usize> {
+    let mut bits: usize = 0;
+
+    for &b in src {
+        let b = if LOWER_CASE {
+            b.to_ascii_lowercase()
+        } else {
+            b
+        };
+
+        let (nbits, _) = ENCODE_TABLE[b as usize];
+        bits += nbits;
+    }
+
+    let mut len = bits / 8;
+
+    if bits & 7 != 0 {
+        len += 1;
+    }
+
+    if len > src.len() {
+        return Err(BufferTooShortError);
+    }
+
+    Ok(len)
 }
 
 /// The functions in this mod test the compile time assertions in the
@@ -1316,3 +1446,5 @@ mod tests {
         }
     }
 }
+
+mod huffman_table;
