@@ -202,5 +202,4 @@ pub use encoder::Encoder;
 
 mod decoder;
 mod encoder;
-mod huffman;
 mod static_table;
