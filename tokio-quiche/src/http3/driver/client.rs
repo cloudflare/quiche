@@ -223,6 +223,7 @@ impl ClientHooks {
             recv: pending_request.recv,
             read_fin: !has_body,
             h3_audit_stats: Arc::clone(&stream_ctx.audit_stats),
+            latest_priority_update: None,
         };
 
         driver

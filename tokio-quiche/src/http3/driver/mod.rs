@@ -46,6 +46,7 @@ use foundations::telemetry::log;
 use futures::FutureExt;
 use futures_util::stream::FuturesUnordered;
 use quiche::h3;
+use quiche::h3::Priority;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -190,6 +191,9 @@ pub struct IncomingH3Headers {
     pub read_fin: bool,
     /// Handle to the [`H3AuditStats`] for the message's stream.
     pub h3_audit_stats: Arc<H3AuditStats>,
+    /// The latest PRIORITY_UPDATE frame value, if any. Always `None` for
+    /// clients.
+    pub latest_priority_update: Option<Priority>,
 }
 
 impl fmt::Debug for IncomingH3Headers {
@@ -199,6 +203,7 @@ impl fmt::Debug for IncomingH3Headers {
             .field("headers", &self.headers)
             .field("read_fin", &self.read_fin)
             .field("h3_audit_stats", &self.h3_audit_stats)
+            .field("latest_priority_update", &self.latest_priority_update)
             .finish()
     }
 }

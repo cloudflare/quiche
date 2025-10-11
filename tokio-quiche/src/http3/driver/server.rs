@@ -26,6 +26,7 @@
 
 use std::sync::Arc;
 
+use quiche::h3::Priority;
 use tokio::sync::mpsc;
 
 use super::datagram;
@@ -130,6 +131,12 @@ impl ServerHooks {
             stream_ctx.associated_dgram_flow_id = Some(flow_id);
         }
 
+        let latest_priority_update = driver
+            .conn_mut()?
+            .take_last_priority_update(stream_id)
+            .and_then(|v| Priority::try_from(v.as_slice()))
+            .ok();
+
         let headers = IncomingH3Headers {
             stream_id,
             headers,
@@ -137,6 +144,7 @@ impl ServerHooks {
             recv,
             read_fin: !has_body,
             h3_audit_stats: Arc::clone(&stream_ctx.audit_stats),
+            latest_priority_update,
         };
 
         driver
