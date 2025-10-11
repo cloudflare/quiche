@@ -133,21 +133,25 @@ pub async fn serve_connection_details(
 
     loop {
         select! {
-            Some(frame) = event_rx.recv() => {
-                let ServerH3Event::Core(frame) = frame;
-                match frame {
-                    H3Event::IncomingSettings {..} | H3Event::BodyBytesReceived { .. } | H3Event::StreamClosed { .. } => {},
-                    H3Event::IncomingHeaders(headers) => {
-                        let IncomingH3Headers {
-                            stream_id, headers, send, recv, ..
-                        } = headers;
-
-                        request_counter.fetch_add(1, Ordering::SeqCst);
-                        request_futs.push(handle_forwarded_headers_frame(stream_id, headers, send, recv));
+            Some(event) = event_rx.recv() => {
+                match event {
+                    ServerH3Event::Core(event) => {
+                        match event {
+                            H3Event::IncomingSettings {..} | H3Event::BodyBytesReceived { .. } | H3Event::StreamClosed { .. } | H3Event::IncomingHeaders(..) => {},
+                            H3Event::ConnectionError(err) => { break Err(err.into()); }
+                            H3Event::ConnectionShutdown(Some(err)) => { break Err(err.into()); }
+                            _ => unreachable!()
+                        }
                     }
-                    H3Event::ConnectionError(err) => { break Err(err.into()); }
-                    H3Event::ConnectionShutdown(Some(err)) => { break Err(err.into()); }
-                    _ => unreachable!()
+
+                    ServerH3Event::Headers{ incoming_headers, ..} => {
+                        let IncomingH3Headers {
+                                stream_id, headers, send, recv, ..
+                            } = incoming_headers;
+
+                            request_counter.fetch_add(1, Ordering::SeqCst);
+                            request_futs.push(handle_forwarded_headers_frame(stream_id, headers, send, recv));
+                    }
                 }
             }
             Some(_) = request_futs.next() => {}

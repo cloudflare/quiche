@@ -44,6 +44,7 @@ use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::http3::driver::OutboundFrame;
 use tokio_quiche::http3::driver::OutboundFrameSender;
+use tokio_quiche::http3::driver::RawPriorityValue;
 use tokio_quiche::http3::driver::ServerEventStream;
 use tokio_quiche::http3::driver::ServerH3Event;
 use tokio_quiche::BoxError;
@@ -102,20 +103,17 @@ where
     ) -> QuicResult<()> {
         loop {
             match h3_event_receiver.recv().await {
-                Some(event) => self.handle_h3_event(event).await?,
+                Some(event) => self.handle_server_h3_event(event).await?,
                 None => return Ok(()), /* The sender was dropped, implying
                                         * connection was terminated */
             }
         }
     }
 
-    /// Handle a [`ServerH3Event`].
+    /// Handle a [`H3Event`].
     ///
     /// For simplicity's sake, we only handle a couple of events here.
-    // TODO(evanrittenhouse): support POST requests
-    async fn handle_h3_event(&mut self, event: ServerH3Event) -> QuicResult<()> {
-        let ServerH3Event::Core(event) = event;
-
+    fn handle_h3_event(event: H3Event) -> QuicResult<()> {
         match event {
             // Received an explicit connection level error. Not much to do here.
             H3Event::ConnectionError(err) => QuicResult::Err(Box::new(err)),
@@ -130,15 +128,29 @@ where
                 QuicResult::Err(err)
             },
 
-            // Received headers for a new stream from the H3Driver.
-            H3Event::IncomingHeaders(headers) => {
-                self.handle_incoming_headers(headers).await;
-
-                Ok(())
-            },
-
             _ => {
                 log::info!("received unhandled event: {event:?}");
+                Ok(())
+            },
+        }
+    }
+
+    /// Handle a [`ServerH3Event`].
+    ///
+    /// TODO(evanrittenhouse): support POST requests
+    async fn handle_server_h3_event(
+        &mut self, event: ServerH3Event,
+    ) -> QuicResult<()> {
+        match event {
+            ServerH3Event::Core(event) => Self::handle_h3_event(event),
+
+            ServerH3Event::Headers {
+                incoming_headers,
+                priority,
+            } => {
+                // Received headers for a new stream from the H3Driver.
+                self.handle_incoming_headers(incoming_headers, priority)
+                    .await;
                 Ok(())
             },
         }
@@ -149,7 +161,10 @@ where
     /// This function transforms the incoming headers into a [`Request`],
     /// creating the proper response body if requested. It then spawns a
     /// Tokio task which calls the `service_fn` on the [`Request`].
-    async fn handle_incoming_headers(&mut self, headers: IncomingH3Headers) {
+    async fn handle_incoming_headers(
+        &mut self, headers: IncomingH3Headers,
+        _priority: Option<RawPriorityValue>,
+    ) {
         log::info!("received headers: {:?}", &headers);
 
         let IncomingH3Headers {
@@ -168,6 +183,7 @@ where
 
         let service_fn = Arc::clone(&self.service_fn);
 
+        // TODO: use the _priority input parameter in request handling
         tokio::spawn(async move {
             Self::handle_request(service_fn, req, frame_sender).await;
         });
