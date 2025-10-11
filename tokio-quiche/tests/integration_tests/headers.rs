@@ -45,12 +45,18 @@ async fn test_additional_headers() {
         move |mut h3_conn| async move {
             let event_rx = h3_conn.h3_controller.event_receiver_mut();
 
-            while let Some(frame) = event_rx.recv().await {
-                let ServerH3Event::Core(frame) = frame;
+            while let Some(event) = event_rx.recv().await {
+                match event {
+                    ServerH3Event::Core(event) => match event {
+                        H3Event::ConnectionShutdown(_) => break,
 
-                match frame {
-                    H3Event::IncomingHeaders(headers) => {
-                        let IncomingH3Headers { mut send, .. } = headers;
+                        _ => (),
+                    },
+
+                    ServerH3Event::Headers {
+                        incoming_headers, ..
+                    } => {
+                        let IncomingH3Headers { mut send, .. } = incoming_headers;
 
                         // Send initial headers.
                         send.send(OutboundFrame::Headers(
@@ -73,10 +79,6 @@ async fn test_additional_headers() {
                         .await
                         .unwrap();
                     },
-
-                    H3Event::ConnectionShutdown(_) => break,
-
-                    _ => (),
                 }
             }
         },
