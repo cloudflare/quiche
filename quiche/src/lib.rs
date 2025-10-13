@@ -4260,11 +4260,17 @@ impl<F: BufFactory> Connection<F> {
                         .is_some_and(|le| le.is_app))) &&
             path.active()
         {
+            #[cfg(not(feature = "fuzzing"))]
             let ack_delay = pkt_space.largest_rx_pkt_time.elapsed();
 
+            #[cfg(not(feature = "fuzzing"))]
             let ack_delay = ack_delay.as_micros() as u64 /
                 2_u64
                     .pow(self.local_transport_params.ack_delay_exponent as u32);
+
+            // pseudo-random reproducible ack delays when fuzzing
+            #[cfg(feature = "fuzzing")]
+            let ack_delay = rand::rand_u8() as u64 + 1;
 
             let frame = frame::Frame::ACK {
                 ack_delay,
