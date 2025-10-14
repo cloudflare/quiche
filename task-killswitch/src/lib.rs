@@ -26,7 +26,7 @@
 
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
+use tokio::task::AbortHandle;
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -35,7 +35,7 @@ use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
 
 enum ActiveTaskOp {
-    Add { id: u64, handle: JoinHandle<()> },
+    Add { id: u64, handle: AbortHandle },
     Remove { id: u64 },
 }
 
@@ -102,7 +102,8 @@ impl TaskKillswitch {
             // we don't need to remove anything from ActiveTasks anymore.
             let _guard = RemoveOnDrop { task_tx_weak, id };
             fut.await;
-        });
+        })
+        .abort_handle();
 
         let _ = task_tx.send(ActiveTaskOp::Add { id, handle });
     }
@@ -128,7 +129,7 @@ impl TaskKillswitch {
 
 enum TaskEntry {
     /// Task was added and not yet removed.
-    Handle(JoinHandle<()>),
+    Handle(AbortHandle),
     /// Task was removed before it was added. This can happen
     /// if a spawned future completes before the `Add` message is sent.
     Tombstone,
@@ -161,7 +162,7 @@ impl ActiveTasks {
         }
     }
 
-    fn add_task(&mut self, id: u64, handle: JoinHandle<()>) {
+    fn add_task(&mut self, id: u64, handle: AbortHandle) {
         use std::collections::hash_map::Entry::Occupied;
         match self.tasks.entry(id) {
             Occupied(e) if matches!(e.get(), TaskEntry::Tombstone) => {
