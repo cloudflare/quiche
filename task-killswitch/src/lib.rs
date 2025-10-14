@@ -29,7 +29,6 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use std::collections::HashMap;
-
 use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -94,6 +93,7 @@ impl TaskKillswitch {
         };
 
         let id = self.task_counter.fetch_add(1, Ordering::SeqCst);
+        assert!(id < u64::MAX, "task-killswitch ID counter wrapped around!");
         let task_tx_weak = task_tx.downgrade();
 
         let handle = tokio::spawn(async move {
@@ -126,9 +126,17 @@ impl TaskKillswitch {
     }
 }
 
+enum TaskEntry {
+    /// Task was added and not yet removed.
+    Handle(JoinHandle<()>),
+    /// Task was removed before it was added. This can happen
+    /// if a spawned future completes before the `Add` message is sent.
+    Tombstone,
+}
+
 struct ActiveTasks {
     task_rx: mpsc::UnboundedReceiver<ActiveTaskOp>,
-    tasks: HashMap<u64, JoinHandle<()>>,
+    tasks: HashMap<u64, TaskEntry>,
     signal_killed: watch::Sender<()>,
 }
 
@@ -138,19 +146,48 @@ impl ActiveTasks {
             self.handle_task_op(op);
         }
 
-        for task in self.tasks.into_values() {
-            task.abort();
+        for entry in self.tasks.into_values() {
+            if let TaskEntry::Handle(task) = entry {
+                task.abort();
+            }
         }
         drop(self.signal_killed);
     }
 
     fn handle_task_op(&mut self, op: ActiveTaskOp) {
         match op {
-            ActiveTaskOp::Add { id, handle } => {
-                self.tasks.insert(id, handle);
+            ActiveTaskOp::Add { id, handle } => self.add_task(id, handle),
+            ActiveTaskOp::Remove { id } => self.remove_task(id),
+        }
+    }
+
+    fn add_task(&mut self, id: u64, handle: JoinHandle<()>) {
+        use std::collections::hash_map::Entry::Occupied;
+        match self.tasks.entry(id) {
+            Occupied(e) if matches!(e.get(), TaskEntry::Tombstone) => {
+                // Task was removed before it was added. Clear the map entry and
+                // drop the handle.
+                e.remove();
             },
-            ActiveTaskOp::Remove { id } => {
-                self.tasks.remove(&id);
+            e => {
+                // We assert against duplicate IDs in `spawn_task`. Panicing here
+                // wouldn't do anything besides stopping the killswitch loop, so
+                // just overwrite the handle.
+                e.insert_entry(TaskEntry::Handle(handle));
+            },
+        }
+    }
+
+    fn remove_task(&mut self, id: u64) {
+        use std::collections::hash_map::Entry::*;
+        match self.tasks.entry(id) {
+            Vacant(e) => {
+                // Task was not added yet, set a tombstone instead.
+                e.insert(TaskEntry::Tombstone);
+            },
+            Occupied(e) if matches!(e.get(), TaskEntry::Tombstone) => {},
+            Occupied(e) => {
+                e.remove();
             },
         }
     }
