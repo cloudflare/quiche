@@ -8,7 +8,11 @@ keywords = { workspace = true }
 categories = { workspace = true }
 description = "Abort all tokio tasks at once"
 
+[features]
+metrics = ["dep:foundations"]
+
 [dependencies]
+foundations = { workspace = true, optional = true, features = ["metrics"] }
 parking_lot = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync"] }
 
