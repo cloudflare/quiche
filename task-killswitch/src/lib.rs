@@ -34,6 +34,9 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
 
+#[cfg(feature = "metrics")]
+mod metrics;
+
 enum ActiveTaskOp {
     Add { id: u64, handle: AbortHandle },
     Remove { id: u64 },
@@ -49,6 +52,8 @@ impl Drop for RemoveOnDrop {
     fn drop(&mut self) {
         if let Some(tx) = self.task_tx_weak.upgrade() {
             let _ = tx.send(ActiveTaskOp::Remove { id: self.id });
+            #[cfg(feature = "metrics")]
+            metrics::killswitch_queue::ops_sent(metrics::OP_KIND_REMOVE).inc();
         }
     }
 }
@@ -106,6 +111,8 @@ impl TaskKillswitch {
         .abort_handle();
 
         let _ = task_tx.send(ActiveTaskOp::Add { id, handle });
+        #[cfg(feature = "metrics")]
+        metrics::killswitch_queue::ops_sent(metrics::OP_KIND_ADD).inc();
     }
 
     fn activate(&self) {
@@ -144,6 +151,12 @@ struct ActiveTasks {
 impl ActiveTasks {
     async fn collect(mut self) {
         while let Some(op) = self.task_rx.recv().await {
+            #[cfg(feature = "metrics")]
+            {
+                metrics::killswitch_queue::length().set(self.task_rx.len() as _);
+                metrics::count_ops_received(std::slice::from_ref(&op));
+            }
+
             self.handle_task_op(op);
         }
 
