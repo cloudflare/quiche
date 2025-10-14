@@ -80,7 +80,7 @@ impl TaskKillswitch {
             tasks: Default::default(),
             signal_killed,
         };
-        tokio::spawn(active_tasks.collect());
+        active_tasks.spawn();
 
         Self {
             task_tx: parking_lot::RwLock::new(Some(task_tx)),
@@ -149,15 +149,25 @@ struct ActiveTasks {
 }
 
 impl ActiveTasks {
-    async fn collect(mut self) {
-        while let Some(op) = self.task_rx.recv().await {
+    fn spawn(self) {
+        std::thread::Builder::new()
+            .name("killswitch_worker".to_owned())
+            .spawn(move || self.collect())
+            .expect("failed to spawn killswitch worker thread");
+    }
+
+    fn collect(mut self) {
+        let mut ops = Vec::with_capacity(16);
+        while self.task_rx.blocking_recv_many(&mut ops, 1024) > 0 {
             #[cfg(feature = "metrics")]
             {
                 metrics::killswitch_queue::length().set(self.task_rx.len() as _);
-                metrics::count_ops_received(std::slice::from_ref(&op));
+                metrics::count_ops_received(&ops);
             }
 
-            self.handle_task_op(op);
+            for op in ops.drain(..) {
+                self.handle_task_op(op);
+            }
         }
 
         for entry in self.tasks.into_values() {
