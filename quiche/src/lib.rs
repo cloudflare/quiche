@@ -821,6 +821,7 @@ pub struct Config {
     custom_bbr_params: Option<BbrParams>,
     initial_congestion_window_packets: usize,
     enable_relaxed_loss_threshold: bool,
+    disable_dynamic_loss_threshold: bool,
 
     pmtud: bool,
 
@@ -900,6 +901,7 @@ impl Config {
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
             enable_relaxed_loss_threshold: false,
+            disable_dynamic_loss_threshold: false,
             pmtud: false,
             hystart: true,
             pacing: true,
@@ -1354,6 +1356,13 @@ impl Config {
     /// The default value is false.
     pub fn set_enable_relaxed_loss_threshold(&mut self, enable: bool) {
         self.enable_relaxed_loss_threshold = enable;
+    }
+
+    /// Configure whether to disable dynamic loss threshold on spurious loss.
+    ///
+    /// The default value is false.
+    pub fn set_disable_dynamic_loss_threshold(&mut self, disable: bool) {
+        self.disable_dynamic_loss_threshold = disable;
     }
 
     /// Configures whether to enable HyStart++.
@@ -2496,6 +2505,27 @@ impl<F: BufFactory> Connection<F> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
 
         ex_data.recovery_config.enable_relaxed_loss_threshold = enable;
+
+        Ok(())
+    }
+
+    /// Configure whether to disable dynamic loss threshold on spurious loss.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_disable_dynamic_loss_threshold()`].
+    ///
+    /// [`Config::set_disable_dynamic_loss_threshold()`]: struct.Config.html#method.set_disable_dynamic_loss_threshold
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_disable_dynamic_loss_threshold_in_handshake(
+        ssl: &mut boring::ssl::SslRef, disable: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.disable_dynamic_loss_threshold = disable;
 
         Ok(())
     }
