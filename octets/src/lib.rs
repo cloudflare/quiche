@@ -284,7 +284,7 @@ impl<'a> Octets<'a> {
             }
         }
 
-        if state == 0 && eos {
+        if state != 0 && !eos {
             return Err(BufferTooShortError);
         }
 
@@ -1134,6 +1134,27 @@ mod tests {
         assert_eq!(b.get_varint().unwrap(), 37);
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 1);
+    }
+
+    #[cfg(feature = "huffman_hpack")]
+    #[test]
+    fn invalid_huffman() {
+        // Extra non-zero padding byte at the end.
+        let mut b = Octets::with_slice(
+            b"\x00\x85\xf2\xb2\x4a\x84\xff\x84\x49\x50\x9f\xff",
+        );
+        assert!(b.get_huffman_decoded().is_err());
+
+        // Zero padded.
+        let mut b =
+            Octets::with_slice(b"\x00\x85\xf2\xb2\x4a\x84\xff\x83\x49\x50\x90");
+        assert!(b.get_huffman_decoded().is_err());
+
+        // Non-final EOS symbol.
+        let mut b = Octets::with_slice(
+            b"\x00\x85\xf2\xb2\x4a\x84\xff\x87\x49\x51\xff\xff\xff\xfa\x7f",
+        );
+        assert!(b.get_huffman_decoded().is_err());
     }
 
     #[test]
