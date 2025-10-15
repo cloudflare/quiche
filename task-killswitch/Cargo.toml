@@ -9,6 +9,7 @@ categories = { workspace = true }
 description = "Abort all tokio tasks at once"
 
 [dependencies]
+dashmap = { workspace = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync"] }
 
