@@ -4987,6 +4987,9 @@ mod tests {
 
         // No event generated at server
         assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert!(s.pipe.server.streams.is_collected(0));
+        assert!(s.pipe.client.streams.is_collected(0));
     }
 
     #[test]
@@ -7120,6 +7123,168 @@ mod tests {
         );
 
         assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    /// The client shuts down the stream's write direction, the server
+    /// shuts down its side with fin
+    #[test]
+    fn client_shutdown_write_server_fin() {
+        let mut buf = [0; 65535];
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends request.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server sends response and closes stream.
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = s.send_response(stream, true).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: false,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // Client shuts down stream ==> sends RESET_STREAM
+        assert_eq!(
+            s.pipe
+                .client
+                .stream_shutdown(stream, crate::Shutdown::Write, 42),
+            Ok(())
+        );
+        assert_eq!(s.advance(), Ok(()));
+
+        // Server issues Reset event for the stream.
+        assert_eq!(s.poll_server(), Ok((stream, Event::Reset(42))));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Streams have been collected by quiche
+        assert!(s.pipe.server.streams.is_collected(stream));
+        assert!(s.pipe.client.streams.is_collected(stream));
+
+        // Client sends another request, server sends response without fin
+        //
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server sends response and closes stream.
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // Client shuts down stream ==> sends RESET_STREAM
+        assert_eq!(
+            s.pipe
+                .client
+                .stream_shutdown(stream, crate::Shutdown::Write, 42),
+            Ok(())
+        );
+        assert_eq!(s.advance(), Ok(()));
+
+        // Server issues Reset event for the stream.
+        assert_eq!(s.poll_server(), Ok((stream, Event::Reset(42))));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        s.send_body_server(stream, true).unwrap();
+
+        // Stream has been collected on server by quiche
+        assert!(s.pipe.server.streams.is_collected(stream));
+        // Client stream has not been collected, the client needs to
+        // read the fin from the stream first.
+        assert!(!s.pipe.client.streams.is_collected(stream));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        s.recv_body_client(stream, &mut buf).unwrap();
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert!(s.pipe.client.streams.is_collected(stream));
+    }
+
+    #[test]
+    fn client_shutdown_read() {
+        let mut buf = [0; 65535];
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends request with fin set.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server sends response and leaves stream open.
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        // assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        // Client shuts down read
+        assert_eq!(
+            s.pipe
+                .client
+                .stream_shutdown(stream, crate::Shutdown::Read, 42),
+            Ok(())
+        );
+        assert_eq!(s.advance(), Ok(()));
+
+        // Stream is writable on server side, but returns StreamStopped
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        let writables: Vec<u64> = s.pipe.server.writable().collect();
+        assert!(writables.contains(&stream));
+        assert_eq!(
+            s.send_body_server(stream, false),
+            Err(Error::TransportError(crate::Error::StreamStopped(42)))
+        );
+
+        // Client needs to finish its side but sending a fin
+        assert_eq!(
+            s.client.send_body(&mut s.pipe.client, stream, &[], true),
+            Ok(0)
+        );
+        assert_eq!(s.advance(), Ok(()));
+        // TODO: why do we get an Event::Data event for an empty buffer?
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut buf), Err(Error::Done));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Since the client has already send a fin, the stream is collected
+        // on both client and server
+        assert!(s.pipe.client.streams.is_collected(stream));
+        assert!(s.pipe.server.streams.is_collected(stream));
     }
 
     #[test]
