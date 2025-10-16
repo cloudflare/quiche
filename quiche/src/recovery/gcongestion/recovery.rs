@@ -1190,7 +1190,7 @@ mod tests {
     fn loss_threshold() {
         let config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         let recovery_config = RecoveryConfig::from_config(&config);
-        assert_eq!(recovery_config.enable_relaxed_loss_threshold, false);
+        assert!(!recovery_config.enable_relaxed_loss_threshold);
 
         let mut loss_thresh = LossThreshold::new(&recovery_config);
         assert_eq!(loss_thresh.time_thresh_overhead, None);

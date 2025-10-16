@@ -4,7 +4,7 @@ version = "0.24.6"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 build = "src/build.rs"
-rust-version = "1.82"
+rust-version = "1.83"
 edition = { workspace = true }
 repository = { workspace = true }
 license = { workspace = true }
