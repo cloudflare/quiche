@@ -1110,9 +1110,9 @@ impl PktNumManager {
         //
         // curr_pn
         //  |
-        //  v               |-lower-|
-        // [c x x x x x x x x x x x s s s s s s s s s s x x]
-        //    |--min_skip---|       |---skip_range----|
+        //  v                 |--- (upper - lower) ---|
+        // [c x x x x x x x x s s s s s s s s s s s s s x x]
+        //    |--min_skip---| |------skip_range-------|
         //
         //```
         let skip_pn_counter = MIN_SKIP_COUNTER_VALUE + lower + rand_skip_value;
