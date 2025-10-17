@@ -54,7 +54,7 @@ quiche = { version = "0.24.6", path = "./quiche" }
 rand = { version = "0.8" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
-rstest = { version = "0.25.0" }
+rstest = { version = "0.26.1" }
 serde = { version = "1" }
 serde_json = { version = "1" }
 serde_with = { version = "3.3", default-features = false }
