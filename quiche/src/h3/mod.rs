@@ -1482,11 +1482,17 @@ impl Connection {
             q.add_event_data_now(ev_data).ok();
         });
 
+        let recv_finished = conn.stream_finished(stream_id);
+
         if let Some(s) = self.streams.get_mut(&stream_id) {
             s.initialize_local();
+
+            if fin && !recv_finished {
+                s.finish_local();
+            }
         }
 
-        if fin && conn.stream_finished(stream_id) {
+        if fin && recv_finished {
             self.streams.remove(&stream_id);
         }
 
@@ -1714,7 +1720,16 @@ impl Connection {
             let _ = conn.stream_writable(stream_id, overhead + 1);
         }
 
-        if fin && written == len && conn.stream_finished(stream_id) {
+        let send_finished = fin && written == len;
+        let recv_finished = conn.stream_finished(stream_id);
+
+        if let Some(s) = self.streams.get_mut(&stream_id) {
+            if send_finished && !recv_finished {
+                s.finish_local();
+            }
+        }
+
+        if send_finished && recv_finished {
             self.streams.remove(&stream_id);
         }
 
@@ -2024,6 +2039,12 @@ impl Connection {
 
         // Process finished streams list.
         if let Some(finished) = self.finished_streams.pop_front() {
+            if let Some(stream) = self.streams.get_mut(&finished) {
+                if stream.local_finished() {
+                    self.streams.remove(&finished);
+                }
+            }
+
             return Ok((finished, Event::Finished));
         }
 
@@ -2038,8 +2059,15 @@ impl Connection {
 
                 // Return early if the stream was reset, to avoid returning
                 // a Finished event later as well.
-                Err(Error::TransportError(crate::Error::StreamReset(e))) =>
-                    return Ok((s, Event::Reset(e))),
+                Err(Error::TransportError(crate::Error::StreamReset(e))) => {
+                    if let Some(stream) = self.streams.get_mut(&s) {
+                        if stream.local_finished() {
+                            self.streams.remove(&s);
+                        }
+                    }
+
+                    return Ok((s, Event::Reset(e)));
+                },
 
                 Err(e) => return Err(e),
             };
@@ -2058,6 +2086,12 @@ impl Connection {
         // events are returned when receiving empty stream frames with the fin
         // flag set.
         if let Some(finished) = self.finished_streams.pop_front() {
+            if let Some(stream) = self.streams.get_mut(&finished) {
+                if stream.local_finished() {
+                    self.streams.remove(&finished);
+                }
+            }
+
             if conn.stream_readable(finished) {
                 // The stream is finished, but is still readable, it may
                 // indicate that there is a pending error, such as reset.
@@ -2067,6 +2101,7 @@ impl Connection {
                     return Ok((finished, Event::Reset(e)));
                 }
             }
+
             return Ok((finished, Event::Finished));
         }
 
@@ -7278,6 +7313,131 @@ mod tests {
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    fn collect_completed_streams() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let init_streams_client = s.client.streams.len();
+        let init_streams_server = s.client.streams.len();
+
+        // Client sends HEADERS and doesn't fin
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server receives headers.
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert_eq!(s.client.streams.len(), init_streams_client + 1);
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        // Client sends body and fin
+        let body = s.send_body_client(stream, true).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        assert_eq!(s.client.streams.len(), init_streams_client + 1);
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        // Server sends response and finishes the stream
+        let resp_headers = s.send_response(stream, false).unwrap();
+        s.send_body_server(stream, true).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp_headers,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_client(stream, &mut recv_buf), Ok(body.len()));
+
+        // The server stream should be gone now
+        assert_eq!(s.client.streams.len(), init_streams_client + 1);
+        assert_eq!(s.server.streams.len(), init_streams_server);
+
+        // Polling again should clean up the client
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        assert_eq!(s.client.streams.len(), init_streams_client);
+    }
+
+    #[test]
+    fn collect_reset_streams() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let init_streams_client = s.client.streams.len();
+        let init_streams_server = s.client.streams.len();
+
+        // Client sends HEADERS and doesn't fin
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server receives headers.
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert_eq!(s.client.streams.len(), init_streams_client + 1);
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        // Client sends body and fin
+        let body = s.send_body_client(stream, true).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        assert_eq!(s.client.streams.len(), init_streams_client + 1);
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        // Server sends response and resets the stream.
+        s.send_response(stream, false).unwrap();
+        s.pipe
+            .server
+            .stream_shutdown(stream, crate::Shutdown::Write, 0)
+            .unwrap();
+
+        s.advance().ok();
+
+        // TODO: need to notify resets better.
+        //
+        // This will trigger the h3 layer to check for the stream resets,
+        // otherwise it wouldn't know that a reset happened.
+        //
+        // We will need to figure out a way to do this automatically to avoid
+        // requiring applications to do this manually. For now just keep this
+        // for testing purposes.
+        let _ = s.send_body_server(stream, true);
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Reset(0))));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // The server stream should be gone now
+        assert_eq!(s.client.streams.len(), init_streams_client);
+        assert_eq!(s.server.streams.len(), init_streams_server);
     }
 }
 
