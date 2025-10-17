@@ -51,7 +51,7 @@ parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
 qlog = { version = "0.15.2", path = "./qlog" }
 quiche = { version = "0.24.6", path = "./quiche" }
-rand = { version = "0.8" }
+rand = { version = "0.9" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
 rstest = { version = "0.25.0" }
