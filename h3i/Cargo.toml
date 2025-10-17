@@ -20,7 +20,7 @@ async = ["dep:buffer-pool", "dep:tokio", "dep:tokio-quiche"]
 [dependencies]
 clap = "3"
 env_logger = { workspace = true }
-inquire = "0.6.2"
+inquire = "0.9.1"
 log = { workspace = true, features = ["std"] }
 mio = { workspace = true, features = ["net", "os-poll"] }
 multimap = "0.10"
