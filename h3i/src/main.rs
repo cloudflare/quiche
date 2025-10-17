@@ -429,10 +429,8 @@ pub fn make_streamer(
     );
 
     let mut streamer = qlog::streamer::QlogStreamer::new(
-        qlog::QLOG_VERSION.to_string(),
         Some("h3i".into()),
         Some("h3i".into()),
-        None,
         time::Instant::now(),
         trace,
         qlog::events::EventImportance::Extra,
