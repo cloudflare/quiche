@@ -846,8 +846,9 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         // Open more space (snd_cnt) for PRR when allowed.
-        self.cwnd().saturating_sub(self.bytes_in_flight.get()) +
-            self.congestion.prr.snd_cnt
+        self.cwnd()
+            .saturating_sub(self.bytes_in_flight.get())
+            .saturating_add(self.congestion.prr.snd_cnt)
     }
 
     fn rtt(&self) -> Duration {
