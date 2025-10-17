@@ -85,7 +85,7 @@ smallvec = { workspace = true, features = ["union"] }
 enum_dispatch = "0.3"
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
   "Win32_Networking_WinSock",
   "Win32_Security_Cryptography",
 ] }
