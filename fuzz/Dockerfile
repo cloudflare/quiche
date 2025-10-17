@@ -32,5 +32,7 @@ COPY fuzz/cert.key ./
 COPY --from=fuzz \
      /build/fuzz/target/x86_64-unknown-linux-gnu/release/packet_recv_client \
      /build/fuzz/target/x86_64-unknown-linux-gnu/release/packet_recv_server \
+     /build/fuzz/target/x86_64-unknown-linux-gnu/release/packets_recv_server \
+     /build/fuzz/target/x86_64-unknown-linux-gnu/release/packets_posths_server \
      /build/fuzz/target/x86_64-unknown-linux-gnu/release/qpack_decode \
      ./
