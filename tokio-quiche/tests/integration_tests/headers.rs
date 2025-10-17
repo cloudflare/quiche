@@ -28,6 +28,7 @@ use crate::fixtures::*;
 
 use futures::SinkExt;
 
+use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::http3::driver::OutboundFrame;
@@ -75,6 +76,14 @@ async fn test_additional_headers() {
                         send.send(OutboundFrame::Headers(
                             vec![Header::new(b":status", b"200")],
                             None,
+                        ))
+                        .await
+                        .unwrap();
+
+                        // Send fin
+                        send.send(OutboundFrame::Body(
+                            BufFactory::get_empty_buf(),
+                            true,
                         ))
                         .await
                         .unwrap();
