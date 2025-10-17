@@ -62,7 +62,7 @@ slog-scope = { version = "4.0" }
 slog-stdlog = { version = "4.1.1" }
 smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.1.1", path = "./task-killswitch" }
-thiserror = { version = "1" }
+thiserror = { version = "2" }
 tokio = { version = "1.44", default-features = false }
 tokio-quiche = { version = "0.10.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
