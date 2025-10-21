@@ -55,10 +55,11 @@ pub(crate) struct StreamCtx {
     pub(crate) initial_headers_sent: bool,
     /// First time that a HEADERS frame was not fully flushed.
     pub(crate) first_full_headers_flush_fail_time: Option<Instant>,
-    /// Indicates the stream received fin. No more data will be received.
-    pub(crate) fin_recv: bool,
-    /// Indicates the stream sent fin. No more data will be sent.
-    pub(crate) fin_sent: bool,
+    /// Indicates the stream received fin or reset. No more data will be
+    /// received.
+    pub(crate) fin_or_reset_recv: bool,
+    /// Indicates the stream sent fin or reset. No more data will be sent.
+    pub(crate) fin_or_reset_sent: bool,
     /// The flow ID for proxying datagrams over this stream. If `None`,
     /// the stream has no associated DATAGRAM flow.
     pub(crate) associated_dgram_flow_id: Option<u64>,
@@ -82,8 +83,8 @@ impl StreamCtx {
             initial_headers_sent: false,
             first_full_headers_flush_fail_time: None,
 
-            fin_recv: false,
-            fin_sent: false,
+            fin_or_reset_recv: false,
+            fin_or_reset_sent: false,
 
             associated_dgram_flow_id: None,
         };
@@ -105,6 +106,60 @@ impl StreamCtx {
             stream_id,
             chan: self.recv.take(),
         })
+    }
+
+    /// Handle the case when we received a STOP_SENDING frame. Note, that
+    /// we'll only learn about a STOP_SENDING frame from the write path.
+    /// Also note, that quiche will automatically send a RESET_STREAM frame
+    /// in response when it receives a STOP_SENDING (as recommended by the
+    /// RFC)
+    pub(crate) fn handle_recvd_stop_sending(&mut self, wire_err_code: u64) {
+        debug_assert!(!self.fin_or_reset_sent);
+        // We received a STOP_SENDING frame. This indicates that the
+        // write direction has closed. We still need to continue
+        // reading from the stream until we receive a RESET_FRAME or
+        // `fin`.
+        self.audit_stats
+            .set_recvd_stop_sending_error_code(wire_err_code as i64);
+        self.fin_or_reset_sent = true;
+        // Drop any pending data and close the write side.
+        // We can't accept additional frames
+        self.queued_frame = None;
+        debug_assert!(self.recv.is_some());
+        self.recv = None;
+    }
+
+    pub(crate) fn handle_recvd_reset(&mut self, wire_err_code: u64) {
+        debug_assert!(!self.fin_or_reset_recv);
+        // We received a RESET_STREAM frame, which closes the read direction
+        // but not the write direction. If the peer wants to shut down write,
+        // it must also send STOP_SENDING
+        self.audit_stats
+            .set_recvd_reset_stream_error_code(wire_err_code as i64);
+        self.fin_or_reset_recv = true;
+        self.send = None;
+    }
+
+    pub(crate) fn handle_sent_reset(&mut self, wire_err_code: u64) {
+        debug_assert!(!self.fin_or_reset_sent);
+        self.audit_stats
+            .set_sent_reset_stream_error_code(wire_err_code as i64);
+        self.fin_or_reset_sent = true;
+    }
+
+    pub(crate) fn handle_sent_stop_sending(&mut self, wire_err_code: u64) {
+        debug_assert!(!self.fin_or_reset_recv);
+        self.audit_stats
+            .set_sent_stop_sending_error_code(wire_err_code as i64);
+        // It is ok for us to set the `fin_reset_recv` flag here.  While the peer
+        // must still send a fin or reset_stream with its final size, we don't
+        // need to read it from the stream. Quiche will take care of that.
+        self.fin_or_reset_recv = true;
+        self.send = None;
+    }
+
+    pub(crate) fn both_directions_done(&self) -> bool {
+        self.fin_or_reset_recv && self.fin_or_reset_sent
     }
 }
 
