@@ -1,6 +1,6 @@
 [package]
 name = "octets"
-version = "0.3.0"
+version = "0.3.3"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
 description = "Zero-copy abstraction for parsing and constructing network packets"
 edition = { workspace = true }
@@ -8,6 +8,10 @@ repository = { workspace = true }
 license = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
+
+[features]
+# Build the Huffman encoding support as defined by HPACK (RFC7541).
+huffman_hpack = []
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

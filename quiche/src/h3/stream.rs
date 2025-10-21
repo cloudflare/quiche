@@ -349,6 +349,12 @@ impl Stream {
                         (frame::MAX_PUSH_FRAME_TYPE_ID, _) =>
                             return Err(Error::FrameUnexpected),
 
+                        (frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID, _) =>
+                            return Err(Error::FrameUnexpected),
+
+                        (frame::PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID, _) =>
+                            return Err(Error::FrameUnexpected),
+
                         // All other frames can be ignored regardless of stream
                         // state.
                         _ => (),

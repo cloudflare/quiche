@@ -24,98 +24,114 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tokio::sync::mpsc;
+use dashmap::DashMap;
+use parking_lot::Mutex;
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
-
-use std::collections::HashMap;
+use tokio::task;
+use tokio::task::AbortHandle;
 
 use std::future::Future;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::LazyLock;
-
-enum ActiveTaskOp {
-    Add { id: u64, handle: JoinHandle<()> },
-    Remove { id: u64 },
-}
 
 /// Drop guard for task removal. If a task panics, this makes sure
 /// it is removed from [`ActiveTasks`] properly.
 struct RemoveOnDrop {
-    id: u64,
-    task_tx_weak: mpsc::WeakUnboundedSender<ActiveTaskOp>,
+    id: task::Id,
+    storage: &'static ActiveTasks,
 }
 impl Drop for RemoveOnDrop {
     fn drop(&mut self) {
-        if let Some(tx) = self.task_tx_weak.upgrade() {
-            let _ = tx.send(ActiveTaskOp::Remove { id: self.id });
-        }
+        self.storage.remove_task(self.id);
     }
 }
 
 /// A task killswitch that allows aborting all the tasks spawned with it at
-/// once. The implementation strives to not introduce any in-band locking, so
-/// spawning the future doesn't require acquiring a global lock, keeping the
-/// regular pace of operation.
+/// once. The implementation strives to minimize in-band locking. Spawning a
+/// future requires a single sharded lock from an internal [`DashMap`].
+/// Conflicts are expected to be very rare (dashmap defaults to `4 * nproc`
+/// shards, while each thread can only spawn one task at a time.)
 struct TaskKillswitch {
-    // NOTE: use a lock without poisoning here to not panic all the threads if
-    // one of the worker threads panic.
-    task_tx: parking_lot::RwLock<Option<mpsc::UnboundedSender<ActiveTaskOp>>>,
-    task_counter: AtomicU64,
+    // Invariant: If `activated` is true, we don't add new tasks anymore.
+    activated: AtomicBool,
+    storage: &'static ActiveTasks,
+
+    /// Watcher that is triggered after all kill signals have been sent (by
+    /// dropping `signal_killed`.) Currently-running tasks are killed after
+    /// their next yield, which may be after this triggers.
     all_killed: watch::Receiver<()>,
+    // NOTE: All we want here is to take ownership of `signal_killed` when
+    // activating the killswitch. That code path only runs once per instance, but
+    // requires interior mutability. Using `Mutex` is easier than bothering with
+    // an `UnsafeCell`. The mutex is guaranteed to be unlocked.
+    signal_killed: Mutex<Option<watch::Sender<()>>>,
 }
 
 impl TaskKillswitch {
-    fn new() -> Self {
-        let (task_tx, task_rx) = mpsc::unbounded_channel();
+    fn new(storage: &'static ActiveTasks) -> Self {
         let (signal_killed, all_killed) = watch::channel(());
-
-        let active_tasks = ActiveTasks {
-            task_rx,
-            tasks: Default::default(),
-            signal_killed,
-        };
-        tokio::spawn(active_tasks.collect());
+        let signal_killed = Mutex::new(Some(signal_killed));
 
         Self {
-            task_tx: parking_lot::RwLock::new(Some(task_tx)),
-            task_counter: Default::default(),
+            activated: AtomicBool::new(false),
+            storage,
+            signal_killed,
             all_killed,
         }
     }
 
+    /// Creates a killswitch by allocating and leaking the task storage.
+    ///
+    /// **NOTE:** This is intended for use in `static`s and tests. It should not
+    /// be exposed publicly!
+    fn with_leaked_storage() -> Self {
+        let storage = Box::leak(Box::new(ActiveTasks::default()));
+        Self::new(storage)
+    }
+
+    fn was_activated(&self) -> bool {
+        // All synchronization is done using locks,
+        // so we can use relaxed for our atomics.
+        self.activated.load(Ordering::Relaxed)
+    }
+
     fn spawn_task(&self, fut: impl Future<Output = ()> + Send + 'static) {
-        // NOTE: acquiring the lock here is very cheap, as unless the killswitch
-        // is activated, this one is always unlocked and this is just a
-        // few atomic operations.
-        let Some(task_tx) = self.task_tx.read().as_ref().cloned() else {
+        if self.was_activated() {
             return;
-        };
+        }
 
-        let id = self.task_counter.fetch_add(1, Ordering::SeqCst);
-        let task_tx_weak = task_tx.downgrade();
-
+        let storage = self.storage;
         let handle = tokio::spawn(async move {
-            // NOTE: we use a weak sender inside the spawned task - dropping
-            // all strong senders activates the killswitch. In that case,
-            // we don't need to remove anything from ActiveTasks anymore.
-            let _guard = RemoveOnDrop { task_tx_weak, id };
+            let id = task::id();
+            let _guard = RemoveOnDrop { id, storage };
             fut.await;
-        });
+        })
+        .abort_handle();
 
-        let _ = task_tx.send(ActiveTaskOp::Add { id, handle });
+        let res = self.storage.add_task_if(handle, || !self.was_activated());
+        if let Err(handle) = res {
+            // Killswitch was activated by the time we got a lock on the map shard
+            handle.abort();
+        }
     }
 
     fn activate(&self) {
-        // take()ing the sender here drops it and thereby triggers the killswitch.
-        // Concurrent spawn_task calls may still hold strong senders, which
-        // ensures those tasks are added to ActiveTasks before the killing
-        // starts.
+        // We check `activated` after locking the map shard and before inserting
+        // an element. This ensures in-progress spawns either complete before
+        // `tasks.kill_all()` obtains the lock for that shard, or they abort
+        // afterwards.
         assert!(
-            self.task_tx.write().take().is_some(),
+            !self.activated.swap(true, Ordering::Relaxed),
             "killswitch can't be used twice"
         );
+
+        let tasks = self.storage;
+        let signal_killed = self.signal_killed.lock().take();
+        std::thread::spawn(move || {
+            tasks.kill_all();
+            drop(signal_killed);
+        });
     }
 
     fn killed(&self) -> impl Future<Output = ()> + Send + 'static {
@@ -126,31 +142,63 @@ impl TaskKillswitch {
     }
 }
 
+enum TaskEntry {
+    /// Task was added and not yet removed.
+    Handle(AbortHandle),
+    /// Task was removed before it was added. This can happen if a spawned
+    /// future completes before the spawning thread can add it to the map.
+    Tombstone,
+}
+
+#[derive(Default)]
 struct ActiveTasks {
-    task_rx: mpsc::UnboundedReceiver<ActiveTaskOp>,
-    tasks: HashMap<u64, JoinHandle<()>>,
-    signal_killed: watch::Sender<()>,
+    tasks: DashMap<task::Id, TaskEntry>,
 }
 
 impl ActiveTasks {
-    async fn collect(mut self) {
-        while let Some(op) = self.task_rx.recv().await {
-            self.handle_task_op(op);
-        }
-
-        for task in self.tasks.into_values() {
-            task.abort();
-        }
-        drop(self.signal_killed);
+    fn kill_all(&self) {
+        self.tasks.retain(|_, entry| {
+            if let TaskEntry::Handle(task) = entry {
+                task.abort();
+            }
+            false // remove all elements
+        });
     }
 
-    fn handle_task_op(&mut self, op: ActiveTaskOp) {
-        match op {
-            ActiveTaskOp::Add { id, handle } => {
-                self.tasks.insert(id, handle);
+    fn add_task_if(
+        &self, handle: AbortHandle, cond: impl FnOnce() -> bool,
+    ) -> Result<(), AbortHandle> {
+        use dashmap::Entry::*;
+        let id = handle.id();
+
+        match self.tasks.entry(id) {
+            Vacant(e) => {
+                if !cond() {
+                    return Err(handle);
+                }
+                e.insert(TaskEntry::Handle(handle));
             },
-            ActiveTaskOp::Remove { id } => {
-                self.tasks.remove(&id);
+            Occupied(e) if matches!(e.get(), TaskEntry::Tombstone) => {
+                // Task was removed before it was added. Clear the map entry and
+                // drop the handle.
+                e.remove();
+            },
+            Occupied(_) => panic!("tokio task ID already in use: {id}"),
+        }
+
+        Ok(())
+    }
+
+    fn remove_task(&self, id: task::Id) {
+        use dashmap::Entry::*;
+        match self.tasks.entry(id) {
+            Vacant(e) => {
+                // Task was not added yet, set a tombstone instead.
+                e.insert(TaskEntry::Tombstone);
+            },
+            Occupied(e) if matches!(e.get(), TaskEntry::Tombstone) => {},
+            Occupied(e) => {
+                e.remove();
             },
         }
     }
@@ -158,7 +206,7 @@ impl ActiveTasks {
 
 /// The global [`TaskKillswitch`] exposed publicly from the crate.
 static TASK_KILLSWITCH: LazyLock<TaskKillswitch> =
-    LazyLock::new(TaskKillswitch::new);
+    LazyLock::new(TaskKillswitch::with_leaked_storage);
 
 /// Spawns a new asynchronous task and registers it in the crate's global
 /// killswitch.
@@ -238,7 +286,7 @@ mod tests {
 
     #[tokio::test]
     async fn activate_killswitch_early() {
-        let killswitch = TaskKillswitch::new();
+        let killswitch = TaskKillswitch::with_leaked_storage();
         let abort_signals = start_test_tasks(&killswitch);
 
         killswitch.activate();
@@ -253,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn activate_killswitch_with_delay() {
-        let killswitch = TaskKillswitch::new();
+        let killswitch = TaskKillswitch::with_leaked_storage();
         let abort_signals = start_test_tasks(&killswitch);
         let signal_handle = tokio::spawn(killswitch.killed());
 

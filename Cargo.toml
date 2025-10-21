@@ -34,8 +34,9 @@ anyhow = { version = "1" }
 boring = { version = "4.3" }
 buffer-pool = { version = "0.1.0", path = "./buffer-pool" }
 crossbeam = { version = "0.8.1", default-features = false }
+dashmap = { version = "6" }
 datagram-socket = { version = "0.5.0", path = "./datagram-socket" }
-env_logger = "0.10"
+env_logger = "0.11"
 foundations = { version = ">=4,<6", default-features = false }
 futures = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false }
@@ -45,25 +46,24 @@ libc = { version = "0.2.76", default-features = false }
 log = { version = "0.4.20" }
 mio = { version = "1" }
 nix = { version = "0.30.1", features = ["net", "uio", "socket"] }
-octets = { version = "0.3.0", path = "./octets" }
+octets = { version = "0.3.3", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
 qlog = { version = "0.15.2", path = "./qlog" }
 quiche = { version = "0.24.6", path = "./quiche" }
-rand = { version = "0.8" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
-rstest = { version = "0.25.0" }
+rstest = { version = "0.26.1" }
 serde = { version = "1" }
 serde_json = { version = "1" }
 serde_with = { version = "3.3", default-features = false }
 slog-scope = { version = "4.0" }
 slog-stdlog = { version = "4.1.1" }
 smallvec = { version = "1.10", default-features = false }
-task-killswitch = { version = "0.1.0", path = "./task-killswitch" }
-thiserror = { version = "1" }
+task-killswitch = { version = "0.1.1", path = "./task-killswitch" }
+thiserror = { version = "2" }
 tokio = { version = "1.44", default-features = false }
-tokio-quiche = { version = "0.9.0", path = "./tokio-quiche" }
+tokio-quiche = { version = "0.10.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 triomphe = { version = "0.1" }
