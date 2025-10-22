@@ -120,6 +120,14 @@ impl From<QuicCommand> for ServerH3Command {
     }
 }
 
+// Quiche urgency is an 8-bit space. Internally, quiche reserves 0 for HTTP/3
+// control streams and request are shifted up by 124. Any value in that range is
+// suitable here.
+const PRE_HEADERS_BOOSTED_PRIORITY_URGENCY: u8 = 64;
+// Non-incremental streams are served in stream ID order, matching the client
+// FIFO expectation.
+const PRE_HEADERS_BOOSTED_PRIORITY_INCREMENTAL: bool = false;
+
 pub struct ServerHooks {
     /// Helper to enforce limits and timeouts on an HTTP/3 connection.
     settings_enforcer: Http3SettingsEnforcer,
@@ -137,7 +145,8 @@ impl ServerHooks {
     /// [`H3Event`] to the [ServerH3Controller] for application-level
     /// processing.
     fn handle_request(
-        driver: &mut H3Driver<Self>, headers: InboundHeaders,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
+        headers: InboundHeaders,
     ) -> H3ConnectionResult<()> {
         let InboundHeaders {
             stream_id,
@@ -165,6 +174,17 @@ impl ServerHooks {
             .take_last_priority_update(stream_id)
             .ok()
             .map(|v| v.into());
+
+        // Boost the priority of the stream until we write response headers via
+        // process_write_frame(), which will set the desired priority. Since it
+        // will get set later, just swallow any error here.
+        qconn
+            .stream_priority(
+                stream_id,
+                PRE_HEADERS_BOOSTED_PRIORITY_URGENCY,
+                PRE_HEADERS_BOOSTED_PRIORITY_INCREMENTAL,
+            )
+            .ok();
 
         let headers = IncomingH3Headers {
             stream_id,
@@ -252,7 +272,7 @@ impl DriverHooks for ServerHooks {
             driver.hooks.settings_enforcer.cancel_timeout(timeout);
         }
 
-        Self::handle_request(driver, headers)
+        Self::handle_request(driver, qconn, headers)
     }
 
     fn conn_command(
