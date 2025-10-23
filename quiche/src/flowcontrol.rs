@@ -77,6 +77,12 @@ impl FlowControl {
         self.max_data
     }
 
+    /// Returns the consumed bytes by the receiver.
+    #[cfg(test)]
+    pub fn consumed(&self) -> u64 {
+        self.consumed
+    }
+
     /// Update consumed bytes.
     pub fn add_consumed(&mut self, consumed: u64) {
         self.consumed += consumed;

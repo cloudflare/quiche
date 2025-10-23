@@ -32,6 +32,7 @@ use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::stream::RecvBufResetReturn;
 use crate::Error;
 use crate::Result;
 
@@ -189,6 +190,9 @@ impl RecvBuf {
 
             if !self.drain {
                 self.data.insert(buf.max_off(), buf);
+            } else {
+                // we are not storing any data, off == len
+                self.off = self.len;
             }
         }
 
@@ -253,7 +257,9 @@ impl RecvBuf {
     }
 
     /// Resets the stream at the given offset.
-    pub fn reset(&mut self, error_code: u64, final_size: u64) -> Result<usize> {
+    pub fn reset(
+        &mut self, error_code: u64, final_size: u64,
+    ) -> Result<RecvBufResetReturn> {
         // Stream's size is already known, forbid changing it.
         if let Some(fin_off) = self.fin_off {
             if fin_off != final_size {
@@ -266,13 +272,17 @@ impl RecvBuf {
             return Err(Error::FinalSize);
         }
 
+        if self.error.is_some() {
+            // We already verified that the final size matches
+            return Ok(RecvBufResetReturn::zero());
+        }
+
         // Calculate how many bytes need to be removed from the connection flow
         // control.
-        let max_data_delta = final_size - self.len;
-
-        if self.error.is_some() {
-            return Ok(max_data_delta as usize);
-        }
+        let result = RecvBufResetReturn {
+            max_data_delta: final_size - self.len,
+            consumed_flowcontrol: final_size - self.off,
+        };
 
         self.error = Some(error_code);
 
@@ -286,7 +296,7 @@ impl RecvBuf {
         let buf = RangeBuf::from(b"", final_size, true);
         self.write(buf)?;
 
-        Ok(max_data_delta as usize)
+        Ok(result)
     }
 
     /// Commits the new max_data limit.
@@ -314,8 +324,10 @@ impl RecvBuf {
         self.flow_control.autotune_window(now, rtt);
     }
 
-    /// Shuts down receiving data.
-    pub fn shutdown(&mut self) -> Result<()> {
+    /// Shuts down receiving data and returns the number of bytes
+    /// that should be returned to the connection level flow
+    /// control
+    pub fn shutdown(&mut self) -> Result<u64> {
         if self.drain {
             return Err(Error::Done);
         }
@@ -324,9 +336,10 @@ impl RecvBuf {
 
         self.data.clear();
 
+        let consumed = self.max_off() - self.off;
         self.off = self.max_off();
 
-        Ok(())
+        Ok(consumed)
     }
 
     /// Returns the lowest offset of data buffered.
@@ -475,6 +488,61 @@ mod tests {
         assert_eq!(&buf[..len], b"helloworldsomething");
         assert_eq!(recv.len, 19);
         assert_eq!(recv.off, 19);
+
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
+    }
+
+    /// Test shutdown behavior
+    #[test]
+    fn shutdown() {
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
+        assert_eq!(recv.len, 0);
+
+        let mut buf = [0; 32];
+
+        let first = RangeBuf::from(b"hello", 0, false);
+        let second = RangeBuf::from(b"world", 5, false);
+        let third = RangeBuf::from(b"something", 10, false);
+
+        assert!(recv.write(second).is_ok());
+        assert_eq!(recv.len, 10);
+        assert_eq!(recv.off, 0);
+
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
+
+        // shutdown the buffer. Buffer is dropped.
+        assert_eq!(recv.shutdown(), Ok(10));
+        assert_eq!(recv.len, 10);
+        assert_eq!(recv.off, 10);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
+
+        // subsequent writes are validated but not added to the buffer
+        assert!(recv.write(first).is_ok());
+        assert_eq!(recv.len, 10);
+        assert_eq!(recv.off, 10);
+        assert_eq!(recv.data.len(), 0);
+
+        // the max offset of received data can increase and
+        // the recv.off must increase with it
+        assert!(recv.write(third).is_ok());
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 19);
+        assert_eq!(recv.data.len(), 0);
+
+        // Send a reset
+        assert_eq!(recv.emit(&mut buf), Err(Error::Done));
+        assert_eq!(
+            recv.reset(42, 123),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 104,
+                consumed_flowcontrol: 104,
+            })
+        );
+        assert_eq!(recv.len, 123);
+        assert_eq!(recv.off, 123);
+        assert_eq!(recv.data.len(), 0);
 
         assert_eq!(recv.emit(&mut buf), Err(Error::Done));
     }
