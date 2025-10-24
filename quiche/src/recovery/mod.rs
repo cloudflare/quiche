@@ -2500,6 +2500,8 @@ mod tests {
         // Send some no "in_flight" packets
         for iter in 3..1000 {
             let mut p = test_utils::helper_packet_sent(next_packet, now, 1200);
+            // `in_flight = false` marks packets as if they only contained ACK
+            // frames.
             p.in_flight = false;
             next_packet += 1;
             r.on_packet_sent(

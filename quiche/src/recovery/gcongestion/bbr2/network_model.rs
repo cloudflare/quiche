@@ -619,6 +619,8 @@ impl BBRv2NetworkModel {
         }
 
         if !congestion_event.last_packet_send_state.is_valid {
+            // last_packet_send_state not available because the
+            // congestion event did not contain any non-ACK frames.
             return false;
         }
 
