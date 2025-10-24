@@ -618,6 +618,10 @@ impl BBRv2NetworkModel {
             return true;
         }
 
+        if !congestion_event.last_packet_send_state.is_valid {
+            return false;
+        }
+
         let ignore_round = self.ignore_app_limited_for_no_bandwidth_growth &&
             congestion_event.last_packet_send_state.is_app_limited;
 
