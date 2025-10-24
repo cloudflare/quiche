@@ -134,7 +134,7 @@ pub struct BandwidthSampler {
 
 /// A subset of [`ConnectionStateOnSentPacket`] which is returned
 /// to the caller when the packet is acked or lost.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SendTimeState {
     /// Whether the sender is app limited at the time the packet was sent.
     /// App limited bandwidth sample might be artificially low because the
@@ -584,9 +584,6 @@ impl BandwidthSampler {
                     _ => continue,
                 };
 
-            last_acked_packet_send_state = Some(sample.state_at_send);
-            last_acked_packet_num = packet.pkt_num;
-
             event_sample.sample_rtt = Some(
                 sample
                     .rtt
@@ -605,6 +602,9 @@ impl BandwidthSampler {
             if inflight_sample > event_sample.sample_max_inflight {
                 event_sample.sample_max_inflight = inflight_sample;
             }
+
+            last_acked_packet_send_state = Some(sample.state_at_send);
+            last_acked_packet_num = packet.pkt_num;
         }
 
         let last_packet_send_state = if last_lost_packet_send_state.is_none() {
@@ -700,7 +700,7 @@ impl BandwidthSampler {
         self.last_acked_packet = packet_number;
         let sent_packet = self.connection_state_map.take(packet_number)?;
 
-        let send_time_state = &sent_packet.send_time_state;
+        let send_time_state = sent_packet.send_time_state;
 
         self.total_bytes_acked += sent_packet.size;
         self.total_bytes_sent_at_last_acked_packet =
