@@ -419,6 +419,9 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::RawInfo;
+use stream::StreamPriorityKey;
+
+use std::mem;
 
 use smallvec::SmallVec;
 
@@ -428,8 +431,6 @@ use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
 use crate::recovery::ReleaseDecision;
-
-use crate::stream::StreamPriorityKey;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -842,12 +843,21 @@ pub struct Config {
     track_unknown_transport_params: Option<usize>,
 
     initial_rtt: Duration,
+
+    // Set to true if the server should assume that the connection
+    // was verified using address verification tokens
+    handshake_path_verified: bool,
+
+    // If Some, this token is used in the initial packet as the address verification token.
+    // This token only makes sense to be set if this config is for a client.
+    address_verification_token: Option<Vec<u8>>,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
 fn is_reserved_version(version: u32) -> bool {
     version & RESERVED_VERSION_MASK == version
 }
+
 
 impl Config {
     /// Creates a config object with the given version.
@@ -917,6 +927,10 @@ impl Config {
 
             track_unknown_transport_params: None,
             initial_rtt: DEFAULT_INITIAL_RTT,
+
+            handshake_path_verified: false,
+
+            address_verification_token: None,
         })
     }
 
@@ -1447,6 +1461,34 @@ impl Config {
     pub fn enable_track_unknown_transport_parameters(&mut self, size: usize) {
         self.track_unknown_transport_params = Some(size);
     }
+
+    /// Sets whether the handshake path should be considered verified from the beginning.
+    /// This removes the initial limitation of only allowing the server to only send up to
+    /// amplification_limit times the amount traffic more back than it received.
+    ///
+    /// This should only be called if the client sent a valid address validation token.
+    /// The application is responsible for validating the address validation token from
+    /// the Initial packet.
+    /// This attribute is reset in the Config struct once a new Connection has been created
+    /// using it. That way, the Config struct can be reused without this setting being carried
+    /// over to an unrelated and unverified connection.
+    pub fn set_handshake_path_verified(&mut self) {
+        self.handshake_path_verified = true;
+    }
+
+    /// Sets the address verification token for a client connection. This token was sent
+    /// to the client in an earlier connection and can be used to skip address validation
+    /// in the case the IP address from which we will connect has not changed compared
+    /// to when we got the token delivered by a NEW_TOKEN frame.
+    ///
+    /// This configuration parameter only makes sense for clients.
+    /// This parameter will only be valid for the next connection that is created using
+    /// this Config object. The token will be taken out of the config object and ownership
+    /// is transferred to the Connection. Therefore, after creating a Connection with this
+    /// Config, the token will be reset to None.
+    pub fn set_address_verification_token(&mut self, token: &[u8]) {
+        self.address_verification_token = Some(token.to_vec());
+    }
 }
 
 /// A QUIC connection.
@@ -1645,6 +1687,9 @@ where
 
     /// Whether the connection handshake has been confirmed.
     handshake_confirmed: bool,
+
+    /// the tokens sent in the NEW_TOKEN frame.
+    new_token_data: VecDeque<Vec<u8>>,
 
     /// Key phase bit used for outgoing protected packets.
     key_phase: bool,
@@ -1973,6 +2018,14 @@ impl Default for QlogInfo {
 }
 
 impl<F: BufFactory> Connection<F> {
+
+    /// Get a potentially received token from a path and take it.
+    pub fn take_token_for_path(&mut self, local: SocketAddr, peer: SocketAddr) -> Result<Option<Vec<u8>>> {
+        let pid = self.paths.path_id_from_addrs(&(local, peer)).ok_or(Error::InvalidState)?;
+        let path = self.paths.get_mut(pid)?;
+        Ok(path.take_received_address_verification_token())
+    }
+
     fn new(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
         peer: SocketAddr, config: &mut Config, is_server: bool,
@@ -1983,7 +2036,7 @@ impl<F: BufFactory> Connection<F> {
 
     fn with_tls(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
-        peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
+        peer: SocketAddr, config: &mut Config, tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection<F>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
@@ -2007,8 +2060,10 @@ impl<F: BufFactory> Connection<F> {
             Some(config),
         );
 
-        // If we did stateless retry assume the peer's address is verified.
-        path.verified_peer_address = odcid.is_some();
+        // If we did stateless retry assume the peer's address is verified,
+        // or if handshake path was verified by other means (address validation token)
+        path.verified_peer_address = odcid.is_some() || config.handshake_path_verified;
+        config.handshake_path_verified = false;
         // Assume clients validate the server's address implicitly.
         path.peer_verified_local_address = is_server;
 
@@ -2111,8 +2166,16 @@ impl<F: BufFactory> Connection<F> {
             odcid: None,
 
             rscid: None,
-
-            token: None,
+            // If we are a client, we set a potential address verification token.
+            // A server does not need to do that.
+            // The token is taken from the Config struct as to not "spoil it for
+            // other connection establishments. The application can set a new token
+            // when needed.
+            token: if !is_server {
+                mem::take(&mut config.address_verification_token)
+            } else {
+                None
+            },
 
             local_error: None,
 
@@ -2149,6 +2212,8 @@ impl<F: BufFactory> Connection<F> {
             handshake_done_acked: false,
 
             handshake_confirmed: false,
+
+            new_token_data: VecDeque::new(),
 
             key_phase: false,
 
@@ -2232,6 +2297,13 @@ impl<F: BufFactory> Connection<F> {
         }
 
         Ok(conn)
+    }
+
+    /// Enqueue a token to be sent in a NEW_TOKEN frame
+    pub fn send_new_token(&mut self, data: Vec<u8>) {
+        if !data.is_empty() {
+            self.new_token_data.push_back(data);
+        }
     }
 
     /// Sets keylog output to the designated [`Writer`].
@@ -2689,7 +2761,7 @@ impl<F: BufFactory> Connection<F> {
 
         // Avoid running `drop(handshake)` as that would free the underlying
         // handshake state.
-        std::mem::forget(handshake);
+        mem::forget(handshake);
 
         Ok(())
     }
@@ -4733,6 +4805,34 @@ impl<F: BufFactory> Connection<F> {
             }
         }
 
+        // NEW_TOKEN generation:
+        // Put specifically here to have CRYPTO frame with a potential
+        // TLS session ticket be generated first
+        if !self.new_token_data.is_empty() &&
+            self.is_server &&
+            self.handshake_done_sent &&
+            self.handshake_completed &&
+            pkt_type == Type::Short &&
+            !is_closing &&
+            path.active()
+        {
+            while let Some(token) = self.new_token_data.pop_front() {
+                let frame = frame::Frame::NewToken {
+                    token: token.clone()
+                };
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    ack_eliciting = true;
+                    in_flight = true;
+                } else {
+                    self.new_token_data.push_front(token);
+                    break;
+                }
+            }
+        }
+
+
+
         // The preference of data-bearing frame to include in a packet
         // is managed by `self.emit_dgram`. However, whether any frames
         // can be sent depends on the state of their buffers. In the case
@@ -5669,7 +5769,7 @@ impl<F: BufFactory> Connection<F> {
         });
 
         let old_priority_key =
-            std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
+            mem::replace(&mut stream.priority_key, new_priority_key.clone());
 
         self.streams
             .update_priority(&old_priority_key, &new_priority_key);
@@ -7587,6 +7687,7 @@ impl<F: BufFactory> Connection<F> {
         let send_path = self.paths.get(send_pid)?;
         if (self.is_established() || self.is_in_early_data()) &&
             (self.should_send_handshake_done() ||
+                !self.new_token_data.is_empty() ||
                 self.almost_full ||
                 self.blocked_limit.is_some() ||
                 self.dgram_send_queue.has_pending() ||
@@ -7860,10 +7961,12 @@ impl<F: BufFactory> Connection<F> {
             frame::Frame::CryptoHeader { .. } => unreachable!(),
 
             // TODO: implement stateless retry
-            frame::Frame::NewToken { .. } =>
+            frame::Frame::NewToken { token } => {
                 if self.is_server {
                     return Err(Error::InvalidPacket);
-                },
+                }
+                self.paths.get_mut(recv_path_id).unwrap().address_verification_tokens.push_back(token);
+            },
 
             frame::Frame::Stream { stream_id, data } => {
                 // Peer can't send on our unidirectional streams.
