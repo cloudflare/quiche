@@ -61,6 +61,8 @@ pub struct Config {
     pub max_window: u64,
     /// Receiver window limit for a stream in bytes.
     pub max_stream_window: u64,
+    /// Set the session to attempt resumption.
+    pub session: Option<Vec<u8>>,
 }
 
 impl Config {
@@ -166,6 +168,7 @@ impl Config {
             max_streams_uni: self.max_streams_uni,
             max_window: self.max_window,
             max_stream_window: self.max_stream_window,
+            session: None,
         })
     }
 }
@@ -188,6 +191,7 @@ impl Default for Config {
             max_streams_uni: 100,
             max_window: 25165824,
             max_stream_window: 16777216,
+            session: None,
         }
     }
 }

@@ -291,6 +291,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         max_streams_uni,
         max_window,
         max_stream_window,
+        session: None,
     };
 
     Ok(Config {

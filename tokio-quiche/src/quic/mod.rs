@@ -220,6 +220,13 @@ where
 
     log::info!("created unestablished quiche::Connection"; "scid" => ?scid);
 
+    if let Some(session) = &params.session {
+        quiche_conn.set_session(session).map_err(|error| {
+            log::error!("application provided an invalid session"; "error"=>?error);
+            quiche::Error::CryptoFail
+        })?;
+    }
+
     // Set the qlog writer here instead of in the `ClientConnector` to avoid
     // missing logs from early in the connection
     if let Some(qlog_dir) = &client_config.qlog_dir {
