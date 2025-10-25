@@ -764,6 +764,7 @@ pub struct Http3Conn {
     dump_json: bool,
     dgram_sender: Option<Http3DgramSender>,
     output_sink: Rc<RefCell<dyn FnMut(String)>>,
+    stdout_writer: std::io::BufWriter<std::io::Stdout>,
 }
 
 impl Http3Conn {
@@ -857,6 +858,7 @@ impl Http3Conn {
             dump_json: dump_json.is_some(),
             dgram_sender,
             output_sink,
+            stdout_writer: std::io::BufWriter::new(std::io::stdout()),
         };
 
         Box::new(h_conn)
@@ -889,6 +891,7 @@ impl Http3Conn {
             dump_json: false,
             dgram_sender,
             output_sink,
+            stdout_writer: std::io::BufWriter::new(std::io::stdout()),
         };
 
         Ok(Box::new(h_conn))
@@ -1270,11 +1273,7 @@ impl HttpConn for Http3Conn {
 
                             None =>
                                 if !self.dump_json {
-                                    self.output_sink.borrow_mut()(unsafe {
-                                        String::from_utf8_unchecked(
-                                            buf[..read].to_vec(),
-                                        )
-                                    });
+                                    self.stdout_writer.write_all(&buf[..read]).ok();
                                 },
                         }
                     }
