@@ -246,6 +246,13 @@ pub(crate) fn execute_action(
                 .or_insert_with(|| FrameParser::new(*stream_id));
         },
 
+        Action::SendDatagram { payload } => {
+            log::info!("dgram tx len={}", payload.len(),);
+
+            conn.dgram_send(payload)
+                .expect("datagram extension not enabled by peer");
+        },
+
         Action::ResetStream {
             stream_id,
             error_code,
