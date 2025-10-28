@@ -623,9 +623,7 @@ impl BandwidthSampler {
             }
         };
 
-        let Some(last_packet_send_state) = last_packet_send_state else {
-            return None;
-        };
+        let last_packet_send_state = last_packet_send_state?;
 
         let is_new_max_bandwidth =
             event_sample.sample_max_bandwidth > max_bandwidth;

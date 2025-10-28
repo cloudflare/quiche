@@ -321,10 +321,7 @@ impl BBRv2NetworkModel {
                 self.round_trip_count(),
             );
 
-        let Some((sample, last_packet_send_state)) = on_congestion_event_result
-        else {
-            return None;
-        };
+        let (sample, last_packet_send_state) = on_congestion_event_result?;
 
         if sample.extra_acked == 0 {
             self.cwnd_limited_before_aggregation_epoch =
