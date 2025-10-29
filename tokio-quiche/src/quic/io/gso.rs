@@ -115,6 +115,7 @@ impl PktInfo {
 }
 
 #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
+#[allow(clippy::too_many_arguments)]
 pub async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, from: Option<SocketAddr>,
     send_buf: &[u8], segment_size: usize, tx_time: Option<Instant>,
@@ -175,6 +176,7 @@ pub async fn send_to(
 }
 
 #[cfg(any(not(target_os = "linux"), feature = "fuzzing"))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, _from: Option<SocketAddr>,
     send_buf: &[u8], _segment_size: usize, _tx_time: Option<Instant>,
