@@ -153,6 +153,8 @@ where
         let would_block_metric = self
             .metrics
             .write_errors(labels::QuicWriteError::WouldBlock);
+        let send_to_wouldblock_duration =
+            self.metrics.send_to_wouldblock_duration();
 
         spawn_with_killswitch(async move {
             let send_buf = &send_buf[..written];
@@ -175,6 +177,7 @@ where
                     send_buf.len(),
                     None,
                     would_block_metric,
+                    send_to_wouldblock_duration,
                 )
                 .await;
             }
