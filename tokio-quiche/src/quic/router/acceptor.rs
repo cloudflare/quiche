@@ -153,6 +153,7 @@ where
         let would_block_metric = self
             .metrics
             .write_errors(labels::QuicWriteError::WouldBlock);
+        #[cfg(target_os = "linux")]
         let send_to_wouldblock_duration =
             self.metrics.send_to_wouldblock_duration();
 
