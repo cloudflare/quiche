@@ -271,8 +271,11 @@ where
                 status = self.wait_for_data_or_handshake(qconn, application) => status?,
             };
 
-            if let ControlFlow::Break(reason) = self.conn_stage.post_wait(qconn) {
-                return reason;
+            if self
+                .conn_stage
+                .flush_post_wait(qconn, &self.write_state.bytes_written)?
+            {
+                self.flush_buffer_to_socket(application.buffer()).await
             }
         }
     }
@@ -637,24 +640,22 @@ where
         if quic_application.should_act() {
             quic_application.wait_for_data(qconn).await
         } else {
-            self.wait_for_quiche(qconn, quic_application).await
+            self.wait_for_quiche(qconn, quic_application.buffer()).await
         }
     }
 
     /// Check if Quiche has any packets to send and flush them to socket.
     ///
-    /// # Example
-    ///
     /// This function can be used, for example, to drive an asynchronous TLS
     /// handshake. Each call to `gather_data_from_quiche_conn` attempts to
-    /// progress the handshake via a call to `quiche::Connection.send()` -
-    /// once one of the `gather_data_from_quiche_conn()` calls writes to the
-    /// send buffer, we flush it to the network socket.
-    async fn wait_for_quiche<App: ApplicationOverQuic>(
-        &mut self, qconn: &mut QuicheConnection, app: &mut App,
+    /// progress the handshake via a call to `quiche::Connection.send()`.
+    ///
+    /// We flush separately to maintain cancellation-safety.
+    async fn wait_for_quiche(
+        &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
     ) -> QuicResult<()> {
-        let populate_send_buf = std::future::poll_fn(|_| {
-            match self.gather_data_from_quiche_conn(qconn, app.buffer()) {
+        std::future::poll_fn(|_| {
+            match self.gather_data_from_quiche_conn(qconn, send_buf) {
                 Ok(bytes_written) => {
                     // We need to avoid consecutive calls to gather(), which write
                     // data to the buffer, without a flush().
@@ -668,18 +669,10 @@ where
                         Poll::Ready(Ok(()))
                     }
                 },
-                _ => Poll::Ready(Err(quiche::Error::TlsFail)),
+                _ => Poll::Ready(Err(Box::new(quiche::Error::TlsFail).into())),
             }
         })
-        .await;
-
-        if populate_send_buf.is_err() {
-            return Err(Box::new(quiche::Error::TlsFail));
-        }
-
-        self.flush_buffer_to_socket(app.buffer()).await;
-
-        Ok(())
+        .await
     }
 }
 
@@ -774,8 +767,8 @@ where
         }
     }
 
-    fn on_conn_established<App: ApplicationOverQuic>(
-        &mut self, qconn: &mut QuicheConnection, driver: &mut App,
+    fn on_conn_established<A: ApplicationOverQuic>(
+        &mut self, qconn: &mut QuicheConnection, driver: &mut A,
     ) -> QuicResult<()> {
         // Only calculate the QUIC handshake duration and call the driver's
         // on_conn_established hook if this is the first time
