@@ -119,7 +119,7 @@ impl PktInfo {
 pub async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, from: Option<SocketAddr>,
     send_buf: &[u8], segment_size: usize, tx_time: Option<Instant>,
-    would_block_metric: Counter, send_to_wouldblock_duration: TimeHistogram,
+    would_block_metric: Counter, send_to_wouldblock_duration_s: TimeHistogram,
 ) -> io::Result<usize> {
     // An instant with the value of zero, since [`Instant`] is backed by a version
     // of timespec this allows to extract raw values from an [`Instant`]
@@ -165,7 +165,7 @@ pub async fn send_to(
             Err(e) if e.kind() == ErrorKind::WouldBlock => {
                 if sendmsg_retry_timer.is_none() {
                     sendmsg_retry_timer =
-                        Some(send_to_wouldblock_duration.start_timer());
+                        Some(send_to_wouldblock_duration_s.start_timer());
                 }
                 would_block_metric.inc();
                 socket.writable().await?
@@ -180,7 +180,7 @@ pub async fn send_to(
 pub(crate) async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, _from: Option<SocketAddr>,
     send_buf: &[u8], _segment_size: usize, _tx_time: Option<Instant>,
-    _would_block_metric: Counter, _send_to_wouldblock_duration: TimeHistogram,
+    _would_block_metric: Counter, _send_to_wouldblock_duration_s: TimeHistogram,
 ) -> io::Result<usize> {
     socket.send_to(send_buf, to).await
 }
