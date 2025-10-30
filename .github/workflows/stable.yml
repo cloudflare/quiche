@@ -7,7 +7,7 @@ permissions:
   pull-requests: write
 
 env:
-  DEFAULT_OPTIONS: "--features=async,ffi,qlog"
+  DEFAULT_OPTIONS: "--features=async,ffi,qlog,congestion_window_unchecked_available"
   NO_BORING_OPTIONS: "--features=ffi,qlog --workspace --exclude h3i --exclude tokio-quiche"
   RUSTFLAGS: "-D warnings"
   RUSTTOOLCHAIN: "stable"
