@@ -125,34 +125,34 @@ pub async fn send_to(
     // of timespec this allows to extract raw values from an [`Instant`]
     const INSTANT_ZERO: Instant = unsafe { std::mem::transmute(0u128) };
 
-    let iov = [std::io::IoSlice::new(send_buf)];
-    let segment_size_u16 = segment_size as u16;
-
-    let raw_time = tx_time
-        .map(|t| t.duration_since(INSTANT_ZERO).as_nanos() as u64)
-        .unwrap_or(0);
-
-    let pkt_info = from.map(PktInfo::from_socket_addr);
-
-    let mut cmsgs: SmallVec<[ControlMessage; 3]> = SmallVec::new();
-
-    // Create cmsg for UDP_SEGMENT.
-    cmsgs.push(ControlMessage::UdpGsoSegments(&segment_size_u16));
-
-    if tx_time.is_some() {
-        // Create cmsg for TXTIME.
-        cmsgs.push(ControlMessage::TxTime(&raw_time));
-    }
-
-    if let Some(pkt) = pkt_info.as_ref() {
-        // Create cmsg for IP(V6)_PKTINFO.
-        cmsgs.push(pkt.make_cmsg());
-    }
-
-    let addr = SockaddrStorage::from(to);
-
     let mut sendmsg_retry_timer = None;
     loop {
+        let iov = [std::io::IoSlice::new(send_buf)];
+        let segment_size_u16 = segment_size as u16;
+
+        let raw_time = tx_time
+            .map(|t| t.duration_since(INSTANT_ZERO).as_nanos() as u64)
+            .unwrap_or(0);
+
+        let pkt_info = from.map(PktInfo::from_socket_addr);
+
+        let mut cmsgs: SmallVec<[ControlMessage; 3]> = SmallVec::new();
+
+        // Create cmsg for UDP_SEGMENT.
+        cmsgs.push(ControlMessage::UdpGsoSegments(&segment_size_u16));
+
+        if tx_time.is_some() {
+            // Create cmsg for TXTIME.
+            cmsgs.push(ControlMessage::TxTime(&raw_time));
+        }
+
+        if let Some(pkt) = pkt_info.as_ref() {
+            // Create cmsg for IP(V6)_PKTINFO.
+            cmsgs.push(pkt.make_cmsg());
+        }
+
+        let addr = SockaddrStorage::from(to);
+
         // Must use [`try_io`] so tokio can properly clear its readyness flag
         let res = socket.try_io(Interest::WRITABLE, || {
             let fd = socket.as_raw_fd();
