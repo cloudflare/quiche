@@ -7,6 +7,7 @@ COPY apps/ ./apps/
 COPY buffer-pool ./buffer-pool/
 COPY datagram-socket/ ./datagram-socket/
 COPY h3i/ ./h3i/
+COPY netlog/ ./netlog/
 COPY octets/ ./octets/
 COPY qlog/ ./qlog/
 COPY quiche/ ./quiche/
