@@ -40,6 +40,14 @@ impl<'a> PktsData<'a> {
     }
 }
 
+pub fn reset_rand_for_fuzzing() {
+    extern "C" {
+        fn RAND_reset_for_fuzzing();
+    }
+
+    unsafe { RAND_reset_for_fuzzing() };
+}
+
 pub fn server_process(
     pkt: &[u8], conn: &mut quiche::Connection,
     h3_conn: &mut Option<quiche::h3::Connection>, info: quiche::RecvInfo,
