@@ -16,14 +16,9 @@ static SCID: quiche::ConnectionId<'static> =
 
 static LOG_INIT: Once = Once::new();
 
-extern "C" {
-    fn RAND_reset_for_fuzzing();
-}
-
 fuzz_target!(|data: &[u8]| {
-    unsafe {
-        RAND_reset_for_fuzzing();
-    }
+    quiche_fuzz::reset_rand_for_fuzzing();
+
     let from: SocketAddr = "127.0.0.1:1234".parse().unwrap();
     let to: SocketAddr = "127.0.0.1:4321".parse().unwrap();
 
