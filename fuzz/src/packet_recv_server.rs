@@ -27,10 +27,7 @@ fuzz_target!(|data: &[u8]| {
     let mut buf = data.to_vec();
 
     let config = CONFIG.get_or_init(|| {
-        let crt_path = std::env::var("QUICHE_FUZZ_CRT")
-            .unwrap_or_else(|_| "fuzz/cert.crt".to_string());
-        let key_path = std::env::var("QUICHE_FUZZ_KEY")
-            .unwrap_or_else(|_| "fuzz/cert.key".to_string());
+        let (crt_path, key_path) = quiche_fuzz::get_cert_path();
 
         let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
         config.load_cert_chain_from_pem_file(&crt_path).unwrap();
