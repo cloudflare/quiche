@@ -1,0 +1,50 @@
+[package]
+name = "qlog-dancer"
+version = "0.1.0"
+description = "qlog and netlog log analysis and visualization"
+repository = { workspace = true }
+authors = ["Lucas Pardue lucas@lucaspardue.com>"]
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+readme = "README.md"
+
+[dependencies]
+clap = "4"
+env_logger = { workspace = true }
+futures-util = { version = "0.3", features = ["io", "sink"] }
+js-sys = "0.3"
+log = { workspace = true }
+netlog = { workspace = true }
+plotters = "0.3.4"
+qlog = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tabled = "0.15.0"
+table_to_html = "0.4.0"
+
+wirefilter-engine = { git = "https://github.com/cloudflare/wirefilter.git", rev="f3116d9f244d10a2d9a37d036cfa7129c5e50d3b" }
+
+# By default, getrandom doesn't have any source of randomness on wasm32-unknown.
+# This optional dependency allows us to build with `--features getrandom/wasm_js`.
+# This also requires that the backend is set via .cargo/config.toml.
+# For more information see: https://docs.rs/getrandom/#webassembly-support
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+plotters-canvas = "0.3"
+serde-wasm-bindgen = "0.4"
+wasm-bindgen = "0.2"
+wasm-streams = "0.4"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "MouseEvent", "console"] }
+
+[dev-dependencies]
+smallvec = { workspace = true }
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[package.metadata.cargo-machete]
+ignored = ["wirefilter-engine"]

@@ -8,7 +8,7 @@ license = { workspace = true }
 keywords = ["quic", "http3", "tokio"]
 categories = { workspace = true }
 readme = "README.md"
-rust-version = "1.83"
+rust-version = "1.85"
 
 [features]
 # Forwarded quiche features for re-exports
