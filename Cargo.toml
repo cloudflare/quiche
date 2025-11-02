@@ -4,6 +4,7 @@ members = [
   "buffer-pool",
   "datagram-socket",
   "h3i",
+  "netlog",
   "octets",
   "qlog",
   "quiche",
