@@ -7,6 +7,7 @@ members = [
   "netlog",
   "octets",
   "qlog",
+  "qlog-dancer",
   "quiche",
   "task-killswitch",
   "tokio-quiche",
@@ -48,6 +49,7 @@ libc = { version = "0.2.76", default-features = false }
 log = { version = "0.4.20" }
 mio = { version = "1" }
 nix = { version = "0.30.1", features = ["net", "uio", "socket"] }
+netlog = { version = "0.1", path="./netlog" }
 octets = { version = "0.3.3", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }

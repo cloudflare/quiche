@@ -1,0 +1,207 @@
+<html>
+  <head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type"/>
+    <link rel="stylesheet" href="qlog-dancer.css"/>
+    <script src="https://code.jquery.com/jquery-3.7.0.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.3.0/css/bootstrap.min.css">
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css">
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+  </head>
+  <body>
+    <script type="module">
+      import init from './pkg/qlog_dancer.js';
+
+      async function run() {
+        await init();
+
+        // After init we can use all the functionality defined in wasm ...
+      }
+
+      run();
+    </script>
+    <script type="module" src="qlog-dancer-ui.js"></script>
+
+    <h1>Welcome to qlog-dancer</h1>
+    <p>This web app can load .sqlog files and render information in various charts. Pick an input to get started.</p>
+    <p>The parsing and plotting code is shared with the qlog-dancer binary. That
+    can be run offline for faster batch processing. For more info, see
+    <a href="https://github.com//cloudflare/quiche/tree/master/qlog-dancer">the repo</a>.</p>
+
+    <div>
+    <input type="file" id="input">
+    </div>
+    <div class="line"></div>
+    <div class="line"></div>
+    <div class="line"></div>
+    <div id="loading" style="display: none">
+      <p>Loading..</p>
+      <div class="lds-ellipsis"><div></div><div></div><div></div><div></div></div>
+    </div>
+    <div id="load-complete" style="display: none">
+      <p><strong>Load complete!</strong> Toggle plot visibility using the buttons below.</p>
+      <button id="overview-btn">Overview hidden</button>
+      <button id="flow-control-btn">Flow control hidden</button>
+      <button id="pkt-tx-btn">Packet tx hidden</button>
+      <button id="pkt-rx-btn">Packet rx hidden</button>
+      <button id="stream-multiplex-btn">Stream multiplexing hidden</button>
+      <button id="sparks-btn">Stream sparks hidden</button>
+      <button id="pending-btn">Stream pending hidden</button>
+      <button id="event-list-btn">Events hidden</button>
+    </div>
+    <div id="tooltip" class="tooltip"></div>
+
+    <div id="overview" style="display: none">
+      <h2>Connection overview</h2>
+      <div>
+        <div id="overview_container" class="canvas-container" width="1200" height="400">
+          <canvas id="overview_canvas" class="canvassy" width="1200" height="400"></canvas>
+          <div class="resize-handle se"></div>
+        </div>
+        <button id="overview-reset-btn" class="canvas-control">Reset zoom</button>
+        <button id="overview-toggle-legend-btn" class="canvas-control">Toggle legend</button>
+      </div>
+
+      <h3>Congestion control</h2>
+      <div>
+        <div id="cc_container" class="canvas-container" width="1200" height="300">
+          <canvas id="cc_canvas" class="canvassy" width="1200" height="300"></canvas>
+          <div class="resize-handle se"></div>
+        </div>
+        <button id="cc-reset-btn" class="canvas-control">Reset zoom</button>
+        <button id="cc-toggle-legend-btn" class="canvas-control">Toggle legend</button>
+      </div>
+
+      <h3>RTT</h2>
+      <div>
+        <div id="rtt_container" class="canvas-container" width="1200" height="300">
+          <canvas id="rtt_canvas" class="canvassy" width="1200" height="300"></canvas>
+          <div class="resize-handle se"></div>
+        </div>
+        <button id="rtt-reset-btn" class="canvas-control">Reset zoom</button>
+        <button id="rtt-toggle-legend-btn" class="canvas-control">Toggle legend</button>
+      </div>
+    </div>
+
+    <div id="flow-control" style="display: none">
+        <h2>Flow control</h2>
+        <div id="flow_control_container" class="canvas-container" width="1200" height="400">
+          <canvas id="flow_control_canvas" class="canvassy" width="1200" height="400"></canvas>
+          <div class="resize-handle se"></div>
+        </div>
+    </div>
+
+    <div id="pkt-rx" style="display: none">
+        <h2>Packets received</h2>
+        <div id="pkt-rx-container" class="canvas-container" width="1200" height="400">
+          <canvas id="pkt-rx-canvas" class="canvassy" width="1200" height="400"></canvas>
+          <div class="resize-handle se"></div>
+        </div>
+    </div>
+
+    <div id="pkt-tx" style="display: none">
+        <h2>Packets sent</h2>
+        <div>
+          <div id="pkt-tx-container" class="canvas-container" width="1200" height="200">
+            <canvas id="pkt-tx-canvas" class="canvassy" width="1200" height="200"></canvas>
+            <div class="resize-handle se"></div>
+          </div>
+          <button id="pkt-tx-reset-btn" class="canvas-control">Reset zoom</button>
+          <button id="pkt-tx-toggle-legend-btn" class="canvas-control">Toggle legend</button>
+        </div>
+
+        <h3>Packet sent / lost / delivered counts</h3>
+        <div>
+          <div id="pkt-tx-counts-container" class="canvas-container" width="1200" height="200">
+            <canvas id="pkt-tx-counts-canvas" class="canvassy" width="1200" height="200"></canvas>
+            <div class="resize-handle se"></div>
+          </div>
+          <button id="pkt-tx-counts-reset-btn" class="canvas-control">Reset zoom</button>
+          <button id="pkt-tx-counts-toggle-legend-btn" class="canvas-control">Toggle legend</button>
+        </div>
+
+        <h3>Pacing rate</h3>
+        <div>
+          <div id="pkt-tx-pacing-container" class="canvas-container" width="1200" height="200">
+            <canvas id="pkt-tx-pacing-canvas" class="canvassy" width="1200" height="200"></canvas>
+            <div class="resize-handle se"></div>
+          </div>
+          <button id="pkt-tx-pacing-reset-btn" class="canvas-control">Reset zoom</button>
+          <button id="pkt-tx-pacing-toggle-legend-btn" class="canvas-control">Toggle legend</button>
+        </div>
+
+        <h3>Packet created / sent delta timing</h3>
+        <div>
+          <div id="pkt-tx-delta-container" class="canvas-container" width="1200" height="200">
+            <canvas id="pkt-tx-delta-canvas" class="canvassy" width="1200" height="200"></canvas>
+            <div class="resize-handle se"></div>
+          </div>
+          <button id="pkt-tx-delta-reset-btn" class="canvas-control">Reset zoom</button>
+          <button id="pkt-tx-delta-toggle-legend-btn" class="canvas-control">Toggle legend</button>
+        </div>
+
+    </div>
+
+    <div id="stream-multiplex" style="display: none">
+      <h2>Stream multiplexing</h2>
+      <div id="stream-multiplex-container" class="canvas-container" width="600" height="400">
+        <canvas id="stream-multiplex-canvas" class="canvassy" width="600" height="800"></canvas>
+        <div class="resize-handle se"></div>
+      </div>
+    </div>
+
+    <div id="abs-dl" style="display: none">
+      <h3>Download (absolute timings)</h3>
+      <div id="abs_dl-container" class="canvas-container" width="600" height="400">
+        <canvas id="abs_dl_canvas" class="canvassy" width="600" height="200"></canvas>
+        <div class="resize-handle se"></div>
+      </div>
+    </div>
+
+    <div id="rel-dl" style="display: none">
+      <h3>Download (normalized timings)</h3>
+      <div id="rel_dl-container" class="canvas-container" width="600" height="400">
+        <canvas id="rel_dl_canvas" class="canvassy" width="600" height="200"></canvas>
+        <div class="resize-handle se"></div>
+      </div>
+    </div>
+
+    <div id="abs-ul" style="display: none">
+      <h3>Upload (absolute timings)</h3>
+      <div id="abs_ul-container" class="canvas-container" width="600" height="400">
+        <canvas id="abs_ul_canvas" class="canvassy" width="600" height="200"></canvas>
+        <div class="resize-handle se"></div>
+      </div>
+    </div>
+
+    <div id="rel-ul" style="display: none">
+      <h3>Upload (normalized timings)</h3>
+      <div id="rel_ul-container" class="canvas-container" width="600" height="400">
+        <canvas id="rel_ul_canvas" class="canvassy" width="600" height="200"></canvas>
+        <div class="resize-handle se"></div>
+      </div>
+    </div>
+
+    <div id="pending" style="display: none">
+      <h2>Pending streams</h2>
+      <div id="pending-container" class="canvas-container" width="600" height="400">
+        <canvas id="pending_canvas" class="canvassy" width="600" height="100"></canvas>
+        <div class="resize-handle se"></div>
+      </div>
+    </div>
+
+    <div id="events-top-container" style="display: none">
+      <h2>qlog event list</h2>
+      <button id="render-events-btn">Render table</button>
+      <div id="events-loading" style="display: none">
+        <p>Loading event list..</p>
+        <div class="lds-ellipsis"><div></div><div></div><div></div><div></div></div>
+      </div>
+      <!-- This following div is a skeleton for the WASM to fill in-->
+      <div id="events-container"></div>
+    </div>
+
+    </div>
+  </body>
+</html>

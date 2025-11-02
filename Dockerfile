@@ -1,4 +1,4 @@
-FROM rust:1.83 AS build
+FROM rust:1.85 AS build
 
 WORKDIR /build
 
@@ -10,6 +10,7 @@ COPY h3i/ ./h3i/
 COPY netlog/ ./netlog/
 COPY octets/ ./octets/
 COPY qlog/ ./qlog/
+COPY qlog-dancer/ ./qlog-dancer/
 COPY quiche/ ./quiche/
 COPY task-killswitch ./task-killswitch/
 COPY tokio-quiche ./tokio-quiche/
