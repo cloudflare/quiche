@@ -25,7 +25,9 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::io::IoSlice;
-use std::io::{self};
+use std::io::{
+    self,
+};
 use std::os::fd::AsRawFd;
 use std::os::fd::BorrowedFd;
 
