@@ -15,7 +15,7 @@ exclude = ["fuzz", "tools/http3_test"]
 resolver = "2"
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 repository = "https://github.com/cloudflare/quiche"
 license = "BSD-2-Clause"
 readme = "README.md"

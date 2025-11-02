@@ -6,7 +6,7 @@ license = { workspace = true }
 description = "Asynchronous wrapper around quiche"
 keywords = ["quic", "http3", "tokio"]
 categories = { workspace = true }
-rust-version = "1.83"
+rust-version = "1.85"
 edition = { workspace = true }
 readme = "README.md"
 
