@@ -3,7 +3,7 @@ name = "qlog"
 version = "0.15.2"
 description = "qlog data model for QUIC and HTTP/3"
 repository = { workspace = true }
-authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
+authors = ["Lucas Pardue <lucas@lucaspardue.com>"]
 edition = { workspace = true }
 license = { workspace = true }
 keywords = { workspace = true }
