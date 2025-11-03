@@ -1,14 +1,14 @@
 [package]
 name = "netlog"
 version = "0.1.0"
-authors = ["Lucas Pardue <lucas@lucaspardue.com>"]
 description = "Chrome netlog parsing"
-keywords = ["quic", "http2", "http3"]
-edition = { workspace = true }
 repository = { workspace = true }
+authors = ["Lucas Pardue <lucas@lucaspardue.com>"]
+edition = { workspace = true }
 license = { workspace = true }
-readme = { workspace = true }
+keywords = ["quic", "http2", "http3"]
 categories = { workspace = true }
+readme = "README.md"
 
 [dependencies]
 log = { workspace = true }
