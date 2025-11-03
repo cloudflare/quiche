@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::net::UdpSocket;
 use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::InboundFrame;
@@ -232,6 +233,27 @@ where
     Fut: Future<Output = ()> + Send,
 {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+
+    start_server_with_socket_and_settings(
+        socket,
+        quic_settings,
+        http3_settings,
+        hook,
+        hdl,
+    )
+}
+
+// Only used in Linux tests at the moment.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn start_server_with_socket_and_settings<F, Fut>(
+    socket: UdpSocket, quic_settings: QuicSettings,
+    http3_settings: Http3Settings,
+    hook: Arc<impl ConnectionHook + Send + Sync + 'static>, hdl: F,
+) -> String
+where
+    F: Fn(ServerH3Connection) -> Fut + Send + Clone + 'static,
+    Fut: Future<Output = ()> + Send,
+{
     let url = format!("http://127.0.0.1:{}", socket.local_addr().unwrap().port());
 
     let tls_cert_settings = TlsCertificatePaths {

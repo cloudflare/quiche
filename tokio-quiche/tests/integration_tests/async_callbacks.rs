@@ -25,13 +25,13 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use crate::fixtures::*;
-use h3i_fixtures::received_status_code_on_stream;
-
 use boring::ssl::BoxSelectCertFinish;
 use boring::ssl::ClientHello;
 use boring::ssl::SslContextBuilder;
 use boring::ssl::SslFiletype;
 use boring::ssl::SslMethod;
+use h3i::client::ClientError;
+use h3i_fixtures::received_status_code_on_stream;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -97,10 +97,6 @@ async fn test_hello_world_async_callbacks() {
 
 #[tokio::test]
 async fn test_async_callbacks_fail_after_initial_send() {
-    // TODO: migrate this to rxtx-h3, copied from examples/client as a simple
-    // Hello World to sanity check that the client builder works.
-    use h3i::client::ClientError;
-
     struct TestAsyncCallbackConnectionHook {}
 
     impl ConnectionHook for TestAsyncCallbackConnectionHook {
@@ -149,4 +145,81 @@ async fn test_async_callbacks_fail_after_initial_send() {
     let url = format!("{url}/1");
     let client_res = h3i_fixtures::request(&url, 1).await;
     assert!(matches!(client_res, Err(ClientError::HandshakeFail)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+// #[cfg(target_os = "linux")]
+async fn test_handshake_future_cancellation_is_a_problem() {
+    use nix::sys::socket::setsockopt;
+    use nix::sys::socket::sockopt::SndBuf;
+    use std::os::fd::AsFd;
+    use tokio::task::JoinSet;
+
+    const NUM_HANDSHAKES: u16 = 500;
+
+    struct TestAsyncCallbackConnectionHook {}
+
+    impl ConnectionHook for TestAsyncCallbackConnectionHook {
+        fn create_custom_ssl_context_builder(
+            &self, _settings: TlsCertificatePaths<'_>,
+        ) -> Option<SslContextBuilder> {
+            let mut ssl_ctx_builder =
+                SslContextBuilder::new(SslMethod::tls()).ok()?;
+            ssl_ctx_builder.set_async_select_certificate_callback(|_| {
+                Ok(Box::pin(async {
+                    // Sleep during the callback. This should mean we end up waiting in the
+                    // wait_for_data stage, which we then cancel by manually sending a packet with
+                    // the client Quiche connection.
+                    // tokio::task::yield_now().await;
+
+                    // Allow the handshake to progress
+                    Ok(Box::new(|_: ClientHello<'_>| Ok(()))
+                        as BoxSelectCertFinish)
+                }))
+            });
+
+            ssl_ctx_builder
+                .set_private_key_file(TEST_KEY_FILE, SslFiletype::PEM)
+                .unwrap();
+
+            ssl_ctx_builder
+                .set_certificate_chain_file(TEST_CERT_FILE)
+                .unwrap();
+
+            Some(ssl_ctx_builder)
+        }
+    }
+
+    // Shrink the socket buffer so that it can only hold one packet. This will
+    // force congestion on the listening socket.
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    setsockopt(&socket.as_fd(), SndBuf, &1200)
+        .expect("can't set sndbuf on UDP socket");
+
+    let hook = Arc::new(TestAsyncCallbackConnectionHook {});
+    let url = start_server_with_socket_and_settings(
+        socket,
+        QuicSettings::default(),
+        Http3Settings::default(),
+        hook.clone(),
+        handle_connection,
+    );
+
+    let mut set = JoinSet::new();
+
+    // The socket's send buffer can only fit one packet, so spawning 100 connections should cause
+    // congestion and cause one of the handshakes to fail.
+    for _ in 0..NUM_HANDSHAKES {
+        let clone = url.clone();
+        set.spawn(async move { h3i_fixtures::request(&clone, 1).await });
+    }
+
+    let results = set.join_all().await;
+    let errors: Vec<_> = results
+        .iter()
+        .filter(|r| matches!(r, Err(ClientError::HandshakeFail)))
+        .collect();
+    let n_errors = errors.len();
+
+    assert_eq!(n_errors, 0, "{} handshakes failed", n_errors,);
 }
