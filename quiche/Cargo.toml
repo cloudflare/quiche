@@ -30,6 +30,12 @@ rust-version = "1.85"
 [features]
 default = ["boringssl-vendored"]
 
+# Allow client connections to provide a custom DCID when initiating a
+# connection. Be aware that RFC 9000 places requirements for unpredictability and
+# length on the client DCID field. Enabling this feature can be dangerous if these
+# requirements are not satisfied.
+custom-client-dcid = []
+
 # Build the vendored BoringSSL library.
 boringssl-vendored = []
 
@@ -63,7 +69,7 @@ tag-prefix = ""
 
 [package.metadata.docs.rs]
 no-default-features = true
-features = ["boringssl-boring-crate", "qlog"]
+features = ["boringssl-boring-crate", "qlog", "custom-client-dcid"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [build-dependencies]

@@ -28,6 +28,7 @@ use super::*;
 
 use crate::range_buf::RangeBuf;
 use crate::test_utils::stream_recv_discard;
+use crate::Header;
 
 use rstest::rstest;
 
@@ -11104,4 +11105,154 @@ fn configuration_values_are_limited_to_max_varint() {
     // It's fine that this will fail with an error. We just want to ensure we
     // do not panic because of too large values that we try to encode via varint.
     assert_eq!(pipe.handshake(), Err(Error::InvalidTransportParam));
+}
+
+#[cfg(feature = "custom-client-dcid")]
+#[rstest]
+fn connect_custom_client_dcid() {
+    let mut client_scid = [0; 16];
+    rand::rand_bytes(&mut client_scid[..]);
+    let client_scid = ConnectionId::from_ref(&client_scid);
+    let client_addr = "127.0.0.1:1234".parse().unwrap();
+
+    let mut server_scid = [0; 16];
+    rand::rand_bytes(&mut server_scid[..]);
+    let server_scid = ConnectionId::from_ref(&server_scid);
+    let server_addr = "127.0.0.1:4321".parse().unwrap();
+
+    // 8 is the minimum required.
+    let mut client_dcid = [0; 8];
+    rand::rand_bytes(&mut client_dcid[..]);
+    let client_dcid = ConnectionId::from_ref(&client_dcid);
+
+    let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
+    client_config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+
+    let client = connect_with_dcid(
+        Some("quic.tech"),
+        &client_scid,
+        &client_dcid,
+        client_addr,
+        server_addr,
+        &mut client_config,
+    );
+
+    let mut server_config = Config::new(PROTOCOL_VERSION).unwrap();
+    server_config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    server_config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    server_config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    server_config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe {
+        client: client.unwrap(),
+        server: accept(
+            &server_scid,
+            None,
+            server_addr,
+            client_addr,
+            &mut server_config,
+        )
+        .unwrap(),
+    };
+
+    // Client sends initial flight.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+
+    let (pkt, _info) = flight.first().unwrap();
+    let header =
+        Header::from_slice(&mut pkt.to_vec()[..], client_dcid.len()).unwrap();
+
+    // Validate that the dcid is the same as the one we provided.
+    assert_eq!(client_dcid, header.dcid);
+
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // Server sends initial flight.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    assert!(!pipe.client.is_established());
+    assert!(!pipe.client.handshake_confirmed);
+
+    assert!(!pipe.server.is_established());
+    assert!(!pipe.server.handshake_confirmed);
+
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // Client sends Handshake packet and completes handshake.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+
+    assert!(pipe.client.is_established());
+    assert!(!pipe.client.handshake_confirmed);
+
+    assert!(!pipe.server.is_established());
+    assert!(!pipe.server.handshake_confirmed);
+
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // Server completes and confirms handshake, and sends HANDSHAKE_DONE.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    assert!(pipe.client.is_established());
+    assert!(!pipe.client.handshake_confirmed);
+
+    assert!(pipe.server.is_established());
+    assert!(pipe.server.handshake_confirmed);
+
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // Client acks 1-RTT packet, and confirms handshake.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+
+    assert!(pipe.client.is_established());
+    assert!(pipe.client.handshake_confirmed);
+
+    assert!(pipe.server.is_established());
+    assert!(pipe.server.handshake_confirmed);
+
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    assert!(pipe.client.is_established());
+    assert!(pipe.client.handshake_confirmed);
+
+    assert!(pipe.server.is_established());
+    assert!(pipe.server.handshake_confirmed);
+}
+
+#[cfg(feature = "custom-client-dcid")]
+#[rstest]
+fn connect_custom_client_dcid_too_short() {
+    let mut client_scid = [0; 16];
+    rand::rand_bytes(&mut client_scid[..]);
+    let client_scid = ConnectionId::from_ref(&client_scid);
+    let client_addr = "127.0.0.1:1234".parse().unwrap();
+
+    let server_addr = "127.0.0.1:4321".parse().unwrap();
+
+    // Just use something which is smaller than 8 (which is the minimum)
+    let mut client_dcid = [0; 6];
+    rand::rand_bytes(&mut client_dcid[..]);
+    let client_dcid = ConnectionId::from_ref(&client_dcid);
+
+    let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
+    client_config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+
+    let client = connect_with_dcid(
+        Some("quic.tech"),
+        &client_scid,
+        &client_dcid,
+        client_addr,
+        server_addr,
+        &mut client_config,
+    );
+    assert_eq!(client.err().unwrap(), Error::InvalidDcidInitialization);
 }

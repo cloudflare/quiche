@@ -112,6 +112,9 @@ pub enum Error {
     /// The peer send an ACK frame for a skipped packet used for Optimistic ACK
     /// mitigation.
     OptimisticAckDetected,
+
+    /// An invalid DCID was used when connecting to a remote peer.
+    InvalidDcidInitialization,
 }
 
 /// QUIC error codes sent on the wire.
@@ -223,6 +226,7 @@ impl Error {
             Error::CryptoBufferExceeded => -20,
             Error::InvalidAckRange => -21,
             Error::OptimisticAckDetected => -22,
+            Error::InvalidDcidInitialization => -23,
         }
     }
 }
