@@ -3442,7 +3442,7 @@ impl<F: BufFactory> Connection<F> {
         // Process acked frames. Note that several packets from several paths
         // might have been acked by the received packet.
         for (_, p) in self.paths.iter_mut() {
-            for acked in p.recovery.get_acked_frames(epoch) {
+            while let Some(acked) = p.recovery.next_acked_frame(epoch) {
                 match acked {
                     frame::Frame::Ping {
                         mtu_probe: Some(mtu_probe),
@@ -3987,7 +3987,7 @@ impl<F: BufFactory> Connection<F> {
 
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
-            for lost in p.recovery.get_lost_frames(epoch) {
+            while let Some(lost) = p.recovery.next_lost_frame(epoch) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
                         crypto_ctx.crypto_stream.send.retransmit(offset, length);
