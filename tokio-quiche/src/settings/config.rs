@@ -168,6 +168,9 @@ fn make_quiche_config(
     config.set_initial_congestion_window_packets(
         quic_settings.initial_congestion_window_packets,
     );
+    config.set_enable_relaxed_loss_threshold(
+        quic_settings.enable_relaxed_loss_threshold,
+    );
     config.discover_pmtu(quic_settings.discover_path_mtu);
     config.enable_hystart(quic_settings.enable_hystart);
 
@@ -184,6 +187,7 @@ fn make_quiche_config(
     config.set_max_stream_window(quic_settings.max_stream_window);
     config.grease(quic_settings.grease);
     config.set_max_amplification_factor(quic_settings.max_amplification_factor);
+    config.set_send_capacity_factor(quic_settings.send_capacity_factor);
     config.set_ack_delay_exponent(quic_settings.ack_delay_exponent);
     config.set_max_ack_delay(quic_settings.max_ack_delay);
     config.set_path_challenge_recv_max_queue_len(

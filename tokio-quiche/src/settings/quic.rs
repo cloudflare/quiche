@@ -161,6 +161,11 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_initial_congestion_window_packets")]
     pub initial_congestion_window_packets: usize,
 
+    /// Configures whether to enable relaxed loss detection on spurious loss.
+    ///
+    /// Defaults to `false`.
+    pub enable_relaxed_loss_threshold: bool,
+
     /// Configures whether to do path MTU discovery.
     ///
     /// Defaults to `false`.
@@ -250,6 +255,16 @@ pub struct QuicSettings {
     /// Defaults to 3.
     #[serde(default = "QuicSettings::default_amplification_factor")]
     pub max_amplification_factor: usize,
+
+    /// Sets the send capacity factor.
+    ///
+    /// A factor greater than 1 allows the connection to buffer more outbound
+    /// data than can be sent at this moment. This can improve throughput by
+    /// reducing time spent waiting for new data.
+    ///
+    /// Defaults to 1.
+    #[serde(default = "QuicSettings::default_send_capacity_factor")]
+    pub send_capacity_factor: f64,
 
     /// Sets the `ack_delay_exponent` transport parameter.
     ///
@@ -392,6 +407,11 @@ impl QuicSettings {
     #[inline]
     fn default_amplification_factor() -> usize {
         3
+    }
+
+    #[inline]
+    fn default_send_capacity_factor() -> f64 {
+        1.0
     }
 
     #[inline]
