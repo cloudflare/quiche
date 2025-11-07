@@ -65,9 +65,9 @@ pub struct Config {
     pub session: Option<Vec<u8>>,
     /// Whether to enable datagram sending.
     pub enable_dgram: bool,
-    /// Datagram receive queue length
+    /// Datagram receive queue length.
     pub dgram_recv_queue_len: usize,
-    /// Datagram send queue length
+    /// Datagram send queue length.
     pub dgram_send_queue_len: usize,
 }
 

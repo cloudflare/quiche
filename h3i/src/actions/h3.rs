@@ -75,7 +75,7 @@ pub enum Action {
         bytes: Vec<u8>,
     },
 
-    /// Send a DATAGRAM frame
+    /// Send a DATAGRAM frame.
     SendDatagram {
         payload: Vec<u8>,
     },
