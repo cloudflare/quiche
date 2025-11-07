@@ -202,6 +202,26 @@ fn config_from_clap() -> std::result::Result<Config, String> {
                 .requires("qlog-input")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("enable-dgram")
+                .long("enable-dgram")
+                .help("Enable datagram reception")
+                .takes_value(false),
+        )
+        .arg(
+            Arg::with_name("dgram-recv-queue-len")
+                .long("dgram-recv-queue-len")
+                .help("Datagram receive queue length")
+                .default_value("65536")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("dgram-send-queue-len")
+                .long("dgram-send-queue-len")
+                .help("Datagram send queue length")
+                .default_value("65536")
+                .takes_value(true),
+        )
         .get_matches();
 
     let host_port = matches.value_of("host:port").unwrap().to_string();
@@ -263,6 +283,20 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         .parse::<u64>()
         .map_err(|e| format!("max-stream-window input error {e}"))?;
 
+    let enable_dgram = matches.is_present("enable-dgram");
+
+    let dgram_recv_queue_len = matches
+        .value_of("dgram-recv-queue-len")
+        .unwrap()
+        .parse::<usize>()
+        .map_err(|e| format!("dgram-recv-queue-len input error {e}"))?;
+
+    let dgram_send_queue_len = matches
+        .value_of("dgram-send-queue-len")
+        .unwrap()
+        .parse::<usize>()
+        .map_err(|e| format!("dgram-send-queue-len input error {e}"))?;
+
     let qlog_actions_output = !matches.is_present("no-qlog-actions-output");
     let qlog_input = matches.value_of("qlog-input").and_then(|q| {
         std::path::Path::new(q)
@@ -292,6 +326,9 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         max_window,
         max_stream_window,
         session: None,
+        enable_dgram,
+        dgram_recv_queue_len,
+        dgram_send_queue_len,
     };
 
     Ok(Config {

@@ -63,6 +63,12 @@ pub struct Config {
     pub max_stream_window: u64,
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
+    /// Whether to enable datagram sending.
+    pub enable_dgram: bool,
+    /// Datagram receive queue length.
+    pub dgram_recv_queue_len: usize,
+    /// Datagram send queue length.
+    pub dgram_send_queue_len: usize,
 }
 
 impl Config {
@@ -145,6 +151,25 @@ impl Config {
         self
     }
 
+    pub fn enable_dgram(mut self, enable_dgram: bool) -> Self {
+        self.enable_dgram = enable_dgram;
+        self
+    }
+
+    pub fn with_dgram_recv_queue_len(
+        mut self, dgram_recv_queue_len: usize,
+    ) -> Self {
+        self.dgram_recv_queue_len = dgram_recv_queue_len;
+        self
+    }
+
+    pub fn with_dgram_send_queue_len(
+        mut self, dgram_send_queue_len: usize,
+    ) -> Self {
+        self.dgram_send_queue_len = dgram_send_queue_len;
+        self
+    }
+
     pub fn build(self) -> Result<Self, io::Error> {
         if self.host_port.is_empty() {
             return Err(io::Error::new(
@@ -169,6 +194,9 @@ impl Config {
             max_window: self.max_window,
             max_stream_window: self.max_stream_window,
             session: None,
+            enable_dgram: self.enable_dgram,
+            dgram_recv_queue_len: self.dgram_recv_queue_len,
+            dgram_send_queue_len: self.dgram_send_queue_len,
         })
     }
 }
@@ -192,6 +220,9 @@ impl Default for Config {
             max_window: 25165824,
             max_stream_window: 16777216,
             session: None,
+            enable_dgram: true,
+            dgram_recv_queue_len: 65536,
+            dgram_send_queue_len: 65536,
         }
     }
 }

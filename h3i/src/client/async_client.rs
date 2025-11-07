@@ -141,6 +141,10 @@ fn create_config(args: &H3iConfig) -> QuicSettings {
     quic_settings.keylog_file = std::env::var_os("SSLKEYLOGFILE")
         .and_then(|os_str| os_str.into_string().ok());
 
+    quic_settings.enable_dgram = args.enable_dgram;
+    quic_settings.dgram_recv_max_queue_len = args.dgram_recv_queue_len;
+    quic_settings.dgram_send_max_queue_len = args.dgram_send_queue_len;
+
     quic_settings
 }
 
@@ -352,6 +356,7 @@ impl ApplicationOverQuic for H3iDriver {
             match action {
                 Action::SendFrame { .. } |
                 Action::StreamBytes { .. } |
+                Action::SendDatagram { .. } |
                 Action::ResetStream { .. } |
                 Action::StopSending { .. } |
                 Action::OpenUniStream { .. } |
