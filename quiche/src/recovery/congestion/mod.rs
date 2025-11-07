@@ -40,6 +40,16 @@ use crate::StartupExitReason;
 
 pub const PACING_MULTIPLIER: f64 = 1.25;
 
+/// 16 GiB
+#[cfg(any(test, feature = "congestion_window_unchecked_available"))]
+#[cfg(target_pointer_width = "64")]
+pub const UNCHECKED_WINDOW: usize = 16 << 30;
+
+/// 2 GiB
+#[cfg(any(test, feature = "congestion_window_unchecked_available"))]
+#[cfg(not(target_pointer_width = "64"))]
+pub const UNCHECKED_WINDOW: usize = 2 << 30;
+
 pub struct SsThresh {
     // Current slow start threshold.  Defaults to usize::MAX which
     // indicates we're still in the initial slow start phase.
@@ -354,6 +364,9 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
                 debug_panic!("legacy implementation, not gcongestion");
                 &bbr2::BBR2
             },
+            #[cfg(feature = "congestion_window_unchecked_available")]
+            CongestionControlAlgorithm::CwndUnchecked =>
+                &cwnd_unchecked::CONGESTION_WINDOW_UNCHECKED,
         }
     }
 }
@@ -411,6 +424,8 @@ mod tests {
 mod bbr;
 mod bbr2;
 mod cubic;
+#[cfg(feature = "congestion_window_unchecked_available")]
+mod cwnd_unchecked;
 mod delivery_rate;
 mod hystart;
 pub(crate) mod pacer;

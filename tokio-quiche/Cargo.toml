@@ -14,6 +14,7 @@ rust-version = "1.83"
 # Forwarded quiche features for re-exports
 fuzzing = ["quiche/fuzzing"]
 quiche_internal = ["quiche/internal"]
+congestion_window_unchecked = ["quiche/congestion_window_unchecked_available"]
 
 # Enable extra timing instrumentation for QUIC handshakes, including protocol
 # overhead and network delays.
@@ -83,7 +84,11 @@ http-body = "1"
 http-body-util = "0.1"
 regex = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["time", "test-util", "rt-multi-thread"] }
+tokio = { workspace = true, features = [
+  "time",
+  "test-util",
+  "rt-multi-thread",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
