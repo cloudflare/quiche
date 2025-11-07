@@ -104,8 +104,8 @@ struct RecoveryEpoch {
     loss_probes: usize,
     pkts_in_flight: usize,
 
-    acked_frames: Vec<frame::Frame>,
-    lost_frames: Vec<frame::Frame>,
+    acked_frames: VecDeque<frame::Frame>,
+    lost_frames: VecDeque<frame::Frame>,
 
     /// The largest packet number sent in the packet number space so far.
     #[allow(dead_code)]
@@ -654,12 +654,12 @@ impl RecoveryOps for GRecovery {
                 MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
-    fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].acked_frames)
+    fn next_acked_frame(&mut self, epoch: packet::Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].acked_frames.pop_front()
     }
 
-    fn get_lost_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].lost_frames)
+    fn next_lost_frame(&mut self, epoch: packet::Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].lost_frames.pop_front()
     }
 
     fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64> {

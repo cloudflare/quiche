@@ -549,12 +549,12 @@ impl RecoveryOps for LegacyRecovery {
                 MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
-    fn get_acked_frames(&mut self, epoch: Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].acked_frames)
+    fn next_acked_frame(&mut self, epoch: Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].acked_frames.pop()
     }
 
-    fn get_lost_frames(&mut self, epoch: Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].lost_frames)
+    fn next_lost_frame(&mut self, epoch: Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].lost_frames.pop()
     }
 
     fn get_largest_acked_on_epoch(&self, epoch: Epoch) -> Option<u64> {
