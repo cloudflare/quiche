@@ -552,6 +552,16 @@ impl<F: BufFactory> StreamMap<F> {
         self.peer_max_streams_uni - self.local_opened_streams_uni
     }
 
+    /// Returns the number of bidirectional streams that the peer has opened.
+    pub fn peer_opened_streams_bidi(&self) -> u64 {
+        self.peer_opened_streams_bidi
+    }
+
+    /// Returns the number of bidirectional streams that the peer has opened.
+    pub fn local_opened_streams_bidi(&self) -> u64 {
+        self.local_opened_streams_bidi
+    }
+
     /// Drops completed stream.
     ///
     /// This should only be called when Stream::is_complete() returns true for
@@ -619,6 +629,11 @@ impl<F: BufFactory> StreamMap<F> {
     /// Returns true if the stream has been collected.
     pub fn is_collected(&self, stream_id: u64) -> bool {
         self.collected.contains(&stream_id)
+    }
+
+    /// Returns the number of streams that have been collected.
+    pub fn num_collected(&self) -> u64 {
+        self.collected.len() as u64
     }
 
     /// Returns true if there are any streams that have data to write.

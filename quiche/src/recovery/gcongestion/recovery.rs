@@ -1051,7 +1051,6 @@ impl RecoveryOps for GRecovery {
         self.bytes_in_flight.get_duration()
     }
 
-    #[cfg(test)]
     fn pacing_rate(&self) -> u64 {
         self.pacer
             .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats)
