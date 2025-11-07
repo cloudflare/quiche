@@ -1297,4 +1297,73 @@ mod server_side_driver {
         assert_eq!(audit_stats.downstream_bytes_sent(), 1);
         assert_eq!(helper.driver.stream_map.len(), 0);
     }
+
+    #[test]
+    fn server_send_trailers() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // client sends a request
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), false)
+            .unwrap();
+
+        // servers reads request and sends response headers
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        assert_eq!(req.stream_id, stream_id);
+        assert!(!req.read_fin);
+        let to_client = req.send.get_ref().unwrap().clone();
+        let mut from_client = req.recv;
+        to_client
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+
+        // client reads response and sends body and fin
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_client_poll(),
+            Ok((0, h3::Event::Headers { .. }))
+        );
+        assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+        assert_eq!(helper.peer_client_send_body(0, &[1; 5], true), Ok(5));
+        helper.advance_and_run_loop().unwrap();
+
+        // server receives body
+        let (body, fin, _err) = helper.driver_try_recv_body(&mut from_client);
+        assert_eq!(body, vec![1; 5]);
+        assert!(fin);
+
+        // server sends body
+        to_client
+            .try_send(OutboundFrame::Body(
+                BufFactory::buf_from_slice(&[42]),
+                false,
+            ))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
+        assert_eq!(helper.peer_client_recv_body_vec(0, 1024), Ok(vec![42]));
+        assert_eq!(
+            helper.peer_client_recv_body_vec(0, 1024),
+            Err(h3::Error::Done)
+        );
+
+        // server sends trailers
+        to_client
+            .try_send(OutboundFrame::Trailers(make_response_trailers(), None))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_client_poll(),
+            Ok((0, h3::Event::Headers { .. }))
+        );
+
+        assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Finished)));
+        assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+    }
 }

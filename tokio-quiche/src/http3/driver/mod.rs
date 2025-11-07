@@ -289,6 +289,8 @@ pub enum OutboundFrame {
     Body(PooledBuf, bool),
     /// CONNECT-UDP (DATAGRAM) downstream data plus flow ID.
     Datagram(PooledDgram, u64),
+    /// Close the stream with a trailers, with optional priority.
+    Trailers(Vec<h3::Header>, Option<quiche::h3::Priority>),
     /// An error encountered when serving the request. Stream should be closed.
     PeerStreamError,
     /// DATAGRAM flow explicitly closed.
@@ -790,6 +792,29 @@ impl<H: DriverHooks> H3Driver<H> {
                     }
                     Ok(())
                 }
+            },
+
+            OutboundFrame::Trailers(headers, priority) => {
+                let prio = priority.as_ref().unwrap_or(&DEFAULT_PRIO);
+
+                let res = conn.send_additional_headers_with_priority(
+                    qconn, stream_id, headers, prio, true, true,
+                );
+
+                // trailers always set fin=true
+                // here we run the same logic as OutboundFrame::Body with fin=true
+                if res.is_ok() {
+                    ctx.recv = None;
+                    ctx.fin_or_reset_sent = true;
+                    audit_stats.set_sent_stream_fin(StreamClosureKind::Explicit);
+                    if ctx.fin_or_reset_recv {
+                        return Err(h3::Error::TransportError(
+                            quiche::Error::Done,
+                        ));
+                    }
+                }
+
+                res
             },
 
             OutboundFrame::PeerStreamError => Err(h3::Error::MessageError),
