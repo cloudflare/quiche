@@ -41,6 +41,10 @@ pub struct Args {
     /// Path for the TLS private key.
     #[arg(long, default_value_t = default_private_key_path())]
     pub tls_private_key_path: String,
+
+    /// CC algorithm
+    #[arg(long,  default_value_t = default_cc_algorithm())]
+    pub cc_algorithm: String,
 }
 
 fn default_cert_path() -> String {
@@ -58,4 +62,8 @@ fn path_relative_to_manifest_dir(path: &str) -> String {
     .unwrap()
     .to_string_lossy()
     .into_owned()
+}
+
+fn default_cc_algorithm() -> String {
+    "bbr2_gcongestion".to_string()
 }
