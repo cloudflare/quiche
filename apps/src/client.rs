@@ -543,7 +543,7 @@ pub fn connect(
             }
         }
 
-        if conn.is_closed() {
+        if conn.is_closed() || conn.is_draining() {
             info!(
                 "connection closed, {:?} {:?}",
                 conn.stats(),
