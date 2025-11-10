@@ -34,7 +34,7 @@ wirefilter-engine = { git = "https://github.com/cloudflare/wirefilter.git", rev=
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
 plotters-canvas = "0.3"
-serde-wasm-bindgen = "0.4"
+serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2"
 wasm-streams = "0.4"
 wasm-bindgen-futures = "0.4"
