@@ -3514,7 +3514,7 @@ impl<F: BufFactory> Connection<F> {
         // Process acked frames. Note that several packets from several paths
         // might have been acked by the received packet.
         for (_, p) in self.paths.iter_mut() {
-            for acked in p.recovery.get_acked_frames(epoch) {
+            while let Some(acked) = p.recovery.next_acked_frame(epoch) {
                 match acked {
                     frame::Frame::Ping {
                         mtu_probe: Some(mtu_probe),
@@ -4059,7 +4059,7 @@ impl<F: BufFactory> Connection<F> {
 
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
-            for lost in p.recovery.get_lost_frames(epoch) {
+            while let Some(lost) = p.recovery.next_lost_frame(epoch) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
                         crypto_ctx.crypto_stream.send.retransmit(offset, length);
@@ -5828,7 +5828,11 @@ impl<F: BufFactory> Connection<F> {
 
         match direction {
             Shutdown::Read => {
-                stream.recv.shutdown()?;
+                let consumed = stream.recv.shutdown()?;
+                self.flow_control.add_consumed(consumed);
+                if self.flow_control.should_update_max_data() {
+                    self.almost_full = true;
+                }
 
                 if !stream.recv.is_fin() {
                     self.streams.insert_stopped(stream_id, err);
@@ -7858,10 +7862,12 @@ impl<F: BufFactory> Connection<F> {
                 let was_readable = stream.is_readable();
                 let priority_key = Arc::clone(&stream.priority_key);
 
-                let max_off_delta =
-                    stream.recv.reset(error_code, final_size)? as u64;
+                let stream::RecvBufResetReturn {
+                    max_data_delta,
+                    consumed_flowcontrol,
+                } = stream.recv.reset(error_code, final_size)?;
 
-                if max_off_delta > max_rx_data_left {
+                if max_data_delta > max_rx_data_left {
                     return Err(Error::FlowControl);
                 }
 
@@ -7869,7 +7875,15 @@ impl<F: BufFactory> Connection<F> {
                     self.streams.insert_readable(&priority_key);
                 }
 
-                self.rx_data += max_off_delta;
+                self.rx_data += max_data_delta;
+                // We dropped the receive buffer, return connection level
+                // flow-control
+                self.flow_control.add_consumed(consumed_flowcontrol);
+
+                // ... and check if need to send an updated MAX_DATA frame
+                if self.should_update_max_data() {
+                    self.almost_full = true;
+                }
 
                 self.reset_stream_remote_count =
                     self.reset_stream_remote_count.saturating_add(1);

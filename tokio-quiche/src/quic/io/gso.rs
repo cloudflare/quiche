@@ -29,6 +29,7 @@ use std::net::SocketAddr;
 use std::time::Instant;
 
 use foundations::telemetry::metrics::Counter;
+use foundations::telemetry::metrics::TimeHistogram;
 
 #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 mod linux_imports {
@@ -114,15 +115,17 @@ impl PktInfo {
 }
 
 #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
+#[allow(clippy::too_many_arguments)]
 pub async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, from: Option<SocketAddr>,
     send_buf: &[u8], segment_size: usize, tx_time: Option<Instant>,
-    would_block_metric: Counter,
+    would_block_metric: Counter, send_to_wouldblock_duration_s: TimeHistogram,
 ) -> io::Result<usize> {
     // An instant with the value of zero, since [`Instant`] is backed by a version
     // of timespec this allows to extract raw values from an [`Instant`]
     const INSTANT_ZERO: Instant = unsafe { std::mem::transmute(0u128) };
 
+    let mut sendmsg_retry_timer = None;
     loop {
         let iov = [std::io::IoSlice::new(send_buf)];
         let segment_size_u16 = segment_size as u16;
@@ -160,6 +163,10 @@ pub async fn send_to(
         match res {
             // Wait for the socket to become writable and try again
             Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                if sendmsg_retry_timer.is_none() {
+                    sendmsg_retry_timer =
+                        Some(send_to_wouldblock_duration_s.start_timer());
+                }
                 would_block_metric.inc();
                 socket.writable().await?
             },
@@ -169,10 +176,11 @@ pub async fn send_to(
 }
 
 #[cfg(any(not(target_os = "linux"), feature = "fuzzing"))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, _from: Option<SocketAddr>,
     send_buf: &[u8], _segment_size: usize, _tx_time: Option<Instant>,
-    _would_block_metric: Counter,
+    _would_block_metric: Counter, _send_to_wouldblock_duration_s: TimeHistogram,
 ) -> io::Result<usize> {
     socket.send_to(send_buf, to).await
 }

@@ -1,3 +1,6 @@
+use std::path::Path;
+use std::path::PathBuf;
+
 use quiche::h3::NameValue;
 
 pub struct PktsData<'a> {
@@ -38,6 +41,50 @@ impl<'a> PktsData<'a> {
             index: 0,
         }
     }
+}
+
+pub fn reset_rand_for_fuzzing() {
+    extern "C" {
+        fn RAND_reset_for_fuzzing();
+    }
+
+    unsafe { RAND_reset_for_fuzzing() };
+}
+
+/// Returns the path to the X.509 certificate and key.
+///
+/// If `QUICHE_FUZZ_CRT` and / or `QUICHE_FUZZ_KEY` are set, their value is
+/// used, otherwise in order to accomodate different fuzzing environments, this
+/// either returns relative paths (e.g. "fuzz/cert.crt") when running from a
+/// clone of the git repository, or absolute paths based on `argv[0]` when
+/// running bare executable (as used by OSS-Fuzz).
+pub fn get_cert_path() -> (String, String) {
+    let fuzz_dir = if Path::new("fuzz/").exists() {
+        PathBuf::from("fuzz/")
+    } else {
+        // Get directory the fuzzer is running from.
+        let mut fuzz_dir = PathBuf::from(std::env::args().next().unwrap());
+        // Remove executable file name.
+        fuzz_dir.pop();
+        // Add "fuzz" subdirectory.
+        fuzz_dir.push("fuzz");
+
+        fuzz_dir
+    };
+
+    let crt_path = std::env::var("QUICHE_FUZZ_CRT").unwrap_or_else(|_| {
+        let mut crt_path = fuzz_dir.clone();
+        crt_path.push("cert.crt");
+        crt_path.to_str().unwrap().to_string()
+    });
+
+    let key_path = std::env::var("QUICHE_FUZZ_KEY").unwrap_or_else(|_| {
+        let mut key_path = fuzz_dir.clone();
+        key_path.push("cert.key");
+        key_path.to_str().unwrap().to_string()
+    });
+
+    (crt_path, key_path)
 }
 
 pub fn server_process(

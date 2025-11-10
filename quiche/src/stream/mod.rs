@@ -61,6 +61,27 @@ pub struct StreamIdHasher {
     id: u64,
 }
 
+/// Return value type of `RecvBuf::reset()`
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct RecvBufResetReturn {
+    /// Returns the difference between the previous max_data offset
+    /// received and the final size reported by the reset
+    pub max_data_delta: u64,
+
+    /// The amount of flow control credit that should be returned to the
+    /// connection level flow control.
+    pub consumed_flowcontrol: u64,
+}
+
+impl RecvBufResetReturn {
+    pub fn zero() -> Self {
+        Self {
+            max_data_delta: 0,
+            consumed_flowcontrol: 0,
+        }
+    }
+}
+
 impl std::hash::Hasher for StreamIdHasher {
     #[inline]
     fn finish(&self) -> u64 {
@@ -1031,6 +1052,29 @@ mod tests {
     }
 
     #[test]
+    fn recv_reset_with_gap() {
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        assert!(!stream.recv.almost_full());
+
+        let first = RangeBuf::from(b"hello", 0, false);
+
+        assert_eq!(stream.recv.write(first), Ok(()));
+        // Read one byte.
+        assert_eq!(stream.recv.emit(&mut [0; 1]), Ok((1, false)));
+        // Reset with a final size > than max previously received
+        assert_eq!(
+            stream.recv.reset(0, 10),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 5,
+                // consumed_flowcontrol is 9, since we already read 1 byte
+                consumed_flowcontrol: 9
+            })
+        );
+        assert_eq!(stream.recv.reset(0, 10), Ok(RecvBufResetReturn::zero()));
+    }
+
+    #[test]
     fn recv_reset_dup() {
         let mut stream =
             <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
@@ -1039,8 +1083,14 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv.write(first), Ok(()));
-        assert_eq!(stream.recv.reset(0, 5), Ok(0));
-        assert_eq!(stream.recv.reset(0, 5), Ok(0));
+        assert_eq!(
+            stream.recv.reset(0, 5),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 0,
+                consumed_flowcontrol: 5
+            })
+        );
+        assert_eq!(stream.recv.reset(0, 5), Ok(RecvBufResetReturn::zero()));
     }
 
     #[test]
@@ -1052,7 +1102,13 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv.write(first), Ok(()));
-        assert_eq!(stream.recv.reset(0, 5), Ok(0));
+        assert_eq!(
+            stream.recv.reset(0, 5),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 0,
+                consumed_flowcontrol: 5
+            })
+        );
         assert_eq!(stream.recv.reset(0, 10), Err(Error::FinalSize));
     }
 

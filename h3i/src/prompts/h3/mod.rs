@@ -96,6 +96,8 @@ const RESET_STREAM: &str = "reset_stream";
 const STOP_SENDING: &str = "stop_sending";
 const CONNECTION_CLOSE: &str = "connection_close";
 const STREAM_BYTES: &str = "stream_bytes";
+const DATAGRAM_QUARTER_STREAM_ID: &str = "datagram_quarter_stream_id";
+const DATAGRAM_RAW_PAYLOAD: &str = "datagram_raw_payload";
 
 const COMMIT: &str = "commit";
 const FLUSH_PACKETS: &str = "flush_packets";
@@ -170,6 +172,8 @@ impl Prompter {
             PRIORITY_UPDATE => priority::prompt_priority(),
             CONNECTION_CLOSE => prompt_connection_close(),
             STREAM_BYTES => prompt_stream_bytes(),
+            DATAGRAM_QUARTER_STREAM_ID | DATAGRAM_RAW_PAYLOAD =>
+                prompt_send_datagram(action == DATAGRAM_QUARTER_STREAM_ID),
             FLUSH_PACKETS => return PromptOutcome::Action(Action::FlushPackets),
             COMMIT => return PromptOutcome::Commit,
             WAIT => prompt_wait(),
@@ -269,6 +273,8 @@ fn action_suggester(val: &str) -> SuggestionResult<Vec<String>> {
         STOP_SENDING,
         CONNECTION_CLOSE,
         STREAM_BYTES,
+        DATAGRAM_QUARTER_STREAM_ID,
+        DATAGRAM_RAW_PAYLOAD,
         FLUSH_PACKETS,
         COMMIT,
         WAIT,
@@ -471,6 +477,28 @@ pub fn prompt_stream_bytes() -> InquireResult<Action> {
         fin_stream,
         bytes: bytes.as_bytes().to_vec(),
     })
+}
+
+pub fn prompt_send_datagram(with_quarter_stream: bool) -> InquireResult<Action> {
+    if with_quarter_stream {
+        let stream_id = h3::prompt_varint("stream ID to be quartered:")?;
+        // https://www.rfc-editor.org/rfc/rfc9297#name-http-3-datagrams
+        let quarter_stream_id = stream_id / 4;
+
+        let payload = Text::new("payload bytes:").prompt()?;
+
+        let len = octets::varint_len(quarter_stream_id) + payload.len();
+        let mut d = vec![0; len];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+        b.put_varint(quarter_stream_id).unwrap();
+        b.put_bytes(payload.as_bytes()).unwrap();
+        Ok(Action::SendDatagram { payload: d })
+    } else {
+        let payload_str = Text::new("payload bytes:").prompt()?;
+        Ok(Action::SendDatagram {
+            payload: payload_str.as_bytes().to_owned(),
+        })
+    }
 }
 
 fn validate_wait_period(period: &str) -> SuggestionResult<Validation> {

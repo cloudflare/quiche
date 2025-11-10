@@ -289,6 +289,8 @@ pub enum OutboundFrame {
     Body(PooledBuf, bool),
     /// CONNECT-UDP (DATAGRAM) downstream data plus flow ID.
     Datagram(PooledDgram, u64),
+    /// Close the stream with a trailers, with optional priority.
+    Trailers(Vec<h3::Header>, Option<quiche::h3::Priority>),
     /// An error encountered when serving the request. Stream should be closed.
     PeerStreamError,
     /// DATAGRAM flow explicitly closed.
@@ -777,19 +779,24 @@ impl<H: DriverHooks> H3Driver<H> {
                     Err(h3::Error::StreamBlocked)
                 } else {
                     if *fin {
-                        ctx.fin_or_reset_sent = true;
-                        audit_stats
-                            .set_sent_stream_fin(StreamClosureKind::Explicit);
-                        if ctx.fin_or_reset_recv {
-                            // Return a TransportError to trigger stream cleanup
-                            // instead of h3::Error::Done
-                            return Err(h3::Error::TransportError(
-                                quiche::Error::Done,
-                            ));
-                        }
+                        Self::on_fin_sent(ctx)?;
                     }
                     Ok(())
                 }
+            },
+
+            OutboundFrame::Trailers(headers, priority) => {
+                let prio = priority.as_ref().unwrap_or(&DEFAULT_PRIO);
+
+                // trailers always set fin=true
+                let res = conn.send_additional_headers_with_priority(
+                    qconn, stream_id, headers, prio, true, true,
+                );
+
+                if res.is_ok() {
+                    Self::on_fin_sent(ctx)?;
+                }
+                res
             },
 
             OutboundFrame::PeerStreamError => Err(h3::Error::MessageError),
@@ -801,6 +808,20 @@ impl<H: DriverHooks> H3Driver<H> {
             OutboundFrame::Datagram(..) => {
                 unreachable!("Only flows send datagrams")
             },
+        }
+    }
+
+    fn on_fin_sent(ctx: &mut StreamCtx) -> h3::Result<()> {
+        ctx.recv = None;
+        ctx.fin_or_reset_sent = true;
+        ctx.audit_stats
+            .set_sent_stream_fin(StreamClosureKind::Explicit);
+        if ctx.fin_or_reset_recv {
+            // Return a TransportError to trigger stream cleanup
+            // instead of h3::Error::Done
+            Err(h3::Error::TransportError(quiche::Error::Done))
+        } else {
+            Ok(())
         }
     }
 

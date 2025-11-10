@@ -80,8 +80,10 @@ pub async fn connect(
     close_trigger_frames: Option<CloseTriggerFrames>,
 ) -> std::result::Result<BuildingConnectionSummary, ClientError> {
     let quic_settings = create_config(args);
-    let connection_params =
+    let mut connection_params =
         ConnectionParams::new_client(quic_settings, None, Hooks::default());
+
+    connection_params.session = args.session.clone();
 
     let ParsedArgs {
         connect_url,
@@ -138,6 +140,10 @@ fn create_config(args: &H3iConfig) -> QuicSettings {
     quic_settings.capture_quiche_logs = true;
     quic_settings.keylog_file = std::env::var_os("SSLKEYLOGFILE")
         .and_then(|os_str| os_str.into_string().ok());
+
+    quic_settings.enable_dgram = args.enable_dgram;
+    quic_settings.dgram_recv_max_queue_len = args.dgram_recv_queue_len;
+    quic_settings.dgram_send_max_queue_len = args.dgram_send_queue_len;
 
     quic_settings
 }
@@ -350,6 +356,7 @@ impl ApplicationOverQuic for H3iDriver {
             match action {
                 Action::SendFrame { .. } |
                 Action::StreamBytes { .. } |
+                Action::SendDatagram { .. } |
                 Action::ResetStream { .. } |
                 Action::StopSending { .. } |
                 Action::OpenUniStream { .. } |

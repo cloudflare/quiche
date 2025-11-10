@@ -4,8 +4,10 @@ members = [
   "buffer-pool",
   "datagram-socket",
   "h3i",
+  "netlog",
   "octets",
   "qlog",
+  "qlog-dancer",
   "quiche",
   "task-killswitch",
   "tokio-quiche",
@@ -47,6 +49,7 @@ libc = { version = "0.2.76", default-features = false }
 log = { version = "0.4.20" }
 mio = { version = "1" }
 nix = { version = "0.30.1", features = ["net", "uio", "socket"] }
+netlog = { version = "0.1", path="./netlog" }
 octets = { version = "0.3.3", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
@@ -64,7 +67,7 @@ smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.1.1", path = "./task-killswitch" }
 thiserror = { version = "2" }
 tokio = { version = "1.44", default-features = false }
-tokio-quiche = { version = "0.10.0", path = "./tokio-quiche" }
+tokio-quiche = { version = "0.11.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 triomphe = { version = "0.1" }

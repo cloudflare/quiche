@@ -583,6 +583,7 @@ where
                     self.write_state.tx_time,
                     self.metrics
                         .write_errors(labels::QuicWriteError::WouldBlock),
+                    self.metrics.send_to_wouldblock_duration_s(),
                 )
                 .await
             } else {

@@ -1,18 +1,17 @@
 [package]
 name = "h3i"
 version = "0.5.0"
+description = "Low-level HTTP/3 debugging and testing"
+repository = { workspace = true }
 authors = [
   "Lucas Pardue <lucas@lucaspardue.com>",
   "Evan Rittenhouse <evanrittenhouse@gmail.com>",
 ]
-description = "Low-level HTTP/3 debugging and testing"
-rust-version = "1.83"
 edition = { workspace = true }
-repository = { workspace = true }
 license = { workspace = true }
-readme = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
+readme = "README.md"
 
 [features]
 async = ["dep:buffer-pool", "dep:tokio", "dep:tokio-quiche"]

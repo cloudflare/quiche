@@ -7,7 +7,7 @@ permissions:
   pull-requests: write
 
 env:
-  DEFAULT_OPTIONS: "--features=async,ffi,qlog"
+  DEFAULT_OPTIONS: "--features=async,ffi,qlog --workspace"
   NO_BORING_OPTIONS: "--features=ffi,qlog --workspace --exclude h3i --exclude tokio-quiche"
   RUSTFLAGS: "-D warnings"
   RUSTTOOLCHAIN: "stable"
@@ -39,6 +39,9 @@ jobs:
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
           components: clippy
+
+      - name: Install qlog-dancer dependencies
+        run: sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
 
       - name: Unused dependency check
         if: ${{ matrix.tls-feature == '' }}
@@ -199,11 +202,11 @@ jobs:
 
       - name: Run cargo build
         if: endsWith(matrix.target, '-gnu')
-        run: cargo build --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --features=boringssl-boring-crate
+        run: cargo build --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --exclude qlog-dancer --features=boringssl-boring-crate
 
       - name: Run cargo test
         if: endsWith(matrix.target, '-msvc')
-        run: cargo test --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --features=boringssl-boring-crate
+        run: cargo test --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --exclude qlog-dancer --features=boringssl-boring-crate
 
   quiche_multiarch:
     runs-on: ubuntu-latest
@@ -231,7 +234,7 @@ jobs:
         run: cargo-binstall -y cross
 
       - name: Run cargo test using cross
-        run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }}
+        run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer
 
   http3_test:
     runs-on: ubuntu-latest

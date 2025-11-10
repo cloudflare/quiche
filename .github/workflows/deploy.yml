@@ -20,6 +20,9 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@nightly
 
+      - name: Install qlog-dancer dependencies
+        run: sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
+
       - name: Run cargo doc
         run: cargo doc --no-deps --all-features
 

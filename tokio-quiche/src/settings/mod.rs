@@ -44,7 +44,7 @@ pub use self::tls::*;
 /// To construct them, either `ConnectionParams::new_server` or
 /// `ConnectionParams::new_client` must be used. The parameters can be modified
 /// freely after construction.
-#[derive(Debug, Default)]
+#[derive(Default)]
 #[non_exhaustive] // force use of constructor functions
 pub struct ConnectionParams<'a> {
     /// QUIC connection settings.
@@ -53,6 +53,19 @@ pub struct ConnectionParams<'a> {
     pub tls_cert: Option<TlsCertificatePaths<'a>>,
     /// Hooks to use for the connection.
     pub hooks: Hooks,
+    /// Set the session to attempt resumption.
+    pub session: Option<Vec<u8>>,
+}
+
+impl core::fmt::Debug for ConnectionParams<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Avoid printing 'session' since it contains connection secrets.
+        f.debug_struct("ConnectionParams")
+            .field("settings", &self.settings)
+            .field("tls_cert", &self.tls_cert)
+            .field("hooks", &self.hooks)
+            .finish()
+    }
 }
 
 impl<'a> ConnectionParams<'a> {
@@ -66,6 +79,7 @@ impl<'a> ConnectionParams<'a> {
             settings,
             tls_cert: Some(tls_cert),
             hooks,
+            session: None,
         }
     }
 
@@ -80,6 +94,7 @@ impl<'a> ConnectionParams<'a> {
             settings,
             tls_cert,
             hooks,
+            session: None,
         }
     }
 }

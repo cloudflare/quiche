@@ -1444,34 +1444,249 @@ fn flow_control_update(
 fn flow_control_drain(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    let mut buf = [0; 65536];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    // Set large initial max_data so we don't have to deal with MAX_DATA
+    // or STREAM_MAX_DATA frames
+    config.set_initial_max_data(15_000);
+    config.set_initial_max_stream_data_bidi_local(15_000);
+    config.set_initial_max_stream_data_bidi_remote(15_000);
+    config.set_initial_max_stream_data_uni(10);
+    config.set_initial_max_streams_bidi(3);
+    config.set_initial_max_streams_uni(3);
+    config.set_max_idle_timeout(180_000);
+    config.verify_peer(false);
+    config.set_ack_delay_exponent(8);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Client opens a stream and sends some data.
     assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
+    // And also sends on a different stream
+    assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
+    assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
+    assert_eq!(pipe.client.stream_send(8, b"aaaaa", true), Ok(5));
     assert_eq!(pipe.advance(), Ok(()));
 
     // Server receives data, without reading it.
     let mut r = pipe.server.readable();
     assert_eq!(r.next(), Some(4));
+    assert_eq!(r.next(), Some(8));
     assert_eq!(r.next(), None);
 
-    // In the meantime, client sends more data.
-    assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
-    assert_eq!(pipe.client.stream_send(4, b"aaaaa", true), Ok(5));
+    // check flow control accounting
+    assert_eq!(pipe.server.rx_data, 20);
+    assert_eq!(pipe.server.flow_control.consumed(), 0);
 
-    assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
-    assert_eq!(pipe.client.stream_send(8, b"aaaaa", false), Ok(5));
-    assert_eq!(pipe.client.stream_send(8, b"aaaaa", true), Ok(5));
+    // Helper function that sends STREAM frames to the server on stream 4
+    let mut send_frame_helper =
+        |pipe: &mut test_utils::Pipe, data: RangeBuf| -> Result<()> {
+            let frames = [frame::Frame::Stream { stream_id: 4, data }];
+            let written = test_utils::encode_pkt(
+                &mut pipe.client,
+                Type::Short,
+                &frames,
+                &mut buf,
+            )?;
+            assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+            Ok(())
+        };
 
-    // Server shuts down one stream.
+    // Client sends more data on stream 4, but with a gap.
+    // server now has [0..5] and [10..15]
+    send_frame_helper(&mut pipe, RangeBuf::from(&[1; 5], 10, false)).unwrap();
+
+    // check flow control accounting
+    assert_eq!(pipe.server.rx_data, 30);
+    assert_eq!(pipe.server.flow_control.consumed(), 0);
+
+    // Server shuts down one stream. We do not advance the pipe
     assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
 
+    // check flow control accounting
+    // 15 bytes have been consumed, since that was the highest offset we have
+    // received.
+    assert_eq!(pipe.server.flow_control.consumed(), 15);
+    assert_eq!(pipe.server.rx_data, 30);
+
+    // client sends frame that partially closes the gap
+    // now we have [0..8] and [10..15]
+    // verify flow control. Should be no change.
+    send_frame_helper(&mut pipe, RangeBuf::from(&[1; 3], 5, false)).unwrap();
+    assert_eq!(pipe.server.rx_data, 30);
+    assert_eq!(pipe.server.flow_control.consumed(), 15);
+
+    // client sends partially overlapping data and partially new data
+    // now we have [0..8] and [10..20]
+    // verify flow control. we should account for an additional 5 bytes
+    send_frame_helper(&mut pipe, RangeBuf::from(&[1; 10], 10, false)).unwrap();
+    assert_eq!(pipe.server.rx_data, 35);
+    assert_eq!(pipe.server.flow_control.consumed(), 20);
+
+    // client sends a fin, but again with a gap
+    // this should add another 5 bytes to flow control
+    send_frame_helper(&mut pipe, RangeBuf::from(&[0; 0], 25, true)).unwrap();
+    assert_eq!(pipe.server.rx_data, 40);
+    assert_eq!(pipe.server.flow_control.consumed(), 25);
+}
+
+#[rstest]
+/// Tests that flow control is properly updated when a stream receives a RESET
+fn flow_control_reset_stream(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("reset", "fin")] inconsistent_final_size_frame: &str,
+) {
+    let mut buf = [0; 65536];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    // Set large initial max_data so we don't have to deal with MAX_DATA
+    // or STREAM_MAX_DATA frames
+    config.set_initial_max_data(15_000);
+    config.set_initial_max_stream_data_bidi_local(15_000);
+    config.set_initial_max_stream_data_bidi_remote(15_000);
+    config.set_initial_max_stream_data_uni(10);
+    config.set_initial_max_streams_bidi(3);
+    config.set_initial_max_streams_uni(3);
+    config.set_max_idle_timeout(180_000);
+    config.verify_peer(false);
+    config.set_ack_delay_exponent(8);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens a stream and sends some data.
+    assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server receives data, without reading it.
     let mut r = pipe.server.readable();
+    assert_eq!(r.next(), Some(0));
     assert_eq!(r.next(), None);
 
-    // Flush connection.
-    assert_eq!(pipe.advance(), Ok(()));
+    // check flow control accounting
+    assert_eq!(pipe.server.rx_data, 5);
+    assert_eq!(pipe.server.flow_control.consumed(), 0);
+
+    // Helper function that sends STREAM frames to the server on stream 0
+    let send_frame_helper =
+        |pipe: &mut test_utils::Pipe, data: RangeBuf| -> Result<()> {
+            let mut buf = [0; 65536];
+            let frames = [frame::Frame::Stream { stream_id: 0, data }];
+            let written = test_utils::encode_pkt(
+                &mut pipe.client,
+                Type::Short,
+                &frames,
+                &mut buf,
+            )?;
+            assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+            Ok(())
+        };
+
+    // Client sends more data on stream 4, but with a gap.
+    // server now has [0..5] and [10..15]
+    send_frame_helper(&mut pipe, RangeBuf::from(&[1; 5], 10, false)).unwrap();
+
+    // check flow control accounting
+    assert_eq!(pipe.server.rx_data, 15);
+    assert_eq!(pipe.server.flow_control.consumed(), 0);
+
+    // Client sends a RESET_STREAM with final size 20
+    let frames = [frame::Frame::ResetStream {
+        stream_id: 0,
+        final_size: 20,
+        error_code: 42,
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+    // check flow control accounting
+    // 20 bytes have been consumed, since that was the final_size
+    assert_eq!(pipe.server.flow_control.consumed(), 20);
+    assert_eq!(pipe.server.rx_data, 20);
+
+    // client sends more frames, some overlap, some new data
+    send_frame_helper(&mut pipe, RangeBuf::from(&[1; 3], 5, false)).unwrap();
+    send_frame_helper(&mut pipe, RangeBuf::from(&[1; 7], 10, false)).unwrap();
+    send_frame_helper(&mut pipe, RangeBuf::from(&[1; 3], 5, false)).unwrap();
+
+    // no change in flow control
+    assert_eq!(pipe.server.flow_control.consumed(), 20);
+    assert_eq!(pipe.server.rx_data, 20);
+
+    // Send the RESET again. Nothing happens
+    let frames = [frame::Frame::ResetStream {
+        stream_id: 0,
+        final_size: 20,
+        error_code: 42,
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+    // no change in flow control
+    assert_eq!(pipe.server.flow_control.consumed(), 20);
+    assert_eq!(pipe.server.rx_data, 20);
+
+    if inconsistent_final_size_frame == "reset" {
+        // send another reset with inconsistent final size
+        // Send the RESET again. Nothing happens
+        let frames = [frame::Frame::ResetStream {
+            stream_id: 0,
+            final_size: 42,
+            error_code: 42,
+        }];
+        let written = test_utils::encode_pkt(
+            &mut pipe.client,
+            Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+        assert_eq!(pipe.server_recv(&mut buf[..written]), Err(Error::FinalSize));
+    } else if inconsistent_final_size_frame == "fin" {
+        let frames = [frame::Frame::Stream {
+            stream_id: 0,
+            data: RangeBuf::from(&[], 42, true),
+        }];
+        let written = test_utils::encode_pkt(
+            &mut pipe.client,
+            Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+        assert_eq!(pipe.server_recv(&mut buf[..written]), Err(Error::FinalSize));
+    } else {
+        panic!(
+            "didn't expect inconsistent_final_size_frame to be `{}`",
+            inconsistent_final_size_frame
+        );
+    }
 }
 
 #[rstest]
@@ -2064,6 +2279,7 @@ fn stream_data_overlap(
     let mut b = [0; 15];
     assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((11, false)));
     assert_eq!(&b[..11], b"aaaaabbbccc");
+    assert_eq!(pipe.server.flow_control.consumed(), pipe.server.rx_data);
 }
 
 #[rstest]
@@ -2096,6 +2312,7 @@ fn stream_data_overlap_with_reordering(
     let mut b = [0; 15];
     assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((11, false)));
     assert_eq!(&b[..11], b"aaaaabccccc");
+    assert_eq!(pipe.server.flow_control.consumed(), pipe.server.rx_data);
 }
 
 #[rstest]
@@ -2163,6 +2380,9 @@ fn reset_stream_data_recvd(
 
     let mut r = pipe.server.readable();
     assert_eq!(r.next(), None);
+
+    assert_eq!(pipe.server.flow_control.consumed(), pipe.server.rx_data);
+    assert_eq!(pipe.server.flow_control.consumed(), 5);
 }
 
 #[rstest]
@@ -2229,6 +2449,9 @@ fn reset_stream_data_not_recvd(
 
     let mut r = pipe.server.readable();
     assert_eq!(r.next(), None);
+
+    assert_eq!(pipe.server.flow_control.consumed(), pipe.server.rx_data);
+    assert_eq!(pipe.server.flow_control.consumed(), 5);
 }
 
 #[rstest]
@@ -2245,7 +2468,7 @@ fn reset_stream_flow_control(
     let frames = [
         frame::Frame::Stream {
             stream_id: 0,
-            data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
+            data: <RangeBuf>::from(&[1; 15], 0, false),
         },
         frame::Frame::Stream {
             stream_id: 4,
@@ -2704,15 +2927,16 @@ fn stream_shutdown_read(
 
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
-    let mut iter = frames.iter();
-
-    assert_eq!(
-        iter.next(),
-        Some(&frame::Frame::StopSending {
-            stream_id: 4,
-            error_code: 42,
+    // make sure the pkt contains the expected StopSending frame
+    assert!(frames
+        .iter()
+        .find(|f| {
+            **f == frame::Frame::StopSending {
+                stream_id: 4,
+                error_code: 42,
+            }
         })
-    );
+        .is_some(),);
 
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
@@ -2743,6 +2967,8 @@ fn stream_shutdown_read(
     // Stream is collected on both sides.
     assert_eq!(pipe.client.streams.len(), 0);
     assert_eq!(pipe.server.streams.len(), 0);
+    assert_eq!(pipe.client.flow_control.consumed(), pipe.client.rx_data);
+    assert_eq!(pipe.server.flow_control.consumed(), pipe.server.rx_data);
 
     assert_eq!(
         pipe.server.stream_shutdown(4, Shutdown::Read, 0),
@@ -2759,7 +2985,7 @@ fn stream_shutdown_read_after_fin(
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
-    // Client sends some data.
+    // Client sends some data and a FIN.
     assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
     assert_eq!(pipe.advance(), Ok(()));
 
@@ -2776,8 +3002,17 @@ fn stream_shutdown_read_after_fin(
     let mut r = pipe.server.readable();
     assert_eq!(r.next(), None);
 
-    // Server has nothing to send.
-    assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+    // Server sends a flow control update, but it does NOT send
+    // STOP_SENDING frame, since it has already received a FIN from
+    // the client.
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let mut dummy = buf[..len].to_vec();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
+    for f in frames {
+        assert!(!matches!(f, frame::Frame::StopSending { .. }));
+    }
+    assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
     assert_eq!(pipe.advance(), Ok(()));
 
@@ -2796,6 +3031,8 @@ fn stream_shutdown_read_after_fin(
     // Stream is collected on both sides.
     assert_eq!(pipe.client.streams.len(), 0);
     assert_eq!(pipe.server.streams.len(), 0);
+    assert_eq!(pipe.client.flow_control.consumed(), pipe.client.rx_data);
+    assert_eq!(pipe.server.flow_control.consumed(), pipe.server.rx_data);
 
     assert_eq!(
         pipe.server.stream_shutdown(4, Shutdown::Read, 0),
@@ -2833,26 +3070,134 @@ fn stream_shutdown_read_update_max_data(
     assert_eq!(pipe.advance(), Ok(()));
 
     assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((1, false)));
-    assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 123), Ok(()));
 
-    assert_eq!(pipe.server.rx_data, 1);
-    assert_eq!(pipe.client.tx_data, 1);
-    assert_eq!(pipe.client.max_tx_data, 30);
-
-    assert_eq!(
-        pipe.client
-            .stream_send(0, &buf[..pipe.client.tx_cap], false),
-        Ok(29)
-    );
+    // Client sends data that the server does not read before it shuts down
+    // the read direction
+    assert_eq!(pipe.client.stream_send(0, &buf[0..20], false), Ok(20));
     assert_eq!(pipe.advance(), Ok(()));
+
+    // Server has received 21 bytes, but only 1 have been read/consumed
+    assert_eq!(pipe.server.rx_data, 21);
+    assert_eq!(pipe.server.flow_control.consumed(), 1);
+
+    assert_eq!(pipe.client.stream_send(0, &buf, false), Ok(9));
+    // Connection level flow control limit reached
+    assert_eq!(pipe.client.stream_send(0, &[0], false), Err(Error::Done));
+    assert_eq!(pipe.client.stream_send(4, &[0], false), Err(Error::Done));
+
+    // Shutting down the read side, returns buffered data to flow control budget
+    // (but we are *not advancing* the pipe yet, so client limit is not increased)
+    assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 123), Ok(()));
 
     assert!(!pipe.server.stream_readable(0)); // nothing can be consumed
 
-    // The client has increased its tx_data, and server has received it, so
-    // it increases flow control accordingly.
+    assert_eq!(pipe.server.rx_data, 21);
+    // all bytes in the read buffer have been marked as consumed
+    assert_eq!(pipe.server.flow_control.consumed(), 21);
     assert_eq!(pipe.client.tx_data, 30);
-    assert_eq!(pipe.server.rx_data, 30);
+    assert_eq!(pipe.client.max_tx_data, 30);
+
+    // Client is still blocked
+    assert_eq!(pipe.client.stream_send(0, &[0], false), Err(Error::Done));
+    assert_eq!(pipe.client.stream_send(4, &[0], false), Err(Error::Done));
+
+    // Send a flight of packet from server -> client. We only send in this
+    // direction so ensure that the server sends a MAX_DATA frame on its own,
+    // if we advance the pipe, the client would respond with RESET and that
+    // would increase the window
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // The client has dropped the 9 unset bytes in its buffer
+    assert_eq!(pipe.client.tx_data, 21);
+    assert_eq!(pipe.server.rx_data, 21);
+    assert_eq!(pipe.server.flow_control.consumed(), 21);
+    // default window is 1.5 * initial_max_data, so 45
+    assert_eq!(
+        pipe.client.tx_cap,
+        pipe.server.flow_control.window() as usize
+    );
     assert_eq!(pipe.client.tx_cap, 45);
+
+    assert_eq!(
+        pipe.client.stream_send(0, b"hello, world", false),
+        Err(Error::StreamStopped(123))
+    );
+
+    // fully advance pipe
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.tx_data, 21);
+    assert_eq!(pipe.server.rx_data, 21);
+    assert!(!pipe.server.stream_readable(0)); // nothing can be consumed
+
+    // Server sends fin to fully close the stream
+    assert_eq!(pipe.server.stream_send(0, &[], true), Ok(0));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.stream_recv(0, &mut buf), Ok((0, true)));
+    assert!(pipe.server.streams.is_collected(0));
+    assert!(pipe.client.streams.is_collected(0));
+}
+
+// Sending a reset should drop the receive buffer on the peer and
+// return flow control credit
+#[rstest]
+fn stream_shutdown_write_update_max_data(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(10000);
+    config.set_initial_max_stream_data_bidi_remote(10000);
+    config.set_initial_max_streams_bidi(10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((1, false)));
+
+    // Client sends data until blocked that the server does not read
+    while pipe.client.stream_send(0, b"world", false) != Err(Error::Done) {
+        assert_eq!(pipe.advance(), Ok(()));
+    }
+    // sending on a different stream is blocked by flow control
+    assert_eq!(pipe.client.stream_send(4, b"a", false), Err(Error::Done));
+    assert_eq!(pipe.client.max_tx_data, 30);
+    assert_eq!(pipe.client.tx_data, 30);
+
+    // Server has received 30 bytes, but only 1 has been read/consumed
+    assert_eq!(pipe.server.rx_data, 30);
+    assert_eq!(pipe.server.flow_control.consumed(), 1);
+
+    // The client shuts down its write and sends a reset
+    assert_eq!(pipe.client.stream_shutdown(0, Shutdown::Write, 42), Ok(()));
+    pipe.advance().unwrap();
+
+    // Receiving the reset drops the receive buffer and returns flow control
+    // credit
+    assert_eq!(pipe.server.rx_data, 30);
+    assert_eq!(pipe.server.flow_control.consumed(), 30);
+    assert_eq!(pipe.client.tx_data, 30);
+    // default window is 1.5 * initial_max_data, so 45
+    assert_eq!(pipe.client.tx_cap, 45);
+
+    // client can send again on a different stream
+    assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
 }
 
 #[rstest]
@@ -3022,13 +3367,15 @@ fn stream_shutdown_write_unsent_tx_cap(
         pipe.server.stream_send(4, b"hello", false),
         Err(Error::Done)
     );
+    assert_eq!(pipe.server.tx_data, 15);
 
     // Client shouldn't update flow control.
     assert!(!pipe.client.should_update_max_data());
 
     // Server shuts down stream.
     assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
-    assert_eq!(pipe.advance(), Ok(()));
+    // Unsend data is dropped and returned to flow control credit
+    assert_eq!(pipe.server.tx_data, 5);
 
     // Server can now send more data (on a different stream).
     assert_eq!(pipe.client.stream_send(8, b"hello", true), Ok(5));

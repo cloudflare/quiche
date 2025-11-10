@@ -188,9 +188,9 @@ pub trait RecoveryOps {
     /// otherwise have constructed an ACK eliciting packet.
     fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool;
 
-    fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame>;
+    fn next_acked_frame(&mut self, epoch: packet::Epoch) -> Option<frame::Frame>;
 
-    fn get_lost_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame>;
+    fn next_lost_frame(&mut self, epoch: packet::Epoch) -> Option<frame::Frame>;
 
     fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64>;
     fn has_lost_frames(&self, epoch: packet::Epoch) -> bool;
@@ -2409,6 +2409,154 @@ mod tests {
             r.delivery_rate().to_bytes_per_second()
         );
         assert_eq!(r.startup_exit(), None);
+    }
+
+    #[rstest]
+    fn acks_with_no_retransmittable_data(
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let rtt = Duration::from_millis(100);
+
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let mut r = Recovery::new(&cfg);
+
+        let mut now = Instant::now();
+
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
+
+        let mut next_packet = 0;
+        // send some packets.
+        for _ in 0..3 {
+            let p = test_utils::helper_packet_sent(next_packet, now, 1200);
+            next_packet += 1;
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 3);
+        assert_eq!(r.bytes_in_flight(), 3600);
+        assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
+
+        assert_eq!(
+            r.pacing_rate(),
+            if cc_algorithm_name == "bbr2_gcongestion" {
+                103963
+            } else {
+                0
+            },
+        );
+        assert_eq!(r.get_packet_send_time(now), now);
+        assert_eq!(r.cwnd(), 12000);
+        assert_eq!(r.cwnd_available(), 8400);
+
+        // Wait 1 rtt for ACK.
+        now += rtt;
+
+        let mut acked = RangeSet::default();
+        acked.insert(0..3);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                10,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 3600,
+                spurious_losses: 0,
+            }
+        );
+
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
+        assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.bytes_in_flight_duration(), rtt);
+        assert_eq!(r.rtt(), rtt);
+
+        // Pacing rate is recalculated based on initial cwnd when the
+        // first RTT estimate is available.
+        assert_eq!(
+            r.pacing_rate(),
+            if cc_algorithm_name == "bbr2_gcongestion" {
+                120000
+            } else {
+                0
+            },
+        );
+
+        // Send some no "in_flight" packets
+        for iter in 3..1000 {
+            let mut p = test_utils::helper_packet_sent(next_packet, now, 1200);
+            // `in_flight = false` marks packets as if they only contained ACK
+            // frames.
+            p.in_flight = false;
+            next_packet += 1;
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+
+            now += rtt;
+
+            let mut acked = RangeSet::default();
+            acked.insert(iter..(iter + 1));
+
+            assert_eq!(
+                r.on_ack_received(
+                    &acked,
+                    10,
+                    packet::Epoch::Application,
+                    HandshakeStatus::default(),
+                    now,
+                    None,
+                    "",
+                )
+                .unwrap(),
+                OnAckReceivedOutcome {
+                    lost_packets: 0,
+                    lost_bytes: 0,
+                    acked_bytes: 0,
+                    spurious_losses: 0,
+                }
+            );
+
+            // Verify that connection has not exited startup.
+            assert_eq!(r.startup_exit(), None, "{iter}");
+
+            // Unchanged metrics.
+            assert_eq!(
+                r.sent_packets_len(packet::Epoch::Application),
+                0,
+                "{iter}"
+            );
+            assert_eq!(r.bytes_in_flight(), 0, "{iter}");
+            assert_eq!(r.bytes_in_flight_duration(), rtt, "{iter}");
+            assert_eq!(
+                r.pacing_rate(),
+                if cc_algorithm_name == "bbr2_gcongestion" {
+                    120000
+                } else {
+                    150000
+                },
+                "{iter}"
+            );
+        }
     }
 }
 

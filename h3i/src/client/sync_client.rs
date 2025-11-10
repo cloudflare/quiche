@@ -105,6 +105,13 @@ fn create_config(args: &Config, should_log_keys: bool) -> quiche::Config {
     config.set_max_stream_window(args.max_stream_window);
     config.grease(false);
 
+    if args.enable_dgram {
+        config.enable_dgram(
+            true,
+            args.dgram_recv_queue_len,
+            args.dgram_send_queue_len,
+        );
+    }
     if should_log_keys {
         config.log_keys()
     }

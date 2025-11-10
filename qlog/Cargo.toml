@@ -1,14 +1,14 @@
 [package]
 name = "qlog"
 version = "0.15.2"
-authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
 description = "qlog data model for QUIC and HTTP/3"
-edition = { workspace = true }
 repository = { workspace = true }
+authors = ["Lucas Pardue <lucas@lucaspardue.com>"]
+edition = { workspace = true }
 license = { workspace = true }
-readme = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
+readme = "README.md"
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }

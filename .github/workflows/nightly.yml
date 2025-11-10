@@ -33,6 +33,9 @@ jobs:
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
 
+      - name: Install qlog-dancer dependencies
+        run: sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
+
       - name: Run cargo test
         run: cargo test --verbose --all-targets --features=boringssl-boring-crate,${{ env.FEATURES }}
 
