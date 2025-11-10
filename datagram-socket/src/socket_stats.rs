@@ -64,9 +64,32 @@ pub struct SocketStats {
     pub bytes_retrans: u64,
     pub bytes_unsent: u64,
     pub delivery_rate: u64,
+    pub pacing_rate_bytes_per_sec: u64,
     pub max_bandwidth: Option<u64>,
     pub startup_exit: Option<StartupExit>,
     pub bytes_in_flight_duration_us: u64,
+    /// The amount of available *receive side*, connection level flow
+    /// control.
+    pub flow_control_recv_win_bytes: u64,
+    /// The amount of available *send side*, connection level flow
+    /// control.
+    pub flow_control_send_win_bytes: u64,
+    /// The total number of locally initiated, bidirectional streams
+    /// that are have ever been opened.
+    pub local_bidi_streams_opened: u64,
+    /// The number of locally initiated, bidirectional streams that can
+    /// be additionally be opened based on the peer's announced
+    /// stream limit.
+    pub local_bidi_streams_left: u64,
+    /// The total number of peer initiated, bidirectional streams
+    /// that are have ever been opened.
+    pub peer_bidi_streams_opened: u64,
+    /// The number of peer initiated, bidirectional streams that can
+    /// be additionally be opened based on the stream limit we announced
+    /// to the peer.
+    pub peer_bidi_streams_left: u64,
+    /// The total number of streamsthat are closed and have been collected.
+    pub streams_collected: u64,
 }
 
 /// Statistics from when a CCA first exited the startup phase.

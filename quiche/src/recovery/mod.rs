@@ -273,7 +273,6 @@ pub trait RecoveryOps {
     #[cfg(test)]
     fn in_flight_count(&self, epoch: packet::Epoch) -> usize;
 
-    #[cfg(test)]
     fn pacing_rate(&self) -> u64;
 
     #[cfg(test)]

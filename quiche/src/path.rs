@@ -556,6 +556,7 @@ impl Path {
             stream_retrans_bytes: self.stream_retrans_bytes,
             pmtu,
             delivery_rate: self.recovery.delivery_rate().to_bytes_per_second(),
+            pacing_rate_bytes_per_sec: self.recovery.pacing_rate(),
             max_bandwidth: self
                 .recovery
                 .max_bandwidth()
@@ -986,6 +987,9 @@ pub struct PathStats {
     /// [`SendInfo.at`]: struct.SendInfo.html#structfield.at
     /// [Pacing]: index.html#pacing
     pub delivery_rate: u64,
+
+    /// The current pacing rate in bytes/s.
+    pub pacing_rate_bytes_per_sec: u64,
 
     /// The maximum bandwidth estimate for the connection in bytes/s.
     ///

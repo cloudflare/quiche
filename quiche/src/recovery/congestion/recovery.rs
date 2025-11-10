@@ -936,7 +936,6 @@ impl RecoveryOps for LegacyRecovery {
         self.bytes_in_flight.get_duration()
     }
 
-    #[cfg(test)]
     fn pacing_rate(&self) -> u64 {
         self.congestion.pacer.rate()
     }
