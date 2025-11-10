@@ -59,6 +59,10 @@ pub fn make_response_headers() -> Vec<Header> {
     ]
 }
 
+pub fn make_response_trailers() -> Vec<Header> {
+    vec![Header::new(b"trailers", b"1")]
+}
+
 /// Helper trait to get the either right `quiche::Connection` for
 /// ourselvers (to use with the `H3Driver`) or our peer (to use
 /// with `quiche::H3::Connection`
