@@ -57,10 +57,14 @@ async fn main() {
     let socket = UdpSocket::bind(&args.address)
         .await
         .expect("UDP socket should be bindable");
+
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.cc_algorithm = args.cc_algorithm;
+
     let mut listeners = listen(
         [socket],
         ConnectionParams::new_server(
-            QuicSettings::default(),
+            quic_settings,
             TlsCertificatePaths {
                 cert: &args.tls_cert_path,
                 private_key: &args.tls_private_key_path,
