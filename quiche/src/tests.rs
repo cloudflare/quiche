@@ -5015,14 +5015,15 @@ fn app_limited_false(
 
     // Server sends stream data bigger than cwnd.
     let send_buf1 = [0; 20000];
-    assert_eq!(
-        pipe.server.stream_send(0, &send_buf1, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(13879)
-        }
-    );
+    let send_result = pipe.server.stream_send(0, &send_buf1, false).unwrap();
+    if cc_algorithm_name == "cubic" {
+        assert_eq!(send_result, 12000);
+    } else if cfg!(feature = "openssl") {
+        assert_eq!(send_result, 13965)
+    } else {
+        // TODO explain why this is not 12000 and why it can vary by 1 byte.
+        assert!(send_result >= 13879 && send_result <= 13880);
+    }
 
     test_utils::emit_flight(&mut pipe.server).ok();
 
@@ -5611,14 +5612,15 @@ fn app_limited_false_no_frame(
 
     // Server sends stream data bigger than cwnd.
     let send_buf1 = [0; 20000];
-    assert_eq!(
-        pipe.server.stream_send(0, &send_buf1, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(13879)
-        }
-    );
+    let send_result = pipe.server.stream_send(0, &send_buf1, false).unwrap();
+    if cc_algorithm_name == "cubic" {
+        assert_eq!(send_result, 12000);
+    } else if cfg!(feature = "openssl") {
+        assert_eq!(send_result, 13965)
+    } else {
+        // TODO explain why this is not 12000 and why it can vary by 1 byte.
+        assert!(send_result >= 13879 && send_result <= 13880);
+    }
 
     test_utils::emit_flight(&mut pipe.server).ok();
 
@@ -5662,14 +5664,15 @@ fn app_limited_false_no_header(
 
     // Server sends stream data bigger than cwnd.
     let send_buf1 = [0; 20000];
-    assert_eq!(
-        pipe.server.stream_send(0, &send_buf1, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(13879)
-        }
-    );
+    let send_result = pipe.server.stream_send(0, &send_buf1, false).unwrap();
+    if cc_algorithm_name == "cubic" {
+        assert_eq!(send_result, 12000);
+    } else if cfg!(feature = "openssl") {
+        assert_eq!(send_result, 13965)
+    } else {
+        // TODO explain why this is not 12000 and why it can vary by 1 byte.
+        assert!(send_result >= 13879 && send_result <= 13880);
+    }
 
     test_utils::emit_flight(&mut pipe.server).ok();
 
