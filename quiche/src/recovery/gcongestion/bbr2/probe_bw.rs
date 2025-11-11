@@ -58,7 +58,6 @@ enum AdaptUpperBoundsResult {
     AdaptedOk,
     AdaptedProbedTooHigh,
     NotAdaptedInflightHighNotSet,
-    NotAdaptedInvalidSample,
 }
 
 impl ModeImpl for ProbeBW {
@@ -300,7 +299,7 @@ impl ProbeBW {
             if self.cycle.last_cycle_stopped_risky_probe &&
                 !self.cycle.last_cycle_probed_too_high
             {
-                self.enter_probe_refill(0, congestion_event.event_time);
+                self.enter_probe_refill(0, congestion_event.meta.event_time);
                 return;
             }
         }
@@ -316,7 +315,7 @@ impl ProbeBW {
             congestion_event,
             params,
         ) {
-            self.enter_probe_refill(0, congestion_event.event_time);
+            self.enter_probe_refill(0, congestion_event.meta.event_time);
             return;
         }
 
@@ -324,7 +323,7 @@ impl ProbeBW {
         // diverges from the RFC. Use `disable_probe_down_early_exit` to override
         // the behavior.
         if self.has_stayed_long_enough_in_probe_down(congestion_event, params) {
-            self.enter_probe_cruise(congestion_event.event_time);
+            self.enter_probe_cruise(congestion_event.meta.event_time);
             return;
         }
 
@@ -340,7 +339,7 @@ impl ProbeBW {
         let bdp = self.model.bdp0();
 
         if bytes_in_flight < bdp {
-            self.enter_probe_cruise(congestion_event.event_time);
+            self.enter_probe_cruise(congestion_event.meta.event_time);
         }
     }
 
@@ -359,7 +358,7 @@ impl ProbeBW {
             congestion_event,
             params,
         ) {
-            self.enter_probe_refill(0, congestion_event.event_time);
+            self.enter_probe_refill(0, congestion_event.meta.event_time);
         }
     }
 
@@ -375,8 +374,8 @@ impl ProbeBW {
 
         if self.cycle.rounds_in_phase > 0 && congestion_event.end_of_round_trip {
             self.enter_probe_up(
-                congestion_event.event_time,
-                congestion_event.prior_cwnd,
+                congestion_event.meta.event_time,
+                congestion_event.meta.prior_cwnd,
             );
         }
     }
@@ -394,7 +393,7 @@ impl ProbeBW {
             self.enter_probe_down(
                 true,
                 false,
-                congestion_event.event_time,
+                congestion_event.meta.event_time,
                 params,
             );
             return;
@@ -439,7 +438,7 @@ impl ProbeBW {
             self.enter_probe_down(
                 false,
                 is_risky,
-                congestion_event.event_time,
+                congestion_event.meta.event_time,
                 params,
             );
         }
@@ -472,17 +471,13 @@ impl ProbeBW {
         &mut self, target_bytes_inflight: usize,
         congestion_event: &BBRv2CongestionEvent, params: &Params,
     ) -> AdaptUpperBoundsResult {
-        let send_state = congestion_event.last_packet_send_state;
-
-        if !send_state.is_valid {
-            return AdaptUpperBoundsResult::NotAdaptedInvalidSample;
-        }
+        let send_state = &congestion_event.last_packet_send_state;
 
         // TODO(vlad): use BytesInFlight?
         let mut inflight_at_send = send_state.bytes_in_flight;
         if params.use_bytes_delivered_for_inflight_hi {
-            inflight_at_send = self.model.total_bytes_acked() -
-                congestion_event.last_packet_send_state.total_bytes_acked;
+            inflight_at_send =
+                self.model.total_bytes_acked() - send_state.total_bytes_acked;
         }
 
         if self.cycle.is_sample_from_probing {
@@ -531,13 +526,14 @@ impl ProbeBW {
     fn has_cycle_lasted(
         &self, duration: Duration, congestion_event: &BBRv2CongestionEvent,
     ) -> bool {
-        (congestion_event.event_time - self.cycle.start_time) > duration
+        (congestion_event.meta.event_time - self.cycle.start_time) > duration
     }
 
     fn has_phase_lasted(
         &self, duration: Duration, congestion_event: &BBRv2CongestionEvent,
     ) -> bool {
-        (congestion_event.event_time - self.cycle.phase_start_time) > duration
+        (congestion_event.meta.event_time - self.cycle.phase_start_time) >
+            duration
     }
 
     fn is_time_to_probe_for_reno_coexistence(
@@ -598,14 +594,14 @@ impl ProbeBW {
             return;
         } else {
             // TODO(vlad): probe_up_simplify_inflight_hi?
-            if congestion_event.prior_bytes_in_flight <
-                congestion_event.prior_cwnd
+            if congestion_event.meta.prior_bytes_in_flight <
+                congestion_event.meta.prior_cwnd
             {
                 // Not fully utilizing cwnd, so can't safely grow.
                 return;
             }
 
-            if congestion_event.prior_cwnd < self.model.inflight_hi() {
+            if congestion_event.meta.prior_cwnd < self.model.inflight_hi() {
                 // Not fully using inflight_hi, so don't grow it.
                 return;
             }
@@ -626,7 +622,7 @@ impl ProbeBW {
         }
 
         if congestion_event.end_of_round_trip {
-            self.raise_inflight_high_slope(congestion_event.prior_cwnd);
+            self.raise_inflight_high_slope(congestion_event.meta.prior_cwnd);
         }
     }
 
