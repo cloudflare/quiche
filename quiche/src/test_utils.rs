@@ -37,22 +37,9 @@ pub struct Pipe {
 
 impl Pipe {
     pub fn new(cc_algorithm_name: &str) -> Result<Pipe> {
-        let mut config = Config::new(PROTOCOL_VERSION)?;
-        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-        config.load_cert_chain_from_pem_file("examples/cert.crt")?;
-        config.load_priv_key_from_pem_file("examples/cert.key")?;
-        config.set_application_protos(&[b"proto1", b"proto2"])?;
-        config.set_initial_max_data(30);
-        config.set_initial_max_stream_data_bidi_local(15);
-        config.set_initial_max_stream_data_bidi_remote(15);
-        config.set_initial_max_stream_data_uni(10);
-        config.set_initial_max_streams_bidi(3);
-        config.set_initial_max_streams_uni(3);
-        config.set_max_idle_timeout(180_000);
-        config.verify_peer(false);
-        config.set_ack_delay_exponent(8);
-
-        Pipe::with_config(&mut config)
+        Pipe::with_modify_config(&|config, _is_client| {
+            assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        })
     }
 
     pub fn client_addr() -> SocketAddr {
@@ -84,6 +71,38 @@ impl Pipe {
             )?,
             server: accept(&server_scid, None, server_addr, client_addr, config)?,
         })
+    }
+
+    pub fn with_modify_config(
+        config_modifier: &dyn Fn(&mut Config, bool),
+    ) -> Result<Pipe> {
+        let new_config = || -> Result<Config> {
+            let mut config = Config::new(PROTOCOL_VERSION)?;
+            config.load_cert_chain_from_pem_file("examples/cert.crt")?;
+            config.load_priv_key_from_pem_file("examples/cert.key")?;
+            config.set_application_protos(&[b"proto1", b"proto2"])?;
+            config.set_initial_max_data(30);
+            config.set_initial_max_stream_data_bidi_local(15);
+            config.set_initial_max_stream_data_bidi_remote(15);
+            config.set_initial_max_stream_data_uni(10);
+            config.set_initial_max_streams_bidi(3);
+            config.set_initial_max_streams_uni(3);
+            config.set_max_idle_timeout(180_000);
+            config.verify_peer(false);
+            config.set_ack_delay_exponent(8);
+            Ok(config)
+        };
+
+        let mut client_config = new_config()?;
+        (*config_modifier)(&mut client_config, true);
+
+        let mut server_config = new_config()?;
+        (*config_modifier)(&mut server_config, false);
+
+        Pipe::with_client_and_server_config(
+            &mut client_config,
+            &mut server_config,
+        )
     }
 
     pub fn with_config_and_scid_lengths(

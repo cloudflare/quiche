@@ -1094,7 +1094,7 @@ impl RecoveryOps for GRecovery {
 
     #[cfg(test)]
     fn app_limited(&self) -> bool {
-        self.pacer.is_app_limited(self.bytes_in_flight.get())
+        self.pacer.is_app_limited()
     }
 
     // FIXME only used by congestion

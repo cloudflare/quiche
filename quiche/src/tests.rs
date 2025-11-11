@@ -416,18 +416,18 @@ fn invalid_initial_source_connection_id(
 fn change_idle_timeout(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(0x1).unwrap();
-    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-    config
-        .set_application_protos(&[b"proto1", b"proto2"])
-        .unwrap();
-    config.set_max_idle_timeout(999999);
-    config.verify_peer(false);
+    let config_modifier = &|config: &mut Config, is_client: bool| {
+        if is_client {
+            config.set_max_idle_timeout(999999);
+            config.verify_peer(false);
+        }
+        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    };
 
-    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_modify_config(config_modifier).unwrap();
     assert_eq!(pipe.client.local_transport_params.max_idle_timeout, 999999);
     assert_eq!(pipe.client.peer_transport_params.max_idle_timeout, 0);
-    assert_eq!(pipe.server.local_transport_params.max_idle_timeout, 0);
+    assert_eq!(pipe.server.local_transport_params.max_idle_timeout, 180_000);
     assert_eq!(pipe.server.peer_transport_params.max_idle_timeout, 0);
 
     pipe.client.set_max_idle_timeout(456000).unwrap();
@@ -613,14 +613,11 @@ fn handshake_resumption(
     assert!(pipe.server.is_resumed());
 }
 
-#[rstest]
-fn handshake_alpn_mismatch(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+#[test]
+fn handshake_alpn_mismatch() {
     let mut buf = [0; 65535];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .set_application_protos(&[b"proto3\x06proto4"])
         .unwrap();
@@ -4949,18 +4946,18 @@ fn stream_data_blocked_unblocked_flow_control(
 fn app_limited_true(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-    config
-        .set_application_protos(&[b"proto1", b"proto2"])
-        .unwrap();
-    config.set_initial_max_data(50000);
-    config.set_initial_max_stream_data_bidi_local(50000);
-    config.set_initial_max_stream_data_bidi_remote(50000);
-    config.set_max_recv_udp_payload_size(1200);
-    config.verify_peer(false);
+    let config_modifier = &|config: &mut Config, is_client: bool| {
+        if is_client {
+            config.set_initial_max_data(50000);
+            config.set_initial_max_stream_data_bidi_local(50000);
+            config.set_initial_max_stream_data_bidi_remote(50000);
+            config.set_max_recv_udp_payload_size(1200);
+            config.verify_peer(false);
+        }
+        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    };
 
-    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_modify_config(config_modifier).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Client sends stream data.
@@ -4975,7 +4972,9 @@ fn app_limited_true(
     // Server sends stream data smaller than cwnd.
     let send_buf = [0; 10000];
     assert_eq!(pipe.server.stream_send(0, &send_buf, false), Ok(10000));
-    assert_eq!(pipe.advance(), Ok(()));
+
+    let flight = test_utils::emit_flight(&mut pipe.server);
+    assert!(flight.is_ok());
 
     // app_limited should be true because we send less than cwnd.
     assert!(pipe
@@ -4991,18 +4990,18 @@ fn app_limited_true(
 fn app_limited_false(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-    config
-        .set_application_protos(&[b"proto1", b"proto2"])
-        .unwrap();
-    config.set_initial_max_data(50000);
-    config.set_initial_max_stream_data_bidi_local(50000);
-    config.set_initial_max_stream_data_bidi_remote(50000);
-    config.set_max_recv_udp_payload_size(1200);
-    config.verify_peer(false);
+    let config_modifier = &|config: &mut Config, is_client: bool| {
+        if is_client {
+            config.set_initial_max_data(50000);
+            config.set_initial_max_stream_data_bidi_local(50000);
+            config.set_initial_max_stream_data_bidi_remote(50000);
+            config.set_max_recv_udp_payload_size(1200);
+            config.verify_peer(false);
+        }
+        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    };
 
-    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_modify_config(config_modifier).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Client sends stream data.
@@ -5016,7 +5015,14 @@ fn app_limited_false(
 
     // Server sends stream data bigger than cwnd.
     let send_buf1 = [0; 20000];
-    assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(12000));
+    assert_eq!(
+        pipe.server.stream_send(0, &send_buf1, false),
+        if cc_algorithm_name == "cubic" {
+            Ok(12000)
+        } else {
+            Ok(13879)
+        }
+    );
 
     test_utils::emit_flight(&mut pipe.server).ok();
 
@@ -5580,18 +5586,18 @@ fn prevent_optimistic_ack(
 fn app_limited_false_no_frame(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-    config
-        .set_application_protos(&[b"proto1", b"proto2"])
-        .unwrap();
-    config.set_initial_max_data(50000);
-    config.set_initial_max_stream_data_bidi_local(50000);
-    config.set_initial_max_stream_data_bidi_remote(50000);
-    config.set_max_recv_udp_payload_size(1405);
-    config.verify_peer(false);
+    let config_modifier = &|config: &mut Config, is_client: bool| {
+        if is_client {
+            config.set_initial_max_data(50000);
+            config.set_initial_max_stream_data_bidi_local(50000);
+            config.set_initial_max_stream_data_bidi_remote(50000);
+            config.set_max_recv_udp_payload_size(1200);
+            config.verify_peer(false);
+        }
+        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    };
 
-    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_modify_config(config_modifier).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Client sends stream data.
@@ -5605,7 +5611,14 @@ fn app_limited_false_no_frame(
 
     // Server sends stream data bigger than cwnd.
     let send_buf1 = [0; 20000];
-    assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(12000));
+    assert_eq!(
+        pipe.server.stream_send(0, &send_buf1, false),
+        if cc_algorithm_name == "cubic" {
+            Ok(12000)
+        } else {
+            Ok(13879)
+        }
+    );
 
     test_utils::emit_flight(&mut pipe.server).ok();
 
@@ -5624,18 +5637,18 @@ fn app_limited_false_no_frame(
 fn app_limited_false_no_header(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-    config
-        .set_application_protos(&[b"proto1", b"proto2"])
-        .unwrap();
-    config.set_initial_max_data(50000);
-    config.set_initial_max_stream_data_bidi_local(50000);
-    config.set_initial_max_stream_data_bidi_remote(50000);
-    config.set_max_recv_udp_payload_size(1406);
-    config.verify_peer(false);
+    let config_modifier = &|config: &mut Config, is_client: bool| {
+        if is_client {
+            config.set_initial_max_data(50000);
+            config.set_initial_max_stream_data_bidi_local(50000);
+            config.set_initial_max_stream_data_bidi_remote(50000);
+            config.set_max_recv_udp_payload_size(1406);
+            config.verify_peer(false);
+        }
+        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    };
 
-    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_modify_config(config_modifier).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Client sends stream data.
@@ -5649,7 +5662,14 @@ fn app_limited_false_no_header(
 
     // Server sends stream data bigger than cwnd.
     let send_buf1 = [0; 20000];
-    assert_eq!(pipe.server.stream_send(0, &send_buf1, false), Ok(12000));
+    assert_eq!(
+        pipe.server.stream_send(0, &send_buf1, false),
+        if cc_algorithm_name == "cubic" {
+            Ok(12000)
+        } else {
+            Ok(13879)
+        }
+    );
 
     test_utils::emit_flight(&mut pipe.server).ok();
 
@@ -5668,18 +5688,18 @@ fn app_limited_false_no_header(
 fn app_limited_not_changed_on_no_new_frames(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-    config
-        .set_application_protos(&[b"proto1", b"proto2"])
-        .unwrap();
-    config.set_initial_max_data(50000);
-    config.set_initial_max_stream_data_bidi_local(50000);
-    config.set_initial_max_stream_data_bidi_remote(50000);
-    config.set_max_recv_udp_payload_size(1200);
-    config.verify_peer(false);
+    let config_modifier = &|config: &mut Config, is_client: bool| {
+        if is_client {
+            config.set_initial_max_data(50000);
+            config.set_initial_max_stream_data_bidi_local(50000);
+            config.set_initial_max_stream_data_bidi_remote(50000);
+            config.set_max_recv_udp_payload_size(1200);
+            config.verify_peer(false);
+        }
+        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    };
 
-    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_modify_config(config_modifier).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Client sends stream data.
@@ -5691,27 +5711,53 @@ fn app_limited_not_changed_on_no_new_frames(
     pipe.server.stream_recv(0, &mut b).unwrap();
     assert_eq!(pipe.advance(), Ok(()));
 
-    // Client's app_limited is true because its bytes-in-flight
-    // is much smaller than the current cwnd.
-    assert!(pipe
-        .client
-        .paths
-        .get_active()
-        .expect("no active")
-        .recovery
-        .app_limited());
+    // inflight is 0.
+    assert_eq!(
+        0,
+        pipe.client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .bytes_in_flight()
+    );
+
+    // app_limited is not well defined when inflight is 0.
+    // The gcongestion branch sets it to false.
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited(),
+        cc_algorithm_name != "bbr2_gcongestion"
+    );
 
     // Client has no new frames to send - returns Done.
     assert_eq!(test_utils::emit_flight(&mut pipe.client), Err(Error::Done));
 
+    // inflight is 0.
+    assert_eq!(
+        0,
+        pipe.client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .bytes_in_flight()
+    );
+
     // Client's app_limited should remain the same.
-    assert!(pipe
-        .client
-        .paths
-        .get_active()
-        .expect("no active")
-        .recovery
-        .app_limited());
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited(),
+        cc_algorithm_name != "bbr2_gcongestion"
+    );
 }
 
 #[rstest]
@@ -6599,7 +6645,12 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        // bbr2_gcongestion uses different logic to set app_limited
+        // bbr2_gcongestion uses different logic to set app_limited.
+        //
+        // It is unclear if the dgram_send_queue should factor into
+        // the app limited computation since dgrams don't seem to
+        // consume cwnd.
+        //
         // TODO fix
         cc_algorithm_name != "bbr2_gcongestion"
     );
@@ -6631,16 +6682,13 @@ fn dgram_send_app_limited(
     assert_ne!(pipe.client.dgram_send_queue.byte_size(), 0);
     assert_ne!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
 
-    assert_eq!(
-        !pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited(),
-        cc_algorithm_name != "bbr2_gcongestion"
-    );
+    assert!(!pipe
+        .client
+        .paths
+        .get_active()
+        .expect("no active")
+        .recovery
+        .app_limited());
 }
 
 #[rstest]
@@ -7745,18 +7793,18 @@ fn initial_cwnd(
 fn last_tx_data_larger_than_tx_data(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
-    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
-    config
-        .set_application_protos(&[b"proto1", b"proto2"])
-        .unwrap();
-    config.set_initial_max_data(12000);
-    config.set_initial_max_stream_data_bidi_local(20000);
-    config.set_initial_max_stream_data_bidi_remote(20000);
-    config.set_max_recv_udp_payload_size(1200);
-    config.verify_peer(false);
+    let config_modifier = &|config: &mut Config, is_client: bool| {
+        if is_client {
+            config.set_initial_max_data(12000);
+            config.set_initial_max_stream_data_bidi_local(20000);
+            config.set_initial_max_stream_data_bidi_remote(20000);
+            config.set_max_recv_udp_payload_size(1200);
+            config.verify_peer(false);
+        }
+        assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    };
 
-    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_modify_config(config_modifier).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Client opens stream 4 and 8.

@@ -702,8 +702,9 @@ impl CongestionControl for BBRv2 {
         self.last_quiescence_start.is_none()
     }
 
-    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
-        bytes_in_flight >= self.get_congestion_window()
+    #[cfg(test)]
+    fn is_app_limited(&self) -> bool {
+        self.mode.network_model().is_app_limited()
     }
 
     fn pacing_rate(

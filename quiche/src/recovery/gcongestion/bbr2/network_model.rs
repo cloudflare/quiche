@@ -754,6 +754,11 @@ impl BBRv2NetworkModel {
         self.bandwidth_sampler.on_app_limited()
     }
 
+    #[cfg(test)]
+    pub(super) fn is_app_limited(&self) -> bool {
+        self.bandwidth_sampler.is_app_limited()
+    }
+
     pub(super) fn loss_events_in_round(&self) -> usize {
         self.loss_events_in_round
     }

@@ -4969,9 +4969,14 @@ impl<F: BufFactory> Connection<F> {
             path.recovery.ping_sent(epoch);
         }
 
-        if !has_data &&
-            !dgram_emitted &&
-            cwnd_available > frame::MAX_STREAM_OVERHEAD
+        let sent_pkt_has_data = if path.recovery.gcongestion_enabled() {
+            has_data || dgram_emitted
+        } else {
+            has_data
+        };
+
+        if sent_pkt_has_data &&
+            cwnd_available > self.tx_buffered + frame::MAX_STREAM_OVERHEAD
         {
             path.recovery.on_app_limited();
         }
@@ -5092,12 +5097,6 @@ impl<F: BufFactory> Connection<F> {
             None,
             aead,
         )?;
-
-        let sent_pkt_has_data = if path.recovery.gcongestion_enabled() {
-            has_data || dgram_emitted
-        } else {
-            has_data
-        };
 
         let sent_pkt = recovery::Sent {
             pkt_num: pn,
