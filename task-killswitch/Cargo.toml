@@ -1,6 +1,6 @@
 [package]
 name = "task-killswitch"
-version = "0.1.1"
+version = "0.2.0"
 repository = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
