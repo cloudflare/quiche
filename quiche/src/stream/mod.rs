@@ -663,8 +663,8 @@ impl<F: BufFactory> StreamMap<F> {
     /// Returns true if the max bidirectional streams count needs to be updated
     /// by sending a MAX_STREAMS frame to the peer.
     ///
-    /// This only sends MAX_STREAMS when available capacity is at or below 50% of
-    /// the initial maximum streams target.
+    /// This only sends MAX_STREAMS when available capacity is at or below 50%
+    /// of the initial maximum streams target.
     pub fn should_update_max_streams_bidi(&self) -> bool {
         let available = self
             .local_max_streams_bidi
