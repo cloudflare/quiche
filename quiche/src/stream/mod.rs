@@ -135,9 +135,15 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     local_max_streams_bidi: u64,
     local_max_streams_bidi_next: u64,
 
+    /// Initial maximum bidirectional stream count
+    initial_max_streams_bidi: u64,
+
     /// Local maximum unidirectional stream count limit.
     local_max_streams_uni: u64,
     local_max_streams_uni_next: u64,
+
+    /// Initial maximum unidirectional stream count
+    initial_max_streams_uni: u64,
 
     /// The total number of bidirectional streams opened by the local endpoint.
     local_opened_streams_bidi: u64,
@@ -193,9 +199,11 @@ impl<F: BufFactory> StreamMap<F> {
         StreamMap {
             local_max_streams_bidi: max_streams_bidi,
             local_max_streams_bidi_next: max_streams_bidi,
+            initial_max_streams_bidi: max_streams_bidi,
 
             local_max_streams_uni: max_streams_uni,
             local_max_streams_uni_next: max_streams_uni,
+            initial_max_streams_uni: max_streams_uni,
 
             max_stream_window,
 
@@ -654,18 +662,28 @@ impl<F: BufFactory> StreamMap<F> {
 
     /// Returns true if the max bidirectional streams count needs to be updated
     /// by sending a MAX_STREAMS frame to the peer.
+    ///
+    /// This only sends MAX_STREAMS when available capacity is at or below 50% of
+    /// the initial maximum streams target.
     pub fn should_update_max_streams_bidi(&self) -> bool {
+        let available = self
+            .local_max_streams_bidi
+            .saturating_sub(self.peer_opened_streams_bidi);
         self.local_max_streams_bidi_next != self.local_max_streams_bidi &&
-            self.local_max_streams_bidi_next / 2 >
-                self.local_max_streams_bidi - self.peer_opened_streams_bidi
+            available <= self.initial_max_streams_bidi / 2
     }
 
     /// Returns true if the max unidirectional streams count needs to be updated
     /// by sending a MAX_STREAMS frame to the peer.
+    ///
+    /// This only send MAX_STREAMS when available capacity is at or below 50% of
+    /// the initial maximum streams target.
     pub fn should_update_max_streams_uni(&self) -> bool {
+        let available = self
+            .local_max_streams_uni
+            .saturating_sub(self.peer_opened_streams_uni);
         self.local_max_streams_uni_next != self.local_max_streams_uni &&
-            self.local_max_streams_uni_next / 2 >
-                self.local_max_streams_uni - self.peer_opened_streams_uni
+            available <= self.initial_max_streams_uni / 2
     }
 
     /// Returns the number of active streams in the map.
