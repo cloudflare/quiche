@@ -87,6 +87,8 @@ pub enum ServerH3Event {
         incoming_headers: IncomingH3Headers,
         /// The latest PRIORITY_UPDATE frame value, if any.
         priority: Option<RawPriorityValue>,
+        /// TODO
+        is_in_early_data: bool,
     },
 }
 
@@ -96,6 +98,7 @@ impl From<H3Event> for ServerH3Event {
             H3Event::IncomingHeaders(incoming_headers) => Self::Headers {
                 incoming_headers,
                 priority: None,
+                is_in_early_data: false,
             },
             _ => Self::Core(ev),
         }
@@ -205,6 +208,7 @@ impl ServerHooks {
             .send(ServerH3Event::Headers {
                 incoming_headers: headers,
                 priority: latest_priority_update,
+                is_in_early_data: qconn.is_in_early_data(),
             })
             .map_err(|_| H3ConnectionError::ControllerWentAway)?;
         driver.hooks.requests += 1;

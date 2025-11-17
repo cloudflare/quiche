@@ -147,10 +147,15 @@ where
             ServerH3Event::Headers {
                 incoming_headers,
                 priority,
+                is_in_early_data,
             } => {
                 // Received headers for a new stream from the H3Driver.
-                self.handle_incoming_headers(incoming_headers, priority)
-                    .await;
+                self.handle_incoming_headers(
+                    incoming_headers,
+                    priority,
+                    is_in_early_data,
+                )
+                .await;
                 Ok(())
             },
         }
@@ -163,7 +168,7 @@ where
     /// Tokio task which calls the `service_fn` on the [`Request`].
     async fn handle_incoming_headers(
         &mut self, headers: IncomingH3Headers,
-        _priority: Option<RawPriorityValue>,
+        _priority: Option<RawPriorityValue>, _is_in_early_data: bool,
     ) {
         log::info!("received headers: {:?}", &headers);
 
