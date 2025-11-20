@@ -317,7 +317,7 @@ ssize_t quiche_retry(const uint8_t *scid, size_t scid_len,
 bool quiche_version_is_supported(uint32_t version);
 
 quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
-                                      const uint8_t *odcid, size_t odcid_len,
+                                      const uint8_t *dcid, size_t dcid_len,
                                       const struct sockaddr *local, socklen_t local_len,
                                       const struct sockaddr *peer, socklen_t peer_len,
                                       const quiche_config *config, void *ssl,
