@@ -1,0 +1,1363 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `tokio-quiche/src/http3/driver/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="tokio_quiche" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (07bdbaedc 2025-11-19)" data-channel="nightly" data-search-js="search-680b2199.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">tokio_quiche/http3/driver/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="comment">// Copyright (C) 2025, Cloudflare, Inc.
+<a href=#2 id=2 data-nosnippet>2</a>// All rights reserved.
+<a href=#3 id=3 data-nosnippet>3</a>//
+<a href=#4 id=4 data-nosnippet>4</a>// Redistribution and use in source and binary forms, with or without
+<a href=#5 id=5 data-nosnippet>5</a>// modification, are permitted provided that the following conditions are
+<a href=#6 id=6 data-nosnippet>6</a>// met:
+<a href=#7 id=7 data-nosnippet>7</a>//
+<a href=#8 id=8 data-nosnippet>8</a>//     * Redistributions of source code must retain the above copyright notice,
+<a href=#9 id=9 data-nosnippet>9</a>//       this list of conditions and the following disclaimer.
+<a href=#10 id=10 data-nosnippet>10</a>//
+<a href=#11 id=11 data-nosnippet>11</a>//     * Redistributions in binary form must reproduce the above copyright
+<a href=#12 id=12 data-nosnippet>12</a>//       notice, this list of conditions and the following disclaimer in the
+<a href=#13 id=13 data-nosnippet>13</a>//       documentation and/or other materials provided with the distribution.
+<a href=#14 id=14 data-nosnippet>14</a>//
+<a href=#15 id=15 data-nosnippet>15</a>// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+<a href=#16 id=16 data-nosnippet>16</a>// IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+<a href=#17 id=17 data-nosnippet>17</a>// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+<a href=#18 id=18 data-nosnippet>18</a>// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+<a href=#19 id=19 data-nosnippet>19</a>// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+<a href=#20 id=20 data-nosnippet>20</a>// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+<a href=#21 id=21 data-nosnippet>21</a>// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+<a href=#22 id=22 data-nosnippet>22</a>// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+<a href=#23 id=23 data-nosnippet>23</a>// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+<a href=#24 id=24 data-nosnippet>24</a>// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+<a href=#25 id=25 data-nosnippet>25</a>// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+<a href=#26 id=26 data-nosnippet>26</a>
+<a href=#27 id=27 data-nosnippet>27</a></span><span class="kw">mod </span>client;
+<a href=#28 id=28 data-nosnippet>28</a><span class="doccomment">/// Wrapper for running HTTP/3 connections.
+<a href=#29 id=29 data-nosnippet>29</a></span><span class="kw">pub mod </span>connection;
+<a href=#30 id=30 data-nosnippet>30</a><span class="kw">mod </span>datagram;
+<a href=#31 id=31 data-nosnippet>31</a><span class="comment">// `DriverHooks` must stay private to prevent users from creating their own
+<a href=#32 id=32 data-nosnippet>32</a>// H3Drivers.
+<a href=#33 id=33 data-nosnippet>33</a></span><span class="kw">mod </span>hooks;
+<a href=#34 id=34 data-nosnippet>34</a><span class="kw">mod </span>server;
+<a href=#35 id=35 data-nosnippet>35</a><span class="kw">mod </span>streams;
+<a href=#36 id=36 data-nosnippet>36</a><span class="attr">#[cfg(test)]
+<a href=#37 id=37 data-nosnippet>37</a></span><span class="kw">pub mod </span>test_utils;
+<a href=#38 id=38 data-nosnippet>38</a><span class="attr">#[cfg(test)]
+<a href=#39 id=39 data-nosnippet>39</a></span><span class="kw">mod </span>tests;
+<a href=#40 id=40 data-nosnippet>40</a>
+<a href=#41 id=41 data-nosnippet>41</a><span class="kw">use </span>std::collections::BTreeMap;
+<a href=#42 id=42 data-nosnippet>42</a><span class="kw">use </span>std::error::Error;
+<a href=#43 id=43 data-nosnippet>43</a><span class="kw">use </span>std::fmt;
+<a href=#44 id=44 data-nosnippet>44</a><span class="kw">use </span>std::marker::PhantomData;
+<a href=#45 id=45 data-nosnippet>45</a><span class="kw">use </span>std::sync::Arc;
+<a href=#46 id=46 data-nosnippet>46</a><span class="kw">use </span>std::time::Instant;
+<a href=#47 id=47 data-nosnippet>47</a>
+<a href=#48 id=48 data-nosnippet>48</a><span class="kw">use </span>datagram_socket::StreamClosureKind;
+<a href=#49 id=49 data-nosnippet>49</a><span class="kw">use </span>foundations::telemetry::log;
+<a href=#50 id=50 data-nosnippet>50</a><span class="kw">use </span>futures::FutureExt;
+<a href=#51 id=51 data-nosnippet>51</a><span class="kw">use </span>futures_util::stream::FuturesUnordered;
+<a href=#52 id=52 data-nosnippet>52</a><span class="kw">use </span>quiche::h3;
+<a href=#53 id=53 data-nosnippet>53</a><span class="kw">use </span>tokio::select;
+<a href=#54 id=54 data-nosnippet>54</a><span class="kw">use </span>tokio::sync::mpsc;
+<a href=#55 id=55 data-nosnippet>55</a><span class="kw">use </span>tokio::sync::mpsc::error::TryRecvError;
+<a href=#56 id=56 data-nosnippet>56</a><span class="kw">use </span>tokio::sync::mpsc::error::TrySendError;
+<a href=#57 id=57 data-nosnippet>57</a><span class="kw">use </span>tokio::sync::mpsc::UnboundedReceiver;
+<a href=#58 id=58 data-nosnippet>58</a><span class="kw">use </span>tokio::sync::mpsc::UnboundedSender;
+<a href=#59 id=59 data-nosnippet>59</a><span class="kw">use </span>tokio_stream::StreamExt;
+<a href=#60 id=60 data-nosnippet>60</a><span class="kw">use </span>tokio_util::sync::PollSender;
+<a href=#61 id=61 data-nosnippet>61</a>
+<a href=#62 id=62 data-nosnippet>62</a><span class="kw">use </span><span class="self">self</span>::hooks::DriverHooks;
+<a href=#63 id=63 data-nosnippet>63</a><span class="kw">use </span><span class="self">self</span>::hooks::InboundHeaders;
+<a href=#64 id=64 data-nosnippet>64</a><span class="kw">use </span><span class="self">self</span>::streams::FlowCtx;
+<a href=#65 id=65 data-nosnippet>65</a><span class="kw">use </span><span class="self">self</span>::streams::HaveUpstreamCapacity;
+<a href=#66 id=66 data-nosnippet>66</a><span class="kw">use </span><span class="self">self</span>::streams::ReceivedDownstreamData;
+<a href=#67 id=67 data-nosnippet>67</a><span class="kw">use </span><span class="self">self</span>::streams::StreamCtx;
+<a href=#68 id=68 data-nosnippet>68</a><span class="kw">use </span><span class="self">self</span>::streams::StreamReady;
+<a href=#69 id=69 data-nosnippet>69</a><span class="kw">use </span><span class="self">self</span>::streams::WaitForDownstreamData;
+<a href=#70 id=70 data-nosnippet>70</a><span class="kw">use </span><span class="self">self</span>::streams::WaitForStream;
+<a href=#71 id=71 data-nosnippet>71</a><span class="kw">use </span><span class="self">self</span>::streams::WaitForUpstreamCapacity;
+<a href=#72 id=72 data-nosnippet>72</a><span class="kw">use </span><span class="kw">crate</span>::buf_factory::BufFactory;
+<a href=#73 id=73 data-nosnippet>73</a><span class="kw">use </span><span class="kw">crate</span>::buf_factory::PooledBuf;
+<a href=#74 id=74 data-nosnippet>74</a><span class="kw">use </span><span class="kw">crate</span>::buf_factory::PooledDgram;
+<a href=#75 id=75 data-nosnippet>75</a><span class="kw">use </span><span class="kw">crate</span>::http3::settings::Http3Settings;
+<a href=#76 id=76 data-nosnippet>76</a><span class="kw">use </span><span class="kw">crate</span>::http3::H3AuditStats;
+<a href=#77 id=77 data-nosnippet>77</a><span class="kw">use </span><span class="kw">crate</span>::metrics::Metrics;
+<a href=#78 id=78 data-nosnippet>78</a><span class="kw">use </span><span class="kw">crate</span>::quic::HandshakeInfo;
+<a href=#79 id=79 data-nosnippet>79</a><span class="kw">use </span><span class="kw">crate</span>::quic::QuicCommand;
+<a href=#80 id=80 data-nosnippet>80</a><span class="kw">use </span><span class="kw">crate</span>::quic::QuicheConnection;
+<a href=#81 id=81 data-nosnippet>81</a><span class="kw">use </span><span class="kw">crate</span>::ApplicationOverQuic;
+<a href=#82 id=82 data-nosnippet>82</a><span class="kw">use </span><span class="kw">crate</span>::QuicResult;
+<a href=#83 id=83 data-nosnippet>83</a>
+<a href=#84 id=84 data-nosnippet>84</a><span class="kw">pub use </span><span class="self">self</span>::client::ClientEventStream;
+<a href=#85 id=85 data-nosnippet>85</a><span class="kw">pub use </span><span class="self">self</span>::client::ClientH3Command;
+<a href=#86 id=86 data-nosnippet>86</a><span class="kw">pub use </span><span class="self">self</span>::client::ClientH3Controller;
+<a href=#87 id=87 data-nosnippet>87</a><span class="kw">pub use </span><span class="self">self</span>::client::ClientH3Driver;
+<a href=#88 id=88 data-nosnippet>88</a><span class="kw">pub use </span><span class="self">self</span>::client::ClientH3Event;
+<a href=#89 id=89 data-nosnippet>89</a><span class="kw">pub use </span><span class="self">self</span>::client::ClientRequestSender;
+<a href=#90 id=90 data-nosnippet>90</a><span class="kw">pub use </span><span class="self">self</span>::client::NewClientRequest;
+<a href=#91 id=91 data-nosnippet>91</a><span class="kw">pub use </span><span class="self">self</span>::server::RawPriorityValue;
+<a href=#92 id=92 data-nosnippet>92</a><span class="kw">pub use </span><span class="self">self</span>::server::ServerEventStream;
+<a href=#93 id=93 data-nosnippet>93</a><span class="kw">pub use </span><span class="self">self</span>::server::ServerH3Command;
+<a href=#94 id=94 data-nosnippet>94</a><span class="kw">pub use </span><span class="self">self</span>::server::ServerH3Controller;
+<a href=#95 id=95 data-nosnippet>95</a><span class="kw">pub use </span><span class="self">self</span>::server::ServerH3Driver;
+<a href=#96 id=96 data-nosnippet>96</a><span class="kw">pub use </span><span class="self">self</span>::server::ServerH3Event;
+<a href=#97 id=97 data-nosnippet>97</a>
+<a href=#98 id=98 data-nosnippet>98</a><span class="comment">// The default priority for HTTP/3 responses if the application didn't provide
+<a href=#99 id=99 data-nosnippet>99</a>// one.
+<a href=#100 id=100 data-nosnippet>100</a></span><span class="kw">const </span>DEFAULT_PRIO: h3::Priority = h3::Priority::new(<span class="number">3</span>, <span class="bool-val">true</span>);
+<a href=#101 id=101 data-nosnippet>101</a>
+<a href=#102 id=102 data-nosnippet>102</a><span class="comment">// For a stream use a channel with 16 entries, which works out to 16 * 64KB =
+<a href=#103 id=103 data-nosnippet>103</a>// 1MB of max buffered data.
+<a href=#104 id=104 data-nosnippet>104</a></span><span class="attr">#[cfg(not(any(test, debug_assertions)))]
+<a href=#105 id=105 data-nosnippet>105</a></span><span class="kw">const </span>STREAM_CAPACITY: usize = <span class="number">16</span>;
+<a href=#106 id=106 data-nosnippet>106</a><span class="attr">#[cfg(any(test, debug_assertions))]
+<a href=#107 id=107 data-nosnippet>107</a></span><span class="kw">const </span>STREAM_CAPACITY: usize = <span class="number">1</span>; <span class="comment">// Set to 1 to stress write_pending under test conditions
+<a href=#108 id=108 data-nosnippet>108</a>
+<a href=#109 id=109 data-nosnippet>109</a>// For *all* flows use a shared channel with 2048 entries, which works out
+<a href=#110 id=110 data-nosnippet>110</a>// to 3MB of max buffered data at 1500 bytes per datagram.
+<a href=#111 id=111 data-nosnippet>111</a></span><span class="kw">const </span>FLOW_CAPACITY: usize = <span class="number">2048</span>;
+<a href=#112 id=112 data-nosnippet>112</a>
+<a href=#113 id=113 data-nosnippet>113</a><span class="doccomment">/// Used by a local task to send [`OutboundFrame`]s to a peer on the
+<a href=#114 id=114 data-nosnippet>114</a>/// stream or flow associated with this channel.
+<a href=#115 id=115 data-nosnippet>115</a></span><span class="kw">pub type </span>OutboundFrameSender = PollSender&lt;OutboundFrame&gt;;
+<a href=#116 id=116 data-nosnippet>116</a>
+<a href=#117 id=117 data-nosnippet>117</a><span class="doccomment">/// Used internally to receive [`OutboundFrame`]s which should be sent to a peer
+<a href=#118 id=118 data-nosnippet>118</a>/// on the stream or flow associated with this channel.
+<a href=#119 id=119 data-nosnippet>119</a></span><span class="kw">type </span>OutboundFrameStream = mpsc::Receiver&lt;OutboundFrame&gt;;
+<a href=#120 id=120 data-nosnippet>120</a>
+<a href=#121 id=121 data-nosnippet>121</a><span class="doccomment">/// Used internally to send [`InboundFrame`]s (data) from the peer to a local
+<a href=#122 id=122 data-nosnippet>122</a>/// task on the stream or flow associated with this channel.
+<a href=#123 id=123 data-nosnippet>123</a></span><span class="kw">type </span>InboundFrameSender = PollSender&lt;InboundFrame&gt;;
+<a href=#124 id=124 data-nosnippet>124</a>
+<a href=#125 id=125 data-nosnippet>125</a><span class="doccomment">/// Used by a local task to receive [`InboundFrame`]s (data) on the stream or
+<a href=#126 id=126 data-nosnippet>126</a>/// flow associated with this channel.
+<a href=#127 id=127 data-nosnippet>127</a></span><span class="kw">pub type </span>InboundFrameStream = mpsc::Receiver&lt;InboundFrame&gt;;
+<a href=#128 id=128 data-nosnippet>128</a>
+<a href=#129 id=129 data-nosnippet>129</a><span class="doccomment">/// The error type used internally in [H3Driver].
+<a href=#130 id=130 data-nosnippet>130</a>///
+<a href=#131 id=131 data-nosnippet>131</a>/// Note that [`ApplicationOverQuic`] errors are not exposed to users at this
+<a href=#132 id=132 data-nosnippet>132</a>/// time. The type is public to document the failure modes in [H3Driver].
+<a href=#133 id=133 data-nosnippet>133</a></span><span class="attr">#[derive(Debug, PartialEq, Eq)]
+<a href=#134 id=134 data-nosnippet>134</a>#[non_exhaustive]
+<a href=#135 id=135 data-nosnippet>135</a></span><span class="kw">pub enum </span>H3ConnectionError {
+<a href=#136 id=136 data-nosnippet>136</a>    <span class="doccomment">/// The controller task was shut down and is no longer listening.
+<a href=#137 id=137 data-nosnippet>137</a>    </span>ControllerWentAway,
+<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// Other error at the connection, but not stream level.
+<a href=#139 id=139 data-nosnippet>139</a>    </span>H3(h3::Error),
+<a href=#140 id=140 data-nosnippet>140</a>    <span class="doccomment">/// Received a GOAWAY frame from the peer.
+<a href=#141 id=141 data-nosnippet>141</a>    </span>GoAway,
+<a href=#142 id=142 data-nosnippet>142</a>    <span class="doccomment">/// Received data for a stream that was closed or never opened.
+<a href=#143 id=143 data-nosnippet>143</a>    </span>NonexistentStream,
+<a href=#144 id=144 data-nosnippet>144</a>    <span class="doccomment">/// The server's post-accept timeout was hit.
+<a href=#145 id=145 data-nosnippet>145</a>    /// The timeout can be configured in [`Http3Settings`].
+<a href=#146 id=146 data-nosnippet>146</a>    </span>PostAcceptTimeout,
+<a href=#147 id=147 data-nosnippet>147</a>}
+<a href=#148 id=148 data-nosnippet>148</a>
+<a href=#149 id=149 data-nosnippet>149</a><span class="kw">impl </span>From&lt;h3::Error&gt; <span class="kw">for </span>H3ConnectionError {
+<a href=#150 id=150 data-nosnippet>150</a>    <span class="kw">fn </span>from(err: h3::Error) -&gt; <span class="self">Self </span>{
+<a href=#151 id=151 data-nosnippet>151</a>        H3ConnectionError::H3(err)
+<a href=#152 id=152 data-nosnippet>152</a>    }
+<a href=#153 id=153 data-nosnippet>153</a>}
+<a href=#154 id=154 data-nosnippet>154</a>
+<a href=#155 id=155 data-nosnippet>155</a><span class="kw">impl </span>From&lt;quiche::Error&gt; <span class="kw">for </span>H3ConnectionError {
+<a href=#156 id=156 data-nosnippet>156</a>    <span class="kw">fn </span>from(err: quiche::Error) -&gt; <span class="self">Self </span>{
+<a href=#157 id=157 data-nosnippet>157</a>        H3ConnectionError::H3(h3::Error::TransportError(err))
+<a href=#158 id=158 data-nosnippet>158</a>    }
+<a href=#159 id=159 data-nosnippet>159</a>}
+<a href=#160 id=160 data-nosnippet>160</a>
+<a href=#161 id=161 data-nosnippet>161</a><span class="kw">impl </span>Error <span class="kw">for </span>H3ConnectionError {}
+<a href=#162 id=162 data-nosnippet>162</a>
+<a href=#163 id=163 data-nosnippet>163</a><span class="kw">impl </span>fmt::Display <span class="kw">for </span>H3ConnectionError {
+<a href=#164 id=164 data-nosnippet>164</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter) -&gt; fmt::Result {
+<a href=#165 id=165 data-nosnippet>165</a>        <span class="kw">let </span>s: <span class="kw-2">&amp;</span><span class="kw">dyn </span>fmt::Display = <span class="kw">match </span><span class="self">self </span>{
+<a href=#166 id=166 data-nosnippet>166</a>            <span class="self">Self</span>::ControllerWentAway =&gt; <span class="kw-2">&amp;</span><span class="string">"controller went away"</span>,
+<a href=#167 id=167 data-nosnippet>167</a>            <span class="self">Self</span>::H3(e) =&gt; e,
+<a href=#168 id=168 data-nosnippet>168</a>            <span class="self">Self</span>::GoAway =&gt; <span class="kw-2">&amp;</span><span class="string">"goaway"</span>,
+<a href=#169 id=169 data-nosnippet>169</a>            <span class="self">Self</span>::NonexistentStream =&gt; <span class="kw-2">&amp;</span><span class="string">"nonexistent stream"</span>,
+<a href=#170 id=170 data-nosnippet>170</a>            <span class="self">Self</span>::PostAcceptTimeout =&gt; <span class="kw-2">&amp;</span><span class="string">"post accept timeout hit"</span>,
+<a href=#171 id=171 data-nosnippet>171</a>        };
+<a href=#172 id=172 data-nosnippet>172</a>
+<a href=#173 id=173 data-nosnippet>173</a>        <span class="macro">write!</span>(f, <span class="string">"H3ConnectionError: {s}"</span>)
+<a href=#174 id=174 data-nosnippet>174</a>    }
+<a href=#175 id=175 data-nosnippet>175</a>}
+<a href=#176 id=176 data-nosnippet>176</a>
+<a href=#177 id=177 data-nosnippet>177</a><span class="kw">type </span>H3ConnectionResult&lt;T&gt; = <span class="prelude-ty">Result</span>&lt;T, H3ConnectionError&gt;;
+<a href=#178 id=178 data-nosnippet>178</a>
+<a href=#179 id=179 data-nosnippet>179</a><span class="doccomment">/// HTTP/3 headers that were received on a stream.
+<a href=#180 id=180 data-nosnippet>180</a>///
+<a href=#181 id=181 data-nosnippet>181</a>/// `recv` is used to read the message body, while `send` is used to transmit
+<a href=#182 id=182 data-nosnippet>182</a>/// data back to the peer.
+<a href=#183 id=183 data-nosnippet>183</a></span><span class="kw">pub struct </span>IncomingH3Headers {
+<a href=#184 id=184 data-nosnippet>184</a>    <span class="doccomment">/// Stream ID of the frame.
+<a href=#185 id=185 data-nosnippet>185</a>    </span><span class="kw">pub </span>stream_id: u64,
+<a href=#186 id=186 data-nosnippet>186</a>    <span class="doccomment">/// The actual [`h3::Header`]s which were received.
+<a href=#187 id=187 data-nosnippet>187</a>    </span><span class="kw">pub </span>headers: Vec&lt;h3::Header&gt;,
+<a href=#188 id=188 data-nosnippet>188</a>    <span class="doccomment">/// An [`OutboundFrameSender`] for streaming body data to the peer. For
+<a href=#189 id=189 data-nosnippet>189</a>    /// [ClientH3Driver], note that the request body can also be passed a
+<a href=#190 id=190 data-nosnippet>190</a>    /// cloned sender via [`NewClientRequest`].
+<a href=#191 id=191 data-nosnippet>191</a>    </span><span class="kw">pub </span>send: OutboundFrameSender,
+<a href=#192 id=192 data-nosnippet>192</a>    <span class="doccomment">/// An [`InboundFrameStream`] of body data received from the peer.
+<a href=#193 id=193 data-nosnippet>193</a>    </span><span class="kw">pub </span>recv: InboundFrameStream,
+<a href=#194 id=194 data-nosnippet>194</a>    <span class="doccomment">/// Whether there is a body associated with the incoming headers.
+<a href=#195 id=195 data-nosnippet>195</a>    </span><span class="kw">pub </span>read_fin: bool,
+<a href=#196 id=196 data-nosnippet>196</a>    <span class="doccomment">/// Handle to the [`H3AuditStats`] for the message's stream.
+<a href=#197 id=197 data-nosnippet>197</a>    </span><span class="kw">pub </span>h3_audit_stats: Arc&lt;H3AuditStats&gt;,
+<a href=#198 id=198 data-nosnippet>198</a>}
+<a href=#199 id=199 data-nosnippet>199</a>
+<a href=#200 id=200 data-nosnippet>200</a><span class="kw">impl </span>fmt::Debug <span class="kw">for </span>IncomingH3Headers {
+<a href=#201 id=201 data-nosnippet>201</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
+<a href=#202 id=202 data-nosnippet>202</a>        f.debug_struct(<span class="string">"IncomingH3Headers"</span>)
+<a href=#203 id=203 data-nosnippet>203</a>            .field(<span class="string">"stream_id"</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.stream_id)
+<a href=#204 id=204 data-nosnippet>204</a>            .field(<span class="string">"headers"</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.headers)
+<a href=#205 id=205 data-nosnippet>205</a>            .field(<span class="string">"read_fin"</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.read_fin)
+<a href=#206 id=206 data-nosnippet>206</a>            .field(<span class="string">"h3_audit_stats"</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.h3_audit_stats)
+<a href=#207 id=207 data-nosnippet>207</a>            .finish()
+<a href=#208 id=208 data-nosnippet>208</a>    }
+<a href=#209 id=209 data-nosnippet>209</a>}
+<a href=#210 id=210 data-nosnippet>210</a>
+<a href=#211 id=211 data-nosnippet>211</a><span class="doccomment">/// [`H3Event`]s are produced by an [H3Driver] to describe HTTP/3 state updates.
+<a href=#212 id=212 data-nosnippet>212</a>///
+<a href=#213 id=213 data-nosnippet>213</a>/// Both [ServerH3Driver] and [ClientH3Driver] may extend this enum with
+<a href=#214 id=214 data-nosnippet>214</a>/// endpoint-specific variants. The events must be consumed by users of the
+<a href=#215 id=215 data-nosnippet>215</a>/// drivers, like a higher-level `Server` or `Client` controller.
+<a href=#216 id=216 data-nosnippet>216</a></span><span class="attr">#[derive(Debug)]
+<a href=#217 id=217 data-nosnippet>217</a></span><span class="kw">pub enum </span>H3Event {
+<a href=#218 id=218 data-nosnippet>218</a>    <span class="doccomment">/// A SETTINGS frame was received.
+<a href=#219 id=219 data-nosnippet>219</a>    </span>IncomingSettings {
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="doccomment">/// Raw HTTP/3 setting pairs, in the order received from the peer.
+<a href=#221 id=221 data-nosnippet>221</a>        </span>settings: Vec&lt;(u64, u64)&gt;,
+<a href=#222 id=222 data-nosnippet>222</a>    },
+<a href=#223 id=223 data-nosnippet>223</a>
+<a href=#224 id=224 data-nosnippet>224</a>    <span class="doccomment">/// A HEADERS frame was received on the given stream. This is either a
+<a href=#225 id=225 data-nosnippet>225</a>    /// request or a response depending on the perspective of the [`H3Event`]
+<a href=#226 id=226 data-nosnippet>226</a>    /// receiver.
+<a href=#227 id=227 data-nosnippet>227</a>    </span>IncomingHeaders(IncomingH3Headers),
+<a href=#228 id=228 data-nosnippet>228</a>
+<a href=#229 id=229 data-nosnippet>229</a>    <span class="doccomment">/// A DATAGRAM flow was created and associated with the given `flow_id`.
+<a href=#230 id=230 data-nosnippet>230</a>    /// This event is fired before a HEADERS event for CONNECT[-UDP] requests.
+<a href=#231 id=231 data-nosnippet>231</a>    </span>NewFlow {
+<a href=#232 id=232 data-nosnippet>232</a>        <span class="doccomment">/// Flow ID of the new flow.
+<a href=#233 id=233 data-nosnippet>233</a>        </span>flow_id: u64,
+<a href=#234 id=234 data-nosnippet>234</a>        <span class="doccomment">/// An [`OutboundFrameSender`] for transmitting datagrams to the peer.
+<a href=#235 id=235 data-nosnippet>235</a>        </span>send: OutboundFrameSender,
+<a href=#236 id=236 data-nosnippet>236</a>        <span class="doccomment">/// An [`InboundFrameStream`] for receiving datagrams from the peer.
+<a href=#237 id=237 data-nosnippet>237</a>        </span>recv: InboundFrameStream,
+<a href=#238 id=238 data-nosnippet>238</a>    },
+<a href=#239 id=239 data-nosnippet>239</a>    <span class="doccomment">/// A RST_STREAM frame was seen on the given `stream_id`. The user of the
+<a href=#240 id=240 data-nosnippet>240</a>    /// driver should clean up any state allocated for this stream.
+<a href=#241 id=241 data-nosnippet>241</a>    </span>ResetStream { stream_id: u64 },
+<a href=#242 id=242 data-nosnippet>242</a>    <span class="doccomment">/// The connection has irrecoverably errored and is shutting down.
+<a href=#243 id=243 data-nosnippet>243</a>    </span>ConnectionError(h3::Error),
+<a href=#244 id=244 data-nosnippet>244</a>    <span class="doccomment">/// The connection has been shutdown, optionally due to an
+<a href=#245 id=245 data-nosnippet>245</a>    /// [`H3ConnectionError`].
+<a href=#246 id=246 data-nosnippet>246</a>    </span>ConnectionShutdown(<span class="prelude-ty">Option</span>&lt;H3ConnectionError&gt;),
+<a href=#247 id=247 data-nosnippet>247</a>    <span class="doccomment">/// Body data has been received over a stream.
+<a href=#248 id=248 data-nosnippet>248</a>    </span>BodyBytesReceived {
+<a href=#249 id=249 data-nosnippet>249</a>        <span class="doccomment">/// Stream ID of the body data.
+<a href=#250 id=250 data-nosnippet>250</a>        </span>stream_id: u64,
+<a href=#251 id=251 data-nosnippet>251</a>        <span class="doccomment">/// Number of bytes received.
+<a href=#252 id=252 data-nosnippet>252</a>        </span>num_bytes: u64,
+<a href=#253 id=253 data-nosnippet>253</a>        <span class="doccomment">/// Whether the stream is finished and won't yield any more data.
+<a href=#254 id=254 data-nosnippet>254</a>        </span>fin: bool,
+<a href=#255 id=255 data-nosnippet>255</a>    },
+<a href=#256 id=256 data-nosnippet>256</a>    <span class="doccomment">/// The stream has been closed. This is used to signal stream closures that
+<a href=#257 id=257 data-nosnippet>257</a>    /// don't result from RST_STREAM frames, unlike the
+<a href=#258 id=258 data-nosnippet>258</a>    /// [`H3Event::ResetStream`] variant.
+<a href=#259 id=259 data-nosnippet>259</a>    </span>StreamClosed { stream_id: u64 },
+<a href=#260 id=260 data-nosnippet>260</a>}
+<a href=#261 id=261 data-nosnippet>261</a>
+<a href=#262 id=262 data-nosnippet>262</a><span class="kw">impl </span>H3Event {
+<a href=#263 id=263 data-nosnippet>263</a>    <span class="doccomment">/// Generates an event from an applicable [`H3ConnectionError`].
+<a href=#264 id=264 data-nosnippet>264</a>    </span><span class="kw">fn </span>from_error(err: <span class="kw-2">&amp;</span>H3ConnectionError) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#265 id=265 data-nosnippet>265</a>        <span class="prelude-val">Some</span>(<span class="kw">match </span>err {
+<a href=#266 id=266 data-nosnippet>266</a>            H3ConnectionError::H3(e) =&gt; <span class="self">Self</span>::ConnectionError(<span class="kw-2">*</span>e),
+<a href=#267 id=267 data-nosnippet>267</a>            H3ConnectionError::PostAcceptTimeout =&gt; <span class="self">Self</span>::ConnectionShutdown(
+<a href=#268 id=268 data-nosnippet>268</a>                <span class="prelude-val">Some</span>(H3ConnectionError::PostAcceptTimeout),
+<a href=#269 id=269 data-nosnippet>269</a>            ),
+<a href=#270 id=270 data-nosnippet>270</a>            <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+<a href=#271 id=271 data-nosnippet>271</a>        })
+<a href=#272 id=272 data-nosnippet>272</a>    }
+<a href=#273 id=273 data-nosnippet>273</a>}
+<a href=#274 id=274 data-nosnippet>274</a>
+<a href=#275 id=275 data-nosnippet>275</a><span class="doccomment">/// An [`OutboundFrame`] is a data frame that should be sent from a local task
+<a href=#276 id=276 data-nosnippet>276</a>/// to a peer over a [`quiche::h3::Connection`].
+<a href=#277 id=277 data-nosnippet>277</a>///
+<a href=#278 id=278 data-nosnippet>278</a>/// This is used, for example, to send response body data to a peer, or proxied
+<a href=#279 id=279 data-nosnippet>279</a>/// UDP datagrams.
+<a href=#280 id=280 data-nosnippet>280</a></span><span class="attr">#[derive(Debug)]
+<a href=#281 id=281 data-nosnippet>281</a></span><span class="kw">pub enum </span>OutboundFrame {
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="doccomment">/// Response headers to be sent to the peer, with optional priority.
+<a href=#283 id=283 data-nosnippet>283</a>    </span>Headers(Vec&lt;h3::Header&gt;, <span class="prelude-ty">Option</span>&lt;quiche::h3::Priority&gt;),
+<a href=#284 id=284 data-nosnippet>284</a>    <span class="doccomment">/// Response body/CONNECT downstream data plus FIN flag.
+<a href=#285 id=285 data-nosnippet>285</a>    </span><span class="attr">#[cfg(feature = <span class="string">"zero-copy"</span>)]
+<a href=#286 id=286 data-nosnippet>286</a>    </span>Body(<span class="kw">crate</span>::buf_factory::QuicheBuf, bool),
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="doccomment">/// Response body/CONNECT downstream data plus FIN flag.
+<a href=#288 id=288 data-nosnippet>288</a>    </span><span class="attr">#[cfg(not(feature = <span class="string">"zero-copy"</span>))]
+<a href=#289 id=289 data-nosnippet>289</a>    </span>Body(PooledBuf, bool),
+<a href=#290 id=290 data-nosnippet>290</a>    <span class="doccomment">/// CONNECT-UDP (DATAGRAM) downstream data plus flow ID.
+<a href=#291 id=291 data-nosnippet>291</a>    </span>Datagram(PooledDgram, u64),
+<a href=#292 id=292 data-nosnippet>292</a>    <span class="doccomment">/// Close the stream with a trailers, with optional priority.
+<a href=#293 id=293 data-nosnippet>293</a>    </span>Trailers(Vec&lt;h3::Header&gt;, <span class="prelude-ty">Option</span>&lt;quiche::h3::Priority&gt;),
+<a href=#294 id=294 data-nosnippet>294</a>    <span class="doccomment">/// An error encountered when serving the request. Stream should be closed.
+<a href=#295 id=295 data-nosnippet>295</a>    </span>PeerStreamError,
+<a href=#296 id=296 data-nosnippet>296</a>    <span class="doccomment">/// DATAGRAM flow explicitly closed.
+<a href=#297 id=297 data-nosnippet>297</a>    </span>FlowShutdown { flow_id: u64, stream_id: u64 },
+<a href=#298 id=298 data-nosnippet>298</a>}
+<a href=#299 id=299 data-nosnippet>299</a>
+<a href=#300 id=300 data-nosnippet>300</a><span class="kw">impl </span>OutboundFrame {
+<a href=#301 id=301 data-nosnippet>301</a>    <span class="doccomment">/// Creates a body frame with the provided buffer.
+<a href=#302 id=302 data-nosnippet>302</a>    </span><span class="kw">pub fn </span>body(body: PooledBuf, fin: bool) -&gt; <span class="self">Self </span>{
+<a href=#303 id=303 data-nosnippet>303</a>        <span class="attr">#[cfg(feature = <span class="string">"zero-copy"</span>)]
+<a href=#304 id=304 data-nosnippet>304</a>        </span><span class="kw">let </span>body = <span class="kw">crate</span>::buf_factory::QuicheBuf::new(body);
+<a href=#305 id=305 data-nosnippet>305</a>
+<a href=#306 id=306 data-nosnippet>306</a>        OutboundFrame::Body(body, fin)
+<a href=#307 id=307 data-nosnippet>307</a>    }
+<a href=#308 id=308 data-nosnippet>308</a>}
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a><span class="doccomment">/// An [`InboundFrame`] is a data frame that was received from the peer over a
+<a href=#311 id=311 data-nosnippet>311</a>/// [`quiche::h3::Connection`]. This is used by peers to send body or datagrams
+<a href=#312 id=312 data-nosnippet>312</a>/// to the local task.
+<a href=#313 id=313 data-nosnippet>313</a></span><span class="attr">#[derive(Debug)]
+<a href=#314 id=314 data-nosnippet>314</a></span><span class="kw">pub enum </span>InboundFrame {
+<a href=#315 id=315 data-nosnippet>315</a>    <span class="doccomment">/// Request body/CONNECT upstream data plus FIN flag.
+<a href=#316 id=316 data-nosnippet>316</a>    </span>Body(PooledBuf, bool),
+<a href=#317 id=317 data-nosnippet>317</a>    <span class="doccomment">/// CONNECT-UDP (DATAGRAM) upstream data.
+<a href=#318 id=318 data-nosnippet>318</a>    </span>Datagram(PooledDgram),
+<a href=#319 id=319 data-nosnippet>319</a>}
+<a href=#320 id=320 data-nosnippet>320</a>
+<a href=#321 id=321 data-nosnippet>321</a><span class="doccomment">/// A ready-made [`ApplicationOverQuic`] which can handle HTTP/3 and MASQUE.
+<a href=#322 id=322 data-nosnippet>322</a>/// Depending on the `DriverHooks` in use, it powers either a client or a
+<a href=#323 id=323 data-nosnippet>323</a>/// server.
+<a href=#324 id=324 data-nosnippet>324</a>///
+<a href=#325 id=325 data-nosnippet>325</a>/// Use the [ClientH3Driver] and [ServerH3Driver] aliases to access the
+<a href=#326 id=326 data-nosnippet>326</a>/// respective driver types. The driver is passed into an I/O loop and
+<a href=#327 id=327 data-nosnippet>327</a>/// communicates with the driver's user (e.g., an HTTP client or a server) via
+<a href=#328 id=328 data-nosnippet>328</a>/// its associated [H3Controller]. The controller allows the application to both
+<a href=#329 id=329 data-nosnippet>329</a>/// listen for [`H3Event`]s of note and send [`H3Command`]s into the I/O loop.
+<a href=#330 id=330 data-nosnippet>330</a></span><span class="kw">pub struct </span>H3Driver&lt;H: DriverHooks&gt; {
+<a href=#331 id=331 data-nosnippet>331</a>    <span class="doccomment">/// Configuration used to initialize `conn`. Created from [`Http3Settings`]
+<a href=#332 id=332 data-nosnippet>332</a>    /// in the constructor.
+<a href=#333 id=333 data-nosnippet>333</a>    </span>h3_config: h3::Config,
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="doccomment">/// The underlying HTTP/3 connection. Initialized in
+<a href=#335 id=335 data-nosnippet>335</a>    /// `ApplicationOverQuic::on_conn_established`.
+<a href=#336 id=336 data-nosnippet>336</a>    </span>conn: <span class="prelude-ty">Option</span>&lt;h3::Connection&gt;,
+<a href=#337 id=337 data-nosnippet>337</a>    <span class="doccomment">/// State required by the client/server hooks.
+<a href=#338 id=338 data-nosnippet>338</a>    </span>hooks: H,
+<a href=#339 id=339 data-nosnippet>339</a>    <span class="doccomment">/// Sends [`H3Event`]s to the [H3Controller] paired with this driver.
+<a href=#340 id=340 data-nosnippet>340</a>    </span>h3_event_sender: mpsc::UnboundedSender&lt;H::Event&gt;,
+<a href=#341 id=341 data-nosnippet>341</a>    <span class="doccomment">/// Receives [`H3Command`]s from the [H3Controller] paired with this driver.
+<a href=#342 id=342 data-nosnippet>342</a>    </span>cmd_recv: mpsc::UnboundedReceiver&lt;H::Command&gt;,
+<a href=#343 id=343 data-nosnippet>343</a>
+<a href=#344 id=344 data-nosnippet>344</a>    <span class="doccomment">/// A map of stream IDs to their [StreamCtx]. This is mainly used to
+<a href=#345 id=345 data-nosnippet>345</a>    /// retrieve the internal Tokio channels associated with the stream.
+<a href=#346 id=346 data-nosnippet>346</a>    </span>stream_map: BTreeMap&lt;u64, StreamCtx&gt;,
+<a href=#347 id=347 data-nosnippet>347</a>    <span class="doccomment">/// A map of flow IDs to their [FlowCtx]. This is mainly used to retrieve
+<a href=#348 id=348 data-nosnippet>348</a>    /// the internal Tokio channels associated with the flow.
+<a href=#349 id=349 data-nosnippet>349</a>    </span>flow_map: BTreeMap&lt;u64, FlowCtx&gt;,
+<a href=#350 id=350 data-nosnippet>350</a>    <span class="doccomment">/// Set of [`WaitForStream`] futures. A stream is added to this set if
+<a href=#351 id=351 data-nosnippet>351</a>    /// we need to send to it and its channel is at capacity, or if we need
+<a href=#352 id=352 data-nosnippet>352</a>    /// data from its channel and the channel is empty.
+<a href=#353 id=353 data-nosnippet>353</a>    </span>waiting_streams: FuturesUnordered&lt;WaitForStream&gt;,
+<a href=#354 id=354 data-nosnippet>354</a>
+<a href=#355 id=355 data-nosnippet>355</a>    <span class="doccomment">/// Receives [`OutboundFrame`]s from all datagram flows on the connection.
+<a href=#356 id=356 data-nosnippet>356</a>    </span>dgram_recv: OutboundFrameStream,
+<a href=#357 id=357 data-nosnippet>357</a>    <span class="doccomment">/// Keeps the datagram channel open such that datagram flows can be created.
+<a href=#358 id=358 data-nosnippet>358</a>    </span>dgram_send: OutboundFrameSender,
+<a href=#359 id=359 data-nosnippet>359</a>
+<a href=#360 id=360 data-nosnippet>360</a>    <span class="doccomment">/// The buffer used to interact with the underlying IoWorker.
+<a href=#361 id=361 data-nosnippet>361</a>    </span>pooled_buf: PooledBuf,
+<a href=#362 id=362 data-nosnippet>362</a>    <span class="doccomment">/// The maximum HTTP/3 stream ID seen on this connection.
+<a href=#363 id=363 data-nosnippet>363</a>    </span>max_stream_seen: u64,
+<a href=#364 id=364 data-nosnippet>364</a>
+<a href=#365 id=365 data-nosnippet>365</a>    <span class="doccomment">/// Tracks whether we have forwarded the HTTP/3 SETTINGS frame
+<a href=#366 id=366 data-nosnippet>366</a>    /// to the [H3Controller] once.
+<a href=#367 id=367 data-nosnippet>367</a>    </span>settings_received_and_forwarded: bool,
+<a href=#368 id=368 data-nosnippet>368</a>}
+<a href=#369 id=369 data-nosnippet>369</a>
+<a href=#370 id=370 data-nosnippet>370</a><span class="kw">impl</span>&lt;H: DriverHooks&gt; H3Driver&lt;H&gt; {
+<a href=#371 id=371 data-nosnippet>371</a>    <span class="doccomment">/// Builds a new [H3Driver] and an associated [H3Controller].
+<a href=#372 id=372 data-nosnippet>372</a>    ///
+<a href=#373 id=373 data-nosnippet>373</a>    /// The driver should then be passed to
+<a href=#374 id=374 data-nosnippet>374</a>    /// [`InitialQuicConnection`](crate::InitialQuicConnection)'s `start`
+<a href=#375 id=375 data-nosnippet>375</a>    /// method.
+<a href=#376 id=376 data-nosnippet>376</a>    </span><span class="kw">pub fn </span>new(http3_settings: Http3Settings) -&gt; (<span class="self">Self</span>, H3Controller&lt;H&gt;) {
+<a href=#377 id=377 data-nosnippet>377</a>        <span class="kw">let </span>(dgram_send, dgram_recv) = mpsc::channel(FLOW_CAPACITY);
+<a href=#378 id=378 data-nosnippet>378</a>        <span class="kw">let </span>(cmd_sender, cmd_recv) = mpsc::unbounded_channel();
+<a href=#379 id=379 data-nosnippet>379</a>        <span class="kw">let </span>(h3_event_sender, h3_event_recv) = mpsc::unbounded_channel();
+<a href=#380 id=380 data-nosnippet>380</a>
+<a href=#381 id=381 data-nosnippet>381</a>        (
+<a href=#382 id=382 data-nosnippet>382</a>            H3Driver {
+<a href=#383 id=383 data-nosnippet>383</a>                h3_config: (<span class="kw-2">&amp;</span>http3_settings).into(),
+<a href=#384 id=384 data-nosnippet>384</a>                conn: <span class="prelude-val">None</span>,
+<a href=#385 id=385 data-nosnippet>385</a>                hooks: H::new(<span class="kw-2">&amp;</span>http3_settings),
+<a href=#386 id=386 data-nosnippet>386</a>                h3_event_sender,
+<a href=#387 id=387 data-nosnippet>387</a>                cmd_recv,
+<a href=#388 id=388 data-nosnippet>388</a>
+<a href=#389 id=389 data-nosnippet>389</a>                stream_map: BTreeMap::new(),
+<a href=#390 id=390 data-nosnippet>390</a>                flow_map: BTreeMap::new(),
+<a href=#391 id=391 data-nosnippet>391</a>
+<a href=#392 id=392 data-nosnippet>392</a>                dgram_recv,
+<a href=#393 id=393 data-nosnippet>393</a>                dgram_send: PollSender::new(dgram_send),
+<a href=#394 id=394 data-nosnippet>394</a>                pooled_buf: BufFactory::get_max_buf(),
+<a href=#395 id=395 data-nosnippet>395</a>                max_stream_seen: <span class="number">0</span>,
+<a href=#396 id=396 data-nosnippet>396</a>
+<a href=#397 id=397 data-nosnippet>397</a>                waiting_streams: FuturesUnordered::new(),
+<a href=#398 id=398 data-nosnippet>398</a>
+<a href=#399 id=399 data-nosnippet>399</a>                settings_received_and_forwarded: <span class="bool-val">false</span>,
+<a href=#400 id=400 data-nosnippet>400</a>            },
+<a href=#401 id=401 data-nosnippet>401</a>            H3Controller {
+<a href=#402 id=402 data-nosnippet>402</a>                cmd_sender,
+<a href=#403 id=403 data-nosnippet>403</a>                h3_event_recv: <span class="prelude-val">Some</span>(h3_event_recv),
+<a href=#404 id=404 data-nosnippet>404</a>            },
+<a href=#405 id=405 data-nosnippet>405</a>        )
+<a href=#406 id=406 data-nosnippet>406</a>    }
+<a href=#407 id=407 data-nosnippet>407</a>
+<a href=#408 id=408 data-nosnippet>408</a>    <span class="doccomment">/// Retrieve the [FlowCtx] associated with the given `flow_id`. If no
+<a href=#409 id=409 data-nosnippet>409</a>    /// context is found, a new one will be created.
+<a href=#410 id=410 data-nosnippet>410</a>    </span><span class="kw">fn </span>get_or_insert_flow(
+<a href=#411 id=411 data-nosnippet>411</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, flow_id: u64,
+<a href=#412 id=412 data-nosnippet>412</a>    ) -&gt; H3ConnectionResult&lt;<span class="kw-2">&amp;mut </span>FlowCtx&gt; {
+<a href=#413 id=413 data-nosnippet>413</a>        <span class="kw">use </span>std::collections::btree_map::Entry;
+<a href=#414 id=414 data-nosnippet>414</a>        <span class="prelude-val">Ok</span>(<span class="kw">match </span><span class="self">self</span>.flow_map.entry(flow_id) {
+<a href=#415 id=415 data-nosnippet>415</a>            Entry::Vacant(e) =&gt; {
+<a href=#416 id=416 data-nosnippet>416</a>                <span class="comment">// This is a datagram for a new flow we haven't seen before
+<a href=#417 id=417 data-nosnippet>417</a>                </span><span class="kw">let </span>(flow, recv) = FlowCtx::new(FLOW_CAPACITY);
+<a href=#418 id=418 data-nosnippet>418</a>                <span class="kw">let </span>flow_req = H3Event::NewFlow {
+<a href=#419 id=419 data-nosnippet>419</a>                    flow_id,
+<a href=#420 id=420 data-nosnippet>420</a>                    recv,
+<a href=#421 id=421 data-nosnippet>421</a>                    send: <span class="self">self</span>.dgram_send.clone(),
+<a href=#422 id=422 data-nosnippet>422</a>                };
+<a href=#423 id=423 data-nosnippet>423</a>                <span class="self">self</span>.h3_event_sender
+<a href=#424 id=424 data-nosnippet>424</a>                    .send(flow_req.into())
+<a href=#425 id=425 data-nosnippet>425</a>                    .map_err(|<span class="kw">_</span>| H3ConnectionError::ControllerWentAway)<span class="question-mark">?</span>;
+<a href=#426 id=426 data-nosnippet>426</a>                e.insert(flow)
+<a href=#427 id=427 data-nosnippet>427</a>            },
+<a href=#428 id=428 data-nosnippet>428</a>            Entry::Occupied(e) =&gt; e.into_mut(),
+<a href=#429 id=429 data-nosnippet>429</a>        })
+<a href=#430 id=430 data-nosnippet>430</a>    }
+<a href=#431 id=431 data-nosnippet>431</a>
+<a href=#432 id=432 data-nosnippet>432</a>    <span class="doccomment">/// Adds a [StreamCtx] to the stream map with the given `stream_id`.
+<a href=#433 id=433 data-nosnippet>433</a>    </span><span class="kw">fn </span>insert_stream(<span class="kw-2">&amp;mut </span><span class="self">self</span>, stream_id: u64, ctx: StreamCtx) {
+<a href=#434 id=434 data-nosnippet>434</a>        <span class="self">self</span>.stream_map.insert(stream_id, ctx);
+<a href=#435 id=435 data-nosnippet>435</a>        <span class="self">self</span>.max_stream_seen = <span class="self">self</span>.max_stream_seen.max(stream_id);
+<a href=#436 id=436 data-nosnippet>436</a>    }
+<a href=#437 id=437 data-nosnippet>437</a>
+<a href=#438 id=438 data-nosnippet>438</a>    <span class="doccomment">/// Fetches body chunks from the [`quiche::h3::Connection`] and forwards
+<a href=#439 id=439 data-nosnippet>439</a>    /// them to the stream's associated [`InboundFrameStream`].
+<a href=#440 id=440 data-nosnippet>440</a>    </span><span class="kw">fn </span>process_h3_data(
+<a href=#441 id=441 data-nosnippet>441</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection, stream_id: u64,
+<a href=#442 id=442 data-nosnippet>442</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#443 id=443 data-nosnippet>443</a>        <span class="comment">// Split self borrow between conn and stream_map
+<a href=#444 id=444 data-nosnippet>444</a>        </span><span class="kw">let </span>conn = <span class="self">self</span>.conn.as_mut().ok_or(<span class="self">Self</span>::connection_not_present())<span class="question-mark">?</span>;
+<a href=#445 id=445 data-nosnippet>445</a>        <span class="kw">let </span>ctx = <span class="self">self
+<a href=#446 id=446 data-nosnippet>446</a>            </span>.stream_map
+<a href=#447 id=447 data-nosnippet>447</a>            .get_mut(<span class="kw-2">&amp;</span>stream_id)
+<a href=#448 id=448 data-nosnippet>448</a>            .ok_or(H3ConnectionError::NonexistentStream)<span class="question-mark">?</span>;
+<a href=#449 id=449 data-nosnippet>449</a>
+<a href=#450 id=450 data-nosnippet>450</a>        <span class="kw">enum </span>StreamStatus {
+<a href=#451 id=451 data-nosnippet>451</a>            Done { close: bool },
+<a href=#452 id=452 data-nosnippet>452</a>            Reset { wire_err_code: u64 },
+<a href=#453 id=453 data-nosnippet>453</a>            Blocked,
+<a href=#454 id=454 data-nosnippet>454</a>        }
+<a href=#455 id=455 data-nosnippet>455</a>
+<a href=#456 id=456 data-nosnippet>456</a>        <span class="kw">let </span>status = <span class="kw">loop </span>{
+<a href=#457 id=457 data-nosnippet>457</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(sender) = ctx.send.as_ref().and_then(PollSender::get_ref)
+<a href=#458 id=458 data-nosnippet>458</a>            <span class="kw">else </span>{
+<a href=#459 id=459 data-nosnippet>459</a>                <span class="comment">// already waiting for capacity
+<a href=#460 id=460 data-nosnippet>460</a>                </span><span class="kw">break </span>StreamStatus::Done { close: <span class="bool-val">false </span>};
+<a href=#461 id=461 data-nosnippet>461</a>            };
+<a href=#462 id=462 data-nosnippet>462</a>
+<a href=#463 id=463 data-nosnippet>463</a>            <span class="kw">let </span>try_reserve_result = sender.try_reserve();
+<a href=#464 id=464 data-nosnippet>464</a>            <span class="kw">let </span>permit = <span class="kw">match </span>try_reserve_result {
+<a href=#465 id=465 data-nosnippet>465</a>                <span class="prelude-val">Ok</span>(permit) =&gt; permit,
+<a href=#466 id=466 data-nosnippet>466</a>                <span class="prelude-val">Err</span>(TrySendError::Closed(())) =&gt; {
+<a href=#467 id=467 data-nosnippet>467</a>                    <span class="comment">// The channel has closed before we delivered a fin or reset
+<a href=#468 id=468 data-nosnippet>468</a>                    // to the application.
+<a href=#469 id=469 data-nosnippet>469</a>                    </span><span class="kw">if </span>!ctx.fin_or_reset_recv &amp;&amp;
+<a href=#470 id=470 data-nosnippet>470</a>                        ctx.associated_dgram_flow_id.is_none()
+<a href=#471 id=471 data-nosnippet>471</a>                    <span class="comment">// The channel might be closed if the stream was used to
+<a href=#472 id=472 data-nosnippet>472</a>                    // initiate a datagram exchange.
+<a href=#473 id=473 data-nosnippet>473</a>                    // TODO: ideally, the application would still shut down the
+<a href=#474 id=474 data-nosnippet>474</a>                    // stream properly. Once applications code
+<a href=#475 id=475 data-nosnippet>475</a>                    // is fixed, we can remove this check.
+<a href=#476 id=476 data-nosnippet>476</a>                    </span>{
+<a href=#477 id=477 data-nosnippet>477</a>                        <span class="kw">let </span>err = h3::WireErrorCode::RequestCancelled <span class="kw">as </span>u64;
+<a href=#478 id=478 data-nosnippet>478</a>                        <span class="kw">let _ </span>= qconn.stream_shutdown(
+<a href=#479 id=479 data-nosnippet>479</a>                            stream_id,
+<a href=#480 id=480 data-nosnippet>480</a>                            quiche::Shutdown::Read,
+<a href=#481 id=481 data-nosnippet>481</a>                            err,
+<a href=#482 id=482 data-nosnippet>482</a>                        );
+<a href=#483 id=483 data-nosnippet>483</a>                        drop(try_reserve_result); <span class="comment">// needed to drop the borrow on ctx.
+<a href=#484 id=484 data-nosnippet>484</a>                        </span>ctx.handle_sent_stop_sending(err);
+<a href=#485 id=485 data-nosnippet>485</a>                        <span class="comment">// TODO: should we send an H3Event event to
+<a href=#486 id=486 data-nosnippet>486</a>                        // h3_event_sender? We can only get here if the app
+<a href=#487 id=487 data-nosnippet>487</a>                        // actively closed or dropped
+<a href=#488 id=488 data-nosnippet>488</a>                        // the channel so any event we send would be more for
+<a href=#489 id=489 data-nosnippet>489</a>                        // logging or auditing
+<a href=#490 id=490 data-nosnippet>490</a>                    </span>}
+<a href=#491 id=491 data-nosnippet>491</a>                    <span class="kw">break </span>StreamStatus::Done {
+<a href=#492 id=492 data-nosnippet>492</a>                        close: ctx.both_directions_done(),
+<a href=#493 id=493 data-nosnippet>493</a>                    };
+<a href=#494 id=494 data-nosnippet>494</a>                },
+<a href=#495 id=495 data-nosnippet>495</a>                <span class="prelude-val">Err</span>(TrySendError::Full(())) =&gt; {
+<a href=#496 id=496 data-nosnippet>496</a>                    <span class="kw">if </span>ctx.fin_or_reset_recv || qconn.stream_readable(stream_id) {
+<a href=#497 id=497 data-nosnippet>497</a>                        <span class="kw">break </span>StreamStatus::Blocked;
+<a href=#498 id=498 data-nosnippet>498</a>                    }
+<a href=#499 id=499 data-nosnippet>499</a>                    <span class="kw">break </span>StreamStatus::Done { close: <span class="bool-val">false </span>};
+<a href=#500 id=500 data-nosnippet>500</a>                },
+<a href=#501 id=501 data-nosnippet>501</a>            };
+<a href=#502 id=502 data-nosnippet>502</a>
+<a href=#503 id=503 data-nosnippet>503</a>            <span class="kw">if </span>ctx.fin_or_reset_recv {
+<a href=#504 id=504 data-nosnippet>504</a>                <span class="comment">// Signal end-of-body to upstream
+<a href=#505 id=505 data-nosnippet>505</a>                </span>permit
+<a href=#506 id=506 data-nosnippet>506</a>                    .send(InboundFrame::Body(BufFactory::get_empty_buf(), <span class="bool-val">true</span>));
+<a href=#507 id=507 data-nosnippet>507</a>                <span class="kw">break </span>StreamStatus::Done {
+<a href=#508 id=508 data-nosnippet>508</a>                    close: ctx.fin_or_reset_sent,
+<a href=#509 id=509 data-nosnippet>509</a>                };
+<a href=#510 id=510 data-nosnippet>510</a>            }
+<a href=#511 id=511 data-nosnippet>511</a>
+<a href=#512 id=512 data-nosnippet>512</a>            <span class="kw">match </span>conn.recv_body(qconn, stream_id, <span class="kw-2">&amp;mut </span><span class="self">self</span>.pooled_buf) {
+<a href=#513 id=513 data-nosnippet>513</a>                <span class="prelude-val">Ok</span>(n) =&gt; {
+<a href=#514 id=514 data-nosnippet>514</a>                    <span class="kw">let </span><span class="kw-2">mut </span>body = std::mem::replace(
+<a href=#515 id=515 data-nosnippet>515</a>                        <span class="kw-2">&amp;mut </span><span class="self">self</span>.pooled_buf,
+<a href=#516 id=516 data-nosnippet>516</a>                        BufFactory::get_max_buf(),
+<a href=#517 id=517 data-nosnippet>517</a>                    );
+<a href=#518 id=518 data-nosnippet>518</a>                    body.truncate(n);
+<a href=#519 id=519 data-nosnippet>519</a>
+<a href=#520 id=520 data-nosnippet>520</a>                    ctx.audit_stats.add_downstream_bytes_recvd(n <span class="kw">as </span>u64);
+<a href=#521 id=521 data-nosnippet>521</a>                    <span class="kw">let </span>event = H3Event::BodyBytesReceived {
+<a href=#522 id=522 data-nosnippet>522</a>                        stream_id,
+<a href=#523 id=523 data-nosnippet>523</a>                        num_bytes: n <span class="kw">as </span>u64,
+<a href=#524 id=524 data-nosnippet>524</a>                        fin: <span class="bool-val">false</span>,
+<a href=#525 id=525 data-nosnippet>525</a>                    };
+<a href=#526 id=526 data-nosnippet>526</a>                    <span class="kw">let _ </span>= <span class="self">self</span>.h3_event_sender.send(event.into());
+<a href=#527 id=527 data-nosnippet>527</a>
+<a href=#528 id=528 data-nosnippet>528</a>                    permit.send(InboundFrame::Body(body, <span class="bool-val">false</span>));
+<a href=#529 id=529 data-nosnippet>529</a>                },
+<a href=#530 id=530 data-nosnippet>530</a>                <span class="prelude-val">Err</span>(h3::Error::Done) =&gt;
+<a href=#531 id=531 data-nosnippet>531</a>                    <span class="kw">break </span>StreamStatus::Done { close: <span class="bool-val">false </span>},
+<a href=#532 id=532 data-nosnippet>532</a>                <span class="prelude-val">Err</span>(h3::Error::TransportError(quiche::Error::StreamReset(
+<a href=#533 id=533 data-nosnippet>533</a>                    code,
+<a href=#534 id=534 data-nosnippet>534</a>                ))) =&gt; {
+<a href=#535 id=535 data-nosnippet>535</a>                    <span class="kw">break </span>StreamStatus::Reset {
+<a href=#536 id=536 data-nosnippet>536</a>                        wire_err_code: code,
+<a href=#537 id=537 data-nosnippet>537</a>                    };
+<a href=#538 id=538 data-nosnippet>538</a>                },
+<a href=#539 id=539 data-nosnippet>539</a>                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="kw">break </span>StreamStatus::Done { close: <span class="bool-val">true </span>},
+<a href=#540 id=540 data-nosnippet>540</a>            }
+<a href=#541 id=541 data-nosnippet>541</a>        };
+<a href=#542 id=542 data-nosnippet>542</a>
+<a href=#543 id=543 data-nosnippet>543</a>        <span class="kw">match </span>status {
+<a href=#544 id=544 data-nosnippet>544</a>            StreamStatus::Done { close } =&gt; {
+<a href=#545 id=545 data-nosnippet>545</a>                <span class="kw">if </span>close {
+<a href=#546 id=546 data-nosnippet>546</a>                    <span class="kw">return </span><span class="self">self</span>.finish_stream(qconn, stream_id, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
+<a href=#547 id=547 data-nosnippet>547</a>                }
+<a href=#548 id=548 data-nosnippet>548</a>
+<a href=#549 id=549 data-nosnippet>549</a>                <span class="comment">// The QUIC stream is finished, manually invoke `process_h3_fin`
+<a href=#550 id=550 data-nosnippet>550</a>                // in case `h3::poll()` is never called again.
+<a href=#551 id=551 data-nosnippet>551</a>                //
+<a href=#552 id=552 data-nosnippet>552</a>                // Note that this case will not conflict with StreamStatus::Done
+<a href=#553 id=553 data-nosnippet>553</a>                // being returned due to the body channel being
+<a href=#554 id=554 data-nosnippet>554</a>                // blocked. qconn.stream_finished() will guarantee
+<a href=#555 id=555 data-nosnippet>555</a>                // that we've fully parsed the body as it only returns true
+<a href=#556 id=556 data-nosnippet>556</a>                // if we've seen a Fin for the read half of the stream.
+<a href=#557 id=557 data-nosnippet>557</a>                </span><span class="kw">if </span>!ctx.fin_or_reset_recv &amp;&amp; qconn.stream_finished(stream_id) {
+<a href=#558 id=558 data-nosnippet>558</a>                    <span class="kw">return </span><span class="self">self</span>.process_h3_fin(qconn, stream_id);
+<a href=#559 id=559 data-nosnippet>559</a>                }
+<a href=#560 id=560 data-nosnippet>560</a>            },
+<a href=#561 id=561 data-nosnippet>561</a>            StreamStatus::Reset { wire_err_code } =&gt; {
+<a href=#562 id=562 data-nosnippet>562</a>                <span class="macro">debug_assert!</span>(ctx.send.is_some());
+<a href=#563 id=563 data-nosnippet>563</a>                ctx.handle_recvd_reset(wire_err_code);
+<a href=#564 id=564 data-nosnippet>564</a>                <span class="self">self</span>.h3_event_sender
+<a href=#565 id=565 data-nosnippet>565</a>                    .send(H3Event::ResetStream { stream_id }.into())
+<a href=#566 id=566 data-nosnippet>566</a>                    .map_err(|<span class="kw">_</span>| H3ConnectionError::ControllerWentAway)<span class="question-mark">?</span>;
+<a href=#567 id=567 data-nosnippet>567</a>                <span class="kw">if </span>ctx.both_directions_done() {
+<a href=#568 id=568 data-nosnippet>568</a>                    <span class="kw">return </span><span class="self">self</span>.finish_stream(qconn, stream_id, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
+<a href=#569 id=569 data-nosnippet>569</a>                }
+<a href=#570 id=570 data-nosnippet>570</a>            },
+<a href=#571 id=571 data-nosnippet>571</a>            StreamStatus::Blocked =&gt; {
+<a href=#572 id=572 data-nosnippet>572</a>                <span class="self">self</span>.waiting_streams.push(ctx.wait_for_send(stream_id));
+<a href=#573 id=573 data-nosnippet>573</a>            },
+<a href=#574 id=574 data-nosnippet>574</a>        }
+<a href=#575 id=575 data-nosnippet>575</a>
+<a href=#576 id=576 data-nosnippet>576</a>        <span class="prelude-val">Ok</span>(())
+<a href=#577 id=577 data-nosnippet>577</a>    }
+<a href=#578 id=578 data-nosnippet>578</a>
+<a href=#579 id=579 data-nosnippet>579</a>    <span class="doccomment">/// Processes an end-of-stream event from the [`quiche::h3::Connection`].
+<a href=#580 id=580 data-nosnippet>580</a>    </span><span class="kw">fn </span>process_h3_fin(
+<a href=#581 id=581 data-nosnippet>581</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection, stream_id: u64,
+<a href=#582 id=582 data-nosnippet>582</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#583 id=583 data-nosnippet>583</a>        <span class="kw">let </span>ctx = <span class="self">self
+<a href=#584 id=584 data-nosnippet>584</a>            </span>.stream_map
+<a href=#585 id=585 data-nosnippet>585</a>            .get_mut(<span class="kw-2">&amp;</span>stream_id)
+<a href=#586 id=586 data-nosnippet>586</a>            .filter(|c| !c.fin_or_reset_recv);
+<a href=#587 id=587 data-nosnippet>587</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(ctx) = ctx <span class="kw">else </span>{
+<a href=#588 id=588 data-nosnippet>588</a>            <span class="comment">// Stream is already finished, nothing to do
+<a href=#589 id=589 data-nosnippet>589</a>            </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#590 id=590 data-nosnippet>590</a>        };
+<a href=#591 id=591 data-nosnippet>591</a>
+<a href=#592 id=592 data-nosnippet>592</a>        ctx.fin_or_reset_recv = <span class="bool-val">true</span>;
+<a href=#593 id=593 data-nosnippet>593</a>        ctx.audit_stats
+<a href=#594 id=594 data-nosnippet>594</a>            .set_recvd_stream_fin(StreamClosureKind::Explicit);
+<a href=#595 id=595 data-nosnippet>595</a>
+<a href=#596 id=596 data-nosnippet>596</a>        <span class="comment">// It's important to send this H3Event before process_h3_data so that
+<a href=#597 id=597 data-nosnippet>597</a>        // a server can (potentially) generate the control response before the
+<a href=#598 id=598 data-nosnippet>598</a>        // corresponding receiver drops.
+<a href=#599 id=599 data-nosnippet>599</a>        </span><span class="kw">let </span>event = H3Event::BodyBytesReceived {
+<a href=#600 id=600 data-nosnippet>600</a>            stream_id,
+<a href=#601 id=601 data-nosnippet>601</a>            num_bytes: <span class="number">0</span>,
+<a href=#602 id=602 data-nosnippet>602</a>            fin: <span class="bool-val">true</span>,
+<a href=#603 id=603 data-nosnippet>603</a>        };
+<a href=#604 id=604 data-nosnippet>604</a>        <span class="kw">let _ </span>= <span class="self">self</span>.h3_event_sender.send(event.into());
+<a href=#605 id=605 data-nosnippet>605</a>
+<a href=#606 id=606 data-nosnippet>606</a>        <span class="comment">// Communicate fin to upstream. Since `ctx.fin_recv` is true now,
+<a href=#607 id=607 data-nosnippet>607</a>        // there can't be a recursive loop.
+<a href=#608 id=608 data-nosnippet>608</a>        </span><span class="self">self</span>.process_h3_data(qconn, stream_id)
+<a href=#609 id=609 data-nosnippet>609</a>    }
+<a href=#610 id=610 data-nosnippet>610</a>
+<a href=#611 id=611 data-nosnippet>611</a>    <span class="doccomment">/// Processes a single [`quiche::h3::Event`] received from the underlying
+<a href=#612 id=612 data-nosnippet>612</a>    /// [`quiche::h3::Connection`]. Some events are dispatched to helper
+<a href=#613 id=613 data-nosnippet>613</a>    /// methods.
+<a href=#614 id=614 data-nosnippet>614</a>    </span><span class="kw">fn </span>process_read_event(
+<a href=#615 id=615 data-nosnippet>615</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection, stream_id: u64, event: h3::Event,
+<a href=#616 id=616 data-nosnippet>616</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#617 id=617 data-nosnippet>617</a>        <span class="self">self</span>.forward_settings()<span class="question-mark">?</span>;
+<a href=#618 id=618 data-nosnippet>618</a>
+<a href=#619 id=619 data-nosnippet>619</a>        <span class="kw">match </span>event {
+<a href=#620 id=620 data-nosnippet>620</a>            <span class="comment">// Requests/responses are exclusively handled by hooks.
+<a href=#621 id=621 data-nosnippet>621</a>            </span>h3::Event::Headers { list, more_frames } =&gt;
+<a href=#622 id=622 data-nosnippet>622</a>                H::headers_received(<span class="self">self</span>, qconn, InboundHeaders {
+<a href=#623 id=623 data-nosnippet>623</a>                    stream_id,
+<a href=#624 id=624 data-nosnippet>624</a>                    headers: list,
+<a href=#625 id=625 data-nosnippet>625</a>                    has_body: more_frames,
+<a href=#626 id=626 data-nosnippet>626</a>                }),
+<a href=#627 id=627 data-nosnippet>627</a>
+<a href=#628 id=628 data-nosnippet>628</a>            h3::Event::Data =&gt; <span class="self">self</span>.process_h3_data(qconn, stream_id),
+<a href=#629 id=629 data-nosnippet>629</a>            h3::Event::Finished =&gt; <span class="self">self</span>.process_h3_fin(qconn, stream_id),
+<a href=#630 id=630 data-nosnippet>630</a>
+<a href=#631 id=631 data-nosnippet>631</a>            h3::Event::Reset(code) =&gt; {
+<a href=#632 id=632 data-nosnippet>632</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(ctx) = <span class="self">self</span>.stream_map.get_mut(<span class="kw-2">&amp;</span>stream_id) {
+<a href=#633 id=633 data-nosnippet>633</a>                    ctx.handle_recvd_reset(code);
+<a href=#634 id=634 data-nosnippet>634</a>                    <span class="comment">// See if we are waiting on this stream and close the channel
+<a href=#635 id=635 data-nosnippet>635</a>                    // if we are. If we are not waiting, `handle_recvd_reset()`
+<a href=#636 id=636 data-nosnippet>636</a>                    // will have taken care of closing.
+<a href=#637 id=637 data-nosnippet>637</a>                    </span><span class="kw">for </span>pending <span class="kw">in </span><span class="self">self</span>.waiting_streams.iter_mut() {
+<a href=#638 id=638 data-nosnippet>638</a>                        <span class="kw">match </span>pending {
+<a href=#639 id=639 data-nosnippet>639</a>                            WaitForStream::Upstream(
+<a href=#640 id=640 data-nosnippet>640</a>                                WaitForUpstreamCapacity {
+<a href=#641 id=641 data-nosnippet>641</a>                                    stream_id: id,
+<a href=#642 id=642 data-nosnippet>642</a>                                    chan: <span class="prelude-val">Some</span>(chan),
+<a href=#643 id=643 data-nosnippet>643</a>                                },
+<a href=#644 id=644 data-nosnippet>644</a>                            ) <span class="kw">if </span>stream_id == <span class="kw-2">*</span>id =&gt; {
+<a href=#645 id=645 data-nosnippet>645</a>                                chan.close();
+<a href=#646 id=646 data-nosnippet>646</a>                            },
+<a href=#647 id=647 data-nosnippet>647</a>                            <span class="kw">_ </span>=&gt; {},
+<a href=#648 id=648 data-nosnippet>648</a>                        }
+<a href=#649 id=649 data-nosnippet>649</a>                    }
+<a href=#650 id=650 data-nosnippet>650</a>
+<a href=#651 id=651 data-nosnippet>651</a>                    <span class="self">self</span>.h3_event_sender
+<a href=#652 id=652 data-nosnippet>652</a>                        .send(H3Event::ResetStream { stream_id }.into())
+<a href=#653 id=653 data-nosnippet>653</a>                        .map_err(|<span class="kw">_</span>| H3ConnectionError::ControllerWentAway)<span class="question-mark">?</span>;
+<a href=#654 id=654 data-nosnippet>654</a>                    <span class="kw">if </span>ctx.both_directions_done() {
+<a href=#655 id=655 data-nosnippet>655</a>                        <span class="kw">return </span><span class="self">self</span>.finish_stream(qconn, stream_id, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
+<a href=#656 id=656 data-nosnippet>656</a>                    }
+<a href=#657 id=657 data-nosnippet>657</a>                }
+<a href=#658 id=658 data-nosnippet>658</a>
+<a href=#659 id=659 data-nosnippet>659</a>                <span class="comment">// TODO: if we don't have the stream in our map: should we
+<a href=#660 id=660 data-nosnippet>660</a>                // send the H3Event::ResetStream?
+<a href=#661 id=661 data-nosnippet>661</a>                </span><span class="prelude-val">Ok</span>(())
+<a href=#662 id=662 data-nosnippet>662</a>            },
+<a href=#663 id=663 data-nosnippet>663</a>
+<a href=#664 id=664 data-nosnippet>664</a>            h3::Event::PriorityUpdate =&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#665 id=665 data-nosnippet>665</a>            h3::Event::GoAway =&gt; <span class="prelude-val">Err</span>(H3ConnectionError::GoAway),
+<a href=#666 id=666 data-nosnippet>666</a>        }
+<a href=#667 id=667 data-nosnippet>667</a>    }
+<a href=#668 id=668 data-nosnippet>668</a>
+<a href=#669 id=669 data-nosnippet>669</a>    <span class="doccomment">/// The SETTINGS frame can be received at any point, so we
+<a href=#670 id=670 data-nosnippet>670</a>    /// need to check `peer_settings_raw` to decide if we've received it.
+<a href=#671 id=671 data-nosnippet>671</a>    ///
+<a href=#672 id=672 data-nosnippet>672</a>    /// Settings should only be sent once, so we generate a single event
+<a href=#673 id=673 data-nosnippet>673</a>    /// when `peer_settings_raw` transitions from None to Some.
+<a href=#674 id=674 data-nosnippet>674</a>    </span><span class="kw">fn </span>forward_settings(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#675 id=675 data-nosnippet>675</a>        <span class="kw">if </span><span class="self">self</span>.settings_received_and_forwarded {
+<a href=#676 id=676 data-nosnippet>676</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#677 id=677 data-nosnippet>677</a>        }
+<a href=#678 id=678 data-nosnippet>678</a>
+<a href=#679 id=679 data-nosnippet>679</a>        <span class="comment">// capture the peer settings and forward it
+<a href=#680 id=680 data-nosnippet>680</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(settings) = <span class="self">self</span>.conn_mut()<span class="question-mark">?</span>.peer_settings_raw() {
+<a href=#681 id=681 data-nosnippet>681</a>            <span class="kw">let </span>incoming_settings = H3Event::IncomingSettings {
+<a href=#682 id=682 data-nosnippet>682</a>                settings: settings.to_vec(),
+<a href=#683 id=683 data-nosnippet>683</a>            };
+<a href=#684 id=684 data-nosnippet>684</a>
+<a href=#685 id=685 data-nosnippet>685</a>            <span class="self">self</span>.h3_event_sender
+<a href=#686 id=686 data-nosnippet>686</a>                .send(incoming_settings.into())
+<a href=#687 id=687 data-nosnippet>687</a>                .map_err(|<span class="kw">_</span>| H3ConnectionError::ControllerWentAway)<span class="question-mark">?</span>;
+<a href=#688 id=688 data-nosnippet>688</a>
+<a href=#689 id=689 data-nosnippet>689</a>            <span class="self">self</span>.settings_received_and_forwarded = <span class="bool-val">true</span>;
+<a href=#690 id=690 data-nosnippet>690</a>        }
+<a href=#691 id=691 data-nosnippet>691</a>        <span class="prelude-val">Ok</span>(())
+<a href=#692 id=692 data-nosnippet>692</a>    }
+<a href=#693 id=693 data-nosnippet>693</a>
+<a href=#694 id=694 data-nosnippet>694</a>    <span class="doccomment">/// Send an individual frame to the underlying [`quiche::h3::Connection`] to
+<a href=#695 id=695 data-nosnippet>695</a>    /// be flushed at a later time.
+<a href=#696 id=696 data-nosnippet>696</a>    ///
+<a href=#697 id=697 data-nosnippet>697</a>    /// `Self::process_writes` will iterate over all writable streams and call
+<a href=#698 id=698 data-nosnippet>698</a>    /// this method in a loop for each stream to send all writable packets.
+<a href=#699 id=699 data-nosnippet>699</a>    </span><span class="kw">fn </span>process_write_frame(
+<a href=#700 id=700 data-nosnippet>700</a>        conn: <span class="kw-2">&amp;mut </span>h3::Connection, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection,
+<a href=#701 id=701 data-nosnippet>701</a>        ctx: <span class="kw-2">&amp;mut </span>StreamCtx,
+<a href=#702 id=702 data-nosnippet>702</a>    ) -&gt; h3::Result&lt;()&gt; {
+<a href=#703 id=703 data-nosnippet>703</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(frame) = <span class="kw-2">&amp;mut </span>ctx.queued_frame <span class="kw">else </span>{
+<a href=#704 id=704 data-nosnippet>704</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#705 id=705 data-nosnippet>705</a>        };
+<a href=#706 id=706 data-nosnippet>706</a>
+<a href=#707 id=707 data-nosnippet>707</a>        <span class="kw">let </span>audit_stats = <span class="kw-2">&amp;</span>ctx.audit_stats;
+<a href=#708 id=708 data-nosnippet>708</a>        <span class="kw">let </span>stream_id = audit_stats.stream_id();
+<a href=#709 id=709 data-nosnippet>709</a>
+<a href=#710 id=710 data-nosnippet>710</a>        <span class="kw">match </span>frame {
+<a href=#711 id=711 data-nosnippet>711</a>            OutboundFrame::Headers(headers, priority) =&gt; {
+<a href=#712 id=712 data-nosnippet>712</a>                <span class="kw">let </span>prio = priority.as_ref().unwrap_or(<span class="kw-2">&amp;</span>DEFAULT_PRIO);
+<a href=#713 id=713 data-nosnippet>713</a>
+<a href=#714 id=714 data-nosnippet>714</a>                <span class="kw">let </span>res = <span class="kw">if </span>ctx.initial_headers_sent {
+<a href=#715 id=715 data-nosnippet>715</a>                    <span class="comment">// Initial headers were already sent, send additional
+<a href=#716 id=716 data-nosnippet>716</a>                    // headers now.
+<a href=#717 id=717 data-nosnippet>717</a>                    </span>conn.send_additional_headers_with_priority(
+<a href=#718 id=718 data-nosnippet>718</a>                        qconn, stream_id, headers, prio, <span class="bool-val">false</span>, <span class="bool-val">false</span>,
+<a href=#719 id=719 data-nosnippet>719</a>                    )
+<a href=#720 id=720 data-nosnippet>720</a>                } <span class="kw">else </span>{
+<a href=#721 id=721 data-nosnippet>721</a>                    <span class="comment">// Send initial headers.
+<a href=#722 id=722 data-nosnippet>722</a>                    </span>conn.send_response_with_priority(
+<a href=#723 id=723 data-nosnippet>723</a>                        qconn, stream_id, headers, prio, <span class="bool-val">false</span>,
+<a href=#724 id=724 data-nosnippet>724</a>                    )
+<a href=#725 id=725 data-nosnippet>725</a>                    .inspect(|<span class="kw">_</span>| ctx.initial_headers_sent = <span class="bool-val">true</span>)
+<a href=#726 id=726 data-nosnippet>726</a>                };
+<a href=#727 id=727 data-nosnippet>727</a>
+<a href=#728 id=728 data-nosnippet>728</a>                <span class="kw">if let </span><span class="prelude-val">Err</span>(h3::Error::StreamBlocked) = res {
+<a href=#729 id=729 data-nosnippet>729</a>                    ctx.first_full_headers_flush_fail_time
+<a href=#730 id=730 data-nosnippet>730</a>                        .get_or_insert(Instant::now());
+<a href=#731 id=731 data-nosnippet>731</a>                }
+<a href=#732 id=732 data-nosnippet>732</a>
+<a href=#733 id=733 data-nosnippet>733</a>                <span class="kw">if </span>res.is_ok() {
+<a href=#734 id=734 data-nosnippet>734</a>                    <span class="kw">if let </span><span class="prelude-val">Some</span>(first) =
+<a href=#735 id=735 data-nosnippet>735</a>                        ctx.first_full_headers_flush_fail_time.take()
+<a href=#736 id=736 data-nosnippet>736</a>                    {
+<a href=#737 id=737 data-nosnippet>737</a>                        ctx.audit_stats.add_header_flush_duration(
+<a href=#738 id=738 data-nosnippet>738</a>                            Instant::now().duration_since(first),
+<a href=#739 id=739 data-nosnippet>739</a>                        );
+<a href=#740 id=740 data-nosnippet>740</a>                    }
+<a href=#741 id=741 data-nosnippet>741</a>                }
+<a href=#742 id=742 data-nosnippet>742</a>
+<a href=#743 id=743 data-nosnippet>743</a>                res
+<a href=#744 id=744 data-nosnippet>744</a>            },
+<a href=#745 id=745 data-nosnippet>745</a>
+<a href=#746 id=746 data-nosnippet>746</a>            OutboundFrame::Body(body, fin) =&gt; {
+<a href=#747 id=747 data-nosnippet>747</a>                <span class="kw">let </span>len = body.as_ref().len();
+<a href=#748 id=748 data-nosnippet>748</a>                <span class="kw">if </span>len == <span class="number">0 </span>&amp;&amp; !<span class="kw-2">*</span>fin {
+<a href=#749 id=749 data-nosnippet>749</a>                    <span class="comment">// quiche doesn't allow sending an empty body when the fin
+<a href=#750 id=750 data-nosnippet>750</a>                    // flag is not set
+<a href=#751 id=751 data-nosnippet>751</a>                    </span><span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#752 id=752 data-nosnippet>752</a>                }
+<a href=#753 id=753 data-nosnippet>753</a>                <span class="kw">if </span><span class="kw-2">*</span>fin {
+<a href=#754 id=754 data-nosnippet>754</a>                    <span class="comment">// If this is the last body frame, drop the receiver in the
+<a href=#755 id=755 data-nosnippet>755</a>                    // stream map to signal that we shouldn't receive any more
+<a href=#756 id=756 data-nosnippet>756</a>                    // frames. NOTE: we can't use `mpsc::Receiver::close()`
+<a href=#757 id=757 data-nosnippet>757</a>                    // due to an inconsistency in how tokio handles reading
+<a href=#758 id=758 data-nosnippet>758</a>                    // from a closed mpsc channel https://github.com/tokio-rs/tokio/issues/7631
+<a href=#759 id=759 data-nosnippet>759</a>                    </span>ctx.recv = <span class="prelude-val">None</span>;
+<a href=#760 id=760 data-nosnippet>760</a>                }
+<a href=#761 id=761 data-nosnippet>761</a>                <span class="attr">#[cfg(feature = <span class="string">"zero-copy"</span>)]
+<a href=#762 id=762 data-nosnippet>762</a>                </span><span class="kw">let </span>n = conn.send_body_zc(qconn, stream_id, body, <span class="kw-2">*</span>fin)<span class="question-mark">?</span>;
+<a href=#763 id=763 data-nosnippet>763</a>
+<a href=#764 id=764 data-nosnippet>764</a>                <span class="attr">#[cfg(not(feature = <span class="string">"zero-copy"</span>))]
+<a href=#765 id=765 data-nosnippet>765</a>                </span><span class="kw">let </span>n = conn.send_body(qconn, stream_id, body, <span class="kw-2">*</span>fin)<span class="question-mark">?</span>;
+<a href=#766 id=766 data-nosnippet>766</a>
+<a href=#767 id=767 data-nosnippet>767</a>                audit_stats.add_downstream_bytes_sent(n <span class="kw">as _</span>);
+<a href=#768 id=768 data-nosnippet>768</a>                <span class="kw">if </span><span class="macro">n !</span>= len {
+<a href=#769 id=769 data-nosnippet>769</a>                    <span class="comment">// Couldn't write the entire body, keep what remains for
+<a href=#770 id=770 data-nosnippet>770</a>                    // future retry.
+<a href=#771 id=771 data-nosnippet>771</a>                    </span><span class="attr">#[cfg(not(feature = <span class="string">"zero-copy"</span>))]
+<a href=#772 id=772 data-nosnippet>772</a>                    </span>body.pop_front(n);
+<a href=#773 id=773 data-nosnippet>773</a>
+<a href=#774 id=774 data-nosnippet>774</a>                    <span class="prelude-val">Err</span>(h3::Error::StreamBlocked)
+<a href=#775 id=775 data-nosnippet>775</a>                } <span class="kw">else </span>{
+<a href=#776 id=776 data-nosnippet>776</a>                    <span class="kw">if </span><span class="kw-2">*</span>fin {
+<a href=#777 id=777 data-nosnippet>777</a>                        <span class="self">Self</span>::on_fin_sent(ctx)<span class="question-mark">?</span>;
+<a href=#778 id=778 data-nosnippet>778</a>                    }
+<a href=#779 id=779 data-nosnippet>779</a>                    <span class="prelude-val">Ok</span>(())
+<a href=#780 id=780 data-nosnippet>780</a>                }
+<a href=#781 id=781 data-nosnippet>781</a>            },
+<a href=#782 id=782 data-nosnippet>782</a>
+<a href=#783 id=783 data-nosnippet>783</a>            OutboundFrame::Trailers(headers, priority) =&gt; {
+<a href=#784 id=784 data-nosnippet>784</a>                <span class="kw">let </span>prio = priority.as_ref().unwrap_or(<span class="kw-2">&amp;</span>DEFAULT_PRIO);
+<a href=#785 id=785 data-nosnippet>785</a>
+<a href=#786 id=786 data-nosnippet>786</a>                <span class="comment">// trailers always set fin=true
+<a href=#787 id=787 data-nosnippet>787</a>                </span><span class="kw">let </span>res = conn.send_additional_headers_with_priority(
+<a href=#788 id=788 data-nosnippet>788</a>                    qconn, stream_id, headers, prio, <span class="bool-val">true</span>, <span class="bool-val">true</span>,
+<a href=#789 id=789 data-nosnippet>789</a>                );
+<a href=#790 id=790 data-nosnippet>790</a>
+<a href=#791 id=791 data-nosnippet>791</a>                <span class="kw">if </span>res.is_ok() {
+<a href=#792 id=792 data-nosnippet>792</a>                    <span class="self">Self</span>::on_fin_sent(ctx)<span class="question-mark">?</span>;
+<a href=#793 id=793 data-nosnippet>793</a>                }
+<a href=#794 id=794 data-nosnippet>794</a>                res
+<a href=#795 id=795 data-nosnippet>795</a>            },
+<a href=#796 id=796 data-nosnippet>796</a>
+<a href=#797 id=797 data-nosnippet>797</a>            OutboundFrame::PeerStreamError =&gt; <span class="prelude-val">Err</span>(h3::Error::MessageError),
+<a href=#798 id=798 data-nosnippet>798</a>
+<a href=#799 id=799 data-nosnippet>799</a>            OutboundFrame::FlowShutdown { .. } =&gt; {
+<a href=#800 id=800 data-nosnippet>800</a>                <span class="macro">unreachable!</span>(<span class="string">"Only flows send shutdowns"</span>)
+<a href=#801 id=801 data-nosnippet>801</a>            },
+<a href=#802 id=802 data-nosnippet>802</a>
+<a href=#803 id=803 data-nosnippet>803</a>            OutboundFrame::Datagram(..) =&gt; {
+<a href=#804 id=804 data-nosnippet>804</a>                <span class="macro">unreachable!</span>(<span class="string">"Only flows send datagrams"</span>)
+<a href=#805 id=805 data-nosnippet>805</a>            },
+<a href=#806 id=806 data-nosnippet>806</a>        }
+<a href=#807 id=807 data-nosnippet>807</a>    }
+<a href=#808 id=808 data-nosnippet>808</a>
+<a href=#809 id=809 data-nosnippet>809</a>    <span class="kw">fn </span>on_fin_sent(ctx: <span class="kw-2">&amp;mut </span>StreamCtx) -&gt; h3::Result&lt;()&gt; {
+<a href=#810 id=810 data-nosnippet>810</a>        ctx.recv = <span class="prelude-val">None</span>;
+<a href=#811 id=811 data-nosnippet>811</a>        ctx.fin_or_reset_sent = <span class="bool-val">true</span>;
+<a href=#812 id=812 data-nosnippet>812</a>        ctx.audit_stats
+<a href=#813 id=813 data-nosnippet>813</a>            .set_sent_stream_fin(StreamClosureKind::Explicit);
+<a href=#814 id=814 data-nosnippet>814</a>        <span class="kw">if </span>ctx.fin_or_reset_recv {
+<a href=#815 id=815 data-nosnippet>815</a>            <span class="comment">// Return a TransportError to trigger stream cleanup
+<a href=#816 id=816 data-nosnippet>816</a>            // instead of h3::Error::Done
+<a href=#817 id=817 data-nosnippet>817</a>            </span><span class="prelude-val">Err</span>(h3::Error::TransportError(quiche::Error::Done))
+<a href=#818 id=818 data-nosnippet>818</a>        } <span class="kw">else </span>{
+<a href=#819 id=819 data-nosnippet>819</a>            <span class="prelude-val">Ok</span>(())
+<a href=#820 id=820 data-nosnippet>820</a>        }
+<a href=#821 id=821 data-nosnippet>821</a>    }
+<a href=#822 id=822 data-nosnippet>822</a>
+<a href=#823 id=823 data-nosnippet>823</a>    <span class="doccomment">/// Resumes reads or writes to the connection when a stream channel becomes
+<a href=#824 id=824 data-nosnippet>824</a>    /// unblocked.
+<a href=#825 id=825 data-nosnippet>825</a>    ///
+<a href=#826 id=826 data-nosnippet>826</a>    /// If we were waiting for more data from a channel, we resume writing to
+<a href=#827 id=827 data-nosnippet>827</a>    /// the connection. Otherwise, we were blocked on channel capacity and
+<a href=#828 id=828 data-nosnippet>828</a>    /// continue reading from the connection. `Upstream` in this context is
+<a href=#829 id=829 data-nosnippet>829</a>    /// the consumer of the stream.
+<a href=#830 id=830 data-nosnippet>830</a>    </span><span class="kw">fn </span>upstream_ready(
+<a href=#831 id=831 data-nosnippet>831</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection, ready: StreamReady,
+<a href=#832 id=832 data-nosnippet>832</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#833 id=833 data-nosnippet>833</a>        <span class="kw">match </span>ready {
+<a href=#834 id=834 data-nosnippet>834</a>            StreamReady::Downstream(r) =&gt; <span class="self">self</span>.upstream_read_ready(qconn, r),
+<a href=#835 id=835 data-nosnippet>835</a>            StreamReady::Upstream(r) =&gt; <span class="self">self</span>.upstream_write_ready(qconn, r),
+<a href=#836 id=836 data-nosnippet>836</a>        }
+<a href=#837 id=837 data-nosnippet>837</a>    }
+<a href=#838 id=838 data-nosnippet>838</a>
+<a href=#839 id=839 data-nosnippet>839</a>    <span class="kw">fn </span>upstream_read_ready(
+<a href=#840 id=840 data-nosnippet>840</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection,
+<a href=#841 id=841 data-nosnippet>841</a>        read_ready: ReceivedDownstreamData,
+<a href=#842 id=842 data-nosnippet>842</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#843 id=843 data-nosnippet>843</a>        <span class="kw">let </span>ReceivedDownstreamData {
+<a href=#844 id=844 data-nosnippet>844</a>            stream_id,
+<a href=#845 id=845 data-nosnippet>845</a>            chan,
+<a href=#846 id=846 data-nosnippet>846</a>            data,
+<a href=#847 id=847 data-nosnippet>847</a>        } = read_ready;
+<a href=#848 id=848 data-nosnippet>848</a>
+<a href=#849 id=849 data-nosnippet>849</a>        <span class="kw">match </span><span class="self">self</span>.stream_map.get_mut(<span class="kw-2">&amp;</span>stream_id) {
+<a href=#850 id=850 data-nosnippet>850</a>            <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#851 id=851 data-nosnippet>851</a>            <span class="prelude-val">Some</span>(stream) =&gt; {
+<a href=#852 id=852 data-nosnippet>852</a>                stream.recv = <span class="prelude-val">Some</span>(chan);
+<a href=#853 id=853 data-nosnippet>853</a>                stream.queued_frame = data;
+<a href=#854 id=854 data-nosnippet>854</a>                <span class="self">self</span>.process_writable_stream(qconn, stream_id)
+<a href=#855 id=855 data-nosnippet>855</a>            },
+<a href=#856 id=856 data-nosnippet>856</a>        }
+<a href=#857 id=857 data-nosnippet>857</a>    }
+<a href=#858 id=858 data-nosnippet>858</a>
+<a href=#859 id=859 data-nosnippet>859</a>    <span class="kw">fn </span>upstream_write_ready(
+<a href=#860 id=860 data-nosnippet>860</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection,
+<a href=#861 id=861 data-nosnippet>861</a>        write_ready: HaveUpstreamCapacity,
+<a href=#862 id=862 data-nosnippet>862</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#863 id=863 data-nosnippet>863</a>        <span class="kw">let </span>HaveUpstreamCapacity {
+<a href=#864 id=864 data-nosnippet>864</a>            stream_id,
+<a href=#865 id=865 data-nosnippet>865</a>            <span class="kw-2">mut </span>chan,
+<a href=#866 id=866 data-nosnippet>866</a>        } = write_ready;
+<a href=#867 id=867 data-nosnippet>867</a>
+<a href=#868 id=868 data-nosnippet>868</a>        <span class="kw">match </span><span class="self">self</span>.stream_map.get_mut(<span class="kw-2">&amp;</span>stream_id) {
+<a href=#869 id=869 data-nosnippet>869</a>            <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#870 id=870 data-nosnippet>870</a>            <span class="prelude-val">Some</span>(stream) =&gt; {
+<a href=#871 id=871 data-nosnippet>871</a>                chan.abort_send(); <span class="comment">// Have to do it to release the associated permit
+<a href=#872 id=872 data-nosnippet>872</a>                </span>stream.send = <span class="prelude-val">Some</span>(chan);
+<a href=#873 id=873 data-nosnippet>873</a>                <span class="self">self</span>.process_h3_data(qconn, stream_id)
+<a href=#874 id=874 data-nosnippet>874</a>            },
+<a href=#875 id=875 data-nosnippet>875</a>        }
+<a href=#876 id=876 data-nosnippet>876</a>    }
+<a href=#877 id=877 data-nosnippet>877</a>
+<a href=#878 id=878 data-nosnippet>878</a>    <span class="doccomment">/// Processes all queued outbound datagrams from the `dgram_recv` channel.
+<a href=#879 id=879 data-nosnippet>879</a>    </span><span class="kw">fn </span>dgram_ready(
+<a href=#880 id=880 data-nosnippet>880</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection, frame: OutboundFrame,
+<a href=#881 id=881 data-nosnippet>881</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#882 id=882 data-nosnippet>882</a>        <span class="kw">let </span><span class="kw-2">mut </span>frame = <span class="prelude-val">Ok</span>(frame);
+<a href=#883 id=883 data-nosnippet>883</a>
+<a href=#884 id=884 data-nosnippet>884</a>        <span class="kw">loop </span>{
+<a href=#885 id=885 data-nosnippet>885</a>            <span class="kw">match </span>frame {
+<a href=#886 id=886 data-nosnippet>886</a>                <span class="prelude-val">Ok</span>(OutboundFrame::Datagram(dgram, flow_id)) =&gt; {
+<a href=#887 id=887 data-nosnippet>887</a>                    <span class="comment">// Drop datagrams if there is no capacity
+<a href=#888 id=888 data-nosnippet>888</a>                    </span><span class="kw">let _ </span>= datagram::send_h3_dgram(qconn, flow_id, dgram);
+<a href=#889 id=889 data-nosnippet>889</a>                },
+<a href=#890 id=890 data-nosnippet>890</a>                <span class="prelude-val">Ok</span>(OutboundFrame::FlowShutdown { flow_id, stream_id }) =&gt; {
+<a href=#891 id=891 data-nosnippet>891</a>                    <span class="self">self</span>.finish_stream(
+<a href=#892 id=892 data-nosnippet>892</a>                        qconn,
+<a href=#893 id=893 data-nosnippet>893</a>                        stream_id,
+<a href=#894 id=894 data-nosnippet>894</a>                        <span class="prelude-val">Some</span>(quiche::h3::WireErrorCode::NoError <span class="kw">as </span>u64),
+<a href=#895 id=895 data-nosnippet>895</a>                        <span class="prelude-val">Some</span>(quiche::h3::WireErrorCode::NoError <span class="kw">as </span>u64),
+<a href=#896 id=896 data-nosnippet>896</a>                    )<span class="question-mark">?</span>;
+<a href=#897 id=897 data-nosnippet>897</a>                    <span class="self">self</span>.flow_map.remove(<span class="kw-2">&amp;</span>flow_id);
+<a href=#898 id=898 data-nosnippet>898</a>                    <span class="kw">break</span>;
+<a href=#899 id=899 data-nosnippet>899</a>                },
+<a href=#900 id=900 data-nosnippet>900</a>                <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">"Flows can't send frame of other types"</span>),
+<a href=#901 id=901 data-nosnippet>901</a>                <span class="prelude-val">Err</span>(TryRecvError::Empty) =&gt; <span class="kw">break</span>,
+<a href=#902 id=902 data-nosnippet>902</a>                <span class="prelude-val">Err</span>(TryRecvError::Disconnected) =&gt;
+<a href=#903 id=903 data-nosnippet>903</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(H3ConnectionError::ControllerWentAway),
+<a href=#904 id=904 data-nosnippet>904</a>            }
+<a href=#905 id=905 data-nosnippet>905</a>
+<a href=#906 id=906 data-nosnippet>906</a>            frame = <span class="self">self</span>.dgram_recv.try_recv();
+<a href=#907 id=907 data-nosnippet>907</a>        }
+<a href=#908 id=908 data-nosnippet>908</a>
+<a href=#909 id=909 data-nosnippet>909</a>        <span class="prelude-val">Ok</span>(())
+<a href=#910 id=910 data-nosnippet>910</a>    }
+<a href=#911 id=911 data-nosnippet>911</a>
+<a href=#912 id=912 data-nosnippet>912</a>    <span class="doccomment">/// Return a mutable reference to the driver's HTTP/3 connection.
+<a href=#913 id=913 data-nosnippet>913</a>    ///
+<a href=#914 id=914 data-nosnippet>914</a>    /// If the connection doesn't exist yet, this function returns
+<a href=#915 id=915 data-nosnippet>915</a>    /// a `Self::connection_not_present()` error.
+<a href=#916 id=916 data-nosnippet>916</a>    </span><span class="kw">fn </span>conn_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; H3ConnectionResult&lt;<span class="kw-2">&amp;mut </span>h3::Connection&gt; {
+<a href=#917 id=917 data-nosnippet>917</a>        <span class="self">self</span>.conn.as_mut().ok_or(<span class="self">Self</span>::connection_not_present())
+<a href=#918 id=918 data-nosnippet>918</a>    }
+<a href=#919 id=919 data-nosnippet>919</a>
+<a href=#920 id=920 data-nosnippet>920</a>    <span class="doccomment">/// Alias for [`quiche::Error::TlsFail`], which is used in the case where
+<a href=#921 id=921 data-nosnippet>921</a>    /// this driver doesn't have an established HTTP/3 connection attached
+<a href=#922 id=922 data-nosnippet>922</a>    /// to it yet.
+<a href=#923 id=923 data-nosnippet>923</a>    </span><span class="kw">const fn </span>connection_not_present() -&gt; H3ConnectionError {
+<a href=#924 id=924 data-nosnippet>924</a>        H3ConnectionError::H3(h3::Error::TransportError(quiche::Error::TlsFail))
+<a href=#925 id=925 data-nosnippet>925</a>    }
+<a href=#926 id=926 data-nosnippet>926</a>
+<a href=#927 id=927 data-nosnippet>927</a>    <span class="doccomment">/// Removes a stream from the stream map if it exists. Also optionally sends
+<a href=#928 id=928 data-nosnippet>928</a>    /// `RESET` or `STOP_SENDING` frames if `write` or `read` is set to an
+<a href=#929 id=929 data-nosnippet>929</a>    /// error code, respectively.
+<a href=#930 id=930 data-nosnippet>930</a>    </span><span class="kw">fn </span>finish_stream(
+<a href=#931 id=931 data-nosnippet>931</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection, stream_id: u64,
+<a href=#932 id=932 data-nosnippet>932</a>        read: <span class="prelude-ty">Option</span>&lt;u64&gt;, write: <span class="prelude-ty">Option</span>&lt;u64&gt;,
+<a href=#933 id=933 data-nosnippet>933</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#934 id=934 data-nosnippet>934</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(stream_ctx) = <span class="self">self</span>.stream_map.remove(<span class="kw-2">&amp;</span>stream_id) <span class="kw">else </span>{
+<a href=#935 id=935 data-nosnippet>935</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#936 id=936 data-nosnippet>936</a>        };
+<a href=#937 id=937 data-nosnippet>937</a>
+<a href=#938 id=938 data-nosnippet>938</a>        <span class="kw">let </span>audit_stats = <span class="kw-2">&amp;</span>stream_ctx.audit_stats;
+<a href=#939 id=939 data-nosnippet>939</a>
+<a href=#940 id=940 data-nosnippet>940</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(err) = read {
+<a href=#941 id=941 data-nosnippet>941</a>            audit_stats.set_sent_stop_sending_error_code(err <span class="kw">as _</span>);
+<a href=#942 id=942 data-nosnippet>942</a>            <span class="kw">let _ </span>= qconn.stream_shutdown(stream_id, quiche::Shutdown::Read, err);
+<a href=#943 id=943 data-nosnippet>943</a>        }
+<a href=#944 id=944 data-nosnippet>944</a>
+<a href=#945 id=945 data-nosnippet>945</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(err) = write {
+<a href=#946 id=946 data-nosnippet>946</a>            audit_stats.set_sent_reset_stream_error_code(err <span class="kw">as _</span>);
+<a href=#947 id=947 data-nosnippet>947</a>            <span class="kw">let _ </span>=
+<a href=#948 id=948 data-nosnippet>948</a>                qconn.stream_shutdown(stream_id, quiche::Shutdown::Write, err);
+<a href=#949 id=949 data-nosnippet>949</a>        }
+<a href=#950 id=950 data-nosnippet>950</a>
+<a href=#951 id=951 data-nosnippet>951</a>        <span class="comment">// Find if the stream also has any pending futures associated with it
+<a href=#952 id=952 data-nosnippet>952</a>        </span><span class="kw">for </span>pending <span class="kw">in </span><span class="self">self</span>.waiting_streams.iter_mut() {
+<a href=#953 id=953 data-nosnippet>953</a>            <span class="kw">match </span>pending {
+<a href=#954 id=954 data-nosnippet>954</a>                WaitForStream::Downstream(WaitForDownstreamData {
+<a href=#955 id=955 data-nosnippet>955</a>                    stream_id: id,
+<a href=#956 id=956 data-nosnippet>956</a>                    chan: <span class="prelude-val">Some</span>(chan),
+<a href=#957 id=957 data-nosnippet>957</a>                }) <span class="kw">if </span>stream_id == <span class="kw-2">*</span>id =&gt; {
+<a href=#958 id=958 data-nosnippet>958</a>                    chan.close();
+<a href=#959 id=959 data-nosnippet>959</a>                },
+<a href=#960 id=960 data-nosnippet>960</a>                WaitForStream::Upstream(WaitForUpstreamCapacity {
+<a href=#961 id=961 data-nosnippet>961</a>                    stream_id: id,
+<a href=#962 id=962 data-nosnippet>962</a>                    chan: <span class="prelude-val">Some</span>(chan),
+<a href=#963 id=963 data-nosnippet>963</a>                }) <span class="kw">if </span>stream_id == <span class="kw-2">*</span>id =&gt; {
+<a href=#964 id=964 data-nosnippet>964</a>                    chan.close();
+<a href=#965 id=965 data-nosnippet>965</a>                },
+<a href=#966 id=966 data-nosnippet>966</a>                <span class="kw">_ </span>=&gt; {},
+<a href=#967 id=967 data-nosnippet>967</a>            }
+<a href=#968 id=968 data-nosnippet>968</a>        }
+<a href=#969 id=969 data-nosnippet>969</a>
+<a href=#970 id=970 data-nosnippet>970</a>        <span class="comment">// Close any DATAGRAM-proxying channels when we close the stream, if they
+<a href=#971 id=971 data-nosnippet>971</a>        // exist
+<a href=#972 id=972 data-nosnippet>972</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(mapped_flow_id) = stream_ctx.associated_dgram_flow_id {
+<a href=#973 id=973 data-nosnippet>973</a>            <span class="self">self</span>.flow_map.remove(<span class="kw-2">&amp;</span>mapped_flow_id);
+<a href=#974 id=974 data-nosnippet>974</a>        }
+<a href=#975 id=975 data-nosnippet>975</a>
+<a href=#976 id=976 data-nosnippet>976</a>        <span class="kw">if </span>qconn.is_server() {
+<a href=#977 id=977 data-nosnippet>977</a>            <span class="comment">// Signal the server to remove the stream from its map
+<a href=#978 id=978 data-nosnippet>978</a>            </span><span class="kw">let _ </span>= <span class="self">self
+<a href=#979 id=979 data-nosnippet>979</a>                </span>.h3_event_sender
+<a href=#980 id=980 data-nosnippet>980</a>                .send(H3Event::StreamClosed { stream_id }.into());
+<a href=#981 id=981 data-nosnippet>981</a>        }
+<a href=#982 id=982 data-nosnippet>982</a>
+<a href=#983 id=983 data-nosnippet>983</a>        <span class="prelude-val">Ok</span>(())
+<a href=#984 id=984 data-nosnippet>984</a>    }
+<a href=#985 id=985 data-nosnippet>985</a>
+<a href=#986 id=986 data-nosnippet>986</a>    <span class="doccomment">/// Handles a regular [`H3Command`]. May be called internally by
+<a href=#987 id=987 data-nosnippet>987</a>    /// [DriverHooks] for non-endpoint-specific [`H3Command`]s.
+<a href=#988 id=988 data-nosnippet>988</a>    </span><span class="kw">fn </span>handle_core_command(
+<a href=#989 id=989 data-nosnippet>989</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection, cmd: H3Command,
+<a href=#990 id=990 data-nosnippet>990</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#991 id=991 data-nosnippet>991</a>        <span class="kw">match </span>cmd {
+<a href=#992 id=992 data-nosnippet>992</a>            H3Command::QuicCmd(cmd) =&gt; cmd.execute(qconn),
+<a href=#993 id=993 data-nosnippet>993</a>            H3Command::GoAway =&gt; {
+<a href=#994 id=994 data-nosnippet>994</a>                <span class="kw">let </span>max_id = <span class="self">self</span>.max_stream_seen;
+<a href=#995 id=995 data-nosnippet>995</a>                <span class="self">self</span>.conn_mut()
+<a href=#996 id=996 data-nosnippet>996</a>                    .expect(<span class="string">"connection should be established"</span>)
+<a href=#997 id=997 data-nosnippet>997</a>                    .send_goaway(qconn, max_id)<span class="question-mark">?</span>;
+<a href=#998 id=998 data-nosnippet>998</a>            },
+<a href=#999 id=999 data-nosnippet>999</a>        }
+<a href=#1000 id=1000 data-nosnippet>1000</a>        <span class="prelude-val">Ok</span>(())
+<a href=#1001 id=1001 data-nosnippet>1001</a>    }
+<a href=#1002 id=1002 data-nosnippet>1002</a>}
+<a href=#1003 id=1003 data-nosnippet>1003</a>
+<a href=#1004 id=1004 data-nosnippet>1004</a><span class="kw">impl</span>&lt;H: DriverHooks&gt; H3Driver&lt;H&gt; {
+<a href=#1005 id=1005 data-nosnippet>1005</a>    <span class="doccomment">/// Reads all buffered datagrams out of `qconn` and distributes them to
+<a href=#1006 id=1006 data-nosnippet>1006</a>    /// their flow channels.
+<a href=#1007 id=1007 data-nosnippet>1007</a>    </span><span class="kw">fn </span>process_available_dgrams(
+<a href=#1008 id=1008 data-nosnippet>1008</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection,
+<a href=#1009 id=1009 data-nosnippet>1009</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#1010 id=1010 data-nosnippet>1010</a>        <span class="kw">loop </span>{
+<a href=#1011 id=1011 data-nosnippet>1011</a>            <span class="kw">match </span>datagram::receive_h3_dgram(qconn) {
+<a href=#1012 id=1012 data-nosnippet>1012</a>                <span class="prelude-val">Ok</span>((flow_id, dgram)) =&gt; {
+<a href=#1013 id=1013 data-nosnippet>1013</a>                    <span class="self">self</span>.get_or_insert_flow(flow_id)<span class="question-mark">?</span>.send_best_effort(dgram);
+<a href=#1014 id=1014 data-nosnippet>1014</a>                },
+<a href=#1015 id=1015 data-nosnippet>1015</a>                <span class="prelude-val">Err</span>(quiche::Error::Done) =&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(()),
+<a href=#1016 id=1016 data-nosnippet>1016</a>                <span class="prelude-val">Err</span>(err) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(H3ConnectionError::from(err)),
+<a href=#1017 id=1017 data-nosnippet>1017</a>            }
+<a href=#1018 id=1018 data-nosnippet>1018</a>        }
+<a href=#1019 id=1019 data-nosnippet>1019</a>    }
+<a href=#1020 id=1020 data-nosnippet>1020</a>
+<a href=#1021 id=1021 data-nosnippet>1021</a>    <span class="doccomment">/// Flushes any queued-up frames for `stream_id` into `qconn` until either
+<a href=#1022 id=1022 data-nosnippet>1022</a>    /// there is no more capacity in `qconn` or no more frames to send.
+<a href=#1023 id=1023 data-nosnippet>1023</a>    </span><span class="kw">fn </span>process_writable_stream(
+<a href=#1024 id=1024 data-nosnippet>1024</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection, stream_id: u64,
+<a href=#1025 id=1025 data-nosnippet>1025</a>    ) -&gt; H3ConnectionResult&lt;()&gt; {
+<a href=#1026 id=1026 data-nosnippet>1026</a>        <span class="comment">// Split self borrow between conn and stream_map
+<a href=#1027 id=1027 data-nosnippet>1027</a>        </span><span class="kw">let </span>conn = <span class="self">self</span>.conn.as_mut().ok_or(<span class="self">Self</span>::connection_not_present())<span class="question-mark">?</span>;
+<a href=#1028 id=1028 data-nosnippet>1028</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(ctx) = <span class="self">self</span>.stream_map.get_mut(<span class="kw-2">&amp;</span>stream_id) <span class="kw">else </span>{
+<a href=#1029 id=1029 data-nosnippet>1029</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(()); <span class="comment">// Unknown stream_id
+<a href=#1030 id=1030 data-nosnippet>1030</a>        </span>};
+<a href=#1031 id=1031 data-nosnippet>1031</a>
+<a href=#1032 id=1032 data-nosnippet>1032</a>        <span class="kw">loop </span>{
+<a href=#1033 id=1033 data-nosnippet>1033</a>            <span class="comment">// Process each writable frame, queue the next frame for processing
+<a href=#1034 id=1034 data-nosnippet>1034</a>            // and shut down any errored streams.
+<a href=#1035 id=1035 data-nosnippet>1035</a>            </span><span class="kw">match </span><span class="self">Self</span>::process_write_frame(conn, qconn, ctx) {
+<a href=#1036 id=1036 data-nosnippet>1036</a>                <span class="prelude-val">Ok</span>(()) =&gt; ctx.queued_frame = <span class="prelude-val">None</span>,
+<a href=#1037 id=1037 data-nosnippet>1037</a>                <span class="prelude-val">Err</span>(h3::Error::StreamBlocked | h3::Error::Done) =&gt; <span class="kw">break</span>,
+<a href=#1038 id=1038 data-nosnippet>1038</a>                <span class="prelude-val">Err</span>(h3::Error::MessageError) =&gt; {
+<a href=#1039 id=1039 data-nosnippet>1039</a>                    <span class="kw">return </span><span class="self">self</span>.finish_stream(
+<a href=#1040 id=1040 data-nosnippet>1040</a>                        qconn,
+<a href=#1041 id=1041 data-nosnippet>1041</a>                        stream_id,
+<a href=#1042 id=1042 data-nosnippet>1042</a>                        <span class="prelude-val">Some</span>(quiche::h3::WireErrorCode::MessageError <span class="kw">as </span>u64),
+<a href=#1043 id=1043 data-nosnippet>1043</a>                        <span class="prelude-val">Some</span>(quiche::h3::WireErrorCode::MessageError <span class="kw">as </span>u64),
+<a href=#1044 id=1044 data-nosnippet>1044</a>                    );
+<a href=#1045 id=1045 data-nosnippet>1045</a>                },
+<a href=#1046 id=1046 data-nosnippet>1046</a>                <span class="prelude-val">Err</span>(h3::Error::TransportError(quiche::Error::StreamStopped(
+<a href=#1047 id=1047 data-nosnippet>1047</a>                    e,
+<a href=#1048 id=1048 data-nosnippet>1048</a>                ))) =&gt; {
+<a href=#1049 id=1049 data-nosnippet>1049</a>                    ctx.handle_recvd_stop_sending(e);
+<a href=#1050 id=1050 data-nosnippet>1050</a>                    <span class="kw">if </span>ctx.both_directions_done() {
+<a href=#1051 id=1051 data-nosnippet>1051</a>                        <span class="kw">return </span><span class="self">self</span>.finish_stream(qconn, stream_id, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
+<a href=#1052 id=1052 data-nosnippet>1052</a>                    } <span class="kw">else </span>{
+<a href=#1053 id=1053 data-nosnippet>1053</a>                        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#1054 id=1054 data-nosnippet>1054</a>                    }
+<a href=#1055 id=1055 data-nosnippet>1055</a>                },
+<a href=#1056 id=1056 data-nosnippet>1056</a>                <span class="prelude-val">Err</span>(h3::Error::TransportError(
+<a href=#1057 id=1057 data-nosnippet>1057</a>                    quiche::Error::InvalidStreamState(stream),
+<a href=#1058 id=1058 data-nosnippet>1058</a>                )) =&gt; {
+<a href=#1059 id=1059 data-nosnippet>1059</a>                    <span class="kw">return </span><span class="self">self</span>.finish_stream(qconn, stream, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
+<a href=#1060 id=1060 data-nosnippet>1060</a>                },
+<a href=#1061 id=1061 data-nosnippet>1061</a>                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
+<a href=#1062 id=1062 data-nosnippet>1062</a>                    <span class="kw">return </span><span class="self">self</span>.finish_stream(qconn, stream_id, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
+<a href=#1063 id=1063 data-nosnippet>1063</a>                },
+<a href=#1064 id=1064 data-nosnippet>1064</a>            }
+<a href=#1065 id=1065 data-nosnippet>1065</a>
+<a href=#1066 id=1066 data-nosnippet>1066</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(recv) = ctx.recv.as_mut() <span class="kw">else </span>{
+<a href=#1067 id=1067 data-nosnippet>1067</a>                <span class="comment">// This stream is already waiting for data or we wrote a fin and
+<a href=#1068 id=1068 data-nosnippet>1068</a>                // closed the channel.
+<a href=#1069 id=1069 data-nosnippet>1069</a>                </span><span class="macro">debug_assert!</span>(
+<a href=#1070 id=1070 data-nosnippet>1070</a>                    ctx.queued_frame.is_none(),
+<a href=#1071 id=1071 data-nosnippet>1071</a>                    <span class="string">"We MUST NOT have a queued frame if we are already waiting on 
+<a href=#1072 id=1072 data-nosnippet>1072</a>                    more data from the channel"
+<a href=#1073 id=1073 data-nosnippet>1073</a>                </span>);
+<a href=#1074 id=1074 data-nosnippet>1074</a>                <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#1075 id=1075 data-nosnippet>1075</a>            };
+<a href=#1076 id=1076 data-nosnippet>1076</a>
+<a href=#1077 id=1077 data-nosnippet>1077</a>            <span class="comment">// Attempt to queue the next frame for processing. The corresponding
+<a href=#1078 id=1078 data-nosnippet>1078</a>            // sender is created at the same time as the `StreamCtx`
+<a href=#1079 id=1079 data-nosnippet>1079</a>            // and ultimately ends up in an `H3Body`. The body then
+<a href=#1080 id=1080 data-nosnippet>1080</a>            // determines which frames to send to the peer via
+<a href=#1081 id=1081 data-nosnippet>1081</a>            // this processing loop.
+<a href=#1082 id=1082 data-nosnippet>1082</a>            </span><span class="kw">match </span>recv.try_recv() {
+<a href=#1083 id=1083 data-nosnippet>1083</a>                <span class="prelude-val">Ok</span>(frame) =&gt; ctx.queued_frame = <span class="prelude-val">Some</span>(frame),
+<a href=#1084 id=1084 data-nosnippet>1084</a>                <span class="prelude-val">Err</span>(TryRecvError::Disconnected) =&gt; {
+<a href=#1085 id=1085 data-nosnippet>1085</a>                    <span class="kw">if </span>!ctx.fin_or_reset_sent &amp;&amp;
+<a href=#1086 id=1086 data-nosnippet>1086</a>                        ctx.associated_dgram_flow_id.is_none()
+<a href=#1087 id=1087 data-nosnippet>1087</a>                    <span class="comment">// The channel might be closed if the stream was used to
+<a href=#1088 id=1088 data-nosnippet>1088</a>                    // initiate a datagram exchange.
+<a href=#1089 id=1089 data-nosnippet>1089</a>                    // TODO: ideally, the application would still shut down the
+<a href=#1090 id=1090 data-nosnippet>1090</a>                    // stream properly. Once applications code
+<a href=#1091 id=1091 data-nosnippet>1091</a>                    // is fixed, we can remove this check.
+<a href=#1092 id=1092 data-nosnippet>1092</a>                    </span>{
+<a href=#1093 id=1093 data-nosnippet>1093</a>                        <span class="comment">// The channel closed without having written a fin. Send a
+<a href=#1094 id=1094 data-nosnippet>1094</a>                        // RESET_STREAM to indicate we won't be writing anything
+<a href=#1095 id=1095 data-nosnippet>1095</a>                        // else
+<a href=#1096 id=1096 data-nosnippet>1096</a>                        </span><span class="kw">let </span>err = h3::WireErrorCode::RequestCancelled <span class="kw">as </span>u64;
+<a href=#1097 id=1097 data-nosnippet>1097</a>                        <span class="kw">let _ </span>= qconn.stream_shutdown(
+<a href=#1098 id=1098 data-nosnippet>1098</a>                            stream_id,
+<a href=#1099 id=1099 data-nosnippet>1099</a>                            quiche::Shutdown::Write,
+<a href=#1100 id=1100 data-nosnippet>1100</a>                            err,
+<a href=#1101 id=1101 data-nosnippet>1101</a>                        );
+<a href=#1102 id=1102 data-nosnippet>1102</a>                        ctx.handle_sent_reset(err);
+<a href=#1103 id=1103 data-nosnippet>1103</a>                        <span class="kw">if </span>ctx.both_directions_done() {
+<a href=#1104 id=1104 data-nosnippet>1104</a>                            <span class="kw">return </span><span class="self">self
+<a href=#1105 id=1105 data-nosnippet>1105</a>                                </span>.finish_stream(qconn, stream_id, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
+<a href=#1106 id=1106 data-nosnippet>1106</a>                        }
+<a href=#1107 id=1107 data-nosnippet>1107</a>                    }
+<a href=#1108 id=1108 data-nosnippet>1108</a>                    <span class="kw">break</span>;
+<a href=#1109 id=1109 data-nosnippet>1109</a>                },
+<a href=#1110 id=1110 data-nosnippet>1110</a>                <span class="prelude-val">Err</span>(TryRecvError::Empty) =&gt; {
+<a href=#1111 id=1111 data-nosnippet>1111</a>                    <span class="self">self</span>.waiting_streams.push(ctx.wait_for_recv(stream_id));
+<a href=#1112 id=1112 data-nosnippet>1112</a>                    <span class="kw">break</span>;
+<a href=#1113 id=1113 data-nosnippet>1113</a>                },
+<a href=#1114 id=1114 data-nosnippet>1114</a>            }
+<a href=#1115 id=1115 data-nosnippet>1115</a>        }
+<a href=#1116 id=1116 data-nosnippet>1116</a>
+<a href=#1117 id=1117 data-nosnippet>1117</a>        <span class="prelude-val">Ok</span>(())
+<a href=#1118 id=1118 data-nosnippet>1118</a>    }
+<a href=#1119 id=1119 data-nosnippet>1119</a>
+<a href=#1120 id=1120 data-nosnippet>1120</a>    <span class="doccomment">/// Tests `qconn` for either a local or peer error and increments
+<a href=#1121 id=1121 data-nosnippet>1121</a>    /// the associated HTTP/3 or QUIC error counter.
+<a href=#1122 id=1122 data-nosnippet>1122</a>    </span><span class="kw">fn </span>record_quiche_error(qconn: <span class="kw-2">&amp;mut </span>QuicheConnection, metrics: <span class="kw-2">&amp;</span><span class="kw">impl </span>Metrics) {
+<a href=#1123 id=1123 data-nosnippet>1123</a>        <span class="comment">// split metrics between local/peer and QUIC/HTTP/3 level errors
+<a href=#1124 id=1124 data-nosnippet>1124</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(err) = qconn.local_error() {
+<a href=#1125 id=1125 data-nosnippet>1125</a>            <span class="kw">if </span>err.is_app {
+<a href=#1126 id=1126 data-nosnippet>1126</a>                metrics.local_h3_conn_close_error_count(err.error_code.into())
+<a href=#1127 id=1127 data-nosnippet>1127</a>            } <span class="kw">else </span>{
+<a href=#1128 id=1128 data-nosnippet>1128</a>                metrics.local_quic_conn_close_error_count(err.error_code.into())
+<a href=#1129 id=1129 data-nosnippet>1129</a>            }
+<a href=#1130 id=1130 data-nosnippet>1130</a>            .inc();
+<a href=#1131 id=1131 data-nosnippet>1131</a>        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(err) = qconn.peer_error() {
+<a href=#1132 id=1132 data-nosnippet>1132</a>            <span class="kw">if </span>err.is_app {
+<a href=#1133 id=1133 data-nosnippet>1133</a>                metrics.peer_h3_conn_close_error_count(err.error_code.into())
+<a href=#1134 id=1134 data-nosnippet>1134</a>            } <span class="kw">else </span>{
+<a href=#1135 id=1135 data-nosnippet>1135</a>                metrics.peer_quic_conn_close_error_count(err.error_code.into())
+<a href=#1136 id=1136 data-nosnippet>1136</a>            }
+<a href=#1137 id=1137 data-nosnippet>1137</a>            .inc();
+<a href=#1138 id=1138 data-nosnippet>1138</a>        }
+<a href=#1139 id=1139 data-nosnippet>1139</a>    }
+<a href=#1140 id=1140 data-nosnippet>1140</a>}
+<a href=#1141 id=1141 data-nosnippet>1141</a>
+<a href=#1142 id=1142 data-nosnippet>1142</a><span class="kw">impl</span>&lt;H: DriverHooks&gt; ApplicationOverQuic <span class="kw">for </span>H3Driver&lt;H&gt; {
+<a href=#1143 id=1143 data-nosnippet>1143</a>    <span class="kw">fn </span>on_conn_established(
+<a href=#1144 id=1144 data-nosnippet>1144</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, quiche_conn: <span class="kw-2">&amp;mut </span>QuicheConnection,
+<a href=#1145 id=1145 data-nosnippet>1145</a>        handshake_info: <span class="kw-2">&amp;</span>HandshakeInfo,
+<a href=#1146 id=1146 data-nosnippet>1146</a>    ) -&gt; QuicResult&lt;()&gt; {
+<a href=#1147 id=1147 data-nosnippet>1147</a>        <span class="kw">let </span>conn = h3::Connection::with_transport(quiche_conn, <span class="kw-2">&amp;</span><span class="self">self</span>.h3_config)<span class="question-mark">?</span>;
+<a href=#1148 id=1148 data-nosnippet>1148</a>        <span class="self">self</span>.conn = <span class="prelude-val">Some</span>(conn);
+<a href=#1149 id=1149 data-nosnippet>1149</a>
+<a href=#1150 id=1150 data-nosnippet>1150</a>        H::conn_established(<span class="self">self</span>, quiche_conn, handshake_info)<span class="question-mark">?</span>;
+<a href=#1151 id=1151 data-nosnippet>1151</a>        <span class="prelude-val">Ok</span>(())
+<a href=#1152 id=1152 data-nosnippet>1152</a>    }
+<a href=#1153 id=1153 data-nosnippet>1153</a>
+<a href=#1154 id=1154 data-nosnippet>1154</a>    <span class="attr">#[inline]
+<a href=#1155 id=1155 data-nosnippet>1155</a>    </span><span class="kw">fn </span>should_act(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#1156 id=1156 data-nosnippet>1156</a>        <span class="self">self</span>.conn.is_some()
+<a href=#1157 id=1157 data-nosnippet>1157</a>    }
+<a href=#1158 id=1158 data-nosnippet>1158</a>
+<a href=#1159 id=1159 data-nosnippet>1159</a>    <span class="attr">#[inline]
+<a href=#1160 id=1160 data-nosnippet>1160</a>    </span><span class="kw">fn </span>buffer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>[u8] {
+<a href=#1161 id=1161 data-nosnippet>1161</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>.pooled_buf
+<a href=#1162 id=1162 data-nosnippet>1162</a>    }
+<a href=#1163 id=1163 data-nosnippet>1163</a>
+<a href=#1164 id=1164 data-nosnippet>1164</a>    <span class="doccomment">/// Poll the underlying [`quiche::h3::Connection`] for
+<a href=#1165 id=1165 data-nosnippet>1165</a>    /// [`quiche::h3::Event`]s and DATAGRAMs, delegating processing to
+<a href=#1166 id=1166 data-nosnippet>1166</a>    /// `Self::process_read_event`.
+<a href=#1167 id=1167 data-nosnippet>1167</a>    ///
+<a href=#1168 id=1168 data-nosnippet>1168</a>    /// If a DATAGRAM is found, it is sent to the receiver on its channel.
+<a href=#1169 id=1169 data-nosnippet>1169</a>    </span><span class="kw">fn </span>process_reads(<span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection) -&gt; QuicResult&lt;()&gt; {
+<a href=#1170 id=1170 data-nosnippet>1170</a>        <span class="kw">loop </span>{
+<a href=#1171 id=1171 data-nosnippet>1171</a>            <span class="kw">match </span><span class="self">self</span>.conn_mut()<span class="question-mark">?</span>.poll(qconn) {
+<a href=#1172 id=1172 data-nosnippet>1172</a>                <span class="prelude-val">Ok</span>((stream_id, event)) =&gt;
+<a href=#1173 id=1173 data-nosnippet>1173</a>                    <span class="self">self</span>.process_read_event(qconn, stream_id, event)<span class="question-mark">?</span>,
+<a href=#1174 id=1174 data-nosnippet>1174</a>                <span class="prelude-val">Err</span>(h3::Error::Done) =&gt; <span class="kw">break</span>,
+<a href=#1175 id=1175 data-nosnippet>1175</a>                <span class="prelude-val">Err</span>(err) =&gt; {
+<a href=#1176 id=1176 data-nosnippet>1176</a>                    <span class="comment">// Don't bubble error up, instead keep the worker loop going
+<a href=#1177 id=1177 data-nosnippet>1177</a>                    // until quiche reports the connection is
+<a href=#1178 id=1178 data-nosnippet>1178</a>                    // closed.
+<a href=#1179 id=1179 data-nosnippet>1179</a>                    </span><span class="macro">log::debug!</span>(<span class="string">"connection closed due to h3 protocol error"</span>; <span class="string">"error"</span>=&gt;<span class="question-mark">?</span>err);
+<a href=#1180 id=1180 data-nosnippet>1180</a>                    <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#1181 id=1181 data-nosnippet>1181</a>                },
+<a href=#1182 id=1182 data-nosnippet>1182</a>            };
+<a href=#1183 id=1183 data-nosnippet>1183</a>        }
+<a href=#1184 id=1184 data-nosnippet>1184</a>
+<a href=#1185 id=1185 data-nosnippet>1185</a>        <span class="self">self</span>.process_available_dgrams(qconn)<span class="question-mark">?</span>;
+<a href=#1186 id=1186 data-nosnippet>1186</a>        <span class="prelude-val">Ok</span>(())
+<a href=#1187 id=1187 data-nosnippet>1187</a>    }
+<a href=#1188 id=1188 data-nosnippet>1188</a>
+<a href=#1189 id=1189 data-nosnippet>1189</a>    <span class="doccomment">/// Write as much data as possible into the [`quiche::h3::Connection`] from
+<a href=#1190 id=1190 data-nosnippet>1190</a>    /// all sources. This will attempt to write any queued frames into their
+<a href=#1191 id=1191 data-nosnippet>1191</a>    /// respective streams, if writable.
+<a href=#1192 id=1192 data-nosnippet>1192</a>    </span><span class="kw">fn </span>process_writes(<span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection) -&gt; QuicResult&lt;()&gt; {
+<a href=#1193 id=1193 data-nosnippet>1193</a>        <span class="kw">while let </span><span class="prelude-val">Some</span>(stream_id) = qconn.stream_writable_next() {
+<a href=#1194 id=1194 data-nosnippet>1194</a>            <span class="self">self</span>.process_writable_stream(qconn, stream_id)<span class="question-mark">?</span>;
+<a href=#1195 id=1195 data-nosnippet>1195</a>        }
+<a href=#1196 id=1196 data-nosnippet>1196</a>
+<a href=#1197 id=1197 data-nosnippet>1197</a>        <span class="comment">// Also optimistically check for any ready streams
+<a href=#1198 id=1198 data-nosnippet>1198</a>        </span><span class="kw">while let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(ready)) = <span class="self">self</span>.waiting_streams.next().now_or_never() {
+<a href=#1199 id=1199 data-nosnippet>1199</a>            <span class="self">self</span>.upstream_ready(qconn, ready)<span class="question-mark">?</span>;
+<a href=#1200 id=1200 data-nosnippet>1200</a>        }
+<a href=#1201 id=1201 data-nosnippet>1201</a>
+<a href=#1202 id=1202 data-nosnippet>1202</a>        <span class="prelude-val">Ok</span>(())
+<a href=#1203 id=1203 data-nosnippet>1203</a>    }
+<a href=#1204 id=1204 data-nosnippet>1204</a>
+<a href=#1205 id=1205 data-nosnippet>1205</a>    <span class="doccomment">/// Reports connection-level error metrics and forwards
+<a href=#1206 id=1206 data-nosnippet>1206</a>    /// IOWorker errors to the associated [H3Controller].
+<a href=#1207 id=1207 data-nosnippet>1207</a>    </span><span class="kw">fn </span>on_conn_close&lt;M: Metrics&gt;(
+<a href=#1208 id=1208 data-nosnippet>1208</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, quiche_conn: <span class="kw-2">&amp;mut </span>QuicheConnection, metrics: <span class="kw-2">&amp;</span>M,
+<a href=#1209 id=1209 data-nosnippet>1209</a>        work_loop_result: <span class="kw-2">&amp;</span>QuicResult&lt;()&gt;,
+<a href=#1210 id=1210 data-nosnippet>1210</a>    ) {
+<a href=#1211 id=1211 data-nosnippet>1211</a>        <span class="kw">let </span>max_stream_seen = <span class="self">self</span>.max_stream_seen;
+<a href=#1212 id=1212 data-nosnippet>1212</a>        metrics
+<a href=#1213 id=1213 data-nosnippet>1213</a>            .maximum_writable_streams()
+<a href=#1214 id=1214 data-nosnippet>1214</a>            .observe(max_stream_seen <span class="kw">as </span>f64);
+<a href=#1215 id=1215 data-nosnippet>1215</a>
+<a href=#1216 id=1216 data-nosnippet>1216</a>        <span class="kw">let </span><span class="prelude-val">Err</span>(work_loop_error) = work_loop_result <span class="kw">else </span>{
+<a href=#1217 id=1217 data-nosnippet>1217</a>            <span class="kw">return</span>;
+<a href=#1218 id=1218 data-nosnippet>1218</a>        };
+<a href=#1219 id=1219 data-nosnippet>1219</a>
+<a href=#1220 id=1220 data-nosnippet>1220</a>        <span class="self">Self</span>::record_quiche_error(quiche_conn, metrics);
+<a href=#1221 id=1221 data-nosnippet>1221</a>
+<a href=#1222 id=1222 data-nosnippet>1222</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(h3_err) = work_loop_error.downcast_ref::&lt;H3ConnectionError&gt;()
+<a href=#1223 id=1223 data-nosnippet>1223</a>        <span class="kw">else </span>{
+<a href=#1224 id=1224 data-nosnippet>1224</a>            <span class="macro">log::error!</span>(<span class="string">"Found non-H3ConnectionError"</span>; <span class="string">"error" </span>=&gt; %work_loop_error);
+<a href=#1225 id=1225 data-nosnippet>1225</a>            <span class="kw">return</span>;
+<a href=#1226 id=1226 data-nosnippet>1226</a>        };
+<a href=#1227 id=1227 data-nosnippet>1227</a>
+<a href=#1228 id=1228 data-nosnippet>1228</a>        <span class="kw">if </span><span class="macro">matches!</span>(h3_err, H3ConnectionError::ControllerWentAway) {
+<a href=#1229 id=1229 data-nosnippet>1229</a>            <span class="comment">// Inform client that we won't (can't) respond anymore
+<a href=#1230 id=1230 data-nosnippet>1230</a>            </span><span class="kw">let _ </span>=
+<a href=#1231 id=1231 data-nosnippet>1231</a>                quiche_conn.close(<span class="bool-val">true</span>, h3::WireErrorCode::NoError <span class="kw">as </span>u64, <span class="kw-2">&amp;</span>[]);
+<a href=#1232 id=1232 data-nosnippet>1232</a>            <span class="kw">return</span>;
+<a href=#1233 id=1233 data-nosnippet>1233</a>        }
+<a href=#1234 id=1234 data-nosnippet>1234</a>
+<a href=#1235 id=1235 data-nosnippet>1235</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(ev) = H3Event::from_error(h3_err) {
+<a href=#1236 id=1236 data-nosnippet>1236</a>            <span class="kw">let _ </span>= <span class="self">self</span>.h3_event_sender.send(ev.into());
+<a href=#1237 id=1237 data-nosnippet>1237</a>            <span class="attr">#[expect(clippy::needless_return)]
+<a href=#1238 id=1238 data-nosnippet>1238</a>            </span><span class="kw">return</span>; <span class="comment">// avoid accidental fallthrough in the future
+<a href=#1239 id=1239 data-nosnippet>1239</a>        </span>}
+<a href=#1240 id=1240 data-nosnippet>1240</a>    }
+<a href=#1241 id=1241 data-nosnippet>1241</a>
+<a href=#1242 id=1242 data-nosnippet>1242</a>    <span class="doccomment">/// Wait for incoming data from the [H3Controller]. The next iteration of
+<a href=#1243 id=1243 data-nosnippet>1243</a>    /// the I/O loop commences when one of the `select!`ed futures triggers.
+<a href=#1244 id=1244 data-nosnippet>1244</a>    </span><span class="attr">#[inline]
+<a href=#1245 id=1245 data-nosnippet>1245</a>    </span><span class="kw">async fn </span>wait_for_data(
+<a href=#1246 id=1246 data-nosnippet>1246</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>, qconn: <span class="kw-2">&amp;mut </span>QuicheConnection,
+<a href=#1247 id=1247 data-nosnippet>1247</a>    ) -&gt; QuicResult&lt;()&gt; {
+<a href=#1248 id=1248 data-nosnippet>1248</a>        <span class="macro">select!</span> {
+<a href=#1249 id=1249 data-nosnippet>1249</a>            biased;
+<a href=#1250 id=1250 data-nosnippet>1250</a>            <span class="prelude-val">Some</span>(ready) = <span class="self">self</span>.waiting_streams.next() =&gt; <span class="self">self</span>.upstream_ready(qconn, ready),
+<a href=#1251 id=1251 data-nosnippet>1251</a>            <span class="prelude-val">Some</span>(dgram) = <span class="self">self</span>.dgram_recv.recv() =&gt; <span class="self">self</span>.dgram_ready(qconn, dgram),
+<a href=#1252 id=1252 data-nosnippet>1252</a>            <span class="prelude-val">Some</span>(cmd) = <span class="self">self</span>.cmd_recv.recv() =&gt; H::conn_command(<span class="self">self</span>, qconn, cmd),
+<a href=#1253 id=1253 data-nosnippet>1253</a>            r = <span class="self">self</span>.hooks.wait_for_action(qconn), <span class="kw">if </span>H::has_wait_action(<span class="self">self</span>) =&gt; r,
+<a href=#1254 id=1254 data-nosnippet>1254</a>        }<span class="question-mark">?</span>;
+<a href=#1255 id=1255 data-nosnippet>1255</a>
+<a href=#1256 id=1256 data-nosnippet>1256</a>        <span class="comment">// Make sure controller is not starved, but also not prioritized in the
+<a href=#1257 id=1257 data-nosnippet>1257</a>        // biased select. So poll it last, however also perform a try_recv
+<a href=#1258 id=1258 data-nosnippet>1258</a>        // each iteration.
+<a href=#1259 id=1259 data-nosnippet>1259</a>        </span><span class="kw">if let </span><span class="prelude-val">Ok</span>(cmd) = <span class="self">self</span>.cmd_recv.try_recv() {
+<a href=#1260 id=1260 data-nosnippet>1260</a>            H::conn_command(<span class="self">self</span>, qconn, cmd)<span class="question-mark">?</span>;
+<a href=#1261 id=1261 data-nosnippet>1261</a>        }
+<a href=#1262 id=1262 data-nosnippet>1262</a>
+<a href=#1263 id=1263 data-nosnippet>1263</a>        <span class="prelude-val">Ok</span>(())
+<a href=#1264 id=1264 data-nosnippet>1264</a>    }
+<a href=#1265 id=1265 data-nosnippet>1265</a>}
+<a href=#1266 id=1266 data-nosnippet>1266</a>
+<a href=#1267 id=1267 data-nosnippet>1267</a><span class="kw">impl</span>&lt;H: DriverHooks&gt; Drop <span class="kw">for </span>H3Driver&lt;H&gt; {
+<a href=#1268 id=1268 data-nosnippet>1268</a>    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#1269 id=1269 data-nosnippet>1269</a>        <span class="kw">for </span>stream <span class="kw">in </span><span class="self">self</span>.stream_map.values() {
+<a href=#1270 id=1270 data-nosnippet>1270</a>            stream
+<a href=#1271 id=1271 data-nosnippet>1271</a>                .audit_stats
+<a href=#1272 id=1272 data-nosnippet>1272</a>                .set_recvd_stream_fin(StreamClosureKind::Implicit);
+<a href=#1273 id=1273 data-nosnippet>1273</a>        }
+<a href=#1274 id=1274 data-nosnippet>1274</a>    }
+<a href=#1275 id=1275 data-nosnippet>1275</a>}
+<a href=#1276 id=1276 data-nosnippet>1276</a>
+<a href=#1277 id=1277 data-nosnippet>1277</a><span class="doccomment">/// [`H3Command`]s are sent by the [H3Controller] to alter the [H3Driver]'s
+<a href=#1278 id=1278 data-nosnippet>1278</a>/// state.
+<a href=#1279 id=1279 data-nosnippet>1279</a>///
+<a href=#1280 id=1280 data-nosnippet>1280</a>/// Both [ServerH3Driver] and [ClientH3Driver] may extend this enum with
+<a href=#1281 id=1281 data-nosnippet>1281</a>/// endpoint-specific variants.
+<a href=#1282 id=1282 data-nosnippet>1282</a></span><span class="attr">#[derive(Debug)]
+<a href=#1283 id=1283 data-nosnippet>1283</a></span><span class="kw">pub enum </span>H3Command {
+<a href=#1284 id=1284 data-nosnippet>1284</a>    <span class="doccomment">/// A connection-level command that executes directly on the
+<a href=#1285 id=1285 data-nosnippet>1285</a>    /// [`quiche::Connection`].
+<a href=#1286 id=1286 data-nosnippet>1286</a>    </span>QuicCmd(QuicCommand),
+<a href=#1287 id=1287 data-nosnippet>1287</a>    <span class="doccomment">/// Send a GOAWAY frame to the peer to initiate a graceful connection
+<a href=#1288 id=1288 data-nosnippet>1288</a>    /// shutdown.
+<a href=#1289 id=1289 data-nosnippet>1289</a>    </span>GoAway,
+<a href=#1290 id=1290 data-nosnippet>1290</a>}
+<a href=#1291 id=1291 data-nosnippet>1291</a>
+<a href=#1292 id=1292 data-nosnippet>1292</a><span class="doccomment">/// Sends [`H3Command`]s to an [H3Driver]. The sender is typed and internally
+<a href=#1293 id=1293 data-nosnippet>1293</a>/// wraps instances of `T` in the appropriate `H3Command` variant.
+<a href=#1294 id=1294 data-nosnippet>1294</a></span><span class="kw">pub struct </span>RequestSender&lt;C, T&gt; {
+<a href=#1295 id=1295 data-nosnippet>1295</a>    sender: UnboundedSender&lt;C&gt;,
+<a href=#1296 id=1296 data-nosnippet>1296</a>    <span class="comment">// Required to work around dangling type parameter
+<a href=#1297 id=1297 data-nosnippet>1297</a>    </span>_r: PhantomData&lt;<span class="kw">fn</span>() -&gt; T&gt;,
+<a href=#1298 id=1298 data-nosnippet>1298</a>}
+<a href=#1299 id=1299 data-nosnippet>1299</a>
+<a href=#1300 id=1300 data-nosnippet>1300</a><span class="kw">impl</span>&lt;C, T: Into&lt;C&gt;&gt; RequestSender&lt;C, T&gt; {
+<a href=#1301 id=1301 data-nosnippet>1301</a>    <span class="doccomment">/// Send a request to the [H3Driver]. This can only fail if the driver is
+<a href=#1302 id=1302 data-nosnippet>1302</a>    /// gone.
+<a href=#1303 id=1303 data-nosnippet>1303</a>    </span><span class="attr">#[inline(always)]
+<a href=#1304 id=1304 data-nosnippet>1304</a>    </span><span class="kw">pub fn </span>send(<span class="kw-2">&amp;</span><span class="self">self</span>, v: T) -&gt; <span class="prelude-ty">Result</span>&lt;(), mpsc::error::SendError&lt;C&gt;&gt; {
+<a href=#1305 id=1305 data-nosnippet>1305</a>        <span class="self">self</span>.sender.send(v.into())
+<a href=#1306 id=1306 data-nosnippet>1306</a>    }
+<a href=#1307 id=1307 data-nosnippet>1307</a>}
+<a href=#1308 id=1308 data-nosnippet>1308</a>
+<a href=#1309 id=1309 data-nosnippet>1309</a><span class="kw">impl</span>&lt;C, T&gt; Clone <span class="kw">for </span>RequestSender&lt;C, T&gt; {
+<a href=#1310 id=1310 data-nosnippet>1310</a>    <span class="kw">fn </span>clone(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+<a href=#1311 id=1311 data-nosnippet>1311</a>        <span class="self">Self </span>{
+<a href=#1312 id=1312 data-nosnippet>1312</a>            sender: <span class="self">self</span>.sender.clone(),
+<a href=#1313 id=1313 data-nosnippet>1313</a>            _r: Default::default(),
+<a href=#1314 id=1314 data-nosnippet>1314</a>        }
+<a href=#1315 id=1315 data-nosnippet>1315</a>    }
+<a href=#1316 id=1316 data-nosnippet>1316</a>}
+<a href=#1317 id=1317 data-nosnippet>1317</a>
+<a href=#1318 id=1318 data-nosnippet>1318</a><span class="doccomment">/// Interface to communicate with a paired [H3Driver].
+<a href=#1319 id=1319 data-nosnippet>1319</a>///
+<a href=#1320 id=1320 data-nosnippet>1320</a>/// An [H3Controller] receives [`H3Event`]s from its driver, which must be
+<a href=#1321 id=1321 data-nosnippet>1321</a>/// consumed by the application built on top of the driver to react to incoming
+<a href=#1322 id=1322 data-nosnippet>1322</a>/// events. The controller also allows the application to send ad-hoc
+<a href=#1323 id=1323 data-nosnippet>1323</a>/// [`H3Command`]s to the driver, which will be processed when the driver waits
+<a href=#1324 id=1324 data-nosnippet>1324</a>/// for incoming data.
+<a href=#1325 id=1325 data-nosnippet>1325</a></span><span class="kw">pub struct </span>H3Controller&lt;H: DriverHooks&gt; {
+<a href=#1326 id=1326 data-nosnippet>1326</a>    <span class="doccomment">/// Sends [`H3Command`]s to the [H3Driver], like [`QuicCommand`]s or
+<a href=#1327 id=1327 data-nosnippet>1327</a>    /// outbound HTTP requests.
+<a href=#1328 id=1328 data-nosnippet>1328</a>    </span>cmd_sender: UnboundedSender&lt;H::Command&gt;,
+<a href=#1329 id=1329 data-nosnippet>1329</a>    <span class="doccomment">/// Receives [`H3Event`]s from the [H3Driver]. Can be extracted and
+<a href=#1330 id=1330 data-nosnippet>1330</a>    /// used independently of the [H3Controller].
+<a href=#1331 id=1331 data-nosnippet>1331</a>    </span>h3_event_recv: <span class="prelude-ty">Option</span>&lt;UnboundedReceiver&lt;H::Event&gt;&gt;,
+<a href=#1332 id=1332 data-nosnippet>1332</a>}
+<a href=#1333 id=1333 data-nosnippet>1333</a>
+<a href=#1334 id=1334 data-nosnippet>1334</a><span class="kw">impl</span>&lt;H: DriverHooks&gt; H3Controller&lt;H&gt; {
+<a href=#1335 id=1335 data-nosnippet>1335</a>    <span class="doccomment">/// Gets a mut reference to the [`H3Event`] receiver for the paired
+<a href=#1336 id=1336 data-nosnippet>1336</a>    /// [H3Driver].
+<a href=#1337 id=1337 data-nosnippet>1337</a>    </span><span class="kw">pub fn </span>event_receiver_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>UnboundedReceiver&lt;H::Event&gt; {
+<a href=#1338 id=1338 data-nosnippet>1338</a>        <span class="self">self</span>.h3_event_recv
+<a href=#1339 id=1339 data-nosnippet>1339</a>            .as_mut()
+<a href=#1340 id=1340 data-nosnippet>1340</a>            .expect(<span class="string">"No event receiver on H3Controller"</span>)
+<a href=#1341 id=1341 data-nosnippet>1341</a>    }
+<a href=#1342 id=1342 data-nosnippet>1342</a>
+<a href=#1343 id=1343 data-nosnippet>1343</a>    <span class="doccomment">/// Takes the [`H3Event`] receiver for the paired [H3Driver].
+<a href=#1344 id=1344 data-nosnippet>1344</a>    </span><span class="kw">pub fn </span>take_event_receiver(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; UnboundedReceiver&lt;H::Event&gt; {
+<a href=#1345 id=1345 data-nosnippet>1345</a>        <span class="self">self</span>.h3_event_recv
+<a href=#1346 id=1346 data-nosnippet>1346</a>            .take()
+<a href=#1347 id=1347 data-nosnippet>1347</a>            .expect(<span class="string">"No event receiver on H3Controller"</span>)
+<a href=#1348 id=1348 data-nosnippet>1348</a>    }
+<a href=#1349 id=1349 data-nosnippet>1349</a>
+<a href=#1350 id=1350 data-nosnippet>1350</a>    <span class="doccomment">/// Creates a [`QuicCommand`] sender for the paired [H3Driver].
+<a href=#1351 id=1351 data-nosnippet>1351</a>    </span><span class="kw">pub fn </span>cmd_sender(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; RequestSender&lt;H::Command, QuicCommand&gt; {
+<a href=#1352 id=1352 data-nosnippet>1352</a>        RequestSender {
+<a href=#1353 id=1353 data-nosnippet>1353</a>            sender: <span class="self">self</span>.cmd_sender.clone(),
+<a href=#1354 id=1354 data-nosnippet>1354</a>            _r: Default::default(),
+<a href=#1355 id=1355 data-nosnippet>1355</a>        }
+<a href=#1356 id=1356 data-nosnippet>1356</a>    }
+<a href=#1357 id=1357 data-nosnippet>1357</a>
+<a href=#1358 id=1358 data-nosnippet>1358</a>    <span class="doccomment">/// Sends a GOAWAY frame to initiate a graceful connection shutdown.
+<a href=#1359 id=1359 data-nosnippet>1359</a>    </span><span class="kw">pub fn </span>send_goaway(<span class="kw-2">&amp;</span><span class="self">self</span>) {
+<a href=#1360 id=1360 data-nosnippet>1360</a>        <span class="kw">let _ </span>= <span class="self">self</span>.cmd_sender.send(H3Command::GoAway.into());
+<a href=#1361 id=1361 data-nosnippet>1361</a>    }
+<a href=#1362 id=1362 data-nosnippet>1362</a>}
+</code></pre></div></section></main></body></html>

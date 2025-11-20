@@ -1,0 +1,219 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="🥧 Savoury implementation of the QUIC transport protocol and HTTP/3."><title>quiche - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="quiche" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (07bdbaedc 2025-11-19)" data-channel="nightly" data-search-js="search-680b2199.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../static.files/storage-e2aeef58.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate quiche</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../quiche/index.html">quiche</a><span class="version">0.24.6</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#configuring-connections" title="Configuring connections">Configuring connections</a><ul><li><a href="#connection-setup" title="Connection setup">Connection setup</a></li></ul></li><li><a href="#handling-incoming-packets" title="Handling incoming packets">Handling incoming packets</a></li><li><a href="#generating-outgoing-packets" title="Generating outgoing packets">Generating outgoing packets</a><ul><li><a href="#pacing" title="Pacing">Pacing</a></li></ul></li><li><a href="#sending-and-receiving-stream-data" title="Sending and receiving stream data">Sending and receiving stream data</a></li><li><a href="#http3" title="HTTP/3">HTTP/3</a></li><li><a href="#congestion-control" title="Congestion Control">Congestion Control</a></li><li><a href="#feature-flags" title="Feature flags">Feature flags</a></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#traits" title="Traits">Traits</a></li><li><a href="#functions" title="Functions">Functions</a></li><li><a href="#types" title="Type Aliases">Type Aliases</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content"><div class="main-heading"><h1>Crate <span>quiche</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/quiche/lib.rs.html#27-9405">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>🥧 Savoury implementation of the QUIC transport protocol and HTTP/3.</p>
+<p><a href="https://github.com/cloudflare/quiche/">quiche</a> is an implementation of the QUIC transport protocol and HTTP/3 as
+specified by the <a href="https://quicwg.org/">IETF</a>. It provides a low level API for processing QUIC
+packets and handling connection state. The application is responsible for
+providing I/O (e.g. sockets handling) as well as an event loop with support
+for timers.</p>
+<h3 id="configuring-connections"><a class="doc-anchor" href="#configuring-connections">§</a>Configuring connections</h3>
+<p>The first step in establishing a QUIC connection using quiche is creating a
+<a href="https://docs.quic.tech/quiche/struct.Config.html"><code>Config</code></a> object:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span><span class="kw-2">mut </span>config = quiche::Config::new(quiche::PROTOCOL_VERSION)<span class="question-mark">?</span>;
+config.set_application_protos(<span class="kw-2">&amp;</span>[<span class="string">b"example-proto"</span>]);
+
+<span class="comment">// Additional configuration specific to application and use case...</span></code></pre></div>
+<p>The <a href="https://docs.quic.tech/quiche/struct.Config.html"><code>Config</code></a> object controls important aspects of the QUIC connection such
+as QUIC version, ALPN IDs, flow control, congestion control, idle timeout
+and other properties or features.</p>
+<p>QUIC is a general-purpose transport protocol and there are several
+configuration properties where there is no reasonable default value. For
+example, the permitted number of concurrent streams of any particular type
+is dependent on the application running over QUIC, and other use-case
+specific concerns.</p>
+<p>quiche defaults several properties to zero, applications most likely need
+to set these to something else to satisfy their needs using the following:</p>
+<ul>
+<li><a href="https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_streams_bidi"><code>set_initial_max_streams_bidi()</code></a></li>
+<li><a href="https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_streams_uni"><code>set_initial_max_streams_uni()</code></a></li>
+<li><a href="https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_data"><code>set_initial_max_data()</code></a></li>
+<li><a href="https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_bidi_local"><code>set_initial_max_stream_data_bidi_local()</code></a></li>
+<li><a href="https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_bidi_remote"><code>set_initial_max_stream_data_bidi_remote()</code></a></li>
+<li><a href="https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_initial_max_stream_data_uni"><code>set_initial_max_stream_data_uni()</code></a></li>
+</ul>
+<p><a href="https://docs.quic.tech/quiche/struct.Config.html"><code>Config</code></a> also holds TLS configuration. This can be changed by mutators on
+the an existing object, or by constructing a TLS context manually and
+creating a configuration using <a href="https://docs.quic.tech/quiche/struct.Config.html#method.with_boring_ssl_ctx_builder"><code>with_boring_ssl_ctx_builder()</code></a>.</p>
+<p>A configuration object can be shared among multiple connections.</p>
+<h4 id="connection-setup"><a class="doc-anchor" href="#connection-setup">§</a>Connection setup</h4>
+<p>On the client-side the <a href="fn.connect.html"><code>connect()</code></a> utility function can be used to create
+a new connection, while <a href="fn.accept.html"><code>accept()</code></a> is for servers:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="comment">// Client connection.
+</span><span class="kw">let </span>conn =
+    quiche::connect(<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>server_name), <span class="kw-2">&amp;</span>scid, local, peer, <span class="kw-2">&amp;mut </span>config)<span class="question-mark">?</span>;
+
+<span class="comment">// Server connection.
+</span><span class="kw">let </span>conn = quiche::accept(<span class="kw-2">&amp;</span>scid, <span class="prelude-val">None</span>, local, peer, <span class="kw-2">&amp;mut </span>config)<span class="question-mark">?</span>;</code></pre></div>
+<p>In both cases, the application is responsible for generating a new source
+connection ID that will be used to identify the new connection.</p>
+<p>The application also need to pass the address of the remote peer of the
+connection: in the case of a client that would be the address of the server
+it is trying to connect to, and for a server that is the address of the
+client that initiated the connection.</p>
+<h3 id="handling-incoming-packets"><a class="doc-anchor" href="#handling-incoming-packets">§</a>Handling incoming packets</h3>
+<p>Using the connection’s <a href="struct.Connection.html#method.recv"><code>recv()</code></a> method the application can process
+incoming packets that belong to that connection from the network:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>to = socket.local_addr().unwrap();
+
+<span class="kw">loop </span>{
+    <span class="kw">let </span>(read, from) = socket.recv_from(<span class="kw-2">&amp;mut </span>buf).unwrap();
+
+    <span class="kw">let </span>recv_info = quiche::RecvInfo { from, to };
+
+    <span class="kw">let </span>read = <span class="kw">match </span>conn.recv(<span class="kw-2">&amp;mut </span>buf[..read], recv_info) {
+        <span class="prelude-val">Ok</span>(v) =&gt; v,
+
+        <span class="prelude-val">Err</span>(quiche::Error::Done) =&gt; {
+            <span class="comment">// Done reading.
+            </span><span class="kw">break</span>;
+        },
+
+        <span class="prelude-val">Err</span>(e) =&gt; {
+            <span class="comment">// An error occurred, handle it.
+            </span><span class="kw">break</span>;
+        },
+    };
+}</code></pre></div>
+<p>The application has to pass a <a href="struct.RecvInfo.html"><code>RecvInfo</code></a> structure in order to provide
+additional information about the received packet (such as the address it
+was received from).</p>
+<h3 id="generating-outgoing-packets"><a class="doc-anchor" href="#generating-outgoing-packets">§</a>Generating outgoing packets</h3>
+<p>Outgoing packet are generated using the connection’s <a href="struct.Connection.html#method.send"><code>send()</code></a> method
+instead:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">loop </span>{
+    <span class="kw">let </span>(write, send_info) = <span class="kw">match </span>conn.send(<span class="kw-2">&amp;mut </span>out) {
+        <span class="prelude-val">Ok</span>(v) =&gt; v,
+
+        <span class="prelude-val">Err</span>(quiche::Error::Done) =&gt; {
+            <span class="comment">// Done writing.
+            </span><span class="kw">break</span>;
+        },
+
+        <span class="prelude-val">Err</span>(e) =&gt; {
+            <span class="comment">// An error occurred, handle it.
+            </span><span class="kw">break</span>;
+        },
+    };
+
+    socket.send_to(<span class="kw-2">&amp;</span>out[..write], <span class="kw-2">&amp;</span>send_info.to).unwrap();
+}</code></pre></div>
+<p>The application will be provided with a <a href="struct.SendInfo.html"><code>SendInfo</code></a> structure providing
+additional information about the newly created packet (such as the address
+the packet should be sent to).</p>
+<p>When packets are sent, the application is responsible for maintaining a
+timer to react to time-based connection events. The timer expiration can be
+obtained using the connection’s <a href="struct.Connection.html#method.timeout"><code>timeout()</code></a> method.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>timeout = conn.timeout();</code></pre></div>
+<p>The application is responsible for providing a timer implementation, which
+can be specific to the operating system or networking framework used. When
+a timer expires, the connection’s <a href="struct.Connection.html#method.on_timeout"><code>on_timeout()</code></a> method should be called,
+after which additional packets might need to be sent on the network:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="comment">// Timeout expired, handle it.
+</span>conn.on_timeout();
+
+<span class="comment">// Send more packets as needed after timeout.
+</span><span class="kw">loop </span>{
+    <span class="kw">let </span>(write, send_info) = <span class="kw">match </span>conn.send(<span class="kw-2">&amp;mut </span>out) {
+        <span class="prelude-val">Ok</span>(v) =&gt; v,
+
+        <span class="prelude-val">Err</span>(quiche::Error::Done) =&gt; {
+            <span class="comment">// Done writing.
+            </span><span class="kw">break</span>;
+        },
+
+        <span class="prelude-val">Err</span>(e) =&gt; {
+            <span class="comment">// An error occurred, handle it.
+            </span><span class="kw">break</span>;
+        },
+    };
+
+    socket.send_to(<span class="kw-2">&amp;</span>out[..write], <span class="kw-2">&amp;</span>send_info.to).unwrap();
+}</code></pre></div><h4 id="pacing"><a class="doc-anchor" href="#pacing">§</a>Pacing</h4>
+<p>It is recommended that applications <a href="https://datatracker.ietf.org/doc/html/rfc9002#section-7.7">pace</a> sending of outgoing packets to
+avoid creating packet bursts that could cause short-term congestion and
+losses in the network.</p>
+<p>quiche exposes pacing hints for outgoing packets through the <a href="struct.SendInfo.html#structfield.at"><code>at</code></a> field
+of the <a href="struct.SendInfo.html"><code>SendInfo</code></a> structure that is returned by the <a href="struct.Connection.html#method.send"><code>send()</code></a> method.
+This field represents the time when a specific packet should be sent into
+the network.</p>
+<p>Applications can use these hints by artificially delaying the sending of
+packets through platform-specific mechanisms (such as the <a href="https://man7.org/linux/man-pages/man8/tc-etf.8.html"><code>SO_TXTIME</code></a>
+socket option on Linux), or custom methods (for example by using user-space
+timers).</p>
+<h3 id="sending-and-receiving-stream-data"><a class="doc-anchor" href="#sending-and-receiving-stream-data">§</a>Sending and receiving stream data</h3>
+<p>After some back and forth, the connection will complete its handshake and
+will be ready for sending or receiving application data.</p>
+<p>Data can be sent on a stream by using the <a href="struct.Connection.html#method.stream_send"><code>stream_send()</code></a> method:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">if </span>conn.is_established() {
+    <span class="comment">// Handshake completed, send some data on stream 0.
+    </span>conn.stream_send(<span class="number">0</span>, <span class="string">b"hello"</span>, <span class="bool-val">true</span>)<span class="question-mark">?</span>;
+}</code></pre></div>
+<p>The application can check whether there are any readable streams by using
+the connection’s <a href="struct.Connection.html#method.readable"><code>readable()</code></a> method, which returns an iterator over all
+the streams that have outstanding data to read.</p>
+<p>The <a href="struct.Connection.html#method.stream_recv"><code>stream_recv()</code></a> method can then be used to retrieve the application
+data from the readable stream:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">if </span>conn.is_established() {
+    <span class="comment">// Iterate over readable streams.
+    </span><span class="kw">for </span>stream_id <span class="kw">in </span>conn.readable() {
+        <span class="comment">// Stream is readable, read until there's no more data.
+        </span><span class="kw">while let </span><span class="prelude-val">Ok</span>((read, fin)) = conn.stream_recv(stream_id, <span class="kw-2">&amp;mut </span>buf) {
+            <span class="macro">println!</span>(<span class="string">"Got {} bytes on stream {}"</span>, read, stream_id);
+        }
+    }
+}</code></pre></div><h3 id="http3"><a class="doc-anchor" href="#http3">§</a>HTTP/3</h3>
+<p>The quiche <a href="h3/index.html">HTTP/3 module</a> provides a high level API for sending and
+receiving HTTP requests and responses on top of the QUIC transport protocol.</p>
+<h3 id="congestion-control"><a class="doc-anchor" href="#congestion-control">§</a>Congestion Control</h3>
+<p>The quiche library provides a high-level API for configuring which
+congestion control algorithm to use throughout the QUIC connection.</p>
+<p>When a QUIC connection is created, the application can optionally choose
+which CC algorithm to use. See <a href="enum.CongestionControlAlgorithm.html"><code>CongestionControlAlgorithm</code></a> for currently
+available congestion control algorithms.</p>
+<p>For example:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span><span class="kw-2">mut </span>config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+config.set_cc_algorithm(quiche::CongestionControlAlgorithm::Reno);</code></pre></div>
+<p>Alternatively, you can configure the congestion control algorithm to use
+by its name.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span><span class="kw-2">mut </span>config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+config.set_cc_algorithm_name(<span class="string">"reno"</span>).unwrap();</code></pre></div>
+<p>Note that the CC algorithm should be configured before calling <a href="fn.connect.html"><code>connect()</code></a>
+or <a href="fn.accept.html"><code>accept()</code></a>. Otherwise the connection will use a default CC algorithm.</p>
+<h3 id="feature-flags"><a class="doc-anchor" href="#feature-flags">§</a>Feature flags</h3>
+<p>quiche defines a number of <a href="https://doc.rust-lang.org/cargo/reference/manifest.html#the-features-section">feature flags</a> to reduce the amount of compiled
+code and dependencies:</p>
+<ul>
+<li>
+<p><code>boringssl-vendored</code> (default): Build the vendored BoringSSL library.</p>
+</li>
+<li>
+<p><code>boringssl-boring-crate</code>: Use the BoringSSL library provided by the
+<a href="https://crates.io/crates/boring">boring</a> crate. It takes precedence over <code>boringssl-vendored</code> if both
+features are enabled.</p>
+</li>
+<li>
+<p><code>pkg-config-meta</code>: Generate pkg-config metadata file for libquiche.</p>
+</li>
+<li>
+<p><code>ffi</code>: Build and expose the FFI API.</p>
+</li>
+<li>
+<p><code>qlog</code>: Enable support for the <a href="https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema">qlog</a> logging format.</p>
+</li>
+</ul>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="h3/index.html" title="mod quiche::h3">h3</a></dt><dd>HTTP/3 wire protocol and QPACK implementation.</dd></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Config.html" title="struct quiche::Config">Config</a></dt><dd>Stores configuration shared between multiple connections.</dd><dt><a class="struct" href="struct.Connection.html" title="struct quiche::Connection">Connection</a></dt><dd>A QUIC connection.</dd><dt><a class="struct" href="struct.ConnectionError.html" title="struct quiche::ConnectionError">Connection<wbr>Error</a></dt><dd>Represents information carried by <code>CONNECTION_CLOSE</code> frames.</dd><dt><a class="struct" href="struct.ConnectionId.html" title="struct quiche::ConnectionId">Connection<wbr>Id</a></dt><dd>A QUIC connection ID.</dd><dt><a class="struct" href="struct.Header.html" title="struct quiche::Header">Header</a></dt><dd>A QUIC packet’s header.</dd><dt><a class="struct" href="struct.PathStats.html" title="struct quiche::PathStats">Path<wbr>Stats</a></dt><dd>Statistics about the path of a connection.</dd><dt><a class="struct" href="struct.RecvInfo.html" title="struct quiche::RecvInfo">Recv<wbr>Info</a></dt><dd>Ancillary information about incoming packets.</dd><dt><a class="struct" href="struct.SendInfo.html" title="struct quiche::SendInfo">Send<wbr>Info</a></dt><dd>Ancillary information about outgoing packets.</dd><dt><a class="struct" href="struct.SocketAddrIter.html" title="struct quiche::SocketAddrIter">Socket<wbr>Addr<wbr>Iter</a></dt><dd>An iterator over SocketAddr.</dd><dt><a class="struct" href="struct.StartupExit.html" title="struct quiche::StartupExit">Startup<wbr>Exit</a></dt><dd>Statistics from when a CCA first exited the startup phase.</dd><dt><a class="struct" href="struct.Stats.html" title="struct quiche::Stats">Stats</a></dt><dd>Statistics about the connection.</dd><dt><a class="struct" href="struct.StreamIter.html" title="struct quiche::StreamIter">Stream<wbr>Iter</a></dt><dd>An iterator over QUIC streams.</dd><dt><a class="struct" href="struct.TransportParams.html" title="struct quiche::TransportParams">Transport<wbr>Params</a></dt><dd>QUIC Transport Parameters</dd><dt><a class="struct" href="struct.UnknownTransportParameter.html" title="struct quiche::UnknownTransportParameter">Unknown<wbr>Transport<wbr>Parameter</a></dt><dd>QUIC Unknown Transport Parameter.</dd><dt><a class="struct" href="struct.UnknownTransportParameterIterator.html" title="struct quiche::UnknownTransportParameterIterator">Unknown<wbr>Transport<wbr>Parameter<wbr>Iterator</a></dt><dd>An Iterator over unknown transport parameters.</dd><dt><a class="struct" href="struct.UnknownTransportParameters.html" title="struct quiche::UnknownTransportParameters">Unknown<wbr>Transport<wbr>Parameters</a></dt><dd>Track unknown transport parameters, up to a limit.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.CongestionControlAlgorithm.html" title="enum quiche::CongestionControlAlgorithm">Congestion<wbr>Control<wbr>Algorithm</a></dt><dd>Available congestion control algorithms.</dd><dt><a class="enum" href="enum.Error.html" title="enum quiche::Error">Error</a></dt><dd>A QUIC error.</dd><dt><a class="enum" href="enum.PathEvent.html" title="enum quiche::PathEvent">Path<wbr>Event</a></dt><dd>A path-specific event.</dd><dt><a class="enum" href="enum.QlogLevel.html" title="enum quiche::QlogLevel">Qlog<wbr>Level</a><wbr><span class="stab portability" title="Available on crate feature `qlog` only"><code>qlog</code></span></dt><dd>Qlog logging level.</dd><dt><a class="enum" href="enum.Shutdown.html" title="enum quiche::Shutdown">Shutdown</a></dt><dd>The side of the stream to be shut down.</dd><dt><a class="enum" href="enum.StartupExitReason.html" title="enum quiche::StartupExitReason">Startup<wbr>Exit<wbr>Reason</a></dt><dd>The reason a CCA exited the startup phase.</dd><dt><a class="enum" href="enum.Type.html" title="enum quiche::Type">Type</a></dt><dd>QUIC packet type.</dd><dt><a class="enum" href="enum.WireErrorCode.html" title="enum quiche::WireErrorCode">Wire<wbr>Error<wbr>Code</a></dt><dd>QUIC error codes sent on the wire.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.MAX_CONN_ID_LEN.html" title="constant quiche::MAX_CONN_ID_LEN">MAX_<wbr>CONN_<wbr>ID_<wbr>LEN</a></dt><dd>The maximum length of a connection ID.</dd><dt><a class="constant" href="constant.MIN_CLIENT_INITIAL_LEN.html" title="constant quiche::MIN_CLIENT_INITIAL_LEN">MIN_<wbr>CLIENT_<wbr>INITIAL_<wbr>LEN</a></dt><dd>The minimum length of Initial packets sent by a client.</dd><dt><a class="constant" href="constant.PROTOCOL_VERSION.html" title="constant quiche::PROTOCOL_VERSION">PROTOCOL_<wbr>VERSION</a></dt><dd>The current QUIC wire version.</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.BufFactory.html" title="trait quiche::BufFactory">BufFactory</a></dt><dd>A trait for providing internal storage buffers for <code>RangeBuf</code>.
+The associated type <code>Buf</code> can be any type that dereferences to
+a slice, but should be fast to clone, eg. by wrapping it with an
+<a href="https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc"><code>Arc</code></a>.</dd><dt><a class="trait" href="trait.BufSplit.html" title="trait quiche::BufSplit">BufSplit</a></dt><dd>A trait that enables zero-copy sends to quiche. When buffers produced
+by the <code>BufFactory</code> implement this trait, quiche and h3 can supply the
+raw buffers to be sent, instead of slices that must be copied first.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.accept.html" title="fn quiche::accept">accept</a></dt><dd>Creates a new server-side connection.</dd><dt><a class="fn" href="fn.accept_with_buf_factory.html" title="fn quiche::accept_with_buf_factory">accept_<wbr>with_<wbr>buf_<wbr>factory</a></dt><dd>Creates a new server-side connection, with a custom buffer generation
+method.</dd><dt><a class="fn" href="fn.connect.html" title="fn quiche::connect">connect</a></dt><dd>Creates a new client-side connection.</dd><dt><a class="fn" href="fn.connect_with_buffer_factory.html" title="fn quiche::connect_with_buffer_factory">connect_<wbr>with_<wbr>buffer_<wbr>factory</a></dt><dd>Creates a new client-side connection, with a custom buffer generation
+method.</dd><dt><a class="fn" href="fn.negotiate_version.html" title="fn quiche::negotiate_version">negotiate_<wbr>version</a></dt><dd>Writes a version negotiation packet.</dd><dt><a class="fn" href="fn.retry.html" title="fn quiche::retry">retry</a></dt><dd>Writes a stateless retry packet.</dd><dt><a class="fn" href="fn.version_is_supported.html" title="fn quiche::version_is_supported">version_<wbr>is_<wbr>supported</a></dt><dd>Returns true if the given protocol version is supported.</dd></dl><h2 id="types" class="section-header">Type Aliases<a href="#types" class="anchor">§</a></h2><dl class="item-table"><dt><a class="type" href="type.Result.html" title="type quiche::Result">Result</a></dt><dd>A specialized <a href="https://doc.rust-lang.org/std/result/enum.Result.html"><code>Result</code></a> type for quiche operations.</dd></dl></section></div></main></body></html>

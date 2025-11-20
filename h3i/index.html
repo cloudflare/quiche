@@ -1,0 +1,117 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="h3i - low-level HTTP/3 debug and testing"><title>h3i - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-ca0dd0c4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="h3i" data-themes="" data-resource-suffix="" data-rustdoc-version="1.93.0-nightly (07bdbaedc 2025-11-19)" data-channel="nightly" data-search-js="search-680b2199.js" data-stringdex-js="stringdex-a3946164.js" data-settings-js="settings-c38705f0.js" ><script src="../static.files/storage-e2aeef58.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-a410ff4d.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-263c88ec.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate h3i</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../h3i/index.html">h3i</a><span class="version">0.5.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#example" title="Example">Example</a></li></ul><h3><a href="#reexports">Crate Items</a></h3><ul class="block"><li><a href="#reexports" title="Re-exports">Re-exports</a></li><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#constants" title="Constants">Constants</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content"><div class="main-heading"><h1>Crate <span>h3i</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/h3i/lib.rs.html#27-293">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>h3i - low-level HTTP/3 debug and testing</p>
+<p>HTTP/3 (<a href="https://www.rfc-editor.org/rfc/rfc9114.html">RFC 9114</a>) is the wire format for HTTP semantics (<a href="https://www.rfc-editor.org/rfc/rfc9110.html">RFC 9110</a>). The
+RFCs contain a range of requirements about how Request or Response messages
+are generated, serialized, sent, received, parsed, and consumed. QUIC (<a href="https://www.rfc-editor.org/rfc/rfc9000.html">RFC
+9000</a>) streams are used for these messages along with other control and
+QPACK (<a href="https://www.rfc-editor.org/rfc/rfc9204.html">RFC 9204</a>) header compression instructions.</p>
+<p>h3i provides a highly configurable HTTP/3 client that can bend RFC rules in
+order to test the behavior of servers. QUIC streams can be opened, fin’d,
+stopped or reset at any point in time. HTTP/3 frames can be sent on any
+stream, in any order, containing user-controlled content (both legal and
+illegal).</p>
+<h2 id="example"><a class="doc-anchor" href="#example">§</a>Example</h2>
+<p>The following example sends a request with its Content-Length header set to
+5, but with its body only consisting of 4 bytes. This is classified as a
+<a href="https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3">malformed request</a>, and the server should respond with a 400 Bad Request
+response. Once h3i receives the response, it will close the connection.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>h3i::actions::h3::Action;
+<span class="kw">use </span>h3i::actions::h3::StreamEvent;
+<span class="kw">use </span>h3i::actions::h3::StreamEventType;
+<span class="kw">use </span>h3i::actions::h3::WaitType;
+<span class="kw">use </span>h3i::client::sync_client;
+<span class="kw">use </span>h3i::config::Config;
+<span class="kw">use </span>quiche::h3::frame::Frame;
+<span class="kw">use </span>quiche::h3::Header;
+<span class="kw">use </span>quiche::h3::NameValue;
+
+<span class="kw">fn </span>main() {
+   <span class="doccomment">/// The QUIC stream to send the frames on. See
+   /// https://datatracker.ietf.org/doc/html/rfc9000#name-streams and
+   /// https://datatracker.ietf.org/doc/html/rfc9114#request-streams for more.
+   </span><span class="kw">const </span>STREAM_ID: u64 = <span class="number">0</span>;
+
+   <span class="kw">let </span>config = Config::new()
+       .with_host_port(<span class="string">"blog.cloudflare.com"</span>.to_string())
+       .with_idle_timeout(<span class="number">2000</span>)
+       .build()
+       .unwrap();
+
+   <span class="kw">let </span>headers = <span class="macro">vec!</span>[
+       Header::new(<span class="string">b":method"</span>, <span class="string">b"POST"</span>),
+       Header::new(<span class="string">b":scheme"</span>, <span class="string">b"https"</span>),
+       Header::new(<span class="string">b":authority"</span>, <span class="string">b"blog.cloudflare.com"</span>),
+       Header::new(<span class="string">b":path"</span>, <span class="string">b"/"</span>),
+       <span class="comment">// We say that we're going to send a body with 5 bytes...
+       </span>Header::new(<span class="string">b"content-length"</span>, <span class="string">b"5"</span>),
+   ];
+
+   <span class="kw">let </span>header_block = encode_header_block(<span class="kw-2">&amp;</span>headers).unwrap();
+
+   <span class="kw">let </span>actions = <span class="macro">vec!</span>[
+       Action::SendHeadersFrame {
+           stream_id: STREAM_ID,
+           fin_stream: <span class="bool-val">false</span>,
+           headers,
+           frame: Frame::Headers { header_block },
+           literal_headers: <span class="bool-val">false</span>,
+       },
+       Action::SendFrame {
+           stream_id: STREAM_ID,
+           fin_stream: <span class="bool-val">true</span>,
+           frame: Frame::Data {
+               <span class="comment">// ...but, in actuality, we only send 4 bytes. This should yield a
+               // 400 Bad Request response from an RFC-compliant
+               // server: https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3
+               </span>payload: <span class="string">b"test"</span>.to_vec(),
+           },
+       },
+       Action::Wait {
+           wait_type: WaitType::StreamEvent(StreamEvent {
+               stream_id: STREAM_ID,
+               event_type: StreamEventType::Headers,
+           }),
+       },
+       Action::ConnectionClose {
+           error: quiche::ConnectionError {
+               is_app: <span class="bool-val">true</span>,
+               error_code: quiche::h3::WireErrorCode::NoError <span class="kw">as </span>u64,
+               reason: <span class="macro">vec!</span>[],
+           },
+       },
+   ];
+
+   <span class="comment">// This example doesn't use close trigger frames, since we manually close the connection upon
+   // receiving a HEADERS frame on stream 0.
+   </span><span class="kw">let </span>close_trigger_frames = <span class="prelude-val">None</span>;
+   <span class="kw">let </span>summary = sync_client::connect(config, actions, close_trigger_frames);
+
+   <span class="macro">println!</span>(
+       <span class="string">"=== received connection summary! ===\n\n{}"</span>,
+       serde_json::to_string_pretty(<span class="kw-2">&amp;</span>summary).unwrap_or_else(|e| e.to_string())
+   );
+}
+
+<span class="comment">// SendHeadersFrame requires a QPACK-encoded header block. h3i provides a
+// `send_headers_frame` helper function to abstract this, but for clarity, we do
+// it here.
+</span><span class="kw">fn </span>encode_header_block(
+    headers: <span class="kw-2">&amp;</span>[quiche::h3::Header],
+) -&gt; std::result::Result&lt;Vec&lt;u8&gt;, String&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>encoder = quiche::h3::qpack::Encoder::new();
+
+    <span class="kw">let </span>headers_len = headers
+        .iter()
+        .fold(<span class="number">0</span>, |acc, h| acc + h.value().len() + h.name().len() + <span class="number">32</span>);
+
+    <span class="kw">let </span><span class="kw-2">mut </span>header_block = <span class="macro">vec!</span>[<span class="number">0</span>; headers_len];
+    <span class="kw">let </span>len = encoder
+        .encode(headers, <span class="kw-2">&amp;mut </span>header_block)
+        .map_err(|<span class="kw">_</span>| <span class="string">"Internal Error"</span>)<span class="question-mark">?</span>;
+
+    header_block.truncate(len);
+
+    <span class="prelude-val">Ok</span>(header_block)
+}</code></pre></div></div></details><h2 id="reexports" class="section-header">Re-exports<a href="#reexports" class="anchor">§</a></h2><dl class="item-table reexports"><dt id="reexport.quiche"><code>pub use tokio_quiche::<a class="mod" href="../quiche/index.html" title="mod quiche">quiche</a>;</code></dt></dl><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="actions/index.html" title="mod h3i::actions">actions</a></dt><dd>Actions are small operations such as sending HTTP/3 frames or managing QUIC
+streams. Each independent use case for h3i requires its own collection of
+Actions, that h3i iterates over in sequence and executes.</dd><dt><a class="mod" href="client/index.html" title="mod h3i::client">client</a></dt><dd>The main h3i client runner.</dd><dt><a class="mod" href="config/index.html" title="mod h3i::config">config</a></dt><dd>Configuration for the h3i client.</dd><dt><a class="mod" href="frame/index.html" title="mod h3i::frame">frame</a></dt><dd>Helpers for dealing with quiche stream events and HTTP/3 frames.</dd><dt><a class="mod" href="frame_parser/index.html" title="mod h3i::frame_parser">frame_<wbr>parser</a></dt><dd>Stateful parsing of QUIC streams into HTTP/3 frames.</dd><dt><a class="mod" href="prompts/index.html" title="mod h3i::prompts">prompts</a></dt><dd>A collection of interactive CLI prompts based on [inquire].</dd><dt><a class="mod" href="recordreplay/index.html" title="mod h3i::recordreplay">recordreplay</a></dt><dd>Support for recording h3i Actions and replaying them.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.HTTP3_CONTROL_STREAM_TYPE_ID.html" title="constant h3i::HTTP3_CONTROL_STREAM_TYPE_ID">HTTP3_<wbr>CONTROL_<wbr>STREAM_<wbr>TYPE_<wbr>ID</a></dt><dd>The ID for an HTTP/3 control stream type.</dd><dt><a class="constant" href="constant.HTTP3_PUSH_STREAM_TYPE_ID.html" title="constant h3i::HTTP3_PUSH_STREAM_TYPE_ID">HTTP3_<wbr>PUSH_<wbr>STREAM_<wbr>TYPE_<wbr>ID</a></dt><dd>The ID for an HTTP/3 push stream type.</dd><dt><a class="constant" href="constant.QPACK_DECODER_STREAM_TYPE_ID.html" title="constant h3i::QPACK_DECODER_STREAM_TYPE_ID">QPACK_<wbr>DECODER_<wbr>STREAM_<wbr>TYPE_<wbr>ID</a></dt><dd>The ID for a QPACK decoder stream type.</dd><dt><a class="constant" href="constant.QPACK_ENCODER_STREAM_TYPE_ID.html" title="constant h3i::QPACK_ENCODER_STREAM_TYPE_ID">QPACK_<wbr>ENCODER_<wbr>STREAM_<wbr>TYPE_<wbr>ID</a></dt><dd>The ID for a QPACK encoder stream type.</dd></dl><script type="text/json" id="notable-traits-data">{"&<Vec<T, A> as Index<I>>::Output":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html\" title=\"struct alloc::vec::Vec\">Vec</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>, A&gt;</code></h3><pre><code><div class=\"where\">impl&lt;A&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/std/io/trait.Write.html\" title=\"trait std::io::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html\" title=\"struct alloc::vec::Vec\">Vec</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>, A&gt;<div class=\"where\">where\n    A: <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/alloc/trait.Allocator.html\" title=\"trait core::alloc::Allocator\">Allocator</a>,</div></div>","&[u8]":"<h3>Notable traits for <code>&amp;[<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>]</code></h3><pre><code><div class=\"where\">impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/std/io/trait.Read.html\" title=\"trait std::io::Read\">Read</a> for &amp;[<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>]</div>","&mut <Vec<T, A> as Index<I>>::Output":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html\" title=\"struct alloc::vec::Vec\">Vec</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>, A&gt;</code></h3><pre><code><div class=\"where\">impl&lt;A&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/std/io/trait.Write.html\" title=\"trait std::io::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html\" title=\"struct alloc::vec::Vec\">Vec</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>, A&gt;<div class=\"where\">where\n    A: <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/alloc/trait.Allocator.html\" title=\"trait core::alloc::Allocator\">Allocator</a>,</div></div>","<Vec<T, A> as IntoIterator>::IntoIter":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html\" title=\"struct alloc::vec::Vec\">Vec</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>, A&gt;</code></h3><pre><code><div class=\"where\">impl&lt;A&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/std/io/trait.Write.html\" title=\"trait std::io::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html\" title=\"struct alloc::vec::Vec\">Vec</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>, A&gt;<div class=\"where\">where\n    A: <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/alloc/trait.Allocator.html\" title=\"trait core::alloc::Allocator\">Allocator</a>,</div></div>","<Vec<T> as IntoDeserializer<'de, E>>::Deserializer":"<h3>Notable traits for <code><a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html\" title=\"struct alloc::vec::Vec\">Vec</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>, A&gt;</code></h3><pre><code><div class=\"where\">impl&lt;A&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/std/io/trait.Write.html\" title=\"trait std::io::Write\">Write</a> for <a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html\" title=\"struct alloc::vec::Vec\">Vec</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.u8.html\">u8</a>, A&gt;<div class=\"where\">where\n    A: <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/alloc/trait.Allocator.html\" title=\"trait core::alloc::Allocator\">Allocator</a>,</div></div>"}</script></section></div></main></body></html>
