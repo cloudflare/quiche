@@ -135,14 +135,14 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     local_max_streams_bidi: u64,
     local_max_streams_bidi_next: u64,
 
-    /// Initial maximum bidirectional stream count
+    /// Initial maximum bidirectional stream count.
     initial_max_streams_bidi: u64,
 
     /// Local maximum unidirectional stream count limit.
     local_max_streams_uni: u64,
     local_max_streams_uni_next: u64,
 
-    /// Initial maximum unidirectional stream count
+    /// Initial maximum unidirectional stream count.
     initial_max_streams_uni: u64,
 
     /// The total number of bidirectional streams opened by the local endpoint.
