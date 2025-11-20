@@ -134,10 +134,8 @@ pub struct BandwidthSampler {
 
 /// A subset of [`ConnectionStateOnSentPacket`] which is returned
 /// to the caller when the packet is acked or lost.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SendTimeState {
-    /// Whether other states in this object is valid.
-    pub is_valid: bool,
     /// Whether the sender is app limited at the time the packet was sent.
     /// App limited bandwidth sample might be artificially low because the
     /// sender did not have enough data to send in order to saturate the
@@ -243,7 +241,7 @@ struct MaxAckHeightTracker {
     reduce_extra_acked_on_bandwidth_increase: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq)]
 pub(crate) struct CongestionEventSample {
     /// The maximum bandwidth sample from all acked packets.
     pub sample_max_bandwidth: Option<Bandwidth>,
@@ -255,10 +253,6 @@ pub(crate) struct CongestionEventSample {
     /// INFLIGHT(p), where INFLIGHT(p) is the number of bytes acked while p
     /// is inflight.
     pub sample_max_inflight: usize,
-    /// The send state of the largest packet in acked_packets, unless it is
-    /// empty. If acked_packets is empty, it's the send state of the largest
-    /// packet in lost_packets.
-    pub last_packet_send_state: SendTimeState,
     /// The number of extra bytes acked from this ack event, compared to what is
     /// expected from the flow's bandwidth. Larger value means more ack
     /// aggregation.
@@ -425,7 +419,6 @@ impl From<(Instant, usize, usize, &BandwidthSampler)>
             last_acked_packet_sent_time: sampler.last_acked_packet_sent_time,
             last_acked_packet_ack_time: sampler.last_acked_packet_ack_time,
             send_time_state: SendTimeState {
-                is_valid: true,
                 is_app_limited: sampler.is_app_limited,
                 total_bytes_sent: sampler.total_bytes_sent,
                 total_bytes_acked: sampler.total_bytes_acked,
@@ -559,16 +552,16 @@ impl BandwidthSampler {
         &mut self, ack_time: Instant, acked_packets: &[Acked],
         lost_packets: &[Lost], mut max_bandwidth: Option<Bandwidth>,
         est_bandwidth_upper_bound: Bandwidth, round_trip_count: usize,
-    ) -> CongestionEventSample {
-        let mut last_lost_packet_send_state = SendTimeState::default();
-        let mut last_acked_packet_send_state = SendTimeState::default();
+    ) -> Option<(CongestionEventSample, SendTimeState)> {
+        let mut last_lost_packet_send_state = None;
+        let mut last_acked_packet_send_state = None;
         let mut last_lost_packet_num = 0u64;
         let mut last_acked_packet_num = 0u64;
 
         for packet in lost_packets {
             let send_state =
                 self.on_packet_lost(packet.packet_number, packet.bytes_lost);
-            if send_state.is_valid {
+            if send_state.is_some() {
                 last_lost_packet_send_state = send_state;
                 last_lost_packet_num = packet.packet_number;
             }
@@ -576,10 +569,9 @@ impl BandwidthSampler {
 
         if acked_packets.is_empty() {
             // Only populate send state for a loss-only event.
-            return CongestionEventSample {
-                last_packet_send_state: last_lost_packet_send_state,
-                ..Default::default()
-            };
+            return last_lost_packet_send_state.map(|send_state| {
+                (CongestionEventSample::default(), send_state)
+            });
         }
 
         let mut event_sample = CongestionEventSample::default();
@@ -588,12 +580,9 @@ impl BandwidthSampler {
         for packet in acked_packets {
             let sample =
                 match self.on_packet_acknowledged(ack_time, packet.pkt_num) {
-                    Some(sample) if sample.state_at_send.is_valid => sample,
+                    Some(sample) => sample,
                     _ => continue,
                 };
-
-            last_acked_packet_send_state = sample.state_at_send;
-            last_acked_packet_num = packet.pkt_num;
 
             event_sample.sample_rtt = Some(
                 sample
@@ -608,29 +597,33 @@ impl BandwidthSampler {
             }
             max_send_rate = max_send_rate.max(sample.send_rate);
 
-            let inflight_sample = self.total_bytes_acked -
-                last_acked_packet_send_state.total_bytes_acked;
+            let inflight_sample =
+                self.total_bytes_acked - sample.state_at_send.total_bytes_acked;
             if inflight_sample > event_sample.sample_max_inflight {
                 event_sample.sample_max_inflight = inflight_sample;
             }
+
+            last_acked_packet_send_state = Some(sample.state_at_send);
+            last_acked_packet_num = packet.pkt_num;
         }
 
-        if !last_lost_packet_send_state.is_valid {
-            event_sample.last_packet_send_state = last_acked_packet_send_state;
-        } else if !last_acked_packet_send_state.is_valid {
-            event_sample.last_packet_send_state = last_lost_packet_send_state;
+        let last_packet_send_state = if last_lost_packet_send_state.is_none() {
+            last_acked_packet_send_state
+        } else if last_acked_packet_send_state.is_none() {
+            last_lost_packet_send_state
         } else {
             // If two packets are inflight and an alarm is armed to lose a packet
             // and it wakes up late, then the first of two in flight packets could
             // have been acknowledged before the wakeup, which re-evaluates loss
             // detection, and could declare the later of the two lost.
-            event_sample.last_packet_send_state =
-                if last_acked_packet_num > last_lost_packet_num {
-                    last_acked_packet_send_state
-                } else {
-                    last_lost_packet_send_state
-                };
-        }
+            if last_acked_packet_num > last_lost_packet_num {
+                last_acked_packet_send_state
+            } else {
+                last_lost_packet_send_state
+            }
+        };
+
+        let last_packet_send_state = last_packet_send_state?;
 
         let is_new_max_bandwidth =
             event_sample.sample_max_bandwidth > max_bandwidth;
@@ -652,21 +645,16 @@ impl BandwidthSampler {
             round_trip_count,
         );
 
-        event_sample
+        Some((event_sample, last_packet_send_state))
     }
 
     fn on_packet_lost(
         &mut self, packet_number: u64, bytes_lost: usize,
-    ) -> SendTimeState {
-        let mut send_time_state = SendTimeState::default();
-
+    ) -> Option<SendTimeState> {
         self.total_bytes_lost += bytes_lost;
-        if let Some(state) = self.connection_state_map.take(packet_number) {
-            send_time_state = state.send_time_state;
-            send_time_state.is_valid = true;
-        }
-
-        send_time_state
+        self.connection_state_map
+            .take(packet_number)
+            .map(|s| s.send_time_state)
     }
 
     fn on_ack_event_end(
@@ -710,9 +698,11 @@ impl BandwidthSampler {
         self.last_acked_packet = packet_number;
         let sent_packet = self.connection_state_map.take(packet_number)?;
 
+        let send_time_state = sent_packet.send_time_state;
+
         self.total_bytes_acked += sent_packet.size;
         self.total_bytes_sent_at_last_acked_packet =
-            sent_packet.send_time_state.total_bytes_sent;
+            send_time_state.total_bytes_sent;
         self.last_acked_packet_sent_time = sent_packet.sent_time;
         self.last_acked_packet_ack_time = ack_time;
         if self.overestimate_avoidance {
@@ -739,7 +729,7 @@ impl BandwidthSampler {
             sent_packet.last_acked_packet_sent_time
         {
             Some(Bandwidth::from_bytes_and_time_delta(
-                sent_packet.send_time_state.total_bytes_sent -
+                send_time_state.total_bytes_sent -
                     sent_packet.total_bytes_sent_at_last_acked_packet,
                 sent_packet.sent_time - sent_packet.last_acked_packet_sent_time,
             ))
@@ -750,7 +740,7 @@ impl BandwidthSampler {
         let a0 = if self.overestimate_avoidance {
             Self::choose_a0_point(
                 &mut self.a0_candidates,
-                sent_packet.send_time_state.total_bytes_acked,
+                send_time_state.total_bytes_acked,
                 self.choose_a0_point_fix,
             )
         } else {
@@ -759,7 +749,7 @@ impl BandwidthSampler {
 
         let a0 = a0.unwrap_or(AckPoint {
             ack_time: sent_packet.last_acked_packet_ack_time,
-            total_bytes_acked: sent_packet.send_time_state.total_bytes_acked,
+            total_bytes_acked: send_time_state.total_bytes_acked,
         });
 
         // During the slope calculation, ensure that ack time of the current
@@ -789,10 +779,7 @@ impl BandwidthSampler {
             bandwidth,
             rtt,
             send_rate,
-            state_at_send: SendTimeState {
-                is_valid: true,
-                ..sent_packet.send_time_state
-            },
+            state_at_send: send_time_state,
         })
     }
 
@@ -931,14 +918,17 @@ mod bandwidth_sampler_tests {
             let size = self.get_packet_size(pkt_num);
             self.bytes_in_flight -= size;
 
-            let sample = self.sampler.on_congestion_event(
-                self.clock,
-                &[self.make_acked_packet(pkt_num)],
-                &[],
-                Some(self.max_bandwidth),
-                self.est_bandwidth_upper_bound,
-                self.round_trip_count,
-            );
+            let (sample, last_packet_send_state) = self
+                .sampler
+                .on_congestion_event(
+                    self.clock,
+                    &[self.make_acked_packet(pkt_num)],
+                    &[],
+                    Some(self.max_bandwidth),
+                    self.est_bandwidth_upper_bound,
+                    self.round_trip_count,
+                )
+                .unwrap();
 
             let sample_max_bandwidth = sample.sample_max_bandwidth.unwrap();
             self.max_bandwidth = self.max_bandwidth.max(sample_max_bandwidth);
@@ -947,9 +937,8 @@ mod bandwidth_sampler_tests {
                 bandwidth: sample_max_bandwidth,
                 rtt: sample.sample_rtt.unwrap(),
                 send_rate: None,
-                state_at_send: sample.last_packet_send_state,
+                state_at_send: last_packet_send_state,
             };
-            assert!(bandwidth_sample.state_at_send.is_valid);
             bandwidth_sample
         }
 
@@ -957,24 +946,26 @@ mod bandwidth_sampler_tests {
             let size = self.get_packet_size(pkt_num);
             self.bytes_in_flight -= size;
 
-            let sample = self.sampler.on_congestion_event(
-                self.clock,
-                &[],
-                &[self.make_lost_packet(pkt_num)],
-                Some(self.max_bandwidth),
-                self.est_bandwidth_upper_bound,
-                self.round_trip_count,
-            );
+            let (sample, last_packet_send_state) = self
+                .sampler
+                .on_congestion_event(
+                    self.clock,
+                    &[],
+                    &[self.make_lost_packet(pkt_num)],
+                    Some(self.max_bandwidth),
+                    self.est_bandwidth_upper_bound,
+                    self.round_trip_count,
+                )
+                .unwrap();
 
-            assert!(sample.last_packet_send_state.is_valid);
             assert_eq!(sample.sample_max_bandwidth, None);
             assert_eq!(sample.sample_rtt, None);
-            sample.last_packet_send_state
+            last_packet_send_state
         }
 
         fn on_congestion_event(
             &mut self, acked: &[u64], lost: &[u64],
-        ) -> CongestionEventSample {
+        ) -> (CongestionEventSample, SendTimeState) {
             let acked = acked
                 .iter()
                 .map(|pkt| {
@@ -994,19 +985,22 @@ mod bandwidth_sampler_tests {
                 })
                 .collect::<Vec<_>>();
 
-            let sample = self.sampler.on_congestion_event(
-                self.clock,
-                &acked,
-                &lost,
-                Some(self.max_bandwidth),
-                self.est_bandwidth_upper_bound,
-                self.round_trip_count,
-            );
+            let (sample, last_packet_send_state) = self
+                .sampler
+                .on_congestion_event(
+                    self.clock,
+                    &acked,
+                    &lost,
+                    Some(self.max_bandwidth),
+                    self.est_bandwidth_upper_bound,
+                    self.round_trip_count,
+                )
+                .unwrap();
 
             self.max_bandwidth =
                 self.max_bandwidth.max(sample.sample_max_bandwidth.unwrap());
 
-            sample
+            (sample, last_packet_send_state)
         }
 
         fn send_packet(
@@ -1547,7 +1541,7 @@ mod bandwidth_sampler_tests {
             time_sent: test_sender.clock,
         };
         test_sender.advance_time(Duration::from_millis(10));
-        let sample = test_sender.sampler.on_congestion_event(
+        let on_congestion_event_result = test_sender.sampler.on_congestion_event(
             test_sender.clock,
             &[acked],
             &[],
@@ -1556,12 +1550,8 @@ mod bandwidth_sampler_tests {
             test_sender.round_trip_count,
         );
 
+        assert_eq!(None, on_congestion_event_result);
         assert_eq!(0, test_sender.sampler.total_bytes_acked);
-        assert!(sample.sample_max_bandwidth.is_none());
-        assert!(!sample.sample_is_app_limited);
-        assert!(sample.sample_rtt.is_none());
-        assert_eq!(sample.sample_max_inflight, 0);
-        assert_eq!(sample.extra_acked, 0);
     }
 
     /// Make sure a default constructed [`CongestionEventSample`] has the
@@ -1598,24 +1588,24 @@ mod bandwidth_sampler_tests {
                 continue;
             }
 
-            let sample = test_sender.on_congestion_event(&[i - 1, i], &[]);
+            let (sample, last_packet_send_state) =
+                test_sender.on_congestion_event(&[i - 1, i], &[]);
             assert_eq!(sending_rate, sample.sample_max_bandwidth.unwrap());
             assert_eq!(time_between_packets, sample.sample_rtt.unwrap());
             assert_eq!(2 * REGULAR_PACKET_SIZE, sample.sample_max_inflight);
-            assert!(sample.last_packet_send_state.is_valid);
             assert_eq!(
                 2 * REGULAR_PACKET_SIZE,
-                sample.last_packet_send_state.bytes_in_flight
+                last_packet_send_state.bytes_in_flight
             );
             assert_eq!(
                 i as usize * REGULAR_PACKET_SIZE,
-                sample.last_packet_send_state.total_bytes_sent
+                last_packet_send_state.total_bytes_sent
             );
             assert_eq!(
                 (i - 2) as usize * REGULAR_PACKET_SIZE,
-                sample.last_packet_send_state.total_bytes_acked
+                last_packet_send_state.total_bytes_acked
             );
-            assert_eq!(0, sample.last_packet_send_state.total_bytes_lost);
+            assert_eq!(0, last_packet_send_state.total_bytes_lost);
             test_sender.sampler.remove_obsolete_packets(i - 2);
         }
     }
@@ -1640,28 +1630,28 @@ mod bandwidth_sampler_tests {
                 continue;
             }
             // Ack packet i and lose i-1.
-            let sample = test_sender.on_congestion_event(&[i], &[i - 1]);
+            let (sample, last_packet_send_state) =
+                test_sender.on_congestion_event(&[i], &[i - 1]);
             // Losing 50% packets means sending rate is twice the bandwidth.
 
             assert_eq!(sending_rate, sample.sample_max_bandwidth.unwrap() * 2.);
             assert_eq!(time_between_packets, sample.sample_rtt.unwrap());
             assert_eq!(REGULAR_PACKET_SIZE, sample.sample_max_inflight);
-            assert!(sample.last_packet_send_state.is_valid);
             assert_eq!(
                 2 * REGULAR_PACKET_SIZE,
-                sample.last_packet_send_state.bytes_in_flight
+                last_packet_send_state.bytes_in_flight
             );
             assert_eq!(
                 i as usize * REGULAR_PACKET_SIZE,
-                sample.last_packet_send_state.total_bytes_sent
+                last_packet_send_state.total_bytes_sent
             );
             assert_eq!(
                 (i - 2) as usize * REGULAR_PACKET_SIZE / 2,
-                sample.last_packet_send_state.total_bytes_acked
+                last_packet_send_state.total_bytes_acked
             );
             assert_eq!(
                 (i - 2) as usize * REGULAR_PACKET_SIZE / 2,
-                sample.last_packet_send_state.total_bytes_lost
+                last_packet_send_state.total_bytes_lost
             );
             test_sender.sampler.remove_obsolete_packets(i - 2);
         }
@@ -1686,7 +1676,8 @@ mod bandwidth_sampler_tests {
         test_sender.send_packet(2, REGULAR_PACKET_SIZE, true);
         test_sender.send_packet(3, REGULAR_PACKET_SIZE, true);
         test_sender.send_packet(4, REGULAR_PACKET_SIZE, true);
-        let sample = test_sender.on_congestion_event(&[1], &[]);
+        let (sample, _last_packet_send_state) =
+            test_sender.on_congestion_event(&[1], &[]);
         assert_eq!(
             first_packet_sending_rate,
             sample.sample_max_bandwidth.unwrap()
@@ -1699,7 +1690,8 @@ mod bandwidth_sampler_tests {
         test_sender.est_bandwidth_upper_bound = first_packet_sending_rate * 0.3;
         test_sender.advance_time(time_between_packets);
 
-        let sample = test_sender.on_congestion_event(&[2, 3, 4], &[]);
+        let (sample, _last_packet_send_state) =
+            test_sender.on_congestion_event(&[2, 3, 4], &[]);
 
         assert_eq!(
             first_packet_sending_rate * 2.,
