@@ -703,11 +703,6 @@ impl<H: DriverHooks> H3Driver<H> {
         let Some(frame) = &mut ctx.queued_frame else {
             return Ok(());
         };
-        debug_assert!(
-            ctx.recv.is_some(),
-            "If we have a queued frame in the context, we MUST NOT be waiting
-             on data from the channel"
-        );
 
         let audit_stats = &ctx.audit_stats;
         let stream_id = audit_stats.stream_id();
