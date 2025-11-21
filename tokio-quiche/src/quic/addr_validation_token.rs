@@ -25,10 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use quiche::ConnectionId;
-use std::io::Write;
-use std::io::{
-    self,
-};
+use std::io;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 
@@ -54,61 +51,62 @@ impl Default for AddrValidationTokenManager {
 
 impl AddrValidationTokenManager {
     pub(super) fn gen(
-        &self, original_dcid: &[u8], client_addr: SocketAddr,
+        &self, original_dcid: &[u8], client_addr: SocketAddr, scid: &[u8],
     ) -> Vec<u8> {
         let ip_bytes = match client_addr.ip() {
-            IpAddr::V4(addr) => addr.octets().to_vec(),
-            IpAddr::V6(addr) => addr.octets().to_vec(),
+            IpAddr::V4(addr) => &addr.octets()[..],
+            IpAddr::V6(addr) => &addr.octets()[..],
         };
 
-        let token_len = HMAC_TAG_LEN + ip_bytes.len() + original_dcid.len();
-        let mut token = io::Cursor::new(vec![0u8; token_len]);
+        // The token itself only consists of the client's original DCID and the
+        // HMAC tag. However, we calculate the HMAC over the client's IP and our
+        // SCID as well to bind the token to a specific connection.
+        let hmac_len = std::cmp::max(
+            original_dcid.len() + HMAC_TAG_LEN,
+            original_dcid.len() + ip_bytes.len() + scid.len(),
+        );
 
-        token.set_position(HMAC_TAG_LEN as u64);
-        token.write_all(&ip_bytes).unwrap();
-        token.write_all(original_dcid).unwrap();
+        let mut token_buf = Vec::with_capacity(hmac_len);
+        token_buf.extend_from_slice(original_dcid);
+        token_buf.extend_from_slice(ip_bytes);
+        token_buf.extend_from_slice(scid);
 
-        let tag = boring::hash::hmac_sha256(
-            &self.sign_key,
-            &token.get_ref()[HMAC_TAG_LEN..],
-        )
-        .unwrap();
+        let tag = boring::hash::hmac_sha256(&self.sign_key, &token_buf).unwrap();
+        debug_assert_eq!(tag.len(), HMAC_TAG_LEN);
 
-        token.set_position(0);
-        token.write_all(tag.as_ref()).unwrap();
-
-        token.into_inner()
+        // Drop the non-payload parts of the HMAC and reuse the storage for the
+        // tag.
+        token_buf.truncate(original_dcid.len());
+        token_buf.extend_from_slice(&tag[..]);
+        token_buf
     }
 
     pub(super) fn validate_and_extract_original_dcid<'t>(
-        &self, token: &'t [u8], client_addr: SocketAddr,
+        &self, token: &'t [u8], client_addr: SocketAddr, scid: &[u8],
     ) -> io::Result<ConnectionId<'t>> {
-        let ip_bytes = match client_addr.ip() {
-            IpAddr::V4(addr) => addr.octets().to_vec(),
-            IpAddr::V6(addr) => addr.octets().to_vec(),
+        let Some((payload, _)) = split_last_n(token, HMAC_TAG_LEN) else {
+            return Err("token is too short").into_io();
         };
-
-        let hmac_and_ip_len = HMAC_TAG_LEN + ip_bytes.len();
-
-        if token.len() < hmac_and_ip_len {
+        if payload.is_empty() {
             return Err("token is too short").into_io();
         }
 
-        let (tag, payload) = token.split_at(HMAC_TAG_LEN);
+        let original_dcid = payload;
+        let expected_token = self.gen(original_dcid, client_addr, scid);
 
-        let expected_tag =
-            boring::hash::hmac_sha256(&self.sign_key, payload).unwrap();
-
-        if !boring::memcmp::eq(&expected_tag, tag) {
+        if token.len() != expected_token.len() ||
+            !boring::memcmp::eq(token, &expected_token)
+        {
             return Err("signature verification failed").into_io();
         }
 
-        if payload[..ip_bytes.len()] != *ip_bytes {
-            return Err("IPs don't match").into_io();
-        }
-
-        Ok(ConnectionId::from_ref(&token[hmac_and_ip_len..]))
+        Ok(ConnectionId::from_ref(original_dcid))
     }
+}
+
+fn split_last_n(v: &[u8], n: usize) -> Option<(&[u8], &[u8])> {
+    let mid = v.len().checked_sub(n)?;
+    v.split_at_checked(mid)
 }
 
 #[cfg(test)]
@@ -118,29 +116,20 @@ mod tests {
     #[test]
     fn generate() {
         let manager = AddrValidationTokenManager::default();
+        let v4_addr = "127.0.0.1:1337".parse().unwrap();
+        let v6_addr = "[::1]:1338".parse().unwrap();
 
-        let assert_tag_generated = |token: &[u8]| {
-            let tag = &token[..HMAC_TAG_LEN];
-            let all_nulls = tag.iter().all(|b| *b == 0u8);
+        let token = manager.gen(b"foo", v4_addr, b"bar");
 
-            assert!(!all_nulls);
-        };
+        let (payload, tag) = split_last_n(&token, HMAC_TAG_LEN).unwrap();
+        assert!(!tag.iter().all(|b| *b == 0));
+        assert_eq!(payload, b"foo");
 
-        let token = manager.gen(b"foo", "127.0.0.1:1337".parse().unwrap());
+        let token = manager.gen(b"bar", v6_addr, b"foo");
 
-        assert_tag_generated(&token);
-        assert_eq!(token[HMAC_TAG_LEN..HMAC_TAG_LEN + 4], [127, 0, 0, 1]);
-        assert_eq!(&token[HMAC_TAG_LEN + 4..], b"foo");
-
-        let token = manager.gen(b"bar", "[::1]:1338".parse().unwrap());
-
-        assert_tag_generated(&token);
-
-        assert_eq!(token[HMAC_TAG_LEN..HMAC_TAG_LEN + 16], [
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
-        ]);
-
-        assert_eq!(&token[HMAC_TAG_LEN + 16..], b"bar");
+        let (payload, tag) = split_last_n(&token, HMAC_TAG_LEN).unwrap();
+        assert!(!tag.iter().all(|b| *b == 0));
+        assert_eq!(payload, b"bar");
     }
 
     #[test]
@@ -148,46 +137,49 @@ mod tests {
         let manager = AddrValidationTokenManager::default();
 
         let addr = "127.0.0.1:1337".parse().unwrap();
-        let token = manager.gen(b"foo", addr);
+        let token = manager.gen(b"foo", addr, b"bar");
 
         assert_eq!(
             manager
-                .validate_and_extract_original_dcid(&token, addr)
+                .validate_and_extract_original_dcid(&token, addr, b"bar")
                 .unwrap(),
             ConnectionId::from_ref(b"foo")
         );
 
         let addr = "[::1]:1338".parse().unwrap();
-        let token = manager.gen(b"barbaz", addr);
+        let token = manager.gen(b"barbaz", addr, b"foofuz");
 
         assert_eq!(
             manager
-                .validate_and_extract_original_dcid(&token, addr)
+                .validate_and_extract_original_dcid(&token, addr, b"foofuz")
                 .unwrap(),
             ConnectionId::from_ref(b"barbaz")
         );
     }
 
     #[test]
-    fn validate_err_short_token() {
+    fn validate_err_token_wrong_size() {
         let manager = AddrValidationTokenManager::default();
         let v4_addr = "127.0.0.1:1337".parse().unwrap();
         let v6_addr = "[::1]:1338".parse().unwrap();
 
         for addr in &[v4_addr, v6_addr] {
             assert!(manager
-                .validate_and_extract_original_dcid(b"", *addr)
-                .is_err());
-
-            assert!(manager
-                .validate_and_extract_original_dcid(&[1u8; HMAC_TAG_LEN], *addr)
+                .validate_and_extract_original_dcid(b"", *addr, b"foo")
                 .is_err());
 
             assert!(manager
                 .validate_and_extract_original_dcid(
-                    &[1u8; HMAC_TAG_LEN + 1],
-                    *addr
+                    &[1u8; HMAC_TAG_LEN],
+                    *addr,
+                    b"foo"
                 )
+                .is_err());
+
+            let mut token = manager.gen(b"foo", *addr, b"bar");
+            token.extend_from_slice(&[1; 17]);
+            assert!(manager
+                .validate_and_extract_original_dcid(&token, *addr, b"bar")
                 .is_err());
         }
     }
@@ -196,22 +188,36 @@ mod tests {
     fn validate_err_ips_mismatch() {
         let manager = AddrValidationTokenManager::default();
 
-        let token = manager.gen(b"foo", "127.0.0.1:1337".parse().unwrap());
+        let token =
+            manager.gen(b"foo", "127.0.0.1:1337".parse().unwrap(), b"bar");
 
         assert!(manager
             .validate_and_extract_original_dcid(
                 &token,
-                "127.0.0.2:1337".parse().unwrap()
+                "127.0.0.2:1337".parse().unwrap(),
+                b"bar",
             )
             .is_err());
 
-        let token = manager.gen(b"barbaz", "[::1]:1338".parse().unwrap());
+        let token = manager.gen(b"barbaz", "[::1]:1338".parse().unwrap(), b"foo");
 
         assert!(manager
             .validate_and_extract_original_dcid(
                 &token,
-                "[::2]:1338".parse().unwrap()
+                "[::2]:1338".parse().unwrap(),
+                b"foo",
             )
+            .is_err());
+    }
+
+    #[test]
+    fn validate_err_scid_mismatch() {
+        let manager = AddrValidationTokenManager::default();
+        let addr = "127.0.0.1:1337".parse().unwrap();
+
+        let token = manager.gen(b"foo", addr, b"bar");
+        assert!(manager
+            .validate_and_extract_original_dcid(&token, addr, b"xyzyx")
             .is_err());
     }
 
@@ -220,12 +226,12 @@ mod tests {
         let manager = AddrValidationTokenManager::default();
 
         let addr = "127.0.0.1:1337".parse().unwrap();
-        let mut token = manager.gen(b"foo", addr);
+        let mut token = manager.gen(b"foo", addr, b"bar");
 
         token[..HMAC_TAG_LEN].copy_from_slice(&[1u8; HMAC_TAG_LEN]);
 
         assert!(manager
-            .validate_and_extract_original_dcid(&token, addr)
+            .validate_and_extract_original_dcid(&token, addr, b"bar")
             .is_err());
     }
 }
