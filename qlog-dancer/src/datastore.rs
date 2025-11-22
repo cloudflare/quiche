@@ -34,8 +34,8 @@ use std::fmt::Display;
 
 use log::error;
 use log::trace;
-use qlog::events::connectivity::TransportOwner;
-use qlog::events::h3::Http3Frame;
+use qlog::events::quic::TransportOwner;
+use qlog::events::http3::Http3Frame;
 use qlog::events::quic::AckedRanges;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
@@ -1095,7 +1095,7 @@ impl Datastore {
         }
 
         match &event.data {
-            EventData::TransportParametersSet(v) =>
+            EventData::ParametersSet(v) =>
                 self.consume_qlog_transport_parameters_set(v),
 
             EventData::PacketReceived(v) =>
@@ -1103,7 +1103,7 @@ impl Datastore {
 
             EventData::PacketSent(v) => self.consume_qlog_packet_sent(v, ev_time),
 
-            EventData::DataMoved(v) => self.consume_qlog_data_moved(v, ev_time),
+            EventData::StreamDataMoved(v) => self.consume_qlog_stream_data_moved(v, ev_time),
 
             EventData::MetricsUpdated(v) =>
                 self.consume_qlog_metrics_updated(v, ev_time),
@@ -1173,7 +1173,7 @@ impl Datastore {
     }
 
     fn consume_qlog_transport_parameters_set(
-        &mut self, tp: &qlog::events::quic::TransportParametersSet,
+        &mut self, tp: &qlog::events::quic::ParametersSet,
     ) {
         match tp.owner {
             Some(TransportOwner::Local) => {
@@ -1447,8 +1447,8 @@ impl Datastore {
         }
     }
 
-    fn consume_qlog_data_moved(
-        &mut self, dm: &qlog::events::quic::DataMoved, ev_time: f32,
+    fn consume_qlog_stream_data_moved(
+        &mut self, dm: &qlog::events::quic::StreamDataMoved, ev_time: f32,
     ) {
         if let Some(recipient) = &dm.to {
             let (data, data_flat, sum_data) = match recipient {
@@ -1492,7 +1492,7 @@ impl Datastore {
     }
 
     fn consume_qlog_metrics_updated(
-        &mut self, mu: &qlog::events::quic::MetricsUpdated, ev_time: f32,
+        &mut self, mu: &qlog::events::quic::RecoveryMetricsUpdated, ev_time: f32,
     ) {
         if let Some(cwnd) = mu.congestion_window {
             self.local_cwnd.push((ev_time, cwnd));
@@ -1546,7 +1546,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_created_client(
-        &mut self, fc: &qlog::events::h3::H3FrameCreated, ev_time: f32,
+        &mut self, fc: &qlog::events::http3::FrameCreated, ev_time: f32,
     ) {
         match &fc.frame {
             Http3Frame::Headers { headers } => {
@@ -1585,7 +1585,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_created_server(
-        &mut self, fc: &qlog::events::h3::H3FrameCreated, ev_time: f32,
+        &mut self, fc: &qlog::events::http3::FrameCreated, ev_time: f32,
     ) {
         match &fc.frame {
             Http3Frame::Headers { headers } => {
@@ -1615,7 +1615,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_parsed_client(
-        &mut self, fp: &qlog::events::h3::H3FrameParsed, ev_time: f32,
+        &mut self, fp: &qlog::events::http3::FrameParsed, ev_time: f32,
     ) {
         match &fp.frame {
             Http3Frame::Headers { headers } => {
@@ -1652,7 +1652,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_parsed_server(
-        &mut self, fp: &qlog::events::h3::H3FrameParsed, ev_time: f32,
+        &mut self, fp: &qlog::events::http3::FrameParsed, ev_time: f32,
     ) {
         match &fp.frame {
             Http3Frame::Headers { headers } => {

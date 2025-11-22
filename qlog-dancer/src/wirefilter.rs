@@ -39,7 +39,7 @@ fn stream_ids(event: &Event) -> TypedArray<'_, i64> {
 
     match event {
         Event::Qlog(event) => match &event.data {
-            EventData::DataMoved(v) =>
+            EventData::StreamDataMoved(v) =>
                 if let Some(id) = v.stream_id {
                     ids.push(id as i64);
                 },

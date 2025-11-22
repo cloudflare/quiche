@@ -24,7 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use qlog::events::h3::Http3Frame;
+use qlog::events::http3::Http3Frame;
 use qlog::events::quic::AckedRanges;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
@@ -252,14 +252,16 @@ pub fn sqlog_event_list(
 
                 match &ev.data {
                     EventData::ConnectionStarted(v) => {
-                        printyo!("protocol", &v.protocol, p.details);
-                        printyo!("ip_version", &v.ip_version, p.details);
-                        printy!("src_ip", v.src_ip, p.details);
-                        printyo!("src_port", v.src_port, p.details);
-                        printyo!("src_cid", &v.src_cid, p.details);
-                        printy!("dst_ip", v.dst_ip, p.details);
-                        printyo!("dst_port", v.dst_port, p.details);
-                        printyo!("dst_cid", &v.dst_cid, p.details);
+                        printyo!("local_ip_v4", &v.local.ip_v4, p.details);
+                        printyo!("local_port_v4", &v.local.port_v4, p.details);
+                        printyo!("local_ip_v6", &v.local.ip_v6, p.details);
+                        printyo!("local_port_v6", &v.local.port_v6, p.details);
+                        printy!("local_cids", format!("{:?}",&v.local.connection_ids), p.details);
+                        printyo!("remote_ip_v4", &v.remote.ip_v4, p.details);
+                        printyo!("remote_port_v4", &v.remote.port_v4, p.details);
+                        printyo!("remote_ip_v6", &v.remote.ip_v6, p.details);
+                        printyo!("remote_port_v6", &v.remote.port_v6, p.details);
+                        printy!("remote_cid", format!("{:?}",&v.local.connection_ids), p.details);
                     },
                     EventData::ConnectionClosed(v) => {
                         printyo_json!("owner", &v.owner, p.details);
@@ -277,7 +279,7 @@ pub fn sqlog_event_list(
                         printyo!("reason", &v.reason, p.details);
                         printyo_json!("trigger", &v.trigger, p.details);
                     },
-                    EventData::TransportParametersSet(v) => {
+                    EventData::ParametersSet(v) => {
                         printyo_json!("owner", &v.owner, p.details);
                         printyo!(
                             "resumption_allowed",
@@ -290,11 +292,6 @@ pub fn sqlog_event_list(
                             p.details
                         );
                         printyo!("tls_cipher", &v.tls_cipher, p.details);
-                        printyo!(
-                            "aead_tag_length",
-                            &v.aead_tag_length,
-                            p.details
-                        );
                         printyo!(
                             "odcid",
                             &v.original_destination_connection_id,
@@ -395,7 +392,7 @@ pub fn sqlog_event_list(
                             p.details += &frames_to_string(frames);
                         }
                     },
-                    EventData::DataMoved(v) => {
+                    EventData::StreamDataMoved(v) => {
                         printyo!("id", v.stream_id, p.details);
                         printyo!("off", v.offset, p.details);
                         printyo!("len", v.length, p.details);

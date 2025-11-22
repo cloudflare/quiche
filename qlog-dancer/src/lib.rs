@@ -144,8 +144,8 @@ impl std::fmt::Display for VantagePointTypeShim {
 }
 
 pub struct LogFileDetails {
-    pub log_version: String,
-    pub log_format: String,
+    pub file_schema: String,
+    pub serialization_format: String,
     pub qlog_vantage_point_type: VantagePointTypeShim,
     pub sessions: BTreeMap<i64, NetlogSession>,
 }
@@ -175,8 +175,8 @@ pub fn parse_log_file(
             let mark = std::time::Instant::now();
             let qlog = read_qlog_from_file(config.file.clone())?;
             let details = LogFileDetails {
-                log_version: qlog.qlog_version.clone(),
-                log_format: qlog.qlog_format.clone(),
+                file_schema: qlog.file_schema.clone(),
+                serialization_format: qlog.serialization_format.clone(),
                 qlog_vantage_point_type: VantagePointTypeShim {
                     inner: qlog.traces[0].vantage_point.ty.clone(),
                 },
@@ -261,8 +261,8 @@ pub fn parse_log_file(
             debug!("\tcomplete in {:?}", std::time::Instant::now() - mark);
 
             let details = LogFileDetails {
-                log_version: constants.log_format_version.to_string(),
-                log_format: "Chrome netlog".to_string(),
+                file_schema: constants.log_format_version.to_string(),
+                serialization_format: "Chrome netlog".to_string(),
                 qlog_vantage_point_type: VantagePointTypeShim {
                     inner: qlog::VantagePointType::Client,
                 },
@@ -302,8 +302,8 @@ pub fn qlog_seq_reader(
         })
         .unwrap();
     let log_file_details = LogFileDetails {
-        log_version: qlog_reader.qlog.qlog_version.clone(),
-        log_format: qlog_reader.qlog.qlog_format.clone(),
+        file_schema: qlog_reader.qlog.file_schema.clone(),
+        serialization_format: qlog_reader.qlog.serialization_format.clone(),
         qlog_vantage_point_type: VantagePointTypeShim {
             inner: qlog_reader.qlog.trace.vantage_point.ty.clone(),
         },
