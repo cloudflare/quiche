@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -69,11 +70,8 @@ pub struct H3AuditStats {
     /// Measured across all HEADERS frames sent on the stream. A value of 0
     /// indicates there was no failed flushing.
     headers_flush_duration: AtomicCell<Duration>,
-    /// Number of stream headers entered the pending flush state but haven't
-    /// exited.
-    ///
-    /// This count includes streams that were reset before headers were flushed.
-    headers_pending_flush: AtomicU64,
+    /// True if the stream currently has headers pending flush.
+    headers_pending_flush: AtomicBool,
 }
 
 impl H3AuditStats {
@@ -89,7 +87,7 @@ impl H3AuditStats {
             recvd_stream_fin: AtomicCell::new(StreamClosureKind::None),
             sent_stream_fin: AtomicCell::new(StreamClosureKind::None),
             headers_flush_duration: AtomicCell::new(Duration::from_secs(0)),
-            headers_pending_flush: AtomicU64::new(0),
+            headers_pending_flush: AtomicBool::new(false),
         }
     }
 
@@ -222,8 +220,6 @@ impl H3AuditStats {
 
     #[inline]
     pub fn add_header_flush_duration(&self, duration: Duration) {
-        self.headers_pending_flush.fetch_sub(1, Ordering::SeqCst);
-
         // NB: load and store may not be atomic but we aren't accessing the
         // object from any other thread so things should be ok.
         let current = self.headers_flush_duration.load();
@@ -231,7 +227,7 @@ impl H3AuditStats {
     }
 
     #[inline]
-    pub fn inc_headers_pending_flush(&self) {
-        self.headers_pending_flush.fetch_add(1, Ordering::SeqCst);
+    pub fn set_headers_pending_flush(&self, value: bool) {
+        self.headers_pending_flush.store(value, Ordering::SeqCst);
     }
 }
