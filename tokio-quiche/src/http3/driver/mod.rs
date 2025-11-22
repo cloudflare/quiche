@@ -727,7 +727,7 @@ impl<H: DriverHooks> H3Driver<H> {
 
                 if let Err(h3::Error::StreamBlocked) = res {
                     if ctx.first_full_headers_flush_fail_time.is_none() {
-                        ctx.audit_stats.inc_headers_pending_flush();
+                        ctx.audit_stats.set_headers_pending_flush(true);
                         ctx.first_full_headers_flush_fail_time =
                             Some(Instant::now());
                     }
@@ -737,6 +737,7 @@ impl<H: DriverHooks> H3Driver<H> {
                     if let Some(first) =
                         ctx.first_full_headers_flush_fail_time.take()
                     {
+                        ctx.audit_stats.set_headers_pending_flush(false);
                         ctx.audit_stats.add_header_flush_duration(
                             Instant::now().duration_since(first),
                         );
