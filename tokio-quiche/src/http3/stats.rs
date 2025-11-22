@@ -69,6 +69,11 @@ pub struct H3AuditStats {
     /// Measured across all HEADERS frames sent on the stream. A value of 0
     /// indicates there was no failed flushing.
     headers_flush_duration: AtomicCell<Duration>,
+    /// Number of stream headers entered the pending flush state but haven't
+    /// exited.
+    ///
+    /// This count includes streams that were reset before headers were flushed.
+    headers_pending_flush: AtomicU64,
 }
 
 impl H3AuditStats {
@@ -84,6 +89,7 @@ impl H3AuditStats {
             recvd_stream_fin: AtomicCell::new(StreamClosureKind::None),
             sent_stream_fin: AtomicCell::new(StreamClosureKind::None),
             headers_flush_duration: AtomicCell::new(Duration::from_secs(0)),
+            headers_pending_flush: AtomicU64::new(0),
         }
     }
 
@@ -216,9 +222,16 @@ impl H3AuditStats {
 
     #[inline]
     pub fn add_header_flush_duration(&self, duration: Duration) {
+        self.headers_pending_flush.fetch_sub(1, Ordering::SeqCst);
+
         // NB: load and store may not be atomic but we aren't accessing the
         // object from any other thread so things should be ok.
         let current = self.headers_flush_duration.load();
         self.headers_flush_duration.store(current + duration);
+    }
+
+    #[inline]
+    pub fn inc_headers_pending_flush(&self) {
+        self.headers_pending_flush.fetch_add(1, Ordering::SeqCst);
     }
 }
