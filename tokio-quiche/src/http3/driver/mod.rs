@@ -726,8 +726,11 @@ impl<H: DriverHooks> H3Driver<H> {
                 };
 
                 if let Err(h3::Error::StreamBlocked) = res {
-                    ctx.first_full_headers_flush_fail_time
-                        .get_or_insert(Instant::now());
+                    if ctx.first_full_headers_flush_fail_time.is_none() {
+                        ctx.audit_stats.inc_headers_pending_flush();
+                        ctx.first_full_headers_flush_fail_time =
+                            Some(Instant::now());
+                    }
                 }
 
                 if res.is_ok() {
