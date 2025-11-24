@@ -54,7 +54,7 @@ pub(crate) struct StreamCtx {
     /// Indicates the stream sent initial headers.
     pub(crate) initial_headers_sent: bool,
     /// First time that a HEADERS frame was not fully flushed.
-    first_full_headers_flush_fail_time: Option<Instant>,
+    pub(crate) first_full_headers_flush_fail_time: Option<Instant>,
     /// Indicates the stream received fin or reset. No more data will be
     /// received.
     pub(crate) fin_or_reset_recv: bool,

@@ -43,6 +43,7 @@ use std::error::Error;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Instant;
 
 use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
@@ -1060,7 +1061,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 // closed the channel.
                 debug_assert!(
                     ctx.queued_frame.is_none(),
-                    "We MUST NOT have a queued frame if we are already waiting on 
+                    "We MUST NOT have a queued frame if we are already waiting on
                     more data from the channel"
                 );
                 return Ok(());
@@ -1258,10 +1259,19 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
 
 impl<H: DriverHooks> Drop for H3Driver<H> {
     fn drop(&mut self) {
-        for stream in self.stream_map.values() {
+        for stream in self.stream_map.values_mut() {
             stream
                 .audit_stats
                 .set_recvd_stream_fin(StreamClosureKind::Implicit);
+
+
+            if let Some(first) =
+                stream.first_full_headers_flush_fail_time.take()
+            {
+                stream.audit_stats.add_header_flush_duration(
+                    Instant::now().duration_since(first),
+                );
+            }
         }
     }
 }
