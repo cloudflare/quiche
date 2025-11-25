@@ -110,6 +110,27 @@ where
         }
     }
 
+    /// Handle a [`ServerH3Event`].
+    ///
+    /// TODO(evanrittenhouse): support POST requests
+    async fn handle_server_h3_event(
+        &mut self, event: ServerH3Event,
+    ) -> QuicResult<()> {
+        match event {
+            ServerH3Event::Core(event) => Self::handle_h3_event(event),
+
+            ServerH3Event::Headers {
+                incoming_headers,
+                priority,
+            } => {
+                // Received headers for a new stream from the H3Driver.
+                self.handle_incoming_headers(incoming_headers, priority)
+                    .await;
+                Ok(())
+            },
+        }
+    }
+    
     /// Handle a [`H3Event`].
     ///
     /// For simplicity's sake, we only handle a couple of events here.
@@ -130,27 +151,6 @@ where
 
             _ => {
                 log::info!("received unhandled event: {event:?}");
-                Ok(())
-            },
-        }
-    }
-
-    /// Handle a [`ServerH3Event`].
-    ///
-    /// TODO(evanrittenhouse): support POST requests
-    async fn handle_server_h3_event(
-        &mut self, event: ServerH3Event,
-    ) -> QuicResult<()> {
-        match event {
-            ServerH3Event::Core(event) => Self::handle_h3_event(event),
-
-            ServerH3Event::Headers {
-                incoming_headers,
-                priority,
-            } => {
-                // Received headers for a new stream from the H3Driver.
-                self.handle_incoming_headers(incoming_headers, priority)
-                    .await;
                 Ok(())
             },
         }
