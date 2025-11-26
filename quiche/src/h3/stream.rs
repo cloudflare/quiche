@@ -50,14 +50,14 @@ pub enum Type {
 
 impl Type {
     #[cfg(feature = "qlog")]
-    pub fn to_qlog(self) -> qlog::events::h3::H3StreamType {
+    pub fn to_qlog(self) -> qlog::events::http3::StreamType {
         match self {
-            Type::Control => qlog::events::h3::H3StreamType::Control,
-            Type::Request => qlog::events::h3::H3StreamType::Request,
-            Type::Push => qlog::events::h3::H3StreamType::Push,
-            Type::QpackEncoder => qlog::events::h3::H3StreamType::QpackEncode,
-            Type::QpackDecoder => qlog::events::h3::H3StreamType::QpackDecode,
-            Type::Unknown => qlog::events::h3::H3StreamType::Unknown,
+            Type::Control => qlog::events::http3::StreamType::Control,
+            Type::Request => qlog::events::http3::StreamType::Request,
+            Type::Push => qlog::events::http3::StreamType::Push,
+            Type::QpackEncoder => qlog::events::http3::StreamType::QpackEncode,
+            Type::QpackDecoder => qlog::events::http3::StreamType::QpackDecode,
+            Type::Unknown => qlog::events::http3::StreamType::Unknown,
         }
     }
 }
