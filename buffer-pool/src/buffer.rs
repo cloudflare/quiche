@@ -63,6 +63,10 @@ impl Reuse for ConsumeBuffer {
         self.head = 0;
         self.inner.capacity() > 0
     }
+
+    fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
 }
 
 impl ConsumeBuffer {
