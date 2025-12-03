@@ -805,6 +805,28 @@ pub enum Event {
     GoAway,
 }
 
+impl Event {
+    #[allow(unused_variables)]
+    /// docs
+    pub fn dbg_name(&self) -> String {
+        match self {
+            Event::Headers { list, more_frames } => {
+                let authority = list
+                    .iter()
+                    .find(|v| v.name().eq(":authority".as_bytes()))
+                    .unwrap();
+
+                format!("headers. {:?}", authority)
+            },
+            Event::Data => "data".to_string(),
+            Event::Finished => "finished".to_string(),
+            Event::Reset(_) => "reset".to_string(),
+            Event::PriorityUpdate => "priority_update".to_string(),
+            Event::GoAway => "go_away".to_string(),
+        }
+    }
+}
+
 /// Extensible Priorities parameters.
 ///
 /// The `TryFrom` trait supports constructing this object from the serialized

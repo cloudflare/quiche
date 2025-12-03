@@ -36,6 +36,7 @@ use std::time::Duration;
 use crate::quiche;
 use quiche::h3::frame::Frame;
 use quiche::h3::Header;
+use quiche::h3::NameValue;
 use quiche::ConnectionError;
 use serde::Deserialize;
 use serde::Serialize;
@@ -110,6 +111,54 @@ pub enum Action {
     Wait {
         wait_type: WaitType,
     },
+}
+impl Action {
+    #[allow(unused_variables)]
+    pub fn dbg_name(&self) -> String {
+        match self {
+            Action::SendFrame {
+                stream_id,
+                fin_stream,
+                frame,
+            } => "send_frame".to_string(),
+            Action::SendHeadersFrame {
+                stream_id,
+                fin_stream,
+                literal_headers,
+                headers,
+                frame,
+            } => format!(
+                "send_headers_frame. {:?}",
+                headers
+                    .iter()
+                    .find(|v| v.name().eq(":authority".as_bytes()))
+                    .unwrap()
+            )
+            .to_string(),
+            Action::StreamBytes {
+                stream_id,
+                fin_stream,
+                bytes,
+            } => "stream_bytes".to_string(),
+            Action::SendDatagram { payload } => "send_datagram".to_string(),
+            Action::OpenUniStream {
+                stream_id,
+                fin_stream,
+                stream_type,
+            } => "open_uni_stream".to_string(),
+            Action::ResetStream {
+                stream_id,
+                error_code,
+            } => "reset_stream".to_string(),
+            Action::StopSending {
+                stream_id,
+                error_code,
+            } => "stop_sendind".to_string(),
+            Action::ConnectionClose { error } => "connection_close".to_string(),
+            Action::FlushPackets => "flush_packets".to_string(),
+            Action::Wait { wait_type } => "wait".to_string(),
+        }
+    }
 }
 
 /// Configure the wait behavior for a connection.

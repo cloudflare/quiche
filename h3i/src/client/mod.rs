@@ -328,6 +328,8 @@ pub(crate) fn parse_streams<C: Client>(
             continue;
         }
 
+        println!("------------ 70 h3i_client stream_id: {}", stream);
+
         loop {
             let stream_parse_result = client
                 .stream_parsers_mut()

@@ -319,7 +319,7 @@ async fn test_post_accept_timeout_is_reset() {
         Action::Wait {
             wait_type: WaitType::WaitDuration(POST_ACCEPT_TIMEOUT.mul_f32(0.50)),
         },
-        send_headers_frame(0, true, default_headers()),
+        send_headers_frame(0, true, default_headers(None)),
         Action::FlushPackets,
         // Post-accept timeout should be cancelled, so we can wait an arbitrary
         // period (less than the idle timeout of course) and the
@@ -327,7 +327,7 @@ async fn test_post_accept_timeout_is_reset() {
         Action::Wait {
             wait_type: WaitType::WaitDuration(POST_ACCEPT_TIMEOUT.mul_f32(1.1)),
         },
-        send_headers_frame(4, true, default_headers()),
+        send_headers_frame(4, true, default_headers(None)),
         Action::FlushPackets,
     ];
 

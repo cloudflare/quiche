@@ -122,7 +122,7 @@ impl ConnectionStage for Handshake {
         &mut self, qconn: &mut QuicheConnection,
         _ctx: &mut ConnectionStageContext<A>,
     ) -> ControlFlow<QuicResult<()>> {
-        if qconn.is_established() {
+        if qconn.is_established() || qconn.is_in_early_data() {
             ControlFlow::Break(Ok(()))
         } else {
             ControlFlow::Continue(())
@@ -153,6 +153,10 @@ impl ConnectionStage for RunningApplication {
     ) -> QuicResult<()> {
         if ctx.application.should_act() {
             if received_packets {
+                println!(
+                    "------ 30 conn_stage: recv_packet application.on_read is_server: {}",
+                    qconn.is_server(),
+                );
                 ctx.application.process_reads(qconn)?;
             }
 

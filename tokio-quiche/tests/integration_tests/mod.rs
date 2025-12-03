@@ -46,6 +46,7 @@ pub mod connection_close;
 pub mod headers;
 pub mod migration;
 pub mod timeouts;
+pub mod zero_rtt;
 
 #[tokio::test]
 async fn echo() {
@@ -169,6 +170,7 @@ async fn test_ioworker_state_machine_pause() {
         QuicSettings::default(),
         tls_cert_settings,
         hooks,
+        false,
     );
     let mut stream = listen(
         vec![socket],

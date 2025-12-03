@@ -824,6 +824,13 @@ where
     pub(crate) async fn run<A: ApplicationOverQuic>(
         mut self, mut qconn: QuicheConnection, mut ctx: ConnectionStageContext<A>,
     ) -> Closing<Tx, M, A> {
+        println!(
+            "-- 10 io_worker: start. is_server: {}, get_early_data_reason {}, stage: {:?}",
+            qconn.is_server(),
+            qconn.get_early_data_reason(),
+            self.conn_stage
+        );
+
         // Perform a single call to process_reads()/process_writes(),
         // unconditionally, to ensure that any application data (e.g.
         // STREAM frames or datagrams) processed by the Handshake

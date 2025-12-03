@@ -67,6 +67,7 @@ async fn main() {
                 kind: CertificateKind::X509,
             },
             Hooks::default(),
+            false,
         ),
         SimpleConnectionIdGenerator,
         DefaultMetrics,

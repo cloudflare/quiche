@@ -231,6 +231,30 @@ where
     F: Fn(ServerH3Connection) -> Fut + Send + Clone + 'static,
     Fut: Future<Output = ()> + Send,
 {
+    start_server_with_settings_and_extra(
+        quic_settings,
+        http3_settings,
+        ExtraConfig {
+            enable_early_data: false,
+        },
+        hook,
+        hdl,
+    )
+}
+
+pub struct ExtraConfig {
+    pub enable_early_data: bool,
+}
+
+pub fn start_server_with_settings_and_extra<F, Fut>(
+    quic_settings: QuicSettings, http3_settings: Http3Settings,
+    extra: ExtraConfig, hook: Arc<impl ConnectionHook + Send + Sync + 'static>,
+    hdl: F,
+) -> String
+where
+    F: Fn(ServerH3Connection) -> Fut + Send + Clone + 'static,
+    Fut: Future<Output = ()> + Send,
+{
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     let url = format!("http://127.0.0.1:{}", socket.local_addr().unwrap().port());
 
@@ -244,8 +268,13 @@ where
         connection_hook: Some(hook),
     };
 
-    let params =
-        ConnectionParams::new_server(quic_settings, tls_cert_settings, hooks);
+    let params = ConnectionParams::new_server(
+        quic_settings,
+        tls_cert_settings,
+        hooks,
+        extra.enable_early_data,
+    );
+
     let mut stream = listen(
         vec![socket],
         params,

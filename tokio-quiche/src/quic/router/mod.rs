@@ -866,7 +866,8 @@ mod tests {
         };
         let actions = vec![Action::ConnectionClose { error: conn_close }];
 
-        let _ = h3i::client::sync_client::connect(h3i_config, actions, None);
+        let _ =
+            h3i::client::sync_client::connect(h3i_config, None, actions, None);
     }
 
     #[tokio::test]
@@ -890,6 +891,7 @@ mod tests {
             quic_settings,
             tls_cert_settings,
             Hooks::default(),
+            false,
         );
         let config = Config::new(&params, SocketCapabilities::default()).unwrap();
 
