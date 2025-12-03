@@ -635,8 +635,18 @@ where
         &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
     ) -> QuicResult<()> {
         if quic_application.should_act() {
+            // Poll the application to make progress.
+            //
+            // Once the connection has been established (i.e. the handshake is
+            // complete), we only poll the application.
+            //
+            // The exception is 0-RTT in TLS 1.3, where the full handshake is
+            // still in progress but we have 0-RTT keys to process early data.
+            // This means TLS callbacks migth only be polled on the next timeout
+            // or when a packet is received from the peer.
             quic_application.wait_for_data(qconn).await
         } else {
+            // Poll quiche to make progress on handshake callbacks.
             self.wait_for_quiche(qconn, quic_application).await
         }
     }

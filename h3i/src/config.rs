@@ -63,6 +63,8 @@ pub struct Config {
     pub max_stream_window: u64,
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
+    /// Enables sending or receiving early data.
+    pub enable_early_data: bool,
     /// Whether to enable datagram sending.
     pub enable_dgram: bool,
     /// Datagram receive queue length.
@@ -194,6 +196,7 @@ impl Config {
             max_window: self.max_window,
             max_stream_window: self.max_stream_window,
             session: None,
+            enable_early_data: self.enable_early_data,
             enable_dgram: self.enable_dgram,
             dgram_recv_queue_len: self.dgram_recv_queue_len,
             dgram_send_queue_len: self.dgram_send_queue_len,
@@ -220,6 +223,7 @@ impl Default for Config {
             max_window: 25165824,
             max_stream_window: 16777216,
             session: None,
+            enable_early_data: false,
             enable_dgram: true,
             dgram_recv_queue_len: 65536,
             dgram_send_queue_len: 65536,
