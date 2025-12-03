@@ -274,6 +274,12 @@ impl Handshake {
     pub fn is_in_early_data(&self) -> bool {
         unsafe { SSL_in_early_data(self.as_ptr()) == 1 }
     }
+
+    pub fn early_data_reason(&self) -> u32 {
+        let reuse_reason_status =
+            unsafe { SSL_get_early_data_reason(self.as_ptr()) };
+        reuse_reason_status.0
+    }
 }
 
 pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
@@ -293,6 +299,10 @@ pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
 }
 pub(super) const TLS_ERROR: c_int = 3;
 
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct ssl_early_data_reason_t(pub ::std::os::raw::c_uint);
 extern "C" {
     // SSL_METHOD specific for boringssl.
     pub(super) fn SSL_CTX_set_tlsext_ticket_keys(
@@ -340,6 +350,8 @@ extern "C" {
     fn SSL_reset_early_data_reject(ssl: *mut SSL);
 
     fn SSL_in_early_data(ssl: *const SSL) -> c_int;
+
+    fn SSL_get_early_data_reason(ssl: *const SSL) -> ssl_early_data_reason_t;
 
     fn SSL_SESSION_to_bytes(
         session: *const SSL_SESSION, out: *mut *mut u8, out_len: *mut usize,

@@ -203,6 +203,9 @@ fn make_quiche_config(
             track_unknown_transport_params,
         );
     }
+    if params.settings.enable_early_data {
+        config.enable_early_data();
+    }
 
     if should_log_keys {
         config.log_keys();

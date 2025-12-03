@@ -141,6 +141,10 @@ impl Handshake {
         false
     }
 
+    pub fn early_data_reason(&self) -> u32 {
+        0
+    }
+
     pub fn set_session(&mut self, session: &[u8]) -> Result<()> {
         unsafe {
             let ctx = SSL_get_SSL_CTX(self.as_ptr());
