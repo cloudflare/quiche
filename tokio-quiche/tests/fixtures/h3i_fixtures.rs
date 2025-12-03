@@ -61,10 +61,14 @@ pub fn h3i_config(url: &str) -> h3i::config::Config {
 }
 
 pub fn default_headers() -> Vec<Header> {
+    default_headers_with_authority("test.com")
+}
+
+pub fn default_headers_with_authority(host: &str) -> Vec<Header> {
     vec![
         Header::new(b":method", b"GET"),
         Header::new(b":scheme", b"https"),
-        Header::new(b":authority", b"test.com"),
+        Header::new(b":authority", host.as_bytes()),
         Header::new(b":path", b"/"),
     ]
 }
