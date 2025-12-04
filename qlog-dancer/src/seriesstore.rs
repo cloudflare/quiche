@@ -102,7 +102,8 @@ pub struct SeriesStore {
     pub received_x_min: f32,
     pub received_x_max: f32,
 
-    pub y_max_stream_plot: u64,
+    pub y_max_stream_send_plot: u64,
+    pub y_max_stream_recv_plot: u64,
     pub y_max_congestion_plot: u64,
     pub y_max_rtt_plot: f32,
 
@@ -136,8 +137,12 @@ impl SeriesStore {
         self.y_max_congestion_plot = self.y_max_congestion_plot.max(y);
     }
 
-    fn update_stream_y_axis_max(&mut self, y: u64) {
-        self.y_max_stream_plot = self.y_max_stream_plot.max(y);
+    fn update_stream_send_y_axis_max(&mut self, y: u64) {
+        self.y_max_stream_send_plot = self.y_max_stream_send_plot.max(y);
+    }
+
+    fn update_stream_recv_y_axis_max(&mut self, y: u64) {
+        self.y_max_stream_recv_plot = self.y_max_stream_recv_plot.max(y);
     }
 
     fn update_rtt_y_axis_max(&mut self, y: f32) {
@@ -210,7 +215,7 @@ impl SeriesStore {
     fn sent_max_data(&mut self, data_store: &Datastore) {
         for point in &data_store.sent_max_data {
             self.update_sent_x_axis_max(point.0);
-            self.update_stream_y_axis_max(point.1);
+            self.update_stream_recv_y_axis_max(point.1);
 
             push_interp(&mut self.sent_max_data, *point);
         }
@@ -219,7 +224,7 @@ impl SeriesStore {
     fn sum_sent_stream_max_data(&mut self, data_store: &Datastore) {
         for point in &data_store.sum_sent_stream_max_data {
             self.update_sent_x_axis_max(point.0);
-            self.update_stream_y_axis_max(point.1);
+            self.update_stream_recv_y_axis_max(point.1);
 
             push_interp(&mut self.sum_sent_stream_max_data, *point);
         }
@@ -333,7 +338,7 @@ impl SeriesStore {
 
             for point in points {
                 self.update_sent_x_axis_max(point.0);
-                self.update_stream_y_axis_max(point.1);
+                self.update_stream_recv_y_axis_max(point.1);
 
                 push_interp(&mut series_points, *point);
             }
@@ -348,7 +353,7 @@ impl SeriesStore {
 
             for point in points {
                 self.update_sent_x_axis_max(point.0);
-                self.update_stream_y_axis_max(point.1);
+                self.update_stream_send_y_axis_max(point.1);
 
                 push_interp(&mut series_points, *point);
             }
@@ -365,7 +370,7 @@ impl SeriesStore {
                 let y = point.1.offset + point.1.length;
 
                 self.update_sent_x_axis_max(point.0);
-                self.update_stream_y_axis_max(y);
+                self.update_stream_recv_y_axis_max(y);
 
                 push_interp(&mut series_points, (point.0, y));
             }
@@ -388,7 +393,7 @@ impl SeriesStore {
                 let y = point.1.offset + point.1.length;
 
                 self.update_sent_x_axis_max(point.0);
-                self.update_stream_y_axis_max(y);
+                self.update_stream_send_y_axis_max(y);
 
                 push_interp(&mut series_points, (point.0, y));
             }
@@ -401,6 +406,10 @@ impl SeriesStore {
         for point in &data_store.sum_stream_buffer_writes {
             push_interp(&mut self.sum_stream_buffer_writes, *point);
         }
+
+        if let Some((_, y)) = data_store.sum_stream_buffer_writes.last() {
+            self.update_stream_send_y_axis_max(*y);
+        }
     }
 
     fn stream_buffer_dropped(&mut self, data_store: &Datastore) {
@@ -411,7 +420,7 @@ impl SeriesStore {
                 let y = point.1.offset + point.1.length;
 
                 self.update_sent_x_axis_max(point.0);
-                self.update_stream_y_axis_max(y);
+                self.update_stream_send_y_axis_max(y);
 
                 push_interp(&mut series_points, (point.0, y));
             }
@@ -424,6 +433,10 @@ impl SeriesStore {
         for point in &data_store.sum_stream_buffer_dropped {
             push_interp(&mut self.sum_stream_buffer_dropped, *point);
         }
+
+        if let Some((_, y)) = data_store.sum_stream_buffer_dropped.last() {
+            self.update_stream_send_y_axis_max(*y);
+        }
     }
 
     fn sent_stream_frames(&mut self, data_store: &Datastore) {
@@ -435,7 +448,7 @@ impl SeriesStore {
                     let y = offset + length;
 
                     self.update_sent_x_axis_max(point.0);
-                    self.update_stream_y_axis_max(y);
+                    self.update_stream_send_y_axis_max(y);
 
                     series_points.push((point.0, y));
                 }
@@ -454,7 +467,7 @@ impl SeriesStore {
                 let y = point.1.offset + point.1.length;
 
                 self.received_x_max = self.received_x_max.max(point.0);
-                self.update_stream_y_axis_max(y);
+                self.update_stream_recv_y_axis_max(y);
 
                 series_points.push((point.0, y));
             }
@@ -481,7 +494,7 @@ impl SeriesStore {
                 let new_y = last_y + point.1;
 
                 self.received_x_max = self.received_x_max.max(point.0);
-                self.update_stream_y_axis_max(new_y);
+                self.update_stream_recv_y_axis_max(new_y);
 
                 series_points.push((point.0, new_y));
 
