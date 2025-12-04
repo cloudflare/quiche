@@ -64,7 +64,7 @@ pub fn draw_congestion_plot<'a, DB: DrawingBackend + 'a>(
         &params.colors,
         "Relative time (ms)",
         "Data (bytes)",
-        params.display_minor_lines,
+        false,
         &mut plot,
     );
 
