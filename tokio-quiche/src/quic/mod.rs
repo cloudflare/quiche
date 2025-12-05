@@ -241,6 +241,17 @@ where
         }
     }
 
+    if let Some(verify_file) = &params.settings.verify_file {
+        log::info!("setting up verify_file"; "verify_file"=>verify_file);
+        &client_config.quiche_config.load_verify_locations_from_file(verify_file);
+    }
+
+    if let Some(verify_directory) = &params.settings.verify_directory {
+        log::info!("setting up verify_directory"; "verify_directory"=>verify_directory);
+        &client_config.quiche_config.load_verify_locations_from_directory(verify_directory);
+    }
+
+
     // Set the keylog file here for the same reason
     if let Some(keylog_file) = &client_config.keylog_file {
         log::info!("setting up keylog file");
