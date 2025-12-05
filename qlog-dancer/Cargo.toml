@@ -22,7 +22,7 @@ qlog = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tabled = "0.15.0"
+tabled = "0.20.0"
 table_to_html = "0.4.0"
 
 wirefilter-engine = { git = "https://github.com/cloudflare/wirefilter.git", rev="f3116d9f244d10a2d9a37d036cfa7129c5e50d3b" }
