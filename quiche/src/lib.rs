@@ -4812,9 +4812,9 @@ impl<F: BufFactory> Connection<F> {
                                     ack_eliciting = true;
                                     in_flight = true;
                                     dgram_emitted = true;
-                                    let _ =
+                                    self.dgram_sent_count =
                                         self.dgram_sent_count.saturating_add(1);
-                                    let _ =
+                                    path.dgram_sent_count =
                                         path.dgram_sent_count.saturating_add(1);
                                 }
                             },
@@ -8164,12 +8164,10 @@ impl<F: BufFactory> Connection<F> {
 
                 self.dgram_recv_queue.push(data)?;
 
-                let _ = self.dgram_recv_count.saturating_add(1);
-                let _ = self
-                    .paths
-                    .get_mut(recv_path_id)?
-                    .dgram_recv_count
-                    .saturating_add(1);
+                self.dgram_recv_count = self.dgram_recv_count.saturating_add(1);
+
+                let path = self.paths.get_mut(recv_path_id)?;
+                path.dgram_recv_count = path.dgram_recv_count.saturating_add(1);
             },
 
             frame::Frame::DatagramHeader { .. } => unreachable!(),
