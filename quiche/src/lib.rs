@@ -1691,6 +1691,21 @@ where
     /// The number of streams stopped by remote.
     stopped_stream_remote_count: u64,
 
+    /// The number of DATA_BLOCKED frames sent due to hitting the connection
+    /// flow control limit.
+    data_blocked_sent_count: u64,
+
+    /// The number of STREAM_DATA_BLOCKED frames sent due to a stream hitting
+    /// the stream flow control limit.
+    stream_data_blocked_sent_count: u64,
+
+    /// The number of DATA_BLOCKED frames received from the remote endpoint.
+    data_blocked_recv_count: u64,
+
+    /// The number of STREAM_DATA_BLOCKED frames received from the remote
+    /// endpoint.
+    stream_data_blocked_recv_count: u64,
+
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
 }
@@ -2181,6 +2196,11 @@ impl<F: BufFactory> Connection<F> {
             stopped_stream_local_count: 0,
             reset_stream_remote_count: 0,
             stopped_stream_remote_count: 0,
+
+            data_blocked_sent_count: 0,
+            stream_data_blocked_sent_count: 0,
+            data_blocked_recv_count: 0,
+            stream_data_blocked_recv_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
         };
@@ -4473,6 +4493,8 @@ impl<F: BufFactory> Connection<F> {
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.blocked_limit = None;
+                    self.data_blocked_sent_count =
+                        self.data_blocked_sent_count.saturating_add(1);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -4596,6 +4618,8 @@ impl<F: BufFactory> Connection<F> {
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.streams.remove_blocked(stream_id);
+                    self.stream_data_blocked_sent_count =
+                        self.stream_data_blocked_sent_count.saturating_add(1);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -7234,6 +7258,10 @@ impl<F: BufFactory> Connection<F> {
             stopped_stream_count_local: self.stopped_stream_local_count,
             reset_stream_count_remote: self.reset_stream_remote_count,
             stopped_stream_count_remote: self.stopped_stream_remote_count,
+            data_blocked_sent_count: self.data_blocked_sent_count,
+            stream_data_blocked_sent_count: self.stream_data_blocked_sent_count,
+            data_blocked_recv_count: self.data_blocked_recv_count,
+            stream_data_blocked_recv_count: self.stream_data_blocked_recv_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
         }
@@ -8009,9 +8037,15 @@ impl<F: BufFactory> Connection<F> {
                 self.streams.update_peer_max_streams_uni(max);
             },
 
-            frame::Frame::DataBlocked { .. } => (),
+            frame::Frame::DataBlocked { .. } => {
+                self.data_blocked_recv_count =
+                    self.data_blocked_recv_count.saturating_add(1);
+            },
 
-            frame::Frame::StreamDataBlocked { .. } => (),
+            frame::Frame::StreamDataBlocked { .. } => {
+                self.stream_data_blocked_recv_count =
+                    self.stream_data_blocked_recv_count.saturating_add(1);
+            },
 
             frame::Frame::StreamsBlockedBidi { limit } => {
                 if limit > MAX_STREAM_ID {
@@ -8747,6 +8781,20 @@ pub struct Stats {
 
     /// The number of streams stopped by remote.
     pub stopped_stream_count_remote: u64,
+
+    /// The number of DATA_BLOCKED frames sent due to hitting the connection
+    /// flow control limit.
+    pub data_blocked_sent_count: u64,
+
+    /// The number of STREAM_DATA_BLOCKED frames sent due to a stream hitting
+    /// the stream flow control limit.
+    pub stream_data_blocked_sent_count: u64,
+
+    /// The number of DATA_BLOCKED frames received from the remote.
+    pub data_blocked_recv_count: u64,
+
+    /// The number of STREAM_DATA_BLOCKED frames received from the remote.
+    pub stream_data_blocked_recv_count: u64,
 
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
