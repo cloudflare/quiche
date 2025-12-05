@@ -7097,6 +7097,19 @@ mod tests {
 
         assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
         assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        // Verify that dgram counts are incremented.
+        assert_eq!(s.pipe.client.dgram_sent_count, 6);
+        assert_eq!(s.pipe.client.dgram_recv_count, 0);
+        assert_eq!(s.pipe.server.dgram_sent_count, 0);
+        assert_eq!(s.pipe.server.dgram_recv_count, 6);
+
+        let server_path = s.pipe.server.paths.get_active().expect("no active");
+        let client_path = s.pipe.client.paths.get_active().expect("no active");
+        assert_eq!(client_path.dgram_sent_count, 6);
+        assert_eq!(client_path.dgram_recv_count, 0);
+        assert_eq!(server_path.dgram_sent_count, 0);
+        assert_eq!(server_path.dgram_recv_count, 6);
     }
 
     #[test]
