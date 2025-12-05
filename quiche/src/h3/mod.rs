@@ -5480,6 +5480,16 @@ mod tests {
         // Fin flag from last send_body() call was not sent as the buffer was
         // only partially written.
         assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert_eq!(s.pipe.server.data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.data_blocked_recv_count, 0);
+        assert_eq!(s.pipe.server.stream_data_blocked_recv_count, 1);
+
+        assert_eq!(s.pipe.client.data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.client.stream_data_blocked_sent_count, 1);
+        assert_eq!(s.pipe.client.data_blocked_recv_count, 0);
+        assert_eq!(s.pipe.client.stream_data_blocked_recv_count, 0);
     }
 
     #[test]
@@ -5670,6 +5680,16 @@ mod tests {
         // request.
         assert_eq!(s.pipe.client.stream_writable_next(), Some(4));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(4));
+
+        assert_eq!(s.pipe.server.data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.data_blocked_recv_count, 1);
+        assert_eq!(s.pipe.server.stream_data_blocked_recv_count, 0);
+
+        assert_eq!(s.pipe.client.data_blocked_sent_count, 1);
+        assert_eq!(s.pipe.client.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.client.data_blocked_recv_count, 0);
+        assert_eq!(s.pipe.client.stream_data_blocked_recv_count, 0);
     }
 
     #[test]
@@ -5728,6 +5748,16 @@ mod tests {
         assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
+
+        assert_eq!(s.pipe.server.data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.data_blocked_recv_count, 1);
+        assert_eq!(s.pipe.server.stream_data_blocked_recv_count, 0);
+
+        assert_eq!(s.pipe.client.data_blocked_sent_count, 1);
+        assert_eq!(s.pipe.client.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.client.data_blocked_recv_count, 0);
+        assert_eq!(s.pipe.client.stream_data_blocked_recv_count, 0);
     }
 
     #[test]

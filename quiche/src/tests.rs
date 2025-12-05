@@ -3681,6 +3681,16 @@ fn flow_control_limit_send(
     assert!(r.next().is_some());
     assert!(r.next().is_some());
     assert!(r.next().is_none());
+
+    assert_eq!(pipe.server.data_blocked_sent_count, 0);
+    assert_eq!(pipe.server.stream_data_blocked_sent_count, 0);
+    assert_eq!(pipe.server.data_blocked_recv_count, 1);
+    assert_eq!(pipe.server.stream_data_blocked_recv_count, 0);
+
+    assert_eq!(pipe.client.data_blocked_sent_count, 1);
+    assert_eq!(pipe.client.stream_data_blocked_sent_count, 0);
+    assert_eq!(pipe.client.data_blocked_recv_count, 0);
+    assert_eq!(pipe.client.stream_data_blocked_recv_count, 0);
 }
 
 #[rstest]
@@ -4029,6 +4039,16 @@ fn reset_before_flushed_packets(
 
     // Client has ACK'd the RESET_STREAM so the stream is collected.
     assert_eq!(pipe.server.streams.len(), 0);
+
+    assert_eq!(pipe.server.data_blocked_sent_count, 0);
+    assert_eq!(pipe.server.stream_data_blocked_sent_count, 1);
+    assert_eq!(pipe.server.data_blocked_recv_count, 0);
+    assert_eq!(pipe.server.stream_data_blocked_recv_count, 0);
+
+    assert_eq!(pipe.client.data_blocked_sent_count, 0);
+    assert_eq!(pipe.client.stream_data_blocked_sent_count, 0);
+    assert_eq!(pipe.client.data_blocked_recv_count, 0);
+    assert_eq!(pipe.client.stream_data_blocked_recv_count, 1);
 }
 
 #[rstest]
