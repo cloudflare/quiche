@@ -71,6 +71,10 @@ pub struct SocketStats {
     pub data_blocked_recv_count: u64,
     pub stream_data_blocked_recv_count: u64,
     pub bytes_in_flight_duration_us: u64,
+    pub reset_stream_count_local: u64,
+    pub stopped_stream_count_local: u64,
+    pub reset_stream_count_remote: u64,
+    pub stopped_stream_count_remote: u64,
 }
 
 /// Statistics from when a CCA first exited the startup phase.
