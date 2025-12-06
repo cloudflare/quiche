@@ -470,6 +470,29 @@ where
         conn
     }
 
+    pub async fn start_with_result<A: ApplicationOverQuic>(self, app: A) -> io::Result<QuicConnection> {
+        let task_metrics = self.params.metrics.clone();
+        let result = self.handshake(app).await;
+
+        match result {
+            Ok((q_conn, handshake)) => {
+                crate::metrics::tokio_task::spawn_with_killswitch(
+                    "quic_handshake_worker",
+                    task_metrics,
+                    async move {
+                        Self::resume(handshake)
+                    }
+                );
+
+                Ok(q_conn)
+            },
+            Err(e) => {
+                log::error!("QUIC handshake failed in IQC::start"; "error" => e);
+                Err(e) // Pass it upward
+            }
+        }
+    }
+
     fn generate_id() -> u64 {
         let mut buf = [0; 8];
 
