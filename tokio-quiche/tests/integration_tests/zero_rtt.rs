@@ -100,7 +100,6 @@ async fn handle_0_rtt_request() {
         summary.conn_close_details.session.unwrap()
     };
 
-    println!("================ 2nd conn ======================");
     helper_reset_test(&context);
 
     {
@@ -132,9 +131,7 @@ async fn handle_0_rtt_request() {
             assert_eq!(context.requests_handled_count, 2);
             assert_eq!(context.did_recv_early_data_request, true);
         }
-    };
-
-    // assert!(false, "-o-o-o-o-o- FAIL -o-o-o-o-o-");
+    }
 }
 
 pub async fn helper_connect_with_early_data(
@@ -188,7 +185,6 @@ fn helper_server_handler(
         let event_rx = h3_conn.h3_controller.event_receiver_mut();
 
         while let Some(event) = event_rx.recv().await {
-            println!("-- 50 zero_server: event_name {}", event.dbg_name());
             match event {
                 ServerH3Event::Core(event) => match event {
                     H3Event::ConnectionShutdown(_) => break,
@@ -205,17 +201,10 @@ fn helper_server_handler(
                         mut send, headers, ..
                     } = incoming_headers;
 
-                    println!(
-                        "-o-o-o-o-o =========== {:?} {:?}",
-                        headers, *is_in_early_data
-                    );
-
                     let authority = headers
                         .iter()
                         .find(|v| v.name().eq(":authority".as_bytes()))
                         .unwrap();
-
-                    println!("-- 51 zero_server: authority {:?}", authority,);
 
                     {
                         let mut context = context.lock().unwrap();
@@ -235,7 +224,6 @@ fn helper_server_handler(
                     .await
                     .unwrap();
 
-                    println!("-> 52 zero_server: send fin");
                     send.send(OutboundFrame::Body(
                         BufFactory::get_empty_buf(),
                         true,

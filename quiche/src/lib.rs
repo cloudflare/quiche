@@ -7132,7 +7132,6 @@ impl<F: BufFactory> Connection<F> {
     // #[rustfmt::skip]
     /// https://commondatastorage.googleapis.com/chromium-boringssl-docs/ssl.h.html#ssl_early_data_reason_t
     ///
-    /// ```
     /// // The handshake has not progressed far enough for the 0-RTT status to
     /// // be known.
     /// ssl_early_data_unknown = 0,
@@ -7168,16 +7167,15 @@ impl<F: BufFactory> Connection<F> {
     /// // 0-RTT.
     /// ssl_early_data_channel_id = 10,
     ///
-    /// // Value 11 is reserved. (It has historically |ssl_early_data_token_binding|.)
-    /// // The client and server ticket age were too far apart.
-    /// ssl_early_data_ticket_age_skew = 12,
+    /// // Value 11 is reserved. (It has historically
+    /// |ssl_early_data_token_binding|.) // The client and server ticket age
+    /// were too far apart. ssl_early_data_ticket_age_skew = 12,
     ///
     /// // QUIC parameters differ between this connection and the original.
     /// ssl_early_data_quic_parameter_mismatch = 13,
     ///
     /// // The application settings did not match the session.
     /// ssl_early_data_alps_mismatch = 14,
-    /// ```
     #[inline]
     pub fn get_early_data_reason(&self) -> u32 {
         self.handshake.early_reason()

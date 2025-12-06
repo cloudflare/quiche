@@ -109,19 +109,6 @@ pub enum ServerH3Event {
     },
 }
 
-impl ServerH3Event {
-    pub fn dbg_name(&self) -> String {
-        match self {
-            ServerH3Event::Core(_h3_event) => "core".to_string(),
-            ServerH3Event::Headers {
-                incoming_headers: _,
-                priority: _,
-                is_in_early_data,
-            } => format!("headers. in_early: {}", is_in_early_data.0),
-        }
-    }
-}
-
 impl From<H3Event> for ServerH3Event {
     fn from(ev: H3Event) -> Self {
         match ev {
@@ -195,10 +182,8 @@ impl ServerHooks {
         // the first one is an actual request. For now ignore any additional
         // HEADERS (e.g. "trailers").
         if driver.stream_map.contains_key(&stream_id) {
-            println!("ABORT -------------- 41 handle_request: receiving multiple headers on stream: {:?}", stream_id);
             return Ok(());
         }
-        // println!("-------------- 42 handle_request");
 
         let (mut stream_ctx, send, recv) =
             StreamCtx::new(stream_id, STREAM_CAPACITY);
@@ -207,14 +192,12 @@ impl ServerHooks {
             let _ = driver.get_or_insert_flow(flow_id)?;
             stream_ctx.associated_dgram_flow_id = Some(flow_id);
         }
-        // println!("-------------- 43 handle_request");
 
         let latest_priority_update: Option<RawPriorityValue> = driver
             .conn_mut()?
             .take_last_priority_update(stream_id)
             .ok()
             .map(|v| v.into());
-        // println!("-------------- 44 handle_request");
 
         // Boost the priority of the stream until we write response headers via
         // process_write_frame(), which will set the desired priority. Since it
@@ -227,7 +210,6 @@ impl ServerHooks {
             )
             .ok();
 
-        println!("-------------- 45 handle_request {:?}", headers);
         let headers = IncomingH3Headers {
             stream_id,
             headers,
@@ -315,7 +297,6 @@ impl DriverHooks for ServerHooks {
             driver.hooks.settings_enforcer.cancel_timeout(timeout);
         }
 
-        println!("------------ 33 headers_received",);
         Self::handle_request(driver, qconn, headers)
     }
 

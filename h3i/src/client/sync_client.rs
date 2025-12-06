@@ -241,11 +241,6 @@ pub fn connect(
         return Err(ClientError::Other(format!("send() failed: {e:?}")));
     }
 
-    println!(
-        "---- 21 sync_client: get_early_data_reason {}",
-        conn.get_early_data_reason()
-    );
-
     let app_data_start = std::time::Instant::now();
 
     let mut action_iter = actions.iter();
@@ -563,11 +558,6 @@ where
 
     // Send actions
     for action in iter {
-        println!(
-            "---- 20 sync_client: handle_actions {:?}",
-            action.dbg_name()
-        );
-
         match action {
             Action::FlushPackets => return None,
             Action::Wait { wait_type } => match wait_type {

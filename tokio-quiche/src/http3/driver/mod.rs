@@ -617,11 +617,6 @@ impl<H: DriverHooks> H3Driver<H> {
     ) -> H3ConnectionResult<()> {
         self.forward_settings()?;
 
-        println!(
-            "---------- 32 h3_driver: id: {}, event: {:?}",
-            stream_id,
-            event.dbg_name()
-        );
         match event {
             // Requests/responses are exclusively handled by hooks.
             h3::Event::Headers { list, more_frames } =>
@@ -1174,7 +1169,6 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
     /// If a DATAGRAM is found, it is sent to the receiver on its channel.
     fn process_reads(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()> {
         loop {
-            println!("-------- 31 h3_driver: is_server: {}", qconn.is_server());
             match self.conn_mut()?.poll(qconn) {
                 Ok((stream_id, event)) =>
                     self.process_read_event(qconn, stream_id, event)?,
