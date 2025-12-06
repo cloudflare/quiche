@@ -470,6 +470,11 @@ where
         conn
     }
 
+    /// Drives a QUIC connection from handshake to close in separate tokio
+    /// tasks but returns a result by awaiting the [`InitialQuicConnection::handshake`] call.
+    ///
+    /// It combines [`InitialQuicConnection::handshake`] and
+    /// [`InitialQuicConnection::resume`] into a single call.
     pub async fn start_with_result<A: ApplicationOverQuic>(self, app: A) -> io::Result<QuicConnection> {
         let task_metrics = self.params.metrics.clone();
         let result = self.handshake(app).await;
