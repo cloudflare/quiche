@@ -105,6 +105,10 @@ fn create_config(args: &Config, should_log_keys: bool) -> quiche::Config {
     config.set_max_stream_window(args.max_stream_window);
     config.grease(false);
 
+    if args.enable_early_data {
+        config.enable_early_data();
+    }
+
     if args.enable_dgram {
         config.enable_dgram(
             true,
@@ -130,7 +134,7 @@ fn create_config(args: &Config, should_log_keys: bool) -> quiche::Config {
 ///
 /// Returns a [ConnectionSummary] on success, [ClientError] on failure.
 pub fn connect(
-    args: Config, actions: Vec<Action>,
+    args: Config, early_actions: Option<Vec<Action>>, actions: Vec<Action>,
     close_trigger_frames: Option<CloseTriggerFrames>,
 ) -> std::result::Result<ConnectionSummary, ClientError> {
     let mut buf = [0; 65535];
@@ -178,10 +182,15 @@ pub fn connect(
         return Err(ClientError::Other("invalid socket".to_string()));
     };
 
-    // Create a QUIC connection and initiate handshake.
+    // Create a new client-side QUIC connection.
     let mut conn =
         quiche::connect(connect_url, &scid, local_addr, peer_addr, &mut config)
             .map_err(|e| ClientError::Other(e.to_string()))?;
+
+    if let Some(session) = &args.session {
+        conn.set_session(session)
+            .map_err(|error| ClientError::Other(error.to_string()))?;
+    }
 
     if let Some(keylog) = &mut keylog {
         if let Ok(keylog) = keylog.try_clone() {
@@ -195,7 +204,29 @@ pub fn connect(
 
     let mut app_proto_selected = false;
 
+    // Send ClientHello and initiate the handshake.
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
+
+    let mut client = SyncClient::new(close_trigger_frames);
+    let early_data_sent = match early_actions {
+        Some(early_actions) if conn.is_in_early_data() => {
+            let mut early_action_iter = early_actions.iter();
+            let mut wait_duration = None;
+            let mut wait_instant = None;
+            let mut waiting_for = WaitingFor::default();
+
+            check_duration_and_do_actions(
+                &mut wait_duration,
+                &mut wait_instant,
+                &mut early_action_iter,
+                &mut conn,
+                &mut waiting_for,
+                client.stream_parsers_mut(),
+            );
+            true
+        },
+        _ => false,
+    };
 
     while let Err(e) = socket.send_to(&out[..write], send_info.to) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -216,7 +247,6 @@ pub fn connect(
     let mut wait_duration = None;
     let mut wait_instant = None;
 
-    let mut client = SyncClient::new(close_trigger_frames);
     let mut waiting_for = WaitingFor::default();
 
     loop {
@@ -448,7 +478,7 @@ pub fn connect(
         stream_map: client.streams,
         stats: Some(conn.stats()),
         path_stats: conn.path_stats().collect(),
-        conn_close_details: ConnectionCloseDetails::new(&conn),
+        conn_close_details: ConnectionCloseDetails::new(&conn, early_data_sent),
     })
 }
 

@@ -326,6 +326,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         max_window,
         max_stream_window,
         session: None,
+        enable_early_data: false,
         enable_dgram,
         dgram_recv_queue_len,
         dgram_send_queue_len,
@@ -367,7 +368,7 @@ fn sync_client(
     config: Config, actions: Vec<Action>,
 ) -> Result<ConnectionSummary, ClientError> {
     // TODO: CLI/qlog don't support passing close trigger frames at the moment
-    h3i::client::sync_client::connect(config.library_config, actions, None)
+    h3i::client::sync_client::connect(config.library_config, None, actions, None)
 }
 
 fn read_qlog(filename: &str, host_override: Option<&str>) -> Vec<Action> {

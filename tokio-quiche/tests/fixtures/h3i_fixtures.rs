@@ -60,11 +60,12 @@ pub fn h3i_config(url: &str) -> h3i::config::Config {
         .unwrap()
 }
 
-pub fn default_headers() -> Vec<Header> {
+pub fn default_headers(host: Option<&str>) -> Vec<Header> {
+    let host = host.unwrap_or("test.com");
     vec![
         Header::new(b":method", b"GET"),
         Header::new(b":scheme", b"https"),
-        Header::new(b":authority", b"test.com"),
+        Header::new(b":authority", host.as_bytes()),
         Header::new(b":path", b"/"),
     ]
 }
@@ -88,7 +89,7 @@ pub async fn summarize_connection(
     h3i: h3i::config::Config, actions: Vec<Action>,
 ) -> ConnectionSummary {
     tokio::task::spawn_blocking(move || {
-        h3i::client::sync_client::connect(h3i, actions, None).unwrap()
+        h3i::client::sync_client::connect(h3i, None, actions, None).unwrap()
     })
     .await
     .unwrap()
@@ -123,7 +124,7 @@ pub async fn request(
     });
 
     tokio::task::spawn_blocking(move || {
-        h3i::client::sync_client::connect(h3i, actions, None)
+        h3i::client::sync_client::connect(h3i, None, actions, None)
     })
     .await
     .unwrap()

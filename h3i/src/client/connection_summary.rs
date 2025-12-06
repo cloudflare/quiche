@@ -394,6 +394,8 @@ pub struct ConnectionCloseDetails {
     pub timed_out: bool,
     /// Return the session from the underlying connection.
     pub session: Option<Vec<u8>>,
+    /// Early data was sent by the client.
+    pub early_data_sent: bool,
 }
 
 impl core::fmt::Debug for ConnectionCloseDetails {
@@ -408,13 +410,14 @@ impl core::fmt::Debug for ConnectionCloseDetails {
 }
 
 impl ConnectionCloseDetails {
-    pub fn new(qconn: &Connection) -> Self {
+    pub fn new(qconn: &Connection, early_data_sent: bool) -> Self {
         let session = qconn.session().map(|s| s.to_vec());
         Self {
             peer_error: qconn.peer_error().cloned(),
             local_error: qconn.local_error().cloned(),
             timed_out: qconn.is_timed_out(),
             session,
+            early_data_sent,
         }
     }
 

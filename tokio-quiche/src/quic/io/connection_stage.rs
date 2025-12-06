@@ -122,7 +122,7 @@ impl ConnectionStage for Handshake {
         &mut self, qconn: &mut QuicheConnection,
         _ctx: &mut ConnectionStageContext<A>,
     ) -> ControlFlow<QuicResult<()>> {
-        if qconn.is_established() {
+        if qconn.is_established() || qconn.is_in_early_data() {
             ControlFlow::Break(Ok(()))
         } else {
             ControlFlow::Continue(())

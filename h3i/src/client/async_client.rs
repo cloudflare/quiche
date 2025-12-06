@@ -80,8 +80,12 @@ pub async fn connect(
     close_trigger_frames: Option<CloseTriggerFrames>,
 ) -> std::result::Result<BuildingConnectionSummary, ClientError> {
     let quic_settings = create_config(args);
-    let mut connection_params =
-        ConnectionParams::new_client(quic_settings, None, Hooks::default());
+    let mut connection_params = ConnectionParams::new_client(
+        quic_settings,
+        None,
+        Hooks::default(),
+        false,
+    );
 
     connection_params.session = args.session.clone();
 
@@ -427,9 +431,9 @@ impl ApplicationOverQuic for H3iDriver {
         &mut self, qconn: &mut QuicheConnection, _metrics: &M,
         _work_loop_result: &QuicResult<()>,
     ) {
-        let _ = self
-            .record_tx
-            .send(ConnectionRecord::Close(ConnectionCloseDetails::new(qconn)));
+        let _ = self.record_tx.send(ConnectionRecord::Close(
+            ConnectionCloseDetails::new(qconn, false),
+        ));
 
         let _ = self
             .record_tx

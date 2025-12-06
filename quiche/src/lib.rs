@@ -7153,6 +7153,58 @@ impl<F: BufFactory> Connection<F> {
         self.handshake.is_in_early_data()
     }
 
+    // #[rustfmt::skip]
+    /// https://commondatastorage.googleapis.com/chromium-boringssl-docs/ssl.h.html#ssl_early_data_reason_t
+    ///
+    /// // The handshake has not progressed far enough for the 0-RTT status to
+    /// // be known.
+    /// ssl_early_data_unknown = 0,
+    ///
+    /// // 0-RTT is disabled for this connection.
+    /// ssl_early_data_disabled = 1,
+    ///
+    /// // 0-RTT was accepted.
+    /// ssl_early_data_accepted = 2,
+    ///
+    /// // The negotiated protocol version does not support 0-RTT.
+    /// ssl_early_data_protocol_version = 3,
+    ///
+    /// // The peer declined to offer or accept 0-RTT for an unknown reason.
+    /// ssl_early_data_peer_declined = 4,
+    ///
+    /// // The client did not offer a session.
+    /// ssl_early_data_no_session_offered = 5,
+    ///
+    /// // The server declined to resume the session.
+    /// ssl_early_data_session_not_resumed = 6,
+    ///
+    /// // The session does not support 0-RTT.
+    /// ssl_early_data_unsupported_for_session = 7,
+    ///
+    /// // The server sent a HelloRetryRequest.
+    /// ssl_early_data_hello_retry_request = 8,
+    ///
+    /// // The negotiated ALPN protocol did not match the session.
+    /// ssl_early_data_alpn_mismatch = 9,
+    ///
+    /// // The connection negotiated Channel ID, which is incompatible with
+    /// // 0-RTT.
+    /// ssl_early_data_channel_id = 10,
+    ///
+    /// // Value 11 is reserved. (It has historically
+    /// |ssl_early_data_token_binding|.) // The client and server ticket age
+    /// were too far apart. ssl_early_data_ticket_age_skew = 12,
+    ///
+    /// // QUIC parameters differ between this connection and the original.
+    /// ssl_early_data_quic_parameter_mismatch = 13,
+    ///
+    /// // The application settings did not match the session.
+    /// ssl_early_data_alps_mismatch = 14,
+    #[inline]
+    pub fn get_early_data_reason(&self) -> u32 {
+        self.handshake.early_reason()
+    }
+
     /// Returns whether there is stream or DATAGRAM data available to read.
     #[inline]
     pub fn is_readable(&self) -> bool {

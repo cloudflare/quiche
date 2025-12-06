@@ -71,8 +71,9 @@ fn main() {
     // connection upon receiving a HEADERS frame on stream 0.
     let close_trigger_frames = None;
 
-    let summary = sync_client::connect(config, actions, close_trigger_frames)
-        .expect("connection failed");
+    let summary =
+        sync_client::connect(config, None, actions, close_trigger_frames)
+            .expect("connection failed");
 
     println!(
         "=== received connection summary! ===\n\n{}",

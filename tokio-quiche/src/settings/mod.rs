@@ -55,6 +55,8 @@ pub struct ConnectionParams<'a> {
     pub hooks: Hooks,
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
+    /// Enables early data.
+    pub enable_early_data: bool,
 }
 
 impl core::fmt::Debug for ConnectionParams<'_> {
@@ -74,12 +76,14 @@ impl<'a> ConnectionParams<'a> {
     #[inline]
     pub fn new_server(
         settings: QuicSettings, tls_cert: TlsCertificatePaths<'a>, hooks: Hooks,
+        enable_early_data: bool,
     ) -> Self {
         Self {
             settings,
             tls_cert: Some(tls_cert),
             hooks,
             session: None,
+            enable_early_data,
         }
     }
 
@@ -88,13 +92,14 @@ impl<'a> ConnectionParams<'a> {
     #[inline]
     pub fn new_client(
         settings: QuicSettings, tls_cert: Option<TlsCertificatePaths<'a>>,
-        hooks: Hooks,
+        hooks: Hooks, enable_early_data: bool,
     ) -> Self {
         Self {
             settings,
             tls_cert,
             hooks,
             session: None,
+            enable_early_data,
         }
     }
 }

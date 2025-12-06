@@ -78,6 +78,24 @@ impl Deref for RawPriorityValue {
     }
 }
 
+/// Custom header info to track early data requests.
+#[derive(Clone, Debug)]
+pub struct IsInEarlyData(bool);
+
+impl IsInEarlyData {
+    fn new(is_in_early_data: bool) -> Self {
+        IsInEarlyData(is_in_early_data)
+    }
+}
+
+impl Deref for IsInEarlyData {
+    type Target = bool;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Events produced by [ServerH3Driver].
 #[derive(Debug)]
 pub enum ServerH3Event {
@@ -87,15 +105,21 @@ pub enum ServerH3Event {
         incoming_headers: IncomingH3Headers,
         /// The latest PRIORITY_UPDATE frame value, if any.
         priority: Option<RawPriorityValue>,
+        is_in_early_data: IsInEarlyData,
     },
 }
 
 impl From<H3Event> for ServerH3Event {
     fn from(ev: H3Event) -> Self {
         match ev {
-            H3Event::IncomingHeaders(incoming_headers) => Self::Headers {
-                incoming_headers,
-                priority: None,
+            H3Event::IncomingHeaders(incoming_headers) => {
+                // TODO: parse incoming_headers for "is_in_early_data"
+                // incoming_headers.headers.unwrap_or(&false);
+                Self::Headers {
+                    incoming_headers,
+                    priority: None,
+                    is_in_early_data: IsInEarlyData::new(false),
+                }
             },
             _ => Self::Core(ev),
         }
@@ -205,6 +229,7 @@ impl ServerHooks {
             .send(ServerH3Event::Headers {
                 incoming_headers: headers,
                 priority: latest_priority_update,
+                is_in_early_data: IsInEarlyData::new(qconn.is_in_early_data()),
             })
             .map_err(|_| H3ConnectionError::ControllerWentAway)?;
         driver.hooks.requests += 1;

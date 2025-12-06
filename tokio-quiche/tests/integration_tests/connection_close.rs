@@ -59,7 +59,7 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
     let mut actions = vec![];
 
     for i in 0..MAX_REQS {
-        actions.push(send_headers_frame(i * 4, true, default_headers()));
+        actions.push(send_headers_frame(i * 4, true, default_headers(None)));
         actions.push(Action::FlushPackets);
         actions.push(Action::Wait {
             wait_type: WaitType::StreamEvent(StreamEvent {
@@ -71,7 +71,11 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
 
     // This last action should fail due to request limits on the connection being
     // breached
-    actions.push(send_headers_frame(MAX_REQS * 4, true, default_headers()));
+    actions.push(send_headers_frame(
+        MAX_REQS * 4,
+        true,
+        default_headers(None),
+    ));
     actions.push(Action::FlushPackets);
 
     let summary = summarize_connection(h3i, actions).await;
@@ -108,9 +112,9 @@ async fn test_max_header_list_size_limit() -> QuicResult<()> {
 
     let h3i = h3i_config(&url);
 
-    let mut small_headers = default_headers();
+    let mut small_headers = default_headers(None);
     small_headers.push(Header::new(b"a", vec![b'0'; 4000].as_slice()));
-    let mut big_headers = default_headers();
+    let mut big_headers = default_headers(None);
     big_headers.push(Header::new(b"a", vec![b'0'; 5000].as_slice()));
 
     let actions = vec![
