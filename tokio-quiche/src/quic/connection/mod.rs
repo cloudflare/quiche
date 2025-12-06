@@ -491,9 +491,9 @@ where
 
                 Ok(q_conn)
             },
-            Err(e) => {
-                log::error!("QUIC handshake failed in IQC::start_with_result"; "error" => e);
-                Err(e) // Pass it upward
+            Err(err) => {
+                log::error!("QUIC handshake failed in IQC::start_with_result"; "error" => &err);
+                Err(err) // Pass it upward
             }
         }
     }
