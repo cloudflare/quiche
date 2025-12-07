@@ -444,7 +444,13 @@ impl SeriesStore {
             let mut series_points = vec![];
 
             for point in points {
-                if let (_, QuicFrame::Stream { offset, length, .. }) = point {
+                if let (_, QuicFrame::Stream { offset, raw, .. }) = point {
+                    let offset = offset.unwrap_or_default();
+                    let length = raw
+                        .clone()
+                        .unwrap_or_default()
+                        .payload_length
+                        .unwrap_or_default();
                     let y = offset + length;
 
                     self.update_sent_x_axis_max(point.0);
