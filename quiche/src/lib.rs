@@ -1779,7 +1779,8 @@ pub fn connect(
 /// The `scid` parameter is used as the connection's source connection ID,
 /// while the optional `server_name` parameter is used to verify the peer's
 /// certificate.
-#[inline]
+#[cfg(feature = "connect-with-dcid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "connect-with-dcid")))]
 pub fn connect_with_dcid(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
@@ -1820,7 +1821,8 @@ pub fn connect_with_buffer_factory<F: BufFactory>(
 ///
 /// The buffers generated can be anything that can be drereferenced as a byte
 /// slice. See [`connect`] and [`BufFactory`] for more info.
-#[inline]
+#[cfg(feature = "connect-with-dcid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "connect-with-dcid")))]
 pub fn connect_with_dcid_and_buffer_factory<F: BufFactory>(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
@@ -2030,12 +2032,20 @@ impl<F: BufFactory> Connection<F> {
         peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection<F>> {
         if !is_server {
+
+            #[cfg(feature = "connect-with-dcid")]
             if let Some(dcid) = dcid {
                 // The Minimum length is 8.
                 // See https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
                 if dcid.to_vec().len() < 8 {
                     return Err(Error::InvalidTransportParam);
                 }
+            }
+            #[cfg(not(feature = "connect-with-dcid"))]
+            // Just error out in case we did not compile with feature enabled to guard
+            // against miss-use in the future.
+            if dcid.is_some() {
+                return Err(Error::InvalidTransportParam);
             }
         }
         let max_rx_data = config.local_transport_params.initial_max_data;
