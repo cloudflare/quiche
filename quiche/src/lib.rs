@@ -2032,7 +2032,6 @@ impl<F: BufFactory> Connection<F> {
         peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection<F>> {
         if !is_server {
-
             #[cfg(feature = "connect-with-dcid")]
             if let Some(dcid) = dcid {
                 // The Minimum length is 8.
