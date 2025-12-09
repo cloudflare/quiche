@@ -38,6 +38,7 @@ use datagram_socket::AsSocketStats;
 use datagram_socket::DatagramSocketSend;
 use datagram_socket::MaybeConnectedSocket;
 use datagram_socket::QuicAuditStats;
+use datagram_socket::QuicheDebugDetails;
 use datagram_socket::ShutdownConnection;
 use datagram_socket::SocketStats;
 use foundations::telemetry::log;
@@ -173,22 +174,26 @@ impl AsSocketStats for QuicConnectionStats {
                 .as_ref()
                 .and_then(|p| p.startup_exit)
                 .map(QuicConnectionStats::startup_exit_to_socket_stats),
-            data_blocked_sent_count: self.stats.data_blocked_sent_count,
-            stream_data_blocked_sent_count: self
-                .stats
-                .stream_data_blocked_sent_count,
-            data_blocked_recv_count: self.stats.data_blocked_recv_count,
-            stream_data_blocked_recv_count: self
-                .stats
-                .stream_data_blocked_recv_count,
             bytes_in_flight_duration_us: self
                 .stats
                 .bytes_in_flight_duration
                 .as_micros() as u64,
-            reset_stream_count_local: self.stats.reset_stream_count_local,
-            stopped_stream_count_local: self.stats.stopped_stream_count_local,
-            reset_stream_count_remote: self.stats.reset_stream_count_remote,
-            stopped_stream_count_remote: self.stats.stopped_stream_count_remote,
+            debug_details: QuicheDebugDetails {
+                data_blocked_sent_count: self.stats.data_blocked_sent_count,
+                stream_data_blocked_sent_count: self
+                    .stats
+                    .stream_data_blocked_sent_count,
+                data_blocked_recv_count: self.stats.data_blocked_recv_count,
+                stream_data_blocked_recv_count: self
+                    .stats
+                    .stream_data_blocked_recv_count,
+                reset_stream_count_local: self.stats.reset_stream_count_local,
+                stopped_stream_count_local: self.stats.stopped_stream_count_local,
+                reset_stream_count_remote: self.stats.reset_stream_count_remote,
+                stopped_stream_count_remote: self
+                    .stats
+                    .stopped_stream_count_remote,
+            },
         }
     }
 }
