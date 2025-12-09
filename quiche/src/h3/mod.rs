@@ -7168,6 +7168,74 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::Done));
     }
 
+    #[test]
+    fn reset_mid_data_frame() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends request.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server sends response
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // We want to indicate a larger DATA frame than we will send, so
+        // sidestep quiche's h3 API and write H3 frame bytes directly to QUIC
+        // stream. Imagine a response body of 200 bytes, that would be sent
+        // across two DATA frames of 100 bytes, but quiche's stream write is
+        // limited to only emitting 95 bytes of the DATA frame before the stream
+        // is reset.
+        let mut d = [42; 10];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+        b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
+        b.put_varint(100).unwrap();
+        let off = b.off();
+        s.pipe.server.stream_send(0, &d[..off], false).unwrap();
+        let body = [42; 200];
+        let written = s.pipe.server.stream_send(0, &body[..200], false).unwrap();
+
+        assert_eq!(written, 95);
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        let mut read_buf = [0; 65535];
+        let read = s
+            .client
+            .recv_body(&mut s.pipe.client, 0, &mut read_buf)
+            .unwrap();
+        assert_eq!(read, 95);
+
+        s.pipe
+            .server
+            .stream_shutdown(0, crate::Shutdown::Write, 42)
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
     /// The client shuts down the stream's write direction, the server
     /// shuts down its side with fin
     #[test]
