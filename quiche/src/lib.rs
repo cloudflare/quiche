@@ -2041,11 +2041,7 @@ impl<F: BufFactory> Connection<F> {
                 }
             }
             #[cfg(not(feature = "connect-with-dcid"))]
-            // Just error out in case we did not compile with feature enabled to
-            // guard against miss-use in the future.
-            if dcid.is_some() {
-                return Err(Error::InvalidTransportParam);
-            }
+            debug_assert!(dcid.is_none());
         }
         let max_rx_data = config.local_transport_params.initial_max_data;
 
