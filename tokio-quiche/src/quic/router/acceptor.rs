@@ -195,7 +195,7 @@ where
     ) -> io::Result<Option<NewConnection>> {
         let scid = self.new_connection_id();
 
-        let token = self.token_manager.gen(&hdr.dcid, incoming.peer_addr);
+        let token = self.token_manager.gen(&hdr.dcid, incoming.peer_addr, &scid);
 
         self.handshake_reply(incoming, move |buf| {
             quiche::retry(&hdr.scid, &hdr.dcid, &scid, &token, hdr.version, buf)
@@ -236,31 +236,31 @@ where
             });
         }
 
-        let (scid, original_dcid, pending_cid) = if self
-            .config
-            .disable_client_ip_validation
-        {
-            (self.new_connection_id(), None, Some(hdr.dcid))
-        } else {
-            // NOTE: token is always present in Initial packets
-            let token = hdr.token.as_ref().unwrap();
+        let (scid, original_dcid, pending_cid) =
+            if self.config.disable_client_ip_validation {
+                (self.new_connection_id(), None, Some(hdr.dcid))
+            } else {
+                // NOTE: token is always present in Initial packets
+                let token = hdr.token.as_ref().unwrap();
 
-            if token.is_empty() {
-                return self.stateless_retry(incoming, hdr);
-            }
+                if token.is_empty() {
+                    return self.stateless_retry(incoming, hdr);
+                }
 
-            (
-                hdr.dcid,
-                Some(
-                    self.token_manager
-                        .validate_and_extract_original_dcid(token, incoming.peer_addr)
-                        .or(Err(
-                            labels::QuicInvalidInitialPacketError::TokenValidationFail,
-                        ))?,
-                ),
-                None,
-            )
-        };
+                let scid = hdr.dcid;
+                let original_dcid = self
+                .token_manager
+                .validate_and_extract_original_dcid(
+                    token,
+                    incoming.peer_addr,
+                    &scid,
+                )
+                .or(Err(
+                    labels::QuicInvalidInitialPacketError::TokenValidationFail,
+                ))?;
+
+                (scid, Some(original_dcid), None)
+            };
 
         self.accept_conn(
             incoming,
