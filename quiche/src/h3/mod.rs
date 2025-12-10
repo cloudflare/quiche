@@ -2744,6 +2744,20 @@ impl Connection {
                         break;
                     }
 
+                    // Do a dummy read to check if the stream has been reset
+                    // while waiting to receive more data from a declared DATA
+                    // frame length. Doing this prevents an Event::Data frame
+                    // being triggered, which then might be followed by an
+                    // immediate Event::Finished if an application has already
+                    // read exactly the stream final size.
+                    if let Err(crate::Error::StreamReset(e)) =
+                        conn.stream_recv(stream_id, &mut [])
+                    {
+                        return Err(Error::TransportError(
+                            crate::Error::StreamReset(e),
+                        ));
+                    }
+
                     if !stream.try_trigger_data_event() {
                         break;
                     }
@@ -7231,8 +7245,7 @@ mod tests {
 
         s.advance().ok();
 
-        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
-        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Reset(42))));
         assert_eq!(s.poll_client(), Err(Error::Done));
     }
 
