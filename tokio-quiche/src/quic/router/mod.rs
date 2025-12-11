@@ -908,9 +908,8 @@ mod tests {
                 with_pktinfo: false,
             },
             Arc::clone(&socket_tx),
-            0,
             Default::default(),
-            Box::new(SimpleConnectionIdGenerator),
+            Arc::new(SimpleConnectionIdGenerator),
             DefaultMetrics,
         );
 
