@@ -787,6 +787,11 @@ pub enum QuicCommand {
     /// Unlike [`QuicConnection::stats()`], these statistics are not cached and
     /// instead are retrieved right before the command is executed.
     Stats(Box<dyn FnOnce(datagram_socket::SocketStats) + Send + 'static>),
+    /// Collect the current [`QuicConnectionStats`] from the connection.
+    ///
+    /// These statistics are not cached and instead are retrieved right before
+    /// the command is executed.
+    ConnectionStats(Box<dyn FnOnce(QuicConnectionStats) + Send + 'static>),
 }
 
 impl QuicCommand {
@@ -812,6 +817,10 @@ impl QuicCommand {
                 let stats_pair = QuicConnectionStats::from_conn(qconn);
                 (callback)(stats_pair.as_socket_stats());
             },
+            Self::ConnectionStats(callback) => {
+                let stats_pair = QuicConnectionStats::from_conn(qconn);
+                (callback)(stats_pair);
+            },
         }
     }
 }
@@ -823,6 +832,7 @@ impl fmt::Debug for QuicCommand {
                 f.debug_tuple("ConnectionClose").field(b).finish(),
             Self::Custom(_) => f.debug_tuple("Custom").finish_non_exhaustive(),
             Self::Stats(_) => f.debug_tuple("Stats").finish_non_exhaustive(),
+            Self::ConnectionStats(_) => f.debug_tuple("ConnectionStats").finish_non_exhaustive(),
         }
     }
 }
