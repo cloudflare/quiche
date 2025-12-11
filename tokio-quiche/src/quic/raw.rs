@@ -154,7 +154,9 @@ impl ConnCloseReceiver {
     pub fn poll_recv(&mut self, cx: &mut Context) -> Poll<()> {
         loop {
             let cmd = ready!(self.0.poll_recv(cx));
-            if matches!(cmd, None | Some(ConnectionMapCommand::RemoveScid(_))) {
+            if matches!(cmd, None | Some(ConnectionMapCommand::UnmapCid(_))) {
+                // Raw connections do not have a `pending_cid`.
+                // The only time they unmap a CID is when the connection is closed.
                 return Poll::Ready(());
             }
         }

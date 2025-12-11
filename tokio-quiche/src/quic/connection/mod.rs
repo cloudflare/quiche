@@ -233,9 +233,6 @@ where
     Tx: DatagramSocketSend + Send + 'static + ?Sized,
     M: Metrics,
 {
-    /// An internal ID, to uniquely identify the connection across multiple QUIC
-    /// connection IDs.
-    pub(crate) id: u64,
     params: QuicConnectionParams<Tx, M>,
     pub(crate) audit_log_stats: Arc<QuicAuditStats>,
     stats: QuicConnectionStatsShared,
@@ -259,7 +256,6 @@ where
         )));
 
         Self {
-            id: Self::generate_id(),
             params,
             audit_log_stats,
             stats,
@@ -458,14 +454,6 @@ where
         );
 
         conn
-    }
-
-    fn generate_id() -> u64 {
-        let mut buf = [0; 8];
-
-        boring::rand::rand_bytes(&mut buf).unwrap();
-
-        u64::from_ne_bytes(buf)
     }
 }
 

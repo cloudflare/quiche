@@ -115,7 +115,6 @@ struct PollRecvData {
 /// removed.
 pub enum ConnectionMapCommand {
     UnmapCid(ConnectionId<'static>),
-    RemoveScid(ConnectionId<'static>),
 }
 
 /// An `InboundPacketRouter` maintains a map of quic connections and routes
@@ -348,13 +347,13 @@ where
                 handshake_start_time,
             ));
 
-        self.conns.insert(scid, &conn);
+        self.conns.insert(&scid, &conn);
 
         // Add the client-generated "pending" connection ID to the map as well.
         // This is only required for QUIC servers, because clients can send
         // Initial packets with arbitrary DCIDs to servers.
         if let Some(pending_cid) = pending_cid {
-            self.conns.map_cid(pending_cid, &conn);
+            self.conns.map_cid(&scid, &pending_cid);
         }
 
         self.metrics.accepted_initial_packet_count().inc();
@@ -604,8 +603,6 @@ where
         while let Ok(req) = self.conn_map_cmd_rx.try_recv() {
             match req {
                 ConnectionMapCommand::UnmapCid(cid) => self.conns.unmap_cid(&cid),
-                ConnectionMapCommand::RemoveScid(scid) =>
-                    self.conns.remove(&scid),
             }
         }
     }
