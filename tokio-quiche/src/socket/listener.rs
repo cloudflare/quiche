@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::fmt;
 use std::io;
 #[cfg(unix)]
 use std::os::fd::AsFd;
@@ -33,9 +34,12 @@ use std::os::fd::AsRawFd;
 use std::os::fd::BorrowedFd;
 #[cfg(unix)]
 use std::os::fd::RawFd;
+use std::sync::Arc;
 use tokio::net::UdpSocket;
 
 use super::SocketCapabilities;
+use crate::quic::SimpleConnectionIdGenerator;
+use crate::ConnectionIdGenerator;
 
 /// Wrapper around a [`UdpSocket`] for server-side QUIC connections.
 ///
@@ -45,13 +49,13 @@ use super::SocketCapabilities;
 ///
 /// To create a [`QuicListener`], you may either instantiate the struct yourself
 /// or use one of the `TryFrom` implementations.
-#[derive(Debug)]
 pub struct QuicListener {
     /// The wrapped [tokio] socket.
     pub socket: UdpSocket,
-    /// An opaque value that is later passed to the
-    /// [`ConnectionIdGenerator`](crate::ConnectionIdGenerator).
-    pub socket_cookie: u64,
+    /// The [`ConnectionIdGenerator`] to use for connections arriving on this
+    /// socket. This can be one shared instance for all sockets, but
+    /// socket-specific ID generators are also possible.
+    pub cid_generator: Arc<dyn ConnectionIdGenerator<'static>>,
     /// The [`SocketCapabilities`] to use for this socket.
     ///
     /// By default, [`QuicListener`]s are constructed with all capabilities
@@ -71,13 +75,23 @@ impl QuicListener {
     }
 }
 
+impl fmt::Debug for QuicListener {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("QuicListener")
+            .field("socket", &self.socket)
+            .field("cid_generator", &"dyn ConnectionIdGenerator")
+            .field("capabilities", &self.capabilities)
+            .finish()
+    }
+}
+
 impl TryFrom<UdpSocket> for QuicListener {
     type Error = io::Error;
 
     fn try_from(socket: UdpSocket) -> Result<Self, Self::Error> {
         Ok(Self {
             socket,
-            socket_cookie: 0,
+            cid_generator: Arc::new(SimpleConnectionIdGenerator),
             capabilities: SocketCapabilities::default(),
         })
     }

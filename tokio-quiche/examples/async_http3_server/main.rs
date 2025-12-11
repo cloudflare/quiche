@@ -37,7 +37,6 @@ use tokio::net::UdpSocket;
 use tokio_quiche::http3::settings::Http3Settings;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
-use tokio_quiche::quic::SimpleConnectionIdGenerator;
 use tokio_quiche::settings::CertificateKind::{
     self,
 };
@@ -68,7 +67,6 @@ async fn main() {
             },
             Hooks::default(),
         ),
-        SimpleConnectionIdGenerator,
         DefaultMetrics,
     )
     .expect("should be able to create a listener from a UDP socket");

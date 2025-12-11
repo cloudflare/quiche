@@ -30,6 +30,7 @@ mod map;
 
 pub use self::error::HandshakeError;
 pub use self::id::ConnectionIdGenerator;
+pub use self::id::SharedConnectionIdGenerator;
 pub use self::id::SimpleConnectionIdGenerator;
 pub(crate) use self::map::ConnectionMap;
 
