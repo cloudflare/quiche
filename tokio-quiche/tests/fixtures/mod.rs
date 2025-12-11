@@ -35,7 +35,6 @@ use tokio_quiche::http3::driver::ServerH3Event;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
 use tokio_quiche::quic::ConnectionHook;
-use tokio_quiche::quic::SimpleConnectionIdGenerator;
 use tokio_quiche::quiche::h3::Header;
 use tokio_quiche::quiche::h3::NameValue;
 use tokio_quiche::quiche::h3::{
@@ -246,14 +245,9 @@ where
 
     let params =
         ConnectionParams::new_server(quic_settings, tls_cert_settings, hooks);
-    let mut stream = listen(
-        vec![socket],
-        params,
-        SimpleConnectionIdGenerator,
-        DefaultMetrics,
-    )
-    .unwrap()
-    .remove(0);
+    let mut stream = listen(vec![socket], params, DefaultMetrics)
+        .unwrap()
+        .remove(0);
 
     tokio::spawn(async move {
         loop {

@@ -47,12 +47,8 @@
 //!
 //! # async fn example() -> tokio_quiche::QuicResult<()> {
 //! let socket = tokio::net::UdpSocket::bind("0.0.0.0:443").await?;
-//! let mut listeners = listen(
-//!     [socket],
-//!     ConnectionParams::default(),
-//!     SimpleConnectionIdGenerator,
-//!     DefaultMetrics,
-//! )?;
+//! let mut listeners =
+//!     listen([socket], ConnectionParams::default(), DefaultMetrics)?;
 //! let mut accept_stream = &mut listeners[0];
 //!
 //! while let Some(conn) = accept_stream.next().await {
@@ -154,7 +150,7 @@ pub type QuicConnectionStream<M> =
 /// previously-yielded connections are closed.
 pub fn listen_with_capabilities<M>(
     sockets: impl IntoIterator<Item = QuicListener>, params: ConnectionParams,
-    cid_generator: impl ConnectionIdGenerator<'static> + Clone, metrics: M,
+    metrics: M,
 ) -> io::Result<Vec<QuicConnectionStream<M>>>
 where
     M: Metrics,
@@ -165,14 +161,7 @@ where
 
     sockets
         .into_iter()
-        .map(|s| {
-            crate::quic::start_listener(
-                s,
-                &params,
-                cid_generator.clone(),
-                metrics.clone(),
-            )
-        })
+        .map(|s| crate::quic::start_listener(s, &params, metrics.clone()))
         .collect()
 }
 
@@ -181,8 +170,7 @@ where
 /// Each socket is converted into a [`QuicListener`] with defaulted socket
 /// parameters. The listeners are then passed to [`listen_with_capabilities`].
 pub fn listen<S, M>(
-    sockets: impl IntoIterator<Item = S>, params: ConnectionParams,
-    cid_generator: impl ConnectionIdGenerator<'static> + Clone, metrics: M,
+    sockets: impl IntoIterator<Item = S>, params: ConnectionParams, metrics: M,
 ) -> io::Result<Vec<QuicConnectionStream<M>>>
 where
     S: TryInto<QuicListener, Error = io::Error>,
@@ -199,7 +187,7 @@ where
         })
         .collect::<io::Result<_>>()?;
 
-    listen_with_capabilities(quic_sockets, params, cid_generator, metrics)
+    listen_with_capabilities(quic_sockets, params, metrics)
 }
 
 static GLOBAL_LOGGER_ONCE: Once = Once::new();
