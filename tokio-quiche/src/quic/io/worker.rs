@@ -937,7 +937,7 @@ where
 
         let _ = self
             .conn_map_cmd_tx
-            .send(ConnectionMapCommand::RemoveScid(scid));
+            .send(ConnectionMapCommand::UnmapCid(scid));
 
         self.metrics.connections_in_memory().dec();
     }
