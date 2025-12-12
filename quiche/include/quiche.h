@@ -1117,6 +1117,9 @@ int64_t quiche_h3_send_request(quiche_h3_conn *conn, quiche_conn *quic_conn,
                                const quiche_h3_header *headers, size_t headers_len,
                                bool fin);
 
+// Reserves an HTTP/3 request stream.
+int64_t reserve_request_stream(quiche_h3_conn *conn, quiche_conn *quic_conn);
+
 // Sends an HTTP/3 response on the specified stream with default priority.
 int quiche_h3_send_response(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, const quiche_h3_header *headers,
@@ -1134,6 +1137,16 @@ int quiche_h3_send_additional_headers(quiche_h3_conn *conn,
                             quiche_h3_header *headers, size_t headers_len,
                             bool is_trailer_section, bool fin);
 
+// Initiates streaming of a new HTTP/3 HEADERS frame.
+int quiche_h3_stream_headers(quiche_h3_conn *conn,
+                            quiche_conn *quic_conn, uint64_t stream_id,
+                            quiche_h3_header *headers, size_t headers_len,
+                            bool is_trailer_section, bool fin);
+
+// Continues sending headers on the given stream.
+int quiche_h3_continue_partial_headers(quiche_h3_conn *conn,
+                            quiche_conn *quic_conn, uint64_t stream_id);
+
 // Sends an HTTP/3 body chunk on the given stream.
 ssize_t quiche_h3_send_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
                             uint64_t stream_id, const uint8_t *body, size_t body_len,
@@ -1146,6 +1159,10 @@ ssize_t quiche_h3_recv_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
 // Sends a GOAWAY frame to initiate graceful connection closure.
 int quiche_h3_send_goaway(quiche_h3_conn *conn, quiche_conn *quic_conn,
                           uint64_t id);
+
+// Sets the HTTP/3 priority for a stream.
+int quiche_h3_stream_priority(quiche_conn *conn, uint64_t stream_id,
+                                   quiche_h3_priority *priority);
 
 // Try to parse an Extensible Priority field value.
 int quiche_h3_parse_extensible_priority(uint8_t *priority,
