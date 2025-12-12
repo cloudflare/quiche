@@ -832,7 +832,8 @@ impl fmt::Debug for QuicCommand {
                 f.debug_tuple("ConnectionClose").field(b).finish(),
             Self::Custom(_) => f.debug_tuple("Custom").finish_non_exhaustive(),
             Self::Stats(_) => f.debug_tuple("Stats").finish_non_exhaustive(),
-            Self::ConnectionStats(_) => f.debug_tuple("ConnectionStats").finish_non_exhaustive(),
+            Self::ConnectionStats(_) =>
+                f.debug_tuple("ConnectionStats").finish_non_exhaustive(),
         }
     }
 }
