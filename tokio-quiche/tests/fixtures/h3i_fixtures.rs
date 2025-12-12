@@ -69,6 +69,15 @@ pub fn default_headers() -> Vec<Header> {
     ]
 }
 
+pub fn default_headers_with_authority(host: &str) -> Vec<Header> {
+    vec![
+        Header::new(b":method", b"GET"),
+        Header::new(b":scheme", b"https"),
+        Header::new(b":authority", host.as_bytes()),
+        Header::new(b":path", b"/"),
+    ]
+}
+
 pub fn url_headers(url: &Url) -> Vec<Header> {
     use url::Position::AfterQuery;
     use url::Position::BeforeHost;
