@@ -10,7 +10,7 @@ env:
   DEFAULT_OPTIONS: "--features=async,ffi,qlog --workspace"
   NO_BORING_OPTIONS: "--features=ffi,qlog --workspace --exclude h3i --exclude tokio-quiche"
   RUSTFLAGS: "-D warnings"
-  RUSTTOOLCHAIN: "stable"
+  RUSTTOOLCHAIN: "1.91.1"
 
 concurrency:
   group: ${{ github.ref }}-stable
