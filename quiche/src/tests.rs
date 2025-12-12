@@ -2928,15 +2928,12 @@ fn stream_shutdown_read(
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
     // make sure the pkt contains the expected StopSending frame
-    assert!(frames
-        .iter()
-        .find(|f| {
-            **f == frame::Frame::StopSending {
-                stream_id: 4,
-                error_code: 42,
-            }
-        })
-        .is_some(),);
+    assert!(frames.iter().any(|f| {
+        *f == frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        }
+    }));
 
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
