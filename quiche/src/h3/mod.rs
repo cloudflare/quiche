@@ -3825,6 +3825,11 @@ mod tests {
             more_frames: true,
         };
         assert_eq!(ev, ev_headers);
+        assert_eq!(s.poll_server(), Ok((0, Event::Data)));
+        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
 
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
@@ -3832,6 +3837,11 @@ mod tests {
             more_frames: true,
         };
         assert_eq!(ev, ev_headers);
+        assert_eq!(s.poll_server(), Ok((4, Event::Data)));
+        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((4, Event::Finished)));
 
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
@@ -3839,19 +3849,6 @@ mod tests {
             more_frames: true,
         };
         assert_eq!(ev, ev_headers);
-
-        assert_eq!(s.poll_server(), Ok((0, Event::Data)));
-        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
-        assert_eq!(s.poll_client(), Err(Error::Done));
-        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
-        assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
-
-        assert_eq!(s.poll_server(), Ok((4, Event::Data)));
-        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
-        assert_eq!(s.poll_client(), Err(Error::Done));
-        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
-        assert_eq!(s.poll_server(), Ok((4, Event::Finished)));
-
         assert_eq!(s.poll_server(), Ok((8, Event::Data)));
         assert_eq!(s.recv_body_server(8, &mut recv_buf), Ok(body.len()));
         assert_eq!(s.poll_client(), Err(Error::Done));
