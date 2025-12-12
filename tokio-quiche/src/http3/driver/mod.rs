@@ -1258,10 +1258,13 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
 
 impl<H: DriverHooks> Drop for H3Driver<H> {
     fn drop(&mut self) {
-        for stream in self.stream_map.values() {
+        for stream in self.stream_map.values_mut() {
             stream
                 .audit_stats
                 .set_recvd_stream_fin(StreamClosureKind::Implicit);
+
+            // Update stats if there were pending header sends on this stream.
+            stream.full_headers_flush_failed();
         }
     }
 }
