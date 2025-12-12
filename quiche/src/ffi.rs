@@ -606,16 +606,16 @@ pub extern "C" fn quiche_retry(
 
 #[no_mangle]
 pub extern "C" fn quiche_conn_new_with_tls(
-    scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
+    scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
     config: &Config, ssl: *mut c_void, is_server: bool,
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let scid = ConnectionId::from_ref(scid);
 
-    let odcid = if !odcid.is_null() && odcid_len > 0 {
+    let dcid = if !dcid.is_null() && dcid_len > 0 {
         Some(ConnectionId::from_ref(unsafe {
-            slice::from_raw_parts(odcid, odcid_len)
+            slice::from_raw_parts(dcid, dcid_len)
         }))
     } else {
         None
@@ -628,7 +628,7 @@ pub extern "C" fn quiche_conn_new_with_tls(
 
     match Connection::with_tls(
         &scid,
-        odcid.as_ref(),
+        dcid.as_ref(),
         local,
         peer,
         config,
