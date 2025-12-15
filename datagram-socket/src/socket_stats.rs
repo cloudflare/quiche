@@ -66,10 +66,6 @@ pub struct SocketStats {
     pub delivery_rate: u64,
     pub max_bandwidth: Option<u64>,
     pub startup_exit: Option<StartupExit>,
-    pub data_blocked_sent_count: u64,
-    pub stream_data_blocked_sent_count: u64,
-    pub data_blocked_recv_count: u64,
-    pub stream_data_blocked_recv_count: u64,
     pub bytes_in_flight_duration_us: u64,
 }
 
