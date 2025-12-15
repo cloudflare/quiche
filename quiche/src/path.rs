@@ -1026,6 +1026,12 @@ impl std::fmt::Debug for PathStats {
             f,
             " stream_retrans_bytes={} pmtu={} delivery_rate={}",
             self.stream_retrans_bytes, self.pmtu, self.delivery_rate,
+        )?;
+
+        write!(
+            f,
+            " max_bandwidth={:?} startup_exit={:?} ",
+            self.max_bandwidth, self.startup_exit
         )
     }
 }
