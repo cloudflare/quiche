@@ -185,10 +185,6 @@ impl AsSocketStats for QuicConnectionStats {
                 .stats
                 .bytes_in_flight_duration
                 .as_micros() as u64,
-            reset_stream_count_local: self.stats.reset_stream_count_local,
-            stopped_stream_count_local: self.stats.stopped_stream_count_local,
-            reset_stream_count_remote: self.stats.reset_stream_count_remote,
-            stopped_stream_count_remote: self.stats.stopped_stream_count_remote,
         }
     }
 }
