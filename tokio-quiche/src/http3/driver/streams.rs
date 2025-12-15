@@ -103,20 +103,20 @@ impl StreamCtx {
 
     /// Signal that there was a headers flush attempt was successful.
     pub(crate) fn full_headers_flush_success(&mut self) {
-        self.maybe_update_header_flush_duration(true);
+        // Clear headers_pending_flush since headers were successfully flushed.
+        self.audit_stats.set_headers_pending_flush(false);
+
+        self.maybe_update_header_flush_duration();
     }
 
     /// Signal that the headers flush was aborted due to stream being reset.
     pub(crate) fn full_headers_flush_aborted(&mut self) {
-        self.maybe_update_header_flush_duration(false);
+        self.maybe_update_header_flush_duration();
     }
 
-    fn maybe_update_header_flush_duration(&mut self, flush_successful: bool) {
-        // Clear headers_pending_flush only if header were successfully flushed.
-        if flush_successful {
-            self.audit_stats.set_headers_pending_flush(false);
-        }
-
+    // Helper used to implment full_headers_flush_success and
+    // full_headers_flush_aborted
+    fn maybe_update_header_flush_duration(&mut self) {
         if let Some(first) = self.first_full_headers_flush_fail_time.take() {
             self.audit_stats
                 .add_header_flush_duration(Instant::now().duration_since(first));
