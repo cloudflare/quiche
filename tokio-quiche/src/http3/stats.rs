@@ -153,6 +153,11 @@ impl H3AuditStats {
         self.sent_stream_fin.load()
     }
 
+    #[inline]
+    pub fn headers_pending_flush(&self) -> bool {
+        self.headers_pending_flush.load(Ordering::SeqCst)
+    }
+
     /// Cumulative time between HEADERS failed flush and complete.
     ///
     /// Measured as the duration between the first moment a HEADERS frame was
@@ -229,5 +234,23 @@ impl H3AuditStats {
     #[inline]
     pub fn set_headers_pending_flush(&self, value: bool) {
         self.headers_pending_flush.store(value, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_lock_free<T>(_: &AtomicCell<T>) -> bool {
+        AtomicCell::<T>::is_lock_free()
+    }
+
+    #[test]
+    fn atomic_cells_are_lock_free() {
+        let stats = H3AuditStats::new(0x07ac0ca707ac0ca7);
+        assert!(is_lock_free(&stats.recvd_stream_fin));
+        assert!(is_lock_free(&stats.sent_stream_fin));
+        // BUG!  AtomicCell uses global lock.
+        assert!(!is_lock_free(&stats.headers_flush_duration));
     }
 }

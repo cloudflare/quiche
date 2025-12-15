@@ -725,7 +725,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 };
 
                 if let Err(h3::Error::StreamBlocked) = res {
-                    ctx.full_headers_flush_failed();
+                    ctx.full_headers_flush_blocked();
                 }
 
                 if res.is_ok() {
@@ -1264,7 +1264,7 @@ impl<H: DriverHooks> Drop for H3Driver<H> {
                 .set_recvd_stream_fin(StreamClosureKind::Implicit);
 
             // Update stats if there were pending header sends on this stream.
-            stream.full_headers_flush_failed();
+            stream.full_headers_flush_aborted();
         }
     }
 }

@@ -28,11 +28,15 @@ use crate::fixtures::*;
 
 use futures::SinkExt;
 
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::time::Duration;
 use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::http3::driver::OutboundFrame;
 use tokio_quiche::http3::driver::ServerH3Event;
+use tokio_quiche::http3::H3AuditStats;
 use tokio_quiche::quiche::h3::Header;
 
 #[tokio::test]
@@ -108,4 +112,71 @@ async fn test_additional_headers() {
         Some(&Vec::from("200".as_bytes()))
     );
     assert!(headers.next().is_none());
+}
+
+#[tokio::test]
+async fn test_headers_flush_duration_updated_on_connection_drop() {
+    let hook = TestConnectionHook::new();
+
+    let audit_stats: Arc<RwLock<Option<Arc<H3AuditStats>>>> =
+        Arc::new(RwLock::new(None));
+    let clone = Arc::clone(&audit_stats);
+
+    let url = start_server_with_settings(
+        QuicSettings::default(),
+        Http3Settings::default(),
+        hook,
+        move |mut h3_conn| {
+            let clone = clone.clone();
+            async move {
+                let event_rx = h3_conn.h3_controller.event_receiver_mut();
+
+                while let Some(event) = event_rx.recv().await {
+                    match event {
+                        ServerH3Event::Core(event) => match event {
+                            H3Event::ConnectionShutdown(_) => break,
+
+                            _ => (),
+                        },
+
+                        ServerH3Event::Headers {
+                            incoming_headers, ..
+                        } => {
+                            let IncomingH3Headers {
+                                mut send,
+                                h3_audit_stats,
+                                ..
+                            } = incoming_headers;
+                            *clone.write().unwrap() = Some(h3_audit_stats);
+
+                            // Send headers that don't fit in the congestion
+                            // window and will
+                            // block the connection.
+                            send.send(OutboundFrame::Headers(
+                                vec![
+                                    Header::new(b":status", b"200"),
+                                    Header::new(b"large", &b"a".repeat(30_000)),
+                                ],
+                                None,
+                            ))
+                            .await
+                            .unwrap();
+                        },
+                    }
+                }
+            }
+        },
+    );
+
+    let summary = h3i_fixtures::request(&url, 1)
+        .await
+        .expect("request failed");
+
+    let mut headers = summary.stream_map.headers_on_stream(0).into_iter();
+    assert!(headers.next().is_none());
+
+    let audit_stats = audit_stats.read().unwrap().clone().unwrap();
+    assert!(audit_stats.headers_pending_flush());
+    // Verify that headers_flush_duration is updated on connection drop.
+    assert!(audit_stats.headers_flush_duration() > Duration::ZERO);
 }
