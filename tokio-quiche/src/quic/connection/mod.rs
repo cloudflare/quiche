@@ -340,6 +340,7 @@ where
             audit_log_stats: self.audit_log_stats,
             write_state: WriteState::default(),
             conn_map_cmd_tx: self.params.conn_map_cmd_tx,
+            cid_generator: self.params.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: self.params.init_rx_time,
             metrics: self.params.metrics.clone(),
@@ -468,6 +469,7 @@ where
     pub shutdown_tx: mpsc::Sender<()>,
     pub conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>, /* channel that signals connection map changes */
     pub scid: ConnectionId<'static>,
+    pub cid_generator: Option<SharedConnectionIdGenerator>,
     pub metrics: M,
     #[cfg(feature = "perf-quic-listener-metrics")]
     pub init_rx_time: Option<SystemTime>,
