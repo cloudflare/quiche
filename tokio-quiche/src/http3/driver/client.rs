@@ -152,12 +152,9 @@ impl ClientHooks {
         let body_finished = request.body_writer.is_none();
 
         // TODO: retry the request if the error is not fatal
-        let stream_id = driver.conn_mut()?.reserve_request_stream(qconn)?;
-        driver.conn_mut()?.stream_headers(
+        let stream_id = driver.conn_mut()?.send_request(
             qconn,
-            stream_id,
             &request.headers,
-            false,
             body_finished,
         )?;
 
