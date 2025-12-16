@@ -1055,13 +1055,14 @@ impl Connection {
     ///
     /// On success the new connection is returned.
     ///
-    /// The [`StreamLimit`] error is returned when the HTTP/3 control stream
-    /// cannot be created due to stream limits.
+    /// A [`TransportError`] with the value [`StreamLimit`] error is returned
+    /// when the HTTP/3 control stream cannot be created due to stream limits.
     ///
     /// The [`InternalError`] error is returned when either the underlying QUIC
     /// connection is not in a suitable state, or the HTTP/3 control stream
     /// cannot be created due to flow control limits.
     ///
+    /// [`TransportError`]: enum.Error.html#variant.StreamLimit
     /// [`StreamLimit`]: ../enum.Error.html#variant.StreamLimit
     /// [`InternalError`]: ../enum.Error.html#variant.InternalError
     pub fn with_transport<F: BufFactory>(
@@ -1177,9 +1178,27 @@ impl Connection {
     /// This is only for use by client endpoints, who are required to reserve a
     /// stream before sending headers via the [`stream_headers()`] function.
     ///
-    /// The [`StreamLimit`] error is returned when the stream cannot be created
-    /// due to stream limits.
+    /// This reserves a stream in the QUIC transport layer and cannot be undone.
+    /// If the reservation needs to be cancelled, then the stream should be shut
+    /// down in read and write directions using [`stream_shutdown()`]. Calls to
+    /// [`poll()`] will ensure the stream is subsequently cleaned up while
+    /// generating events according to the peer's actions.
     ///
+    /// A [`StreamCreationError`] is returned if this function is called by a
+    /// server.
+    ///
+    /// A [`StreamCreationError`] is returned if this function is called by a
+    /// client after a [`GoAway`] has been received.
+    ///
+    /// A [`TransportError`] with the value [`StreamLimit`] is returned when the
+    /// stream cannot be created due to stream limits.
+    ///
+    /// [`stream_headers()`]: struct.Connection.html#method.stream_headers
+    /// [`stream_shutdown()`]: ../struct.Connection.html#method.stream_shutdown
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`StreamCreationError`]: enum.Error.html#variant.StreamCreationError
+    /// [`GoAway`]: enum.Event.html#variant.GoAWay
+    /// [`TransportError`]: enum.Error.html#variant.TransportError
     /// [`StreamLimit`]: ../enum.Error.html#variant.StreamLimit
     pub fn reserve_request_stream(
         &mut self, conn: &mut super::Connection,
@@ -1245,6 +1264,7 @@ impl Connection {
     /// happens the application must call [`continue_partial_headers()`] once
     /// the stream is reported as writable again.
     ///
+    /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
     /// [`continue_partial_headers()`]:
     ///     struct.Connection.html#method.continue_partial_headers
     /// [`PartialHeader`]: enum.Error.html#variant.PartialHeader
@@ -1331,6 +1351,7 @@ impl Connection {
     ///     struct.Connection.html#method.continue_partial_headers
     /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
     /// [`PartialHeader`]: enum.Error.html#variant.PartialHeader
+    /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response<T: NameValue, F: BufFactory>(
         &mut self, conn: &mut super::Connection<F>, stream_id: u64,
         headers: &[T], fin: bool,
