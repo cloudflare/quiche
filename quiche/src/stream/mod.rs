@@ -506,6 +506,48 @@ impl<F: BufFactory> StreamMap<F> {
         true
     }
 
+    /// Cycles a readable stream to the back of the queue.
+    ///
+    /// This is used for round-robin scheduling: after processing headers from
+    /// a stream, it should be moved to the back of its priority group to give
+    /// other streams a chance.
+    ///
+    /// Returns `true` if the stream was successfully cycled.
+    pub fn cycle_readable(&mut self, stream_id: u64) -> bool {
+        let stream = match self.streams.get_mut(&stream_id) {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let old_priority_key = Arc::clone(&stream.priority_key);
+
+        // Only cycle if currently in the readable set
+        if !old_priority_key.readable.is_linked() {
+            return false;
+        }
+
+        // Bump the global sequence counter
+        self.sequence_counter = self.sequence_counter.wrapping_add(1);
+
+        // Create a new priority key with the updated sequence
+        let new_priority_key = Arc::new(StreamPriorityKey {
+            urgency: stream.urgency,
+            incremental: stream.incremental,
+            id: stream_id,
+            sequence: self.sequence_counter,
+            ..Default::default()
+        });
+
+        // Replace the stream's priority key
+        stream.priority_key = Arc::clone(&new_priority_key);
+
+        // Remove from readable with old key and re-insert with new key
+        self.remove_readable(&old_priority_key);
+        self.readable.insert(new_priority_key);
+
+        true
+    }
+
     /// Updates the priorities of a stream.
     pub fn update_priority(
         &mut self, old: &Arc<StreamPriorityKey>, new: &Arc<StreamPriorityKey>,
