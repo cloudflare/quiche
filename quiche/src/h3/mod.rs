@@ -1251,10 +1251,8 @@ impl Connection {
     /// message exchange, see [Section 4.1 of RFC 9114]. The [`FrameUnexpected`]
     /// error is returned if expectations are not met.
     ///
-    /// On success the newly allocated stream ID is returned, together with a
-    /// bool that indicates if the headers were fully sent or not. If this value
-    /// is false, it indicates the underlying stream or connection does not have
-    /// enough capacity to send the entire remaining header bytes.
+    /// On success, the HEADERS have been fully sent. If `fin` was `false`, then
+    /// sending subsequent frames can now be attempted.
     ///
     /// The [`PartialHeader`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
@@ -1344,10 +1342,7 @@ impl Connection {
     ///     struct.Connection.html#method.send_additional_headers
     /// [`send_response_with_priority()`]:
     ///     struct.Connection.html#method.send_response_with_priority
-    /// [`continue_partial_headers()`]:
-    ///     struct.Connection.html#method.continue_partial_headers
     /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
-    /// [`PartialHeader`]: enum.Error.html#variant.PartialHeader
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response<T: NameValue, F: BufFactory>(
         &mut self, conn: &mut super::Connection<F>, stream_id: u64,
@@ -1710,13 +1705,20 @@ impl Connection {
 
     /// Continues sending headers on the given stream.
     ///
+    /// On success, the HEADERS have been fully sent. If HEADERS had been sent
+    /// with a `fin` set to `false`, then sending subsequent frames can now be
+    /// attempted.
+    ///
     /// The [`PartialHeader`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
     /// happens the application should retry the operation once the stream is
     /// reported as writable again.
     ///
+    /// The [`FrameUnexpected`] error is returned if there are no partial
+    /// headers in progress i.e., because they have been fully sent.
+    ///
     /// [`PartialHeader`]: enum.Error.html#variant.PartialHeaders
-    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`FrameUnexpected`]: enum.Error.html#variant.PartialHeaders
     pub fn continue_partial_headers(
         &mut self, conn: &mut super::Connection, stream_id: u64,
     ) -> Result<()> {
