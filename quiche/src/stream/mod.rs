@@ -508,9 +508,9 @@ impl<F: BufFactory> StreamMap<F> {
 
     /// Cycles a readable stream to the back of the queue.
     ///
-    /// This is used for round-robin scheduling: after processing headers from
-    /// a stream, it should be moved to the back of its priority group to give
-    /// other streams a chance.
+    /// This is used for round-robin scheduling: after processing some data from
+    /// a stream, it can be moved to the back of its priority group to give
+    /// other streams a chance of being read.
     ///
     /// Returns `true` if the stream was successfully cycled.
     pub fn cycle_readable(&mut self, stream_id: u64) -> bool {
