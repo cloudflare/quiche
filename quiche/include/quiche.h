@@ -1160,10 +1160,6 @@ ssize_t quiche_h3_recv_body(quiche_h3_conn *conn, quiche_conn *quic_conn,
 int quiche_h3_send_goaway(quiche_h3_conn *conn, quiche_conn *quic_conn,
                           uint64_t id);
 
-// Sets the HTTP/3 priority for a stream.
-int quiche_h3_stream_priority(quiche_conn *conn, uint64_t stream_id,
-                                   quiche_h3_priority *priority);
-
 // Try to parse an Extensible Priority field value.
 int quiche_h3_parse_extensible_priority(uint8_t *priority,
                                         size_t priority_len,

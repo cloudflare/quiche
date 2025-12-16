@@ -367,17 +367,6 @@ pub extern "C" fn quiche_h3_send_goaway(
 }
 
 #[no_mangle]
-pub extern "C" fn quiche_h3_stream_priority(
-    quic_conn: &mut Connection, id: u64, priority: &Priority,
-) -> c_int {
-    match h3::Connection::stream_priority(quic_conn, id, priority) {
-        Ok(()) => 0,
-
-        Err(e) => e.to_c() as c_int,
-    }
-}
-
-#[no_mangle]
 #[cfg(feature = "sfv")]
 pub extern "C" fn quiche_h3_parse_extensible_priority(
     priority: *const u8, priority_len: size_t, parsed: &mut Priority,
