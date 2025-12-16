@@ -425,7 +425,8 @@ pub enum Error {
     /// over HTTP/1.1.
     VersionFallback,
 
-    /// TODO
+    /// An attempt to send a HEADERS frame did not fully complete. The local
+    /// endpoint should try to continue sending the remainder at a future time.
     PartialHeader,
 }
 
@@ -506,7 +507,7 @@ impl Error {
             Error::MessageError => WireErrorCode::MessageError as u64,
             Error::ConnectError => WireErrorCode::ConnectError as u64,
             Error::VersionFallback => WireErrorCode::VersionFallback as u64,
-            Error::PartialHeader => 0x1000,
+            Error::PartialHeader => unimplemented!("This error is never sent on the wire."),
         }
     }
 

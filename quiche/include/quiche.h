@@ -951,6 +951,10 @@ enum quiche_h3_error {
     // over HTTP/1.1.
     QUICHE_H3_ERR_VERSION_FALLBACK = -20,
 
+    // An attempt to send a HEADERS frame did not fully complete. The local
+    // endpoint should try to continue sending the remainder at a future time.
+    QUICHE_H3_ERR_PARTIAL_HEADER = -21,
+
     // The following QUICHE_H3_TRANSPORT_ERR_* errors are propagated
     // from the QUIC transport layer.
 
