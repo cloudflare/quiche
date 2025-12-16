@@ -5890,6 +5890,19 @@ impl<F: BufFactory> Connection<F> {
         stream.is_readable()
     }
 
+    /// Cycles a readable stream to the back of the priority queue.
+    ///
+    /// This is used for round-robin scheduling of readable streams. After
+    /// processing data from a stream, calling this method moves it to the
+    /// back of its priority group, giving other streams a chance to be
+    /// processed.
+    ///
+    /// Returns `true` if the stream was successfully cycled, `false` if the
+    /// stream doesn't exist or isn't in the readable set.
+    pub(crate) fn cycle_readable(&mut self, stream_id: u64) -> bool {
+        self.streams.cycle_readable(stream_id)
+    }
+
     /// Returns the next stream that can be written to.
     ///
     /// Note that once returned by this method, a stream ID will not be returned

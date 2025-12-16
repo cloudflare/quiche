@@ -2050,6 +2050,11 @@ impl Connection {
 
             // TODO: check if stream is completed so it can be freed
             if let Some(ev) = ev {
+                // Cycle the stream after returning Headers to enable
+                // round-robin "skim" behavior across multiple streams.
+                if matches!(ev.1, Event::Headers { .. }) {
+                    conn.cycle_readable(ev.0);
+                }
                 return Ok(ev);
             }
         }
@@ -3819,17 +3824,16 @@ mod tests {
         s.send_body_client(stream2, true).unwrap();
         s.send_body_client(stream1, true).unwrap();
 
+        // With reader-side round-robin cycling after Headers events,
+        // we expect interleaved ordering: all Headers first, then Data/Finished.
+
+        // All Headers events first (streams cycle after each Headers)
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
             list: reqs[0].clone(),
             more_frames: true,
         };
         assert_eq!(ev, ev_headers);
-        assert_eq!(s.poll_server(), Ok((0, Event::Data)));
-        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
-        assert_eq!(s.poll_client(), Err(Error::Done));
-        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
-        assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
 
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
@@ -3837,11 +3841,6 @@ mod tests {
             more_frames: true,
         };
         assert_eq!(ev, ev_headers);
-        assert_eq!(s.poll_server(), Ok((4, Event::Data)));
-        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
-        assert_eq!(s.poll_client(), Err(Error::Done));
-        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
-        assert_eq!(s.poll_server(), Ok((4, Event::Finished)));
 
         let (_, ev) = s.poll_server().unwrap();
         let ev_headers = Event::Headers {
@@ -3849,6 +3848,20 @@ mod tests {
             more_frames: true,
         };
         assert_eq!(ev, ev_headers);
+
+        // Now Data and Finished events for each stream
+        assert_eq!(s.poll_server(), Ok((0, Event::Data)));
+        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(0, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
+
+        assert_eq!(s.poll_server(), Ok((4, Event::Data)));
+        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert_eq!(s.recv_body_server(4, &mut recv_buf), Ok(body.len()));
+        assert_eq!(s.poll_server(), Ok((4, Event::Finished)));
+
         assert_eq!(s.poll_server(), Ok((8, Event::Data)));
         assert_eq!(s.recv_body_server(8, &mut recv_buf), Ok(body.len()));
         assert_eq!(s.poll_client(), Err(Error::Done));
