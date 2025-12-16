@@ -133,6 +133,7 @@ where
             conn,
             handshake_start_time,
             pending_cid: Some(pending_cid),
+            cid_generator: Some(Arc::clone(&self.cid_generator)),
             initial_pkt: Some(incoming),
         }))
     }
