@@ -1139,9 +1139,9 @@ int quiche_h3_send_additional_headers(quiche_h3_conn *conn,
 
 // Initiates streaming of a new HTTP/3 HEADERS frame.
 int quiche_h3_stream_headers(quiche_h3_conn *conn,
-                            quiche_conn *quic_conn, uint64_t stream_id,
-                            quiche_h3_header *headers, size_t headers_len,
-                            bool is_trailer_section, bool fin);
+                             quiche_conn *quic_conn, uint64_t stream_id,
+                             quiche_h3_header *headers, size_t headers_len,
+                             bool is_trailer_section, bool fin);
 
 // Continues sending headers on the given stream.
 int quiche_h3_continue_partial_headers(quiche_h3_conn *conn,
