@@ -1225,16 +1225,13 @@ impl Connection {
         Ok(stream_id)
     }
 
-    /// Sets the HTTP/3 priority for a stream.
-    ///
-    /// A stream's priority determines the order in which stream data is sent
-    /// on the wire (streams with lower priority are sent first).
-    ///
-    /// The target stream is created if it did not exist before calling this
-    /// method.
-    pub fn stream_priority<F: BufFactory>(
-        conn: &mut crate::Connection<F>, stream_id: u64, priority: &Priority,
+    fn stream_priority<F: BufFactory>(
+        &self, conn: &mut crate::Connection<F>, stream_id: u64, priority: &Priority,
     ) -> Result<()> {
+        if self.streams.contains_key(&stream_id) {
+            return Err(Error::IdError);
+        }
+
         // Clamp and shift urgency into quiche-priority space
         let urgency = priority
             .urgency
@@ -1427,7 +1424,7 @@ impl Connection {
 
         self.send_headers(conn, stream_id, headers, false, fin, false)?;
 
-        Self::stream_priority(conn, stream_id, priority)?;
+        self.stream_priority(conn, stream_id, priority)?;
 
         Ok(())
     }
@@ -1540,7 +1537,7 @@ impl Connection {
             fin,
         )?;
 
-        Self::stream_priority(conn, stream_id, priority)?;
+        self.stream_priority(conn, stream_id, priority)?;
 
         Ok(())
     }
