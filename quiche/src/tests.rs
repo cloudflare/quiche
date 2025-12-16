@@ -11106,3 +11106,83 @@ fn configuration_values_are_limited_to_max_varint() {
     // do not panic because of too large values that we try to encode via varint.
     assert_eq!(pipe.handshake(), Err(Error::InvalidTransportParam));
 }
+
+/// Tests that incremental streams are scheduled round-robin when sending.
+///
+/// When multiple incremental streams have data queued, each call to send()
+/// should emit data from the next stream in rotation, not always from the
+/// same stream.
+#[test]
+fn incremental_stream_round_robin() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    // Set high limits so we can send data on multiple streams
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(10000);
+    config.set_initial_max_stream_data_bidi_remote(10000);
+    config.set_initial_max_streams_bidi(10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Queue data on three streams. All streams are incremental by default.
+    // Use 2500 bytes so each stream needs ~2 packets to send all data.
+    let data = vec![0u8; 2500];
+    assert_eq!(pipe.client.stream_send(4, &data, false), Ok(2500));
+    assert_eq!(pipe.client.stream_send(8, &data, false), Ok(2500));
+    assert_eq!(pipe.client.stream_send(12, &data, false), Ok(2500));
+
+    // Track which streams get data sent in each packet
+    let mut send_order = Vec::new();
+
+    // Send packets one at a time
+    let mut buf = [0; 1350];
+    let mut recv_buf = [0; 1350];
+
+    // Send multiple packets and track which stream's data is sent
+    for _ in 0..10 {
+        let result = pipe.client.send(&mut buf);
+        if result.is_err() {
+            break;
+        }
+        let (len, _) = result.unwrap();
+        if len == 0 {
+            break;
+        }
+
+        // Process packet on server
+        let info = RecvInfo {
+            to: test_utils::Pipe::server_addr(),
+            from: test_utils::Pipe::client_addr(),
+        };
+        pipe.server.recv(&mut buf[..len], info).unwrap();
+
+        // Check which streams received data in THIS packet by consuming data.
+        // This ensures readable() only shows streams with new data next time.
+        for stream_id in pipe.server.readable() {
+            send_order.push(stream_id);
+            // Drain the data so the stream is no longer readable
+            while pipe.server.stream_recv(stream_id, &mut recv_buf).is_ok() {}
+        }
+    }
+
+    // With round-robin, streams are cycled after sending:
+    // - Stream 4 sends (lowest sequence), cycled to back -> queue: [8, 12, 4]
+    // - Stream 8 sends, cycled to back -> queue: [12, 4, 8]
+    // - Stream 12 sends, cycled to back -> queue: [4, 8, 12]
+    // Pattern repeats until all data is sent (3 rounds for 2500 bytes each).
+    assert_eq!(
+        send_order,
+        vec![4, 8, 12, 4, 8, 12, 4, 8, 12],
+        "Expected round-robin ordering: streams interleave across packets"
+    );
+}
