@@ -108,7 +108,7 @@ pub mod raw;
 mod router;
 
 use self::connection::ApplicationOverQuic;
-use self::connection::ConnectionIdGenerator;
+use self::connection::ConnectionIdGenerator as _;
 use self::connection::QuicConnection;
 use self::router::acceptor::ConnectionAcceptor;
 use self::router::acceptor::ConnectionAcceptorConfig;
