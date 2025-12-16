@@ -8485,10 +8485,9 @@ fn last_tx_data_larger_than_tx_data(
     pipe.server.on_timeout();
 
     // Server sends PTO probe (not limited to cwnd),
-    // to update last_tx_data. The exact size depends on stream scheduling
-    // order, which may vary; we just need some data to be sent.
+    // to update last_tx_data.
     let (len, _) = pipe.server.send(&mut buf).unwrap();
-    assert!(len > 0);
+    assert_eq!(len, 848);
 
     // Client sends STOP_SENDING to decrease tx_data
     // by unsent data. It will make last_tx_data > tx_data
