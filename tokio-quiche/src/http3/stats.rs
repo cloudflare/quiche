@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -69,6 +70,8 @@ pub struct H3AuditStats {
     /// Measured across all HEADERS frames sent on the stream. A value of 0
     /// indicates there was no failed flushing.
     headers_flush_duration: AtomicCell<Duration>,
+    /// True if the stream currently has headers pending flush.
+    headers_pending_flush: AtomicBool,
 }
 
 impl H3AuditStats {
@@ -84,6 +87,7 @@ impl H3AuditStats {
             recvd_stream_fin: AtomicCell::new(StreamClosureKind::None),
             sent_stream_fin: AtomicCell::new(StreamClosureKind::None),
             headers_flush_duration: AtomicCell::new(Duration::from_secs(0)),
+            headers_pending_flush: AtomicBool::new(false),
         }
     }
 
@@ -147,6 +151,11 @@ impl H3AuditStats {
     #[inline]
     pub fn sent_stream_fin(&self) -> StreamClosureKind {
         self.sent_stream_fin.load()
+    }
+
+    #[inline]
+    pub fn headers_pending_flush(&self) -> bool {
+        self.headers_pending_flush.load(Ordering::SeqCst)
     }
 
     /// Cumulative time between HEADERS failed flush and complete.
@@ -220,5 +229,28 @@ impl H3AuditStats {
         // object from any other thread so things should be ok.
         let current = self.headers_flush_duration.load();
         self.headers_flush_duration.store(current + duration);
+    }
+
+    #[inline]
+    pub fn set_headers_pending_flush(&self, value: bool) {
+        self.headers_pending_flush.store(value, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_lock_free<T>(_: &AtomicCell<T>) -> bool {
+        AtomicCell::<T>::is_lock_free()
+    }
+
+    #[test]
+    fn atomic_cells_are_lock_free() {
+        let stats = H3AuditStats::new(0x07ac0ca707ac0ca7);
+        assert!(is_lock_free(&stats.recvd_stream_fin));
+        assert!(is_lock_free(&stats.sent_stream_fin));
+        // BUG!  AtomicCell uses global lock.
+        assert!(!is_lock_free(&stats.headers_flush_duration));
     }
 }
