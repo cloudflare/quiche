@@ -52,6 +52,7 @@ use futures::StreamExt;
 use regex::Regex;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -264,6 +265,15 @@ where
     });
 
     url
+}
+
+pub fn extract_host_ipv4(url: &str) -> SocketAddr {
+    let url = url::Url::parse(url).expect("url should be valid");
+    match (url.host(), url.port()) {
+        (Some(url::Host::Ipv4(addr)), Some(port)) =>
+            SocketAddr::new(addr.into(), port),
+        _ => panic!("invalid server address"),
+    }
 }
 
 pub fn map_responses(
