@@ -28,9 +28,18 @@ use crate::fixtures::*;
 
 use futures::SinkExt;
 
+use h3i::actions::h3::send_headers_frame;
+use h3i::actions::h3::Action;
+use h3i::actions::h3::CustomCallback;
+use h3i::quiche::ConnectionError;
+use h3i::quiche::WireErrorCode;
+use h3i_fixtures::h3i_config;
+use h3i_fixtures::url_headers;
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::thread::sleep;
 use std::time::Duration;
+use std::time::Instant;
 use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
@@ -38,6 +47,7 @@ use tokio_quiche::http3::driver::OutboundFrame;
 use tokio_quiche::http3::driver::ServerH3Event;
 use tokio_quiche::http3::H3AuditStats;
 use tokio_quiche::quiche::h3::Header;
+use url::Url;
 
 #[tokio::test]
 async fn test_additional_headers() {
@@ -168,9 +178,62 @@ async fn test_headers_flush_duration_updated_on_connection_drop() {
         },
     );
 
-    let summary = h3i_fixtures::request(&url, 1)
-        .await
-        .expect("request failed");
+    let h3i = h3i_config(&url);
+    let url = Url::parse(&url).expect("h3i request URL is invalid");
+    let headers = url_headers(&url);
+
+    let wait_until_headers_pending_flush = CustomCallback::new(Arc::new({
+        let audit_stats = Arc::clone(&audit_stats);
+
+        move || {
+            let timeout = Duration::from_secs(5);
+            let start = Instant::now();
+            loop {
+                if let Some(audit_stats) = audit_stats.read().unwrap().clone() {
+                    if audit_stats.headers_pending_flush() {
+                        // Done!
+                        break;
+                    }
+                }
+
+                assert!(Instant::now() - start < timeout, "timeout");
+                sleep(Duration::from_millis(1));
+            }
+        }
+    }));
+
+    // Run actions:
+    // 1. Send a request
+    // 2. Wait for the server to attempt to send headers that are too large.
+    // 3. Close the client connection to trigger implicit stream shutdown at the
+    //    server.
+    let actions = Vec::from([
+        send_headers_frame(0, true, headers.clone()),
+        Action::FlushPackets,
+        Action::RunCallback {
+            cb: wait_until_headers_pending_flush,
+        },
+        Action::ConnectionClose {
+            error: ConnectionError {
+                is_app: true,
+                error_code: WireErrorCode::NoError as _,
+                reason: Vec::new(),
+            },
+        },
+    ]);
+
+    let summary = tokio::task::spawn_blocking(move || {
+        h3i::client::sync_client::connect(h3i, actions, None)
+    })
+    .await
+    .unwrap()
+    .unwrap();
+
+    // Verify that the h3i client executed the full action list and the client
+    // connection did not time out.
+    assert!(!summary.conn_close_details.timed_out);
+    assert!(summary.conn_close_details.local_error().is_some());
+    assert_eq!(summary.conn_close_details.peer_error(), None);
 
     let mut headers = summary.stream_map.headers_on_stream(0).into_iter();
     assert!(headers.next().is_none());

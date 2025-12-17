@@ -82,6 +82,8 @@ pub struct H3FrameCreatedEx {
 impl From<&Action> for QlogEvents {
     fn from(action: &Action) -> Self {
         match action {
+            Action::RunCallback { .. } => unreachable!(),
+
             Action::SendFrame {
                 stream_id,
                 fin_stream,
