@@ -10395,9 +10395,7 @@ fn configuration_values_are_limited_to_max_varint() {
 }
 #[cfg(feature = "custom-client-dcid")]
 #[rstest]
-fn connect_custom_client_dcid(
-    #[values(true, false)] too_short: bool,
-) {
+fn connect_custom_client_dcid(#[values(true, false)] too_short: bool) {
     let mut client_scid = [0; 16];
     rand::rand_bytes(&mut client_scid[..]);
     let client_scid = ConnectionId::from_ref(&client_scid);
@@ -10413,7 +10411,7 @@ fn connect_custom_client_dcid(
     rand::rand_bytes(&mut client_dcid[..]);
     let client_dcid = if too_short {
         // Just use something which is smaller than 8 (which is the minimum
-        ConnectionId::from_ref(&client_dcid[0 .. 6])
+        ConnectionId::from_ref(&client_dcid[0..6])
     } else {
         ConnectionId::from_ref(&client_dcid)
     };
@@ -10455,7 +10453,8 @@ fn connect_custom_client_dcid(
                 server_addr,
                 client_addr,
                 &mut server_config,
-            ).unwrap(),
+            )
+            .unwrap(),
         };
         assert_eq!(pipe.handshake(), Ok(()));
     }

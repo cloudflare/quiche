@@ -627,7 +627,8 @@ pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
 
         let tls = unsafe { tls::Handshake::from_ptr(ssl) };
 
-        // This will return an error if we did not compile with --custom-client-dcid.
+        // This will return an error if we did not compile with
+        // --custom-client-dcid.
         match Connection::with_tls(
             &scid,
             None, // ocid

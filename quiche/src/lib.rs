@@ -1789,7 +1789,8 @@ pub fn connect_with_dcid(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection> {
-    let mut conn = Connection::new(scid, None, Some(dcid), local, peer, config, false)?;
+    let mut conn = Connection::new(
+        scid, None, Some(dcid), local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -1808,7 +1809,8 @@ pub fn connect_with_buffer_factory<F: BufFactory>(
     server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    let mut conn = Connection::new(scid, None, None, local, peer, config, false)?;
+    let mut conn = Connection::new(
+        scid, None, None, local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -1831,7 +1833,8 @@ pub fn connect_with_dcid_and_buffer_factory<F: BufFactory>(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    let mut conn = Connection::new(scid, None, Some(dcid), local, peer, config, false)?;
+    let mut conn = Connection::new(
+        scid, None, Some(dcid), local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -2024,17 +2027,28 @@ impl Default for QlogInfo {
 
 impl<F: BufFactory> Connection<F> {
     fn new(
-        scid: &ConnectionId, dcid: Option<&ConnectionId>, client_dcid: Option<&ConnectionId>,
-        local: SocketAddr, peer: SocketAddr, config: &mut Config, is_server: bool,
+        scid: &ConnectionId, dcid: Option<&ConnectionId>,
+        client_dcid: Option<&ConnectionId>, local: SocketAddr, peer: SocketAddr,
+        config: &mut Config, is_server: bool,
     ) -> Result<Connection<F>> {
         let tls = config.tls_ctx.new_handshake()?;
-        Connection::with_tls(scid, dcid, client_dcid, local, peer, config, tls, is_server)
+        Connection::with_tls(
+            scid,
+            dcid,
+            client_dcid,
+            local,
+            peer,
+            config,
+            tls,
+            is_server
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
     fn with_tls(
-        scid: &ConnectionId, odcid: Option<&ConnectionId>, client_dcid: Option<&ConnectionId>,
-        local: SocketAddr, peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
+        scid: &ConnectionId, odcid: Option<&ConnectionId>,
+        client_dcid: Option<&ConnectionId>, local: SocketAddr, peer: SocketAddr,
+        config: &Config, tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection<F>> {
         #[cfg(feature = "custom-client-dcid")]
         if let Some(client_dcid) = client_dcid {
