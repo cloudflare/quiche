@@ -24,8 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::cmp;
-
 use std::io;
 
 /// For Linux, try to detect GSO is available.
@@ -94,10 +92,21 @@ fn send_to_gso_pacing(
 ///
 /// When GSO and SO_TXTIME are enabled, send packets using send_to_gso().
 /// Otherwise, send packets using socket.send_to().
+///
+/// # Errors
+///
+/// Returns [`io::ErrorKind::InvalidInput`] if `segment_size` is 0.
 pub fn send_to(
     socket: &mio::net::UdpSocket, buf: &[u8], send_info: &quiche::SendInfo,
     segment_size: usize, pacing: bool, enable_gso: bool,
 ) -> io::Result<usize> {
+    if segment_size == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "segment_size must be greater than 0",
+        ));
+    }
+
     if pacing && enable_gso {
         match send_to_gso_pacing(socket, buf, send_info, segment_size) {
             Ok(v) => {
@@ -109,22 +118,14 @@ pub fn send_to(
         }
     }
 
-    let mut off = 0;
-    let mut left = buf.len();
     let mut written = 0;
-
-    while left > 0 {
-        let pkt_len = cmp::min(left, segment_size);
-
-        match socket.send_to(&buf[off..off + pkt_len], send_info.to) {
+    for chunk in buf.chunks(segment_size) {
+        match socket.send_to(chunk, send_info.to) {
             Ok(v) => {
                 written += v;
             },
             Err(e) => return Err(e),
         }
-
-        off += pkt_len;
-        left -= pkt_len;
     }
 
     Ok(written)
