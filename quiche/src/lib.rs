@@ -1789,8 +1789,8 @@ pub fn connect_with_dcid(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection> {
-    let mut conn = Connection::new(
-        scid, None, Some(dcid), local, peer, config, false)?;
+    let mut conn =
+        Connection::new(scid, None, Some(dcid), local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -1809,8 +1809,8 @@ pub fn connect_with_buffer_factory<F: BufFactory>(
     server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    let mut conn = Connection::new(
-        scid, None, None, local, peer, config, false)?;
+    let mut conn =
+        Connection::new(scid, None, None, local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -1833,8 +1833,8 @@ pub fn connect_with_dcid_and_buffer_factory<F: BufFactory>(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    let mut conn = Connection::new(
-        scid, None, Some(dcid), local, peer, config, false)?;
+    let mut conn =
+        Connection::new(scid, None, Some(dcid), local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
