@@ -2031,6 +2031,7 @@ impl<F: BufFactory> Connection<F> {
         Connection::with_tls(scid, dcid, client_dcid, local, peer, config, tls, is_server)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn with_tls(
         scid: &ConnectionId, odcid: Option<&ConnectionId>, client_dcid: Option<&ConnectionId>,
         local: SocketAddr, peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
