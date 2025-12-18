@@ -29,7 +29,6 @@ use super::*;
 use crate::range_buf::RangeBuf;
 
 use rstest::rstest;
-use crate::connect_with_dcid;
 
 #[test]
 fn transport_params() {
@@ -10461,4 +10460,3 @@ fn connect_custom_client_dcid(
         assert_eq!(pipe.handshake(), Ok(()));
     }
 }
-
