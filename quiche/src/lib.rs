@@ -593,6 +593,9 @@ pub enum Error {
     /// The peer send an ACK frame for a skipped packet used for Optimistic ACK
     /// mitigation.
     OptimisticAckDetected,
+
+    /// An invalid DCID was used when connecting to a remote peer.
+    InvalidDcidInitialization,
 }
 
 /// QUIC error codes sent on the wire.
@@ -706,6 +709,7 @@ impl Error {
             Error::CryptoBufferExceeded => -20,
             Error::InvalidAckRange => -21,
             Error::OptimisticAckDetected => -22,
+            Error::InvalidDcidInitialization => -23,
         }
     }
 }
@@ -1719,7 +1723,7 @@ pub fn accept(
     scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection> {
-    let conn = Connection::new(scid, odcid, local, peer, config, true)?;
+    let conn = Connection::new(scid, odcid, None, local, peer, config, true)?;
 
     Ok(conn)
 }
@@ -1734,7 +1738,7 @@ pub fn accept_with_buf_factory<F: BufFactory>(
     scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    let conn = Connection::new(scid, odcid, local, peer, config, true)?;
+    let conn = Connection::new(scid, odcid, None, local, peer, config, true)?;
 
     Ok(conn)
 }
@@ -1762,7 +1766,7 @@ pub fn connect(
     server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection> {
-    let mut conn = Connection::new(scid, None, local, peer, config, false)?;
+    let mut conn = Connection::new(scid, None, None, local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -1771,7 +1775,7 @@ pub fn connect(
     Ok(conn)
 }
 
-/// Creates a new client-side connection using the given dcid initially.
+/// Creates a new client-side connection using the given DCID initially.
 /// Be aware the RFC places requirements for unpredictability and length
 /// on the client DCID field.
 /// [`RFC9000`]:  https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
@@ -1779,13 +1783,13 @@ pub fn connect(
 /// The `scid` parameter is used as the connection's source connection ID,
 /// while the optional `server_name` parameter is used to verify the peer's
 /// certificate.
-#[cfg(feature = "connect-with-dcid")]
-#[cfg_attr(docsrs, doc(cfg(feature = "connect-with-dcid")))]
+#[cfg(feature = "custom-client-dcid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "custom-client-dcid")))]
 pub fn connect_with_dcid(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection> {
-    let mut conn = Connection::new(scid, Some(dcid), local, peer, config, false)?;
+    let mut conn = Connection::new(scid, None, Some(dcid), local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -1804,7 +1808,7 @@ pub fn connect_with_buffer_factory<F: BufFactory>(
     server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    let mut conn = Connection::new(scid, None, local, peer, config, false)?;
+    let mut conn = Connection::new(scid, None, None, local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -1821,13 +1825,13 @@ pub fn connect_with_buffer_factory<F: BufFactory>(
 ///
 /// The buffers generated can be anything that can be drereferenced as a byte
 /// slice. See [`connect`] and [`BufFactory`] for more info.
-#[cfg(feature = "connect-with-dcid")]
-#[cfg_attr(docsrs, doc(cfg(feature = "connect-with-dcid")))]
+#[cfg(feature = "custom-client-dcid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "custom-client-dcid")))]
 pub fn connect_with_dcid_and_buffer_factory<F: BufFactory>(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    let mut conn = Connection::new(scid, Some(dcid), local, peer, config, false)?;
+    let mut conn = Connection::new(scid, None, Some(dcid), local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -2020,29 +2024,30 @@ impl Default for QlogInfo {
 
 impl<F: BufFactory> Connection<F> {
     fn new(
-        scid: &ConnectionId, dcid: Option<&ConnectionId>, local: SocketAddr,
-        peer: SocketAddr, config: &mut Config, is_server: bool,
+        scid: &ConnectionId, dcid: Option<&ConnectionId>, client_dcid: Option<&ConnectionId>,
+        local: SocketAddr, peer: SocketAddr, config: &mut Config, is_server: bool,
     ) -> Result<Connection<F>> {
         let tls = config.tls_ctx.new_handshake()?;
-        Connection::with_tls(scid, dcid, local, peer, config, tls, is_server)
+        Connection::with_tls(scid, dcid, client_dcid, local, peer, config, tls, is_server)
     }
 
     fn with_tls(
-        scid: &ConnectionId, dcid: Option<&ConnectionId>, local: SocketAddr,
-        peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
+        scid: &ConnectionId, odcid: Option<&ConnectionId>, client_dcid: Option<&ConnectionId>,
+        local: SocketAddr, peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection<F>> {
-        if !is_server {
-            #[cfg(feature = "connect-with-dcid")]
-            if let Some(dcid) = dcid {
-                // The Minimum length is 8.
-                // See https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
-                if dcid.to_vec().len() < 8 {
-                    return Err(Error::InvalidTransportParam);
-                }
+        #[cfg(feature = "custom-client-dcid")]
+        if let Some(client_dcid) = client_dcid {
+            // The Minimum length is 8.
+            // See https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
+            if client_dcid.to_vec().len() < 8 {
+                return Err(Error::InvalidDcidInitialization);
             }
-            #[cfg(not(feature = "connect-with-dcid"))]
-            debug_assert!(dcid.is_none());
         }
+        #[cfg(not(feature = "custom-client-dcid"))]
+        if client_dcid.is_some() {
+            return Err(Error::InvalidDcidInitialization);
+        }
+
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> =
@@ -2066,7 +2071,7 @@ impl<F: BufFactory> Connection<F> {
         );
 
         // If we did stateless retry assume the peer's address is verified.
-        path.verified_peer_address = is_server && dcid.is_some();
+        path.verified_peer_address = odcid.is_some();
         // Assume clients validate the server's address implicitly.
         path.peer_verified_local_address = is_server;
 
@@ -2243,19 +2248,14 @@ impl<F: BufFactory> Connection<F> {
             max_amplification_factor: config.max_amplification_factor,
         };
 
-        // If this is a connection for a server we need to use the odcid to encode
-        // it to the local transport parameters.
-        if is_server {
-            if let Some(dcid) = dcid {
-                conn.local_transport_params
-                    .original_destination_connection_id =
-                    Some(dcid.to_vec().into());
+        if let Some(odcid) = odcid {
+            conn.local_transport_params
+                .original_destination_connection_id = Some(odcid.to_vec().into());
 
-                conn.local_transport_params.retry_source_connection_id =
-                    Some(conn.ids.get_scid(0)?.cid.to_vec().into());
+            conn.local_transport_params.retry_source_connection_id =
+                Some(conn.ids.get_scid(0)?.cid.to_vec().into());
 
-                conn.did_retry = true;
-            }
+            conn.did_retry = true;
         }
 
         conn.local_transport_params.initial_source_connection_id =
@@ -2269,9 +2269,9 @@ impl<F: BufFactory> Connection<F> {
         conn.encode_transport_params()?;
 
         if !is_server {
-            let dcid = if let Some(dcid) = dcid {
+            let dcid = if let Some(client_dcid) = client_dcid {
                 // We already had an dcid generated for us, use it.
-                dcid.to_vec()
+                client_dcid.to_vec()
             } else {
                 // Derive initial secrets for the client. We can do this here
                 // because we already generated the random

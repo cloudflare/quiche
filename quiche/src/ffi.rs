@@ -605,17 +605,58 @@ pub extern "C" fn quiche_retry(
 }
 
 #[no_mangle]
-pub extern "C" fn quiche_conn_new_with_tls(
+pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
     scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
+    local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
+    config: &Config, ssl: *mut c_void,
+) -> *mut Connection {
+    {
+        let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+        let scid = ConnectionId::from_ref(scid);
+
+        let dcid = if !dcid.is_null() && dcid_len > 0 {
+            Some(ConnectionId::from_ref(unsafe {
+                slice::from_raw_parts(dcid, dcid_len)
+            }))
+        } else {
+            None
+        };
+
+        let local = std_addr_from_c(local, local_len);
+        let peer = std_addr_from_c(peer, peer_len);
+
+        let tls = unsafe { tls::Handshake::from_ptr(ssl) };
+
+        // This will return an error if we did not compile with --custom-client-dcid.
+        match Connection::with_tls(
+            &scid,
+            None, // ocid
+            dcid.as_ref(),
+            local,
+            peer,
+            config,
+            tls,
+            false,
+        ) {
+            Ok(c) => Box::into_raw(Box::new(c)),
+
+            Err(_) => ptr::null_mut(),
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_conn_new_with_tls(
+    scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
     config: &Config, ssl: *mut c_void, is_server: bool,
 ) -> *mut Connection {
     let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
     let scid = ConnectionId::from_ref(scid);
 
-    let dcid = if !dcid.is_null() && dcid_len > 0 {
+    let odcid = if !odcid.is_null() && odcid_len > 0 {
         Some(ConnectionId::from_ref(unsafe {
-            slice::from_raw_parts(dcid, dcid_len)
+            slice::from_raw_parts(odcid, odcid_len)
         }))
     } else {
         None
@@ -628,7 +669,8 @@ pub extern "C" fn quiche_conn_new_with_tls(
 
     match Connection::with_tls(
         &scid,
-        dcid.as_ref(),
+        odcid.as_ref(),
+        None, // client_dcid
         local,
         peer,
         config,

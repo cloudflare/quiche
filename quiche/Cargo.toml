@@ -30,8 +30,8 @@ rust-version = "1.83"
 [features]
 default = ["boringssl-vendored"]
 
-# Allow to provide generated dcid and connect with it.
-connect-with-dcid = []
+# Allow client connections to provide a custom DCID.
+custom-client-dcid = []
 
 # Build the vendored BoringSSL library.
 boringssl-vendored = []
@@ -63,7 +63,7 @@ tag-prefix = ""
 
 [package.metadata.docs.rs]
 no-default-features = true
-features = ["boringssl-boring-crate", "qlog", "connect-with-dcid"]
+features = ["boringssl-boring-crate", "qlog", "custom-client-dcid"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [build-dependencies]
