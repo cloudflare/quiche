@@ -92,8 +92,8 @@ fn bbr2_handle_lost_packet(
 
 fn bbr2_inflight_hi_from_lost_packet(r: &mut Congestion, packet: &Sent) -> usize {
     let size = packet.size;
-    let inflight_prev = r.bbr2_state.tx_in_flight - size;
-    let lost_prev = r.bbr2_state.lost - size;
+    let inflight_prev = r.bbr2_state.tx_in_flight.saturating_sub(size);
+    let lost_prev = r.bbr2_state.lost.saturating_sub(size);
     let lost_prefix = (LOSS_THRESH * inflight_prev as f64 - lost_prev as f64) /
         (1.0 - LOSS_THRESH);
 
