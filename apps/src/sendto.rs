@@ -24,8 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::cmp;
-
 use std::io;
 
 /// For Linux, try to detect GSO is available.
@@ -109,22 +107,14 @@ pub fn send_to(
         }
     }
 
-    let mut off = 0;
-    let mut left = buf.len();
     let mut written = 0;
-
-    while left > 0 {
-        let pkt_len = cmp::min(left, segment_size);
-
-        match socket.send_to(&buf[off..off + pkt_len], send_info.to) {
+    for chunk in buf.chunks(segment_size) {
+        match socket.send_to(chunk, send_info.to) {
             Ok(v) => {
                 written += v;
             },
             Err(e) => return Err(e),
         }
-
-        off += pkt_len;
-        left -= pkt_len;
     }
 
     Ok(written)
