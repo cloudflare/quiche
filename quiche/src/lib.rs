@@ -429,8 +429,6 @@ use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
 use crate::recovery::ReleaseDecision;
 
-use crate::stream::StreamPriorityKey;
-
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 
@@ -4947,14 +4945,14 @@ impl<F: BufFactory> Connection<F> {
                 }
 
                 let priority_key = Arc::clone(&stream.priority_key);
+
                 // If the stream is no longer flushable, remove it from the queue
                 if !stream.is_flushable() {
                     self.streams.remove_flushable(&priority_key);
                 } else if stream.incremental {
-                    // Shuffle the incremental stream to the back of the
-                    // queue.
-                    self.streams.remove_flushable(&priority_key);
-                    self.streams.insert_flushable(&priority_key);
+                    // Cycle the incremental stream to the back of the queue
+                    // for round-robin scheduling.
+                    self.streams.cycle_flushable(stream_id);
                 }
 
                 #[cfg(feature = "fuzzing")]
@@ -5685,15 +5683,21 @@ impl<F: BufFactory> Connection<F> {
         stream.urgency = urgency;
         stream.incremental = incremental;
 
-        let new_priority_key = Arc::new(StreamPriorityKey {
-            urgency: stream.urgency,
-            incremental: stream.incremental,
+        let old_priority_key = Arc::clone(&stream.priority_key);
+
+        let sequence = self.streams.next_sequence();
+
+        let stream = self.streams.get_mut(stream_id).unwrap();
+
+        let new_priority_key = Arc::new(stream::StreamPriorityKey {
+            urgency,
+            incremental,
             id: stream_id,
+            sequence,
             ..Default::default()
         });
 
-        let old_priority_key =
-            std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
+        stream.priority_key = Arc::clone(&new_priority_key);
 
         self.streams
             .update_priority(&old_priority_key, &new_priority_key);
@@ -5846,6 +5850,19 @@ impl<F: BufFactory> Connection<F> {
         };
 
         stream.is_readable()
+    }
+
+    /// Cycles a readable stream to the back of the priority queue.
+    ///
+    /// This is used for round-robin scheduling of readable streams. After
+    /// processing data from a stream, calling this method moves it to the
+    /// back of its priority group, giving other streams a chance to be
+    /// processed.
+    ///
+    /// Returns `true` if the stream was successfully cycled, `false` if the
+    /// stream doesn't exist or isn't in the readable set.
+    pub(crate) fn cycle_readable(&mut self, stream_id: u64) -> bool {
+        self.streams.cycle_readable(stream_id)
     }
 
     /// Returns the next stream that can be written to.
