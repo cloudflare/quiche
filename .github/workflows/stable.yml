@@ -41,7 +41,9 @@ jobs:
           components: clippy
 
       - name: Install qlog-dancer dependencies
-        run: sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
 
       - name: Unused dependency check
         if: ${{ matrix.tls-feature == '' }}
