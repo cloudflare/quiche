@@ -400,14 +400,6 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(feature = "qlog")]
-use qlog::events::connectivity::ConnectivityEventType;
-#[cfg(feature = "qlog")]
-use qlog::events::connectivity::TransportOwner;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::RecoveryEventType;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::TransportEventType;
-#[cfg(feature = "qlog")]
 use qlog::events::DataRecipient;
 #[cfg(feature = "qlog")]
 use qlog::events::Event;
@@ -419,6 +411,14 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::RawInfo;
+#[cfg(feature = "qlog")]
+use qlog::events::connectivity::ConnectivityEventType;
+#[cfg(feature = "qlog")]
+use qlog::events::connectivity::TransportOwner;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::RecoveryEventType;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::TransportEventType;
 
 use smallvec::SmallVec;
 
@@ -2787,8 +2787,7 @@ impl<F: BufFactory> Connection<F> {
             // the client MUST discard these packets.
             trace!(
                 "{} client received packet from unknown address {:?}, dropping",
-                self.trace_id,
-                info,
+                self.trace_id, info,
             );
 
             return Ok(len);
@@ -3470,8 +3469,7 @@ impl<F: BufFactory> Connection<F> {
                         if let Some(pmtud) = p.pmtud.as_mut() {
                             trace!(
                                 "{} pmtud probe acked; probe size {:?}",
-                                self.trace_id,
-                                mtu_probe
+                                self.trace_id, mtu_probe
                             );
 
                             // Ensure the probe is within the supported MTU range
@@ -7294,6 +7292,7 @@ impl<F: BufFactory> Connection<F> {
     /// Collects and returns statistics about each known path for the
     /// connection.
     pub fn path_stats(&self) -> impl Iterator<Item = PathStats> + '_ {
+        info!("----------- 1 path_stats");
         self.paths.iter().map(|(_, p)| p.stats())
     }
 
@@ -7537,14 +7536,16 @@ impl<F: BufFactory> Connection<F> {
             // 0-RTT packets anymore, so clear the buffer now.
             self.undecryptable_pkts.clear();
 
-            trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-                   &self.trace_id,
-                   std::str::from_utf8(self.application_proto()),
-                   self.handshake.cipher(),
-                   self.handshake.curve(),
-                   self.handshake.sigalg(),
-                   self.handshake.is_resumed(),
-                   self.peer_transport_params);
+            trace!(
+                "{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
+                &self.trace_id,
+                std::str::from_utf8(self.application_proto()),
+                self.handshake.cipher(),
+                self.handshake.curve(),
+                self.handshake.sigalg(),
+                self.handshake.is_resumed(),
+                self.peer_transport_params
+            );
         }
 
         Ok(())
@@ -8373,10 +8374,7 @@ impl<F: BufFactory> Connection<F> {
                 if prev_recv_pid != recv_pid {
                     trace!(
                         "{} peer reused CID {:?} from path {} on path {}",
-                        self.trace_id,
-                        dcid,
-                        prev_recv_pid,
-                        recv_pid
+                        self.trace_id, dcid, prev_recv_pid, recv_pid
                     );
 
                     // TODO: reset congestion control.
@@ -8384,9 +8382,7 @@ impl<F: BufFactory> Connection<F> {
 
                 trace!(
                     "{} path ID {} now see SCID with seq num {}",
-                    self.trace_id,
-                    recv_pid,
-                    in_scid_seq
+                    self.trace_id, recv_pid, in_scid_seq
                 );
 
                 recv_path.active_scid_seq = Some(in_scid_seq);

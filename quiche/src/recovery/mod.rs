@@ -28,12 +28,12 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::Config;
+use crate::Result;
 use crate::frame;
 use crate::packet;
 use crate::ranges::RangeSet;
 pub(crate) use crate::recovery::bandwidth::Bandwidth;
-use crate::Config;
-use crate::Result;
 
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
@@ -309,7 +309,7 @@ pub trait RecoveryOps {
 
     #[cfg(feature = "qlog")]
     fn get_updated_qlog_cc_state(&mut self, now: Instant)
-        -> Option<&'static str>;
+    -> Option<&'static str>;
 
     fn send_quantum(&self) -> usize;
 
@@ -664,6 +664,7 @@ impl RecoveryStats {
     // Record statistics when a CCA first exits startup.
     pub fn set_startup_exit(&mut self, startup_exit: StartupExit) {
         if self.startup_exit.is_none() {
+            info!("----------- 2 set startup exit");
             self.startup_exit = Some(startup_exit);
         }
     }
@@ -711,11 +712,11 @@ pub enum StartupExitReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CongestionControlAlgorithm;
+    use crate::DEFAULT_INITIAL_RTT;
     use crate::packet;
     use crate::recovery::congestion::PACING_MULTIPLIER;
     use crate::test_utils;
-    use crate::CongestionControlAlgorithm;
-    use crate::DEFAULT_INITIAL_RTT;
     use rstest::rstest;
     use smallvec::smallvec;
     use std::str::FromStr;

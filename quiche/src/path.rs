@@ -527,6 +527,7 @@ impl Path {
     }
 
     pub fn stats(&self) -> PathStats {
+        info!("----------- 3 path.stats()");
         let pmtu = match self.pmtud.as_ref().map(|p| p.get_current_mtu()) {
             Some(v) => v,
 
@@ -1013,7 +1014,14 @@ impl std::fmt::Debug for PathStats {
         write!(
             f,
             "recv={} sent={} lost={} retrans={} rtt={:?} min_rtt={:?} rttvar={:?} cwnd={}",
-            self.recv, self.sent, self.lost, self.retrans, self.rtt, self.min_rtt, self.rttvar, self.cwnd,
+            self.recv,
+            self.sent,
+            self.lost,
+            self.retrans,
+            self.rtt,
+            self.min_rtt,
+            self.rttvar,
+            self.cwnd,
         )?;
 
         write!(
@@ -1038,11 +1046,11 @@ impl std::fmt::Debug for PathStats {
 
 #[cfg(test)]
 mod tests {
-    use crate::rand;
     use crate::MIN_CLIENT_INITIAL_LEN;
+    use crate::rand;
 
-    use crate::recovery::RecoveryConfig;
     use crate::Config;
+    use crate::recovery::RecoveryConfig;
 
     use super::*;
 
