@@ -664,7 +664,6 @@ impl RecoveryStats {
     // Record statistics when a CCA first exits startup.
     pub fn set_startup_exit(&mut self, startup_exit: StartupExit) {
         if self.startup_exit.is_none() {
-            info!("----------- 2 set startup exit");
             self.startup_exit = Some(startup_exit);
         }
     }

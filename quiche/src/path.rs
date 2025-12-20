@@ -527,7 +527,6 @@ impl Path {
     }
 
     pub fn stats(&self) -> PathStats {
-        info!("----------- 3 path.stats()");
         let pmtu = match self.pmtud.as_ref().map(|p| p.get_current_mtu()) {
             Some(v) => v,
 

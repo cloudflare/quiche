@@ -7292,7 +7292,6 @@ impl<F: BufFactory> Connection<F> {
     /// Collects and returns statistics about each known path for the
     /// connection.
     pub fn path_stats(&self) -> impl Iterator<Item = PathStats> + '_ {
-        info!("----------- 1 path_stats");
         self.paths.iter().map(|(_, p)| p.stats())
     }
 

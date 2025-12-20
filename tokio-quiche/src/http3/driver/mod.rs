@@ -49,6 +49,7 @@ use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
 use futures::FutureExt;
 use futures_util::stream::FuturesUnordered;
+use quiche::PathStats;
 use quiche::h3;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -256,7 +257,10 @@ pub enum H3Event {
     /// The stream has been closed. This is used to signal stream closures that
     /// don't result from RST_STREAM frames, unlike the
     /// [`H3Event::ResetStream`] variant.
-    StreamClosed { stream_id: u64 },
+    StreamClosed {
+        stream_id: u64,
+        path_stat: Option<PathStats>,
+    },
 }
 
 impl H3Event {
@@ -974,10 +978,16 @@ impl<H: DriverHooks> H3Driver<H> {
         }
 
         if qconn.is_server() {
+            let path_stat = qconn.path_stats().next();
+
             // Signal the server to remove the stream from its map
-            let _ = self
-                .h3_event_sender
-                .send(H3Event::StreamClosed { stream_id }.into());
+            let _ = self.h3_event_sender.send(
+                H3Event::StreamClosed {
+                    stream_id,
+                    path_stat,
+                }
+                .into(),
+            );
         }
 
         Ok(())

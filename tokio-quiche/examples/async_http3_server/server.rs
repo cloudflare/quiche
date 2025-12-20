@@ -128,6 +128,14 @@ where
                 QuicResult::Err(err)
             },
 
+            H3Event::StreamClosed {
+                stream_id,
+                path_stat,
+            } => {
+                log::info!("stream closed: {:?}", path_stat);
+                Ok(())
+            },
+
             _ => {
                 log::info!("received unhandled event: {event:?}");
                 Ok(())
