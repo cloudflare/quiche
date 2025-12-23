@@ -704,7 +704,6 @@ pub enum StartupExitReason {
 mod tests {
     use super::*;
     use crate::packet;
-    use crate::recovery::congestion::PACING_MULTIPLIER;
     use crate::test_utils;
     use crate::CongestionControlAlgorithm;
     use crate::DEFAULT_INITIAL_RTT;
@@ -1918,18 +1917,7 @@ mod tests {
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
         let pacing_rate = match cc_algorithm_name {
-            "bbr" => {
-                // Constants from congestion/bbr/mod.rs
-                let cwnd_gain = 2.0;
-                let startup_pacing_gain = 2.89;
-                // Adjust for cwnd_gain.  BW estimate was made before the CWND
-                // increase.
-                let bw = r.cwnd() as f64 /
-                    cwnd_gain /
-                    Duration::from_millis(50).as_secs_f64();
-                (bw * startup_pacing_gain) as u64
-            },
-            "bbr2" | "bbr2_gcongestion" => {
+            "bbr2_gcongestion" | "bbr2" => {
                 let cwnd_gain: f64 = 2.0;
                 // Adjust for cwnd_gain.  BW estimate was made before the CWND
                 // increase.
@@ -1938,11 +1926,7 @@ mod tests {
                     Duration::from_millis(50).as_secs_f64();
                 bw as u64
             },
-            _ => {
-                let bw =
-                    r.cwnd() as f64 / Duration::from_millis(50).as_secs_f64();
-                (bw * PACING_MULTIPLIER) as u64
-            },
+            _ => 0,
         };
         assert_eq!(r.pacing_rate(), pacing_rate);
 
@@ -1957,7 +1941,15 @@ mod tests {
         };
         assert_eq!(
             r.get_packet_send_time(now) - now,
-            Duration::from_secs_f64(scale_factor * 12000.0 / pacing_rate as f64)
+            if cc_algorithm_name == "bbr2_gcongestion" ||
+                cc_algorithm_name == "bbr2"
+            {
+                Duration::from_secs_f64(
+                    scale_factor * 12000.0 / pacing_rate as f64,
+                )
+            } else {
+                Duration::ZERO
+            }
         );
         assert_eq!(r.startup_exit(), None);
     }
@@ -2522,7 +2514,7 @@ mod tests {
                 {
                     120000
                 } else {
-                    150000
+                    0
                 },
                 "{iter}"
             );

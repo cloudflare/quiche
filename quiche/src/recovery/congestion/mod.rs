@@ -37,8 +37,6 @@ use crate::recovery::CongestionControlAlgorithm;
 use crate::StartupExit;
 use crate::StartupExitReason;
 
-pub const PACING_MULTIPLIER: f64 = 1.25;
-
 pub struct SsThresh {
     // Current slow start threshold.  Defaults to usize::MAX which
     // indicates we're still in the initial slow start phase.
@@ -91,9 +89,6 @@ pub struct Congestion {
 
     // HyStart++.
     pub(crate) hystart: hystart::Hystart,
-
-    // Pacing.
-    pub(crate) pacer: pacer::Pacer,
 
     // RFC6937 PRR.
     pub(crate) prr: prr::PRR,
@@ -159,14 +154,6 @@ impl Congestion {
 
             hystart: hystart::Hystart::new(recovery_config.hystart),
 
-            pacer: pacer::Pacer::new(
-                recovery_config.pacing,
-                initial_congestion_window,
-                0,
-                recovery_config.max_send_udp_payload_size,
-                recovery_config.max_pacing_rate,
-            ),
-
             prr: prr::PRR::default(),
         };
 
@@ -193,10 +180,6 @@ impl Congestion {
         self.send_quantum
     }
 
-    pub(crate) fn set_pacing_rate(&mut self, rate: u64, now: Instant) {
-        self.pacer.update(self.send_quantum, rate, now);
-    }
-
     pub(crate) fn congestion_window(&self) -> usize {
         self.congestion_window
     }
@@ -208,7 +191,7 @@ impl Congestion {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn on_packet_sent(
         &mut self, bytes_in_flight: usize, sent_bytes: usize, now: Instant,
-        pkt: &mut Sent, rtt_stats: &RttStats, bytes_lost: u64, in_flight: bool,
+        pkt: &mut Sent, _rtt_stats: &RttStats, bytes_lost: u64, in_flight: bool,
     ) {
         if in_flight {
             self.update_app_limited(
@@ -227,16 +210,7 @@ impl Congestion {
             }
         }
 
-        // Pacing: Set the pacing rate if CC doesn't do its own.
-        if !(self.cc_ops.has_custom_pacing)() && rtt_stats.has_first_rtt_sample {
-            let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
-                rtt_stats.smoothed_rtt.as_secs_f64();
-            self.set_pacing_rate(rate as u64, now);
-        }
-
-        self.schedule_next_packet(now, sent_bytes);
-
-        pkt.time_sent = self.get_packet_send_time();
+        pkt.time_sent = now;
 
         // bytes_in_flight is already updated. Use previous value.
         self.delivery_rate
@@ -263,27 +237,6 @@ impl Congestion {
             now,
             rtt_stats,
         );
-    }
-
-    fn schedule_next_packet(&mut self, now: Instant, packet_size: usize) {
-        // Don't pace in any of these cases:
-        //   * Packet contains no data.
-        //   * The congestion window is within initcwnd.
-
-        let in_initcwnd = self.congestion_window <
-            self.max_datagram_size * self.initial_congestion_window_packets;
-
-        let sent_bytes = if !self.pacer.enabled() || in_initcwnd {
-            0
-        } else {
-            packet_size
-        };
-
-        self.pacer.send(sent_bytes, now);
-    }
-
-    pub(crate) fn get_packet_send_time(&self) -> Instant {
-        self.pacer.next_time()
     }
 }
 
@@ -316,8 +269,6 @@ pub(crate) struct CongestionControlOps {
     pub checkpoint: fn(r: &mut Congestion),
 
     pub rollback: fn(r: &mut Congestion) -> bool,
-
-    pub has_custom_pacing: fn() -> bool,
 
     #[cfg(feature = "qlog")]
     pub state_str: fn(r: &Congestion, now: Instant) -> &'static str,
@@ -394,7 +345,6 @@ mod tests {
 mod cubic;
 mod delivery_rate;
 mod hystart;
-pub(crate) mod pacer;
 mod prr;
 pub(crate) mod recovery;
 mod reno;
