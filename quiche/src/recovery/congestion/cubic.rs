@@ -52,7 +52,6 @@ pub(crate) static CUBIC: CongestionControlOps = CongestionControlOps {
     congestion_event,
     checkpoint,
     rollback,
-    has_custom_pacing,
     #[cfg(feature = "qlog")]
     state_str,
     debug_fmt,
@@ -404,10 +403,6 @@ fn rollback(r: &mut Congestion) -> bool {
     true
 }
 
-fn has_custom_pacing() -> bool {
-    false
-}
-
 #[cfg(feature = "qlog")]
 fn state_str(r: &Congestion, now: Instant) -> &'static str {
     reno::state_str(r, now)
@@ -518,7 +513,9 @@ mod tests {
             sender.send_packet(size);
         }
 
-        // Trigger congestion event to update ssthresh
+        let rtt = Duration::from_millis(100);
+
+        sender.advance_time(rtt);
         sender.lose_n_packets(1, size, None);
 
         // After congestion event, cwnd will be reduced.
@@ -526,14 +523,26 @@ mod tests {
         assert_eq!(sender.congestion_window, cur_cwnd);
 
         // Shift current time by 1 RTT.
-        let rtt = Duration::from_millis(100);
         sender.update_rtt(rtt);
         // Exit from the recovery.
         sender.advance_time(rtt);
 
+        sender.ack_n_packets(sender.initial_congestion_window_packets - 2, size);
+        // Only packets sent after exit recovery can increase cwnd.
+        assert_eq!(sender.congestion_window, cur_cwnd);
+
+        for _ in 0..8 {
+            sender.send_packet(size);
+        }
+        sender.advance_time(rtt);
+
+        sender.ack_n_packets(1, size);
+        // Only packets sent after exit recovery can increase cwnd.
+        assert_eq!(sender.congestion_window, cur_cwnd);
+
         // During Congestion Avoidance, it will take
-        // 5 ACKs to increase cwnd by 1 MSS.
-        for _ in 0..5 {
+        // 6 ACKs to increase cwnd by 1 MSS.
+        for _ in 0..6 {
             sender.ack_n_packets(1, size);
             sender.advance_time(rtt);
         }
@@ -793,11 +802,21 @@ mod tests {
         // Exit from the recovery.
         sender.advance_time(rtt);
 
-        // During Congestion Avoidance, it will take
-        // 5 ACKs to increase cwnd by 1 MSS.
-        for _ in 0..5 {
+        // Drain most packets in flight except for 1 to avoid adjustments to
+        // cubic.last_sent_time when idle, see on_packet_sent.
+        sender.ack_n_packets(sender.initial_congestion_window_packets - 2, size);
+
+        // During Congestion Avoidance, it will take 6 ACKs to
+        // increase cwnd by 1 MSS.  But ACKed packets must have been
+        // sent after the loss event.
+        for _ in 0..7 {
+            sender.send_packet(size);
+        }
+        // ACK the packet that was sent before the loss event.
+        sender.ack_n_packets(1, size);
+        sender.advance_time(rtt);
+        for _ in 0..6 {
             sender.ack_n_packets(1, size);
-            sender.advance_time(rtt);
         }
 
         assert_eq!(sender.congestion_window, cur_cwnd + size);
