@@ -25,7 +25,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use debug_panic::debug_panic;
-use std::time::Duration;
 use std::time::Instant;
 
 use self::recovery::Acked;
@@ -103,12 +102,6 @@ pub struct Congestion {
     // transmitted together.
     send_quantum: usize,
 
-    // BBR state.
-    bbr_state: bbr::State,
-
-    // BBRv2 state.
-    bbr2_state: bbr2::State,
-
     pub(crate) congestion_window: usize,
 
     pub(crate) ssthresh: SsThresh,
@@ -122,8 +115,6 @@ pub struct Congestion {
     pub(crate) app_limited: bool,
 
     pub(crate) delivery_rate: delivery_rate::Rate,
-
-    initial_rtt: Duration,
 
     /// Initial congestion window size in terms of packet count.
     pub(crate) initial_congestion_window_packets: usize,
@@ -157,8 +148,6 @@ impl Congestion {
 
             lost_count: 0,
 
-            initial_rtt: recovery_config.initial_rtt,
-
             initial_congestion_window_packets: recovery_config
                 .initial_congestion_window_packets,
 
@@ -179,10 +168,6 @@ impl Congestion {
             ),
 
             prr: prr::PRR::default(),
-
-            bbr_state: bbr::State::new(),
-
-            bbr2_state: bbr2::State::new(),
         };
 
         (cc.cc_ops.on_init)(&mut cc);
@@ -348,11 +333,9 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
         match algo {
             CongestionControlAlgorithm::Reno => &reno::RENO,
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
-            CongestionControlAlgorithm::BBR => &bbr::BBR,
-            CongestionControlAlgorithm::BBR2 => &bbr2::BBR2,
             CongestionControlAlgorithm::Bbr2Gcongestion => {
                 debug_panic!("legacy implementation, not gcongestion");
-                &bbr2::BBR2
+                &cubic::CUBIC
             },
         }
     }
@@ -408,8 +391,6 @@ mod tests {
     }
 }
 
-mod bbr;
-mod bbr2;
 mod cubic;
 mod delivery_rate;
 mod hystart;

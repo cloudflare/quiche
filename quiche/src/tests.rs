@@ -6618,7 +6618,7 @@ fn dgram_send_app_limited(
             .app_limited(),
         // bbr2_gcongestion uses different logic to set app_limited
         // TODO fix
-        cc_algorithm_name != "bbr2_gcongestion"
+        cc_algorithm_name == "cubic" || cc_algorithm_name == "reno"
     );
     assert_eq!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
 
@@ -6634,7 +6634,7 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        cc_algorithm_name != "bbr2_gcongestion"
+        cc_algorithm_name == "cubic" || cc_algorithm_name == "reno"
     );
 
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
@@ -6656,7 +6656,7 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        cc_algorithm_name != "bbr2_gcongestion"
+        cc_algorithm_name == "cubic" || cc_algorithm_name == "reno"
     );
 }
 
@@ -9449,9 +9449,9 @@ fn resilience_against_migration_attack(
     let send1_bytes = pipe.server.stream_send(1, &buf, true).unwrap();
     assert_eq!(send1_bytes, match cc_algorithm_name {
         #[cfg(feature = "openssl")]
-        "bbr2" => 14041,
+        "bbr2" => 13966,
         #[cfg(not(feature = "openssl"))]
-        "bbr2" => 13955,
+        "bbr2" => 13880,
         #[cfg(feature = "openssl")]
         "bbr2_gcongestion" => 13966,
         #[cfg(not(feature = "openssl"))]
