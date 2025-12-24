@@ -36,6 +36,8 @@ use h3i::client::ClientError;
 use h3i::prompts::h3::Prompter;
 use h3i::recordreplay::qlog::QlogEvent;
 use h3i::recordreplay::qlog::*;
+use qlog::events::HTTP3_URI;
+use qlog::events::QUIC_URI;
 use qlog::reader::QlogSeqReader;
 
 use clap::App;
@@ -452,25 +454,20 @@ pub fn make_streamer(
     let vp = qlog::VantagePointType::Client;
 
     let trace = qlog::TraceSeq::new(
-        qlog::VantagePoint {
+        Some("h3i".into()),
+        Some("h3i".into()),
+        None,
+        Some(qlog::VantagePoint {
             name: None,
             ty: vp,
             flow: None,
-        },
-        Some("h3i".into()),
-        Some("h3i".into()),
-        Some(qlog::Configuration {
-            time_offset: Some(0.0),
-            original_uris: None,
         }),
-        None,
+        vec![QUIC_URI.to_string(), HTTP3_URI.to_string()],
     );
 
     let mut streamer = qlog::streamer::QlogStreamer::new(
-        qlog::QLOG_VERSION.to_string(),
         Some("h3i".into()),
         Some("h3i".into()),
-        None,
         time::Instant::now(),
         trace,
         qlog::events::EventImportance::Extra,
