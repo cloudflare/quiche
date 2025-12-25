@@ -388,6 +388,12 @@ mod tests {
         // Simulate a failed probe that is less than the last successful probe
         pmtud.failed_probe(1300);
 
+        // The largest successful probe should be reset after restarting PMTUD
+        assert_eq!(pmtud.largest_successful_probe_size, None);
+
+        // The smallest failed probe should be recorded again after restarting PMTUD
+        assert_eq!(pmtud.smallest_failed_probe_size, Some(1300));
+
         // Run the PMTUD test runner to verify handling of inconsistent results
         pmtud_test_runner(&mut pmtud, 1250);
     }
