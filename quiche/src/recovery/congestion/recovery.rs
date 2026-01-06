@@ -59,6 +59,7 @@ use crate::recovery::LossDetectionTimer;
 use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
+use crate::recovery::TimeSent;
 use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
@@ -580,7 +581,8 @@ impl RecoveryOps for LegacyRecovery {
 
     fn on_packet_sent(
         &mut self, mut pkt: Sent, epoch: Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        handshake_status: HandshakeStatus, _time_sent: &TimeSent, now: Instant,
+        trace_id: &str,
     ) {
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
@@ -625,10 +627,6 @@ impl RecoveryOps for LegacyRecovery {
         self.epochs[epoch].sent_packets.push_back(pkt);
 
         trace!("{trace_id} {self:?}");
-    }
-
-    fn get_packet_send_time(&self, now: Instant) -> Instant {
-        now
     }
 
     // `peer_sent_ack_ranges` should not be used without validation.

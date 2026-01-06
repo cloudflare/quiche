@@ -3744,7 +3744,8 @@ impl<F: BufFactory> Connection<F> {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<(usize, SendInfo)> {
-        self.send_on_path(out, None, None)
+        let now = Instant::now();
+        self.send_on_path(out, None, None, &TimeSent::new(&None, now), now)
     }
 
     /// Writes a single QUIC packet to be sent to the peer from the specified
@@ -3832,7 +3833,7 @@ impl<F: BufFactory> Connection<F> {
     /// ```
     pub fn send_on_path(
         &mut self, out: &mut [u8], from: Option<SocketAddr>,
-        to: Option<SocketAddr>,
+        to: Option<SocketAddr>, time_sent: &TimeSent, now: Instant,
     ) -> Result<(usize, SendInfo)> {
         if out.is_empty() {
             return Err(Error::BufferTooShort);
@@ -3841,8 +3842,6 @@ impl<F: BufFactory> Connection<F> {
         if self.is_closed() || self.is_draining() {
             return Err(Error::Done);
         }
-
-        let now = Instant::now();
 
         if self.local_error.is_none() {
             self.do_handshake(now)?;
@@ -3910,6 +3909,7 @@ impl<F: BufFactory> Connection<F> {
                 &mut out[done..done + left],
                 send_pid,
                 has_initial,
+                time_sent,
                 now,
             ) {
                 Ok(v) => v,
@@ -3968,8 +3968,7 @@ impl<F: BufFactory> Connection<F> {
         let info = SendInfo {
             from: send_path.local_addr(),
             to: send_path.peer_addr(),
-
-            at: send_path.recovery.get_packet_send_time(now),
+            at: time_sent.time(),
         };
 
         Ok((done, info))
@@ -3977,7 +3976,7 @@ impl<F: BufFactory> Connection<F> {
 
     fn send_single(
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
-        now: Instant,
+        time_sent: &TimeSent, now: Instant,
     ) -> Result<(Type, usize)> {
         if out.is_empty() {
             return Err(Error::BufferTooShort);
@@ -5155,7 +5154,14 @@ impl<F: BufFactory> Connection<F> {
             completed: self.handshake_completed,
         };
 
-        self.on_packet_sent(send_pid, sent_pkt, epoch, handshake_status, now)?;
+        self.on_packet_sent(
+            send_pid,
+            sent_pkt,
+            epoch,
+            handshake_status,
+            time_sent,
+            now,
+        )?;
 
         let path = self.paths.get_mut(send_pid)?;
         qlog_with_type!(QLOG_METRICS, self.qlog, q, {
@@ -5201,7 +5207,7 @@ impl<F: BufFactory> Connection<F> {
     fn on_packet_sent(
         &mut self, send_pid: usize, sent_pkt: recovery::Sent,
         epoch: packet::Epoch, handshake_status: recovery::HandshakeStatus,
-        now: Instant,
+        time_sent: &TimeSent, now: Instant,
     ) -> Result<()> {
         let path = self.paths.get_mut(send_pid)?;
 
@@ -5219,6 +5225,7 @@ impl<F: BufFactory> Connection<F> {
             sent_pkt,
             epoch,
             handshake_status,
+            time_sent,
             now,
             &self.trace_id,
         );
@@ -9425,6 +9432,7 @@ pub use crate::recovery::BbrParams;
 pub use crate::recovery::CongestionControlAlgorithm;
 pub use crate::recovery::StartupExit;
 pub use crate::recovery::StartupExitReason;
+pub use crate::recovery::TimeSent;
 
 pub use crate::stream::StreamIter;
 

@@ -60,6 +60,7 @@ use foundations::telemetry::log;
 use quiche::ConnectionId;
 use quiche::Error as QuicheError;
 use quiche::SendInfo;
+use quiche::TimeSent;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::time;
@@ -337,12 +338,15 @@ where
             None
         };
 
+        let time_sent = TimeSent::new(&initial_release_decision, now);
         let buffer_write_outcome = loop {
             let outcome = self.write_packet_to_buffer(
                 qconn,
                 send_buf,
                 &mut send_info,
                 segment_size,
+                &time_sent,
+                now,
             );
 
             let packet_size = match outcome {
@@ -491,6 +495,7 @@ where
     fn write_packet_to_buffer(
         &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
         send_info: &mut Option<SendInfo>, segment_size: Option<usize>,
+        time_sent: &TimeSent, now: Instant,
     ) -> QuicResult<usize> {
         let mut send_buf = &mut send_buf[self.write_state.bytes_written..];
         if send_buf.len() > segment_size.unwrap_or(usize::MAX) {
@@ -511,7 +516,7 @@ where
         // apply to the whole GSO buffer.
         let (from, to) = self.select_path(qconn).unzip();
 
-        match qconn.send_on_path(send_buf, from, to) {
+        match qconn.send_on_path(send_buf, from, to, time_sent, now) {
             Ok((packet_size, info)) => {
                 let _ = send_info.get_or_insert(info);
 

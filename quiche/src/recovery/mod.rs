@@ -202,9 +202,14 @@ pub trait RecoveryOps {
 
     fn on_packet_sent(
         &mut self, pkt: Sent, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        handshake_status: HandshakeStatus, time_sent: &TimeSent, now: Instant,
+        trace_id: &str,
     );
-    fn get_packet_send_time(&self, now: Instant) -> Instant;
+
+    #[cfg(test)]
+    fn get_packet_send_time(&self, now: Instant) -> Instant {
+        TimeSent::new(&Some(self.get_next_release_time()), now).time()
+    }
 
     #[allow(clippy::too_many_arguments)]
     fn on_ack_received(
@@ -642,6 +647,27 @@ impl ReleaseDecision {
     }
 }
 
+/// Time at which the generated packet will be sent on the network.
+pub struct TimeSent {
+    time: Instant,
+}
+
+impl TimeSent {
+    /// Create from ReleaseDecision and now.
+    pub fn new(release_decision: &Option<ReleaseDecision>, now: Instant) -> Self {
+        let time = release_decision
+            .as_ref()
+            .and_then(|v| v.time(now))
+            .unwrap_or(now);
+        Self { time }
+    }
+
+    /// Accessor for the underlying Instant.
+    pub fn time(&self) -> Instant {
+        self.time
+    }
+}
+
 /// Recovery statistics
 #[derive(Default, Debug)]
 pub struct RecoveryStats {
@@ -783,6 +809,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -814,6 +841,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -845,6 +873,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -875,6 +904,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -945,6 +975,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -975,6 +1006,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -1070,6 +1102,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -1100,6 +1133,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -1130,6 +1164,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -1160,6 +1195,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -1252,6 +1288,7 @@ mod tests {
                 p,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
+                &TimeSent::new(&None, now),
                 now,
                 "",
             );
@@ -1395,6 +1432,7 @@ mod tests {
                 p,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
+                &TimeSent::new(&None, send_time),
                 send_time,
                 "",
             );
@@ -1569,6 +1607,7 @@ mod tests {
                 p,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
+                &TimeSent::new(&None, send_time),
                 send_time,
                 "",
             );
@@ -1758,6 +1797,7 @@ mod tests {
                 p,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
+                &TimeSent::new(&Some(r.get_next_release_time()), now),
                 now,
                 "",
             );
@@ -1836,6 +1876,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&Some(r.get_next_release_time()), now),
             now,
             "",
         );
@@ -1853,6 +1894,7 @@ mod tests {
         }
 
         // Send the third and fourth packet bursts together.
+        let send_time = &TimeSent::new(&Some(r.get_next_release_time()), now);
         let p = Sent {
             pkt_num: 11,
             frames: smallvec![],
@@ -1876,6 +1918,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            send_time,
             now,
             "",
         );
@@ -1884,7 +1927,17 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 12000);
         assert_eq!(r.bytes_in_flight_duration(), initial_rtt);
 
-        // Send the fourth packet burst.
+        // The fourth packet burst.
+        if pacing_enabled {
+            // Ideal send time is 25msec in the future, but send_time is still set
+            // to that of the third burst.
+            let ideal_send_time =
+                TimeSent::new(&Some(r.get_next_release_time()), now);
+            assert_eq!(
+                ideal_send_time.time() - send_time.time(),
+                Duration::from_millis(25)
+            );
+        }
         let p = Sent {
             pkt_num: 12,
             frames: smallvec![],
@@ -1908,6 +1961,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            send_time,
             now,
             "",
         );
@@ -2041,13 +2095,10 @@ mod tests {
             }
         );
 
-        // Pacer adds 50msec delay to the second packet, resulting in
-        // an effective RTT of 0.
-        let expected_min_rtt = if pacing_enabled {
-            Duration::from_millis(0)
-        } else {
-            reduced_rtt
-        };
+        // min_rtt is not modified, since the sent_time associated
+        // with packet 12 was equal to that of packet 11 since they
+        // were sent together despite they having different ideal
+        // release times.
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.bytes_in_flight_duration(), initial_rtt + reduced_rtt);
@@ -2102,6 +2153,7 @@ mod tests {
                 p,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
+                &TimeSent::new(&None, now),
                 now,
                 "",
             );
@@ -2176,7 +2228,14 @@ mod tests {
         let pkt_count = 4;
         for pkt_num in 0..pkt_count {
             let sent = test_utils::helper_packet_sent(pkt_num, now, pkt_size);
-            r.on_packet_sent(sent, epoch, HandshakeStatus::default(), now, "");
+            r.on_packet_sent(
+                sent,
+                epoch,
+                HandshakeStatus::default(),
+                &TimeSent::new(&None, now),
+                now,
+                "",
+            );
         }
         assert_eq!(r.sent_packets_len(epoch), pkt_count as usize);
         assert_eq!(r.bytes_in_flight(), pkt_count as usize * pkt_size);
@@ -2282,6 +2341,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -2314,6 +2374,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -2343,6 +2404,7 @@ mod tests {
             p,
             packet::Epoch::Application,
             HandshakeStatus::default(),
+            &TimeSent::new(&None, now),
             now,
             "",
         );
@@ -2435,6 +2497,7 @@ mod tests {
                 sent,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
+                &TimeSent::new(&None, now),
                 now,
                 "",
             );
@@ -2498,6 +2561,7 @@ mod tests {
                 p,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
+                &TimeSent::new(&None, now),
                 now,
                 "",
             );
@@ -2571,6 +2635,7 @@ mod tests {
                 p,
                 packet::Epoch::Application,
                 HandshakeStatus::default(),
+                &TimeSent::new(&None, now),
                 now,
                 "",
             );

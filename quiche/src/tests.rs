@@ -6534,19 +6534,21 @@ fn handshake_packet_type_corruption(
     test_utils::process_flight(&mut pipe.client, flight).unwrap();
 
     // Client sends Initial packet with ACK.
+    let now = Instant::now();
     let active_pid = pipe.client.paths.get_active_path_id().expect("no active");
     let (ty, len) = pipe
         .client
-        .send_single(&mut buf, active_pid, false, Instant::now())
+        .send_single(&mut buf, active_pid, false, &TimeSent::new(&None, now), now)
         .unwrap();
     assert_eq!(ty, Type::Initial);
 
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
     // Client sends Handshake packet.
+    let now = Instant::now();
     let (ty, len) = pipe
         .client
-        .send_single(&mut buf, active_pid, false, Instant::now())
+        .send_single(&mut buf, active_pid, false, &TimeSent::new(&None, now), now)
         .unwrap();
     assert_eq!(ty, Type::Handshake);
 
@@ -8894,16 +8896,28 @@ fn send_on_path_test(
 
     let mut buf = [0; 65535];
     // There is nothing to send on the initial path.
+    let now = Instant::now();
     assert_eq!(
-        pipe.client
-            .send_on_path(&mut buf, Some(client_addr), Some(server_addr)),
+        pipe.client.send_on_path(
+            &mut buf,
+            Some(client_addr),
+            Some(server_addr),
+            &TimeSent::new(&None, now),
+            now
+        ),
         Err(Error::Done)
     );
 
     // Client should send padded PATH_CHALLENGE.
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, Some(client_addr_2), Some(server_addr))
+        .send_on_path(
+            &mut buf,
+            Some(client_addr_2),
+            Some(server_addr),
+            &TimeSent::new(&None, now),
+            now,
+        )
         .expect("No error");
     assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(si.from, client_addr_2);
@@ -8925,7 +8939,9 @@ fn send_on_path_test(
         pipe.client.send_on_path(
             &mut buf,
             Some(client_addr_3),
-            Some(server_addr)
+            Some(server_addr),
+            &TimeSent::new(&None, now),
+            now
         ),
         Err(Error::InvalidState)
     );
@@ -8933,7 +8949,9 @@ fn send_on_path_test(
         pipe.client.send_on_path(
             &mut buf,
             Some(client_addr),
-            Some(server_addr_2)
+            Some(server_addr_2),
+            &TimeSent::new(&None, now),
+            now
         ),
         Err(Error::InvalidState)
     );
@@ -8947,7 +8965,13 @@ fn send_on_path_test(
     // PATH_CHALLENGE
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, Some(client_addr), None)
+        .send_on_path(
+            &mut buf,
+            Some(client_addr),
+            None,
+            &TimeSent::new(&None, now),
+            now,
+        )
         .expect("No error");
     assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(si.from, client_addr);
@@ -8965,7 +8989,13 @@ fn send_on_path_test(
     // STREAM frame on active path.
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, Some(client_addr), None)
+        .send_on_path(
+            &mut buf,
+            Some(client_addr),
+            None,
+            &TimeSent::new(&None, now),
+            now,
+        )
         .expect("No error");
     assert_eq!(si.from, client_addr);
     assert_eq!(si.to, server_addr);
@@ -8982,7 +9012,13 @@ fn send_on_path_test(
     // PATH_CHALLENGE
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, None, Some(server_addr))
+        .send_on_path(
+            &mut buf,
+            None,
+            Some(server_addr),
+            &TimeSent::new(&None, now),
+            now,
+        )
         .expect("No error");
     assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(si.from, client_addr_3);
@@ -9000,7 +9036,13 @@ fn send_on_path_test(
     // STREAM frame on active path.
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, None, Some(server_addr))
+        .send_on_path(
+            &mut buf,
+            None,
+            Some(server_addr),
+            &TimeSent::new(&None, now),
+            now,
+        )
         .expect("No error");
     assert_eq!(si.from, client_addr);
     assert_eq!(si.to, server_addr);
@@ -9013,11 +9055,23 @@ fn send_on_path_test(
 
     // No more data to exchange leads to Error::Done.
     assert_eq!(
-        pipe.client.send_on_path(&mut buf, Some(client_addr), None),
+        pipe.client.send_on_path(
+            &mut buf,
+            Some(client_addr),
+            None,
+            &TimeSent::new(&None, now),
+            now
+        ),
         Err(Error::Done)
     );
     assert_eq!(
-        pipe.client.send_on_path(&mut buf, None, Some(server_addr)),
+        pipe.client.send_on_path(
+            &mut buf,
+            None,
+            Some(server_addr),
+            &TimeSent::new(&None, now),
+            now
+        ),
         Err(Error::Done)
     );
 

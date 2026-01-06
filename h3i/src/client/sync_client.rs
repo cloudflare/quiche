@@ -384,10 +384,13 @@ pub fn connect(
 
             for peer_addr in conn.paths_iter(local_addr) {
                 loop {
+                    let now = Instant::now();
                     let (write, send_info) = match conn.send_on_path(
                         &mut out,
                         Some(local_addr),
                         Some(peer_addr),
+                        &quiche::TimeSent::new(&None, now),
+                        now,
                     ) {
                         Ok(v) => v,
 
