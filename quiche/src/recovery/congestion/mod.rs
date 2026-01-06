@@ -283,6 +283,10 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
         match algo {
             CongestionControlAlgorithm::Reno => &reno::RENO,
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
+            // Bbr2Gcongestion is routed to the congestion implementation in
+            // the gcongestion directory by Recovery::new_with_config;
+            // LegacyRecovery never gets a RecoveryConfig with the
+            // Bbr2Gcongestion algorithm.
             CongestionControlAlgorithm::Bbr2Gcongestion => unreachable!(),
         }
     }

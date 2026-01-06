@@ -1843,7 +1843,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
 
         if cc_algorithm_name == "cubic" || cc_algorithm_name == "reno" {
-            // Pacing is not done during initial phase of connection.
+            // Pacing is disabled.
             assert_eq!(r.get_packet_send_time(now), now);
         } else {
             // Pacing is done from the beginning.

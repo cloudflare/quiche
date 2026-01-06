@@ -6608,6 +6608,10 @@ fn dgram_send_app_limited(
         assert_eq!(pipe.client.dgram_send(&send_buf), Ok(()));
     }
 
+    // bbr2_gcongestion uses different logic to set app_limited
+    // TODO fix
+    let should_be_app_limited =
+        cc_algorithm_name == "cubic" || cc_algorithm_name == "reno";
     assert_eq!(
         !pipe
             .client
@@ -6616,9 +6620,7 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        // bbr2_gcongestion uses different logic to set app_limited
-        // TODO fix
-        cc_algorithm_name == "cubic" || cc_algorithm_name == "reno"
+        should_be_app_limited
     );
     assert_eq!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
 
@@ -6634,7 +6636,7 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        cc_algorithm_name == "cubic" || cc_algorithm_name == "reno"
+        should_be_app_limited
     );
 
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
@@ -6656,7 +6658,7 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        cc_algorithm_name == "cubic" || cc_algorithm_name == "reno"
+        should_be_app_limited
     );
 }
 
