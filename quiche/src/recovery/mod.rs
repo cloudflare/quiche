@@ -592,7 +592,6 @@ pub struct ReleaseDecision {
 
 impl ReleaseTime {
     /// Add the specific delay to the current time
-    #[allow(dead_code)]
     fn inc(&mut self, delay: Duration) {
         match self {
             ReleaseTime::Immediate => {},
@@ -601,7 +600,6 @@ impl ReleaseTime {
     }
 
     /// Set the time to the later of two times
-    #[allow(dead_code)]
     fn set_max(&mut self, other: Instant) {
         match self {
             ReleaseTime::Immediate => *self = ReleaseTime::At(other),
@@ -615,7 +613,6 @@ impl ReleaseDecision {
 
     /// Get the [`Instant`] the next packet should be released. It will never be
     /// in the past.
-    #[allow(dead_code)]
     #[inline]
     pub fn time(&self, now: Instant) -> Option<Instant> {
         match self.time {
@@ -625,14 +622,12 @@ impl ReleaseDecision {
     }
 
     /// Can this packet be appended to a previous burst
-    #[allow(dead_code)]
     #[inline]
     pub fn can_burst(&self) -> bool {
         self.allow_burst
     }
 
     /// Check if the two packets can be released at the same time
-    #[allow(dead_code)]
     #[inline]
     pub fn time_eq(&self, other: &Self, now: Instant) -> bool {
         let delta = match (self.time(now), other.time(now)) {
