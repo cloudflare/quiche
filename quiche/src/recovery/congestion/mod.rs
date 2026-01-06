@@ -24,7 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use debug_panic::debug_panic;
 use std::time::Instant;
 
 use self::recovery::Acked;
@@ -284,10 +283,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
         match algo {
             CongestionControlAlgorithm::Reno => &reno::RENO,
             CongestionControlAlgorithm::CUBIC => &cubic::CUBIC,
-            CongestionControlAlgorithm::Bbr2Gcongestion => {
-                debug_panic!("legacy implementation, not gcongestion");
-                &cubic::CUBIC
-            },
+            CongestionControlAlgorithm::Bbr2Gcongestion => unreachable!(),
         }
     }
 }
