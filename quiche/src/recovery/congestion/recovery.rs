@@ -1028,7 +1028,7 @@ impl RecoveryOps for LegacyRecovery {
     fn get_next_release_time(&self) -> ReleaseDecision {
         ReleaseDecision {
             time: ReleaseTime::Immediate,
-            allow_burst: false,
+            allow_burst: true,
         }
     }
 
