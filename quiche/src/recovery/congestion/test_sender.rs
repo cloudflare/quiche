@@ -93,7 +93,6 @@ impl TestSender {
             bytes,
             self.time,
             &mut sent,
-            &self.rtt_stats,
             0,
             true,
         );
