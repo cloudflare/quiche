@@ -381,6 +381,7 @@ impl FromStr for CongestionControlAlgorithm {
         match name {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
+            "bbr" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             "bbr2" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             _ => Err(crate::Error::CongestionControl),
@@ -727,11 +728,13 @@ mod tests {
         assert_eq!(algo, CongestionControlAlgorithm::CUBIC);
         assert!(!recovery_for_alg(algo).gcongestion_enabled());
 
+        let algo = CongestionControlAlgorithm::from_str("bbr").unwrap();
+        assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
+        assert!(recovery_for_alg(algo).gcongestion_enabled());
+
         let algo = CongestionControlAlgorithm::from_str("bbr2").unwrap();
-        {
-            assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
-            assert!(recovery_for_alg(algo).gcongestion_enabled());
-        }
+        assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
+        assert!(recovery_for_alg(algo).gcongestion_enabled());
 
         let algo =
             CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
