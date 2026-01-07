@@ -3813,7 +3813,10 @@ impl<F: BufFactory> Connection<F> {
     /// # let local = socket.local_addr().unwrap();
     /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
     /// loop {
-    ///     let (write, send_info) = match conn.send_on_path(&mut out, Some(local), Some(peer)) {
+    ///     let now = std::time::Instant::now();
+    ///     let (write, send_info) = match conn.send_on_path(&mut out, Some(local), Some(peer),
+    ///                                                      &quiche::TimeSent::new(&None, now),
+    ///                                                      now) {
     ///         Ok(v) => v,
     ///
     ///         Err(quiche::Error::Done) => {
@@ -6919,8 +6922,11 @@ impl<F: BufFactory> Connection<F> {
     /// // Iterate over possible destinations for the given local `SockAddr`.
     /// for dest in conn.paths_iter(local) {
     ///     loop {
+    ///         let now = std::time::Instant::now();
     ///         let (write, send_info) =
-    ///             match conn.send_on_path(&mut out, Some(local), Some(dest)) {
+    ///                 match conn.send_on_path(&mut out, Some(local), Some(dest),
+    ///                                         &quiche::TimeSent::new(&None, now),
+    ///                                         now) {
     ///                 Ok(v) => v,
     ///
     ///                 Err(quiche::Error::Done) => {
