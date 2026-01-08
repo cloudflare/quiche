@@ -1550,6 +1550,10 @@ where
     /// Number of bytes buffered in the send buffer.
     tx_buffered: usize,
 
+    /// True if the connection detected an inconsistency in the tx_buffered
+    /// value.
+    inconsistent_tx_buffered: bool,
+
     /// Total number of bytes sent to the peer.
     tx_data: u64,
 
@@ -2110,6 +2114,7 @@ impl<F: BufFactory> Connection<F> {
             tx_cap_factor: config.tx_cap_factor,
 
             tx_buffered: 0,
+            inconsistent_tx_buffered: false,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -3533,14 +3538,10 @@ impl<F: BufFactory> Connection<F> {
                         length,
                         ..
                     } => {
-                        let stream = match self.streams.get_mut(stream_id) {
-                            Some(v) => v,
-
-                            None => continue,
-                        };
-
-                        stream.send.ack_and_drop(offset, length);
-
+                        // Update tx_buffered and emit qlog before checking if the
+                        // stream still exists.  The client does need to ACK
+                        // frames that were received after the client sends a
+                        // ResetStream.
                         self.tx_buffered =
                             self.tx_buffered.saturating_sub(length);
 
@@ -3558,6 +3559,14 @@ impl<F: BufFactory> Connection<F> {
 
                             q.add_event_data_with_instant(ev_data, now).ok();
                         });
+
+                        let stream = match self.streams.get_mut(stream_id) {
+                            Some(v) => v,
+
+                            None => continue,
+                        };
+
+                        stream.send.ack_and_drop(offset, length);
 
                         // Only collect the stream if it is complete and not
                         // readable. If it is readable, it will get collected when
@@ -4028,7 +4037,31 @@ impl<F: BufFactory> Connection<F> {
                         let stream = match self.streams.get_mut(stream_id) {
                             Some(v) => v,
 
-                            None => continue,
+                            None => {
+                                // Update tx_buffered and qlog. Data on a closed
+                                // stream will not be retransmitted or ACKed after
+                                // it is declared lost.
+                                self.tx_buffered =
+                                    self.tx_buffered.saturating_sub(length);
+
+                                qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
+                                    let ev_data = EventData::DataMoved(
+                                        qlog::events::quic::DataMoved {
+                                            stream_id: Some(stream_id),
+                                            offset: Some(offset),
+                                            length: Some(length as u64),
+                                            from: Some(DataRecipient::Transport),
+                                            to: Some(DataRecipient::Dropped),
+                                            ..Default::default()
+                                        },
+                                    );
+
+                                    q.add_event_data_with_instant(ev_data, now)
+                                        .ok();
+                                });
+
+                                continue;
+                            },
                         };
 
                         let was_flushable = stream.is_flushable();
@@ -4107,6 +4140,7 @@ impl<F: BufFactory> Connection<F> {
                 }
             }
         }
+        self.check_tx_buffered_invariant();
 
         let is_app_limited = self.delivery_rate_check_if_app_limited();
         let n_paths = self.paths.len();
@@ -5629,6 +5663,7 @@ impl<F: BufFactory> Connection<F> {
         self.tx_data += sent as u64;
 
         self.tx_buffered += sent;
+        self.check_tx_buffered_invariant();
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
             let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
@@ -5778,6 +5813,26 @@ impl<F: BufFactory> Connection<F> {
 
                 self.tx_buffered =
                     self.tx_buffered.saturating_sub(unsent as usize);
+
+                // These drops in qlog are a bit weird, but the only way to ensure
+                // that all bytes that are moved from App to Transport in
+                // stream_do_send are eventually moved from Transport to Dropped.
+                // Ideally we would add a Transport to Network transition also as
+                // a way to indicate when bytes were transmitted vs dropped
+                // without ever being sent.
+                qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
+                    let ev_data =
+                        EventData::DataMoved(qlog::events::quic::DataMoved {
+                            stream_id: Some(stream_id),
+                            offset: Some(final_size),
+                            length: Some(unsent as u64),
+                            from: Some(DataRecipient::Transport),
+                            to: Some(DataRecipient::Dropped),
+                            ..Default::default()
+                        });
+
+                    q.add_event_data_with_instant(ev_data, Instant::now()).ok();
+                });
 
                 // Update send capacity.
                 self.update_tx_cap();
@@ -7264,6 +7319,7 @@ impl<F: BufFactory> Connection<F> {
             stream_data_blocked_recv_count: self.stream_data_blocked_recv_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
+            inconsistent_tx_buffered: self.inconsistent_tx_buffered,
         }
     }
 
@@ -7862,6 +7918,26 @@ impl<F: BufFactory> Connection<F> {
                     self.tx_buffered =
                         self.tx_buffered.saturating_sub(unsent as usize);
 
+                    // These drops in qlog are a bit weird, but the only way to
+                    // ensure that all bytes that are moved from App to Transport
+                    // in stream_do_send are eventually moved from Transport to
+                    // Dropped.  Ideally we would add a Transport to Network
+                    // transition also as a way to indicate when bytes were
+                    // transmitted vs dropped without ever being sent.
+                    qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
+                        let ev_data =
+                            EventData::DataMoved(qlog::events::quic::DataMoved {
+                                stream_id: Some(stream_id),
+                                offset: Some(final_size),
+                                length: Some(unsent as u64),
+                                from: Some(DataRecipient::Transport),
+                                to: Some(DataRecipient::Dropped),
+                                ..Default::default()
+                            });
+
+                        q.add_event_data_with_instant(ev_data, now).ok();
+                    });
+
                     self.streams.insert_reset(stream_id, error_code, final_size);
 
                     if !was_writable {
@@ -8336,6 +8412,18 @@ impl<F: BufFactory> Connection<F> {
             cwin_available > 0
     }
 
+    fn check_tx_buffered_invariant(&mut self) {
+        if self.tx_buffered > 0 &&
+            !self.streams.has_flushable() &&
+            !self
+                .paths
+                .iter()
+                .any(|(_, p)| p.recovery.bytes_in_flight() > 0)
+        {
+            self.inconsistent_tx_buffered = true;
+        }
+    }
+
     fn set_initial_dcid(
         &mut self, cid: ConnectionId<'static>, reset_token: Option<u128>,
         path_id: usize,
@@ -8802,6 +8890,12 @@ pub struct Stats {
     /// Total duration during which this side of the connection was
     /// actively sending bytes or waiting for those bytes to be acked.
     pub bytes_in_flight_duration: Duration,
+
+    /// True if the connection detected inconsistencies in tx_buffered
+    /// which tracks the size of the connection's send buffer.
+    /// Inaccuracies in tx_buffered could lead to connection stalls or
+    /// excess buffering.
+    pub inconsistent_tx_buffered: bool,
 }
 
 impl std::fmt::Debug for Stats {
