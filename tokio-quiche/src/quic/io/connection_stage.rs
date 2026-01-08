@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::result::QuicResultExt;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::time::Instant;
@@ -167,7 +168,24 @@ impl ConnectionStage for RunningApplication {
 
 #[derive(Debug)]
 pub struct Close {
-    pub work_loop_result: QuicResult<()>,
+    pub(crate) work_loop_result: QuicResult<()>,
+}
+
+impl Close {
+    pub fn new(
+        work_loop_result: QuicResult<()>, qconn: &QuicheConnection,
+    ) -> Self {
+        let work_loop_result = work_loop_result.with_close_context(qconn);
+        Close { work_loop_result }
+    }
+
+    pub fn work_loop_result(&self) -> &QuicResult<()> {
+        &self.work_loop_result
+    }
+
+    pub fn into_work_loop_result(self) -> QuicResult<()> {
+        self.work_loop_result
+    }
 }
 
 impl ConnectionStage for Close {}
