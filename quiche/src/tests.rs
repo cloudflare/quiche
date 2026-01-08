@@ -8896,28 +8896,16 @@ fn send_on_path_test(
 
     let mut buf = [0; 65535];
     // There is nothing to send on the initial path.
-    let now = Instant::now();
     assert_eq!(
-        pipe.client.send_on_path(
-            &mut buf,
-            Some(client_addr),
-            Some(server_addr),
-            &TimeSent::new(&None, now),
-            now
-        ),
+        pipe.client
+            .send_on_path(&mut buf, Some(client_addr), Some(server_addr)),
         Err(Error::Done)
     );
 
     // Client should send padded PATH_CHALLENGE.
     let (sent, si) = pipe
         .client
-        .send_on_path(
-            &mut buf,
-            Some(client_addr_2),
-            Some(server_addr),
-            &TimeSent::new(&None, now),
-            now,
-        )
+        .send_on_path(&mut buf, Some(client_addr_2), Some(server_addr))
         .expect("No error");
     assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(si.from, client_addr_2);
@@ -8939,9 +8927,7 @@ fn send_on_path_test(
         pipe.client.send_on_path(
             &mut buf,
             Some(client_addr_3),
-            Some(server_addr),
-            &TimeSent::new(&None, now),
-            now
+            Some(server_addr)
         ),
         Err(Error::InvalidState)
     );
@@ -8949,9 +8935,7 @@ fn send_on_path_test(
         pipe.client.send_on_path(
             &mut buf,
             Some(client_addr),
-            Some(server_addr_2),
-            &TimeSent::new(&None, now),
-            now
+            Some(server_addr_2)
         ),
         Err(Error::InvalidState)
     );
@@ -8965,13 +8949,7 @@ fn send_on_path_test(
     // PATH_CHALLENGE
     let (sent, si) = pipe
         .client
-        .send_on_path(
-            &mut buf,
-            Some(client_addr),
-            None,
-            &TimeSent::new(&None, now),
-            now,
-        )
+        .send_on_path(&mut buf, Some(client_addr), None)
         .expect("No error");
     assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(si.from, client_addr);
@@ -8989,13 +8967,7 @@ fn send_on_path_test(
     // STREAM frame on active path.
     let (sent, si) = pipe
         .client
-        .send_on_path(
-            &mut buf,
-            Some(client_addr),
-            None,
-            &TimeSent::new(&None, now),
-            now,
-        )
+        .send_on_path(&mut buf, Some(client_addr), None)
         .expect("No error");
     assert_eq!(si.from, client_addr);
     assert_eq!(si.to, server_addr);
@@ -9012,13 +8984,7 @@ fn send_on_path_test(
     // PATH_CHALLENGE
     let (sent, si) = pipe
         .client
-        .send_on_path(
-            &mut buf,
-            None,
-            Some(server_addr),
-            &TimeSent::new(&None, now),
-            now,
-        )
+        .send_on_path(&mut buf, None, Some(server_addr))
         .expect("No error");
     assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(si.from, client_addr_3);
@@ -9036,13 +9002,7 @@ fn send_on_path_test(
     // STREAM frame on active path.
     let (sent, si) = pipe
         .client
-        .send_on_path(
-            &mut buf,
-            None,
-            Some(server_addr),
-            &TimeSent::new(&None, now),
-            now,
-        )
+        .send_on_path(&mut buf, None, Some(server_addr))
         .expect("No error");
     assert_eq!(si.from, client_addr);
     assert_eq!(si.to, server_addr);
@@ -9055,23 +9015,11 @@ fn send_on_path_test(
 
     // No more data to exchange leads to Error::Done.
     assert_eq!(
-        pipe.client.send_on_path(
-            &mut buf,
-            Some(client_addr),
-            None,
-            &TimeSent::new(&None, now),
-            now
-        ),
+        pipe.client.send_on_path(&mut buf, Some(client_addr), None),
         Err(Error::Done)
     );
     assert_eq!(
-        pipe.client.send_on_path(
-            &mut buf,
-            None,
-            Some(server_addr),
-            &TimeSent::new(&None, now),
-            now
-        ),
+        pipe.client.send_on_path(&mut buf, None, Some(server_addr)),
         Err(Error::Done)
     );
 

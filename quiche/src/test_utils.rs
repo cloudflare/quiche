@@ -364,14 +364,7 @@ pub fn emit_flight_with_max_buffer(
     loop {
         let mut out = vec![0u8; out_size];
 
-        let now = Instant::now();
-        let info = match conn.send_on_path(
-            &mut out,
-            from,
-            to,
-            &TimeSent::new(&None, now),
-            now,
-        ) {
+        let info = match conn.send_on_path(&mut out, from, to) {
             Ok((written, info)) => {
                 out.truncate(written);
                 info

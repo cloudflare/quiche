@@ -59,8 +59,8 @@ use datagram_socket::QuicAuditStats;
 use foundations::telemetry::log;
 use quiche::ConnectionId;
 use quiche::Error as QuicheError;
-use quiche::SendInfo;
-use quiche::TimeSent;
+use quiche::GsoSendResult;
+use quiche::GsoSendSuccess;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::time;
@@ -73,9 +73,6 @@ pub(crate) const INCOMING_QUEUE_SIZE: usize = 2048;
 pub(crate) const CHECK_INCOMING_QUEUE_RATIO: usize = INCOMING_QUEUE_SIZE / 16;
 
 const RELEASE_TIMER_THRESHOLD: Duration = Duration::from_micros(250);
-
-/// Stop queuing GSO packets, if packet size is below this threshold.
-const GSO_THRESHOLD: usize = 1_000;
 
 pub struct WriterConfig {
     pub pending_cid: Option<ConnectionId<'static>>,
@@ -294,9 +291,6 @@ where
     fn gather_data_from_quiche_conn(
         &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
     ) -> QuicResult<usize> {
-        let mut segment_size = None;
-        let mut send_info = None;
-
         self.write_state.num_pkts = 0;
         self.write_state.bytes_written = 0;
 
@@ -315,124 +309,46 @@ where
         #[cfg(not(feature = "gcongestion"))]
         let gcongestion_enabled = qconn.gcongestion_enabled().unwrap_or(false);
 
-        let initial_release_decision = if gcongestion_enabled {
-            let initial_release_decision = qconn
-                .get_next_release_time()
-                .filter(|_| self.pacing_enabled(qconn));
+        let result = self.write_packets_to_buffer(qconn, send_buf, now)?;
 
-            if let Some(future_release_time) =
-                initial_release_decision.as_ref().and_then(|v| v.time(now))
-            {
+        let Some(result) = result else { return Ok(0) };
+
+        let GsoSendSuccess {
+            bytes_written,
+            packet_size,
+            num_packets,
+            send_info,
+        } = match result {
+            GsoSendResult::PacingLimitedUntil(_future_release_time) => {
                 let max_into_fut = qconn.max_release_into_future();
 
-                if future_release_time.duration_since(now) >= max_into_fut {
-                    self.write_state.next_release_time =
-                        Some(now + max_into_fut.mul_f32(0.8));
-                    self.write_state.has_pending_data = false;
-                    return Ok(0);
-                }
-            }
+                // TODO(perf): Consider setting self.write_state.next_release_time
+                // to `future_release_time -
+                // max_into_fut.mul_f32(0.8)` to avoid busy
+                // polling when there's no work to do.
+                self.write_state.next_release_time =
+                    Some(now + max_into_fut.mul_f32(0.8));
+                self.write_state.has_pending_data = false;
+                return Ok(0);
+            },
 
-            initial_release_decision
+            GsoSendResult::Success(result) => result,
+        };
+
+        self.write_state.bytes_written += bytes_written;
+        self.write_state.num_pkts += num_packets;
+        self.write_state.selected_path = Some((send_info.from, send_info.to));
+        self.write_state.has_pending_data = true;
+
+        let tx_time = if self.pacing_enabled(qconn) {
+            Some(send_info.at)
         } else {
             None
         };
 
-        let time_sent = TimeSent::new(&initial_release_decision, now);
-        let buffer_write_outcome = loop {
-            let outcome = self.write_packet_to_buffer(
-                qconn,
-                send_buf,
-                &mut send_info,
-                segment_size,
-                &time_sent,
-                now,
-            );
-
-            let packet_size = match outcome {
-                Ok(0) => break Ok(0),
-
-                Ok(bytes_written) => bytes_written,
-
-                Err(e) => break Err(e),
-            };
-
-            // Flush to network after generating a single packet when GSO
-            // is disabled.
-            if !self.cfg.with_gso {
-                break outcome;
-            }
-
-            #[cfg(not(feature = "gcongestion"))]
-            let max_send_size = if !gcongestion_enabled {
-                // Only call qconn.send_quantum when !gcongestion_enabled.
-                tune_max_send_size(
-                    segment_size,
-                    qconn.send_quantum(),
-                    send_buf.len(),
-                )
-            } else {
-                usize::MAX
-            };
-
-            #[cfg(feature = "gcongestion")]
-            let max_send_size = usize::MAX;
-
-            // If segment_size is known, update the maximum of
-            // GSO sender buffer size to the multiple of
-            // segment_size.
-            let buffer_is_full = self.write_state.num_pkts ==
-                UDP_MAX_SEGMENT_COUNT ||
-                self.write_state.bytes_written >= max_send_size;
-
-            if buffer_is_full {
-                break outcome;
-            }
-
-            // Flush to network when the newly generated packet size is
-            // different from previously written packet, as GSO needs packets
-            // to have the same size, except for the last one in the buffer.
-            // The last packet may be smaller than the previous size.
-            match segment_size {
-                Some(size)
-                    if packet_size != size || packet_size < GSO_THRESHOLD =>
-                    break outcome,
-                None => segment_size = Some(packet_size),
-                _ => (),
-            }
-
-            if gcongestion_enabled {
-                // If the release time of next packet is different, or it can't be
-                // part of a burst, start the next batch
-                if let Some(initial_release_decision) = initial_release_decision {
-                    match qconn.get_next_release_time() {
-                        Some(release)
-                            if release.can_burst() ||
-                                release.time_eq(
-                                    &initial_release_decision,
-                                    now,
-                                ) => {},
-                        _ => break outcome,
-                    }
-                }
-            }
-        };
-
-        let tx_time = if gcongestion_enabled {
-            initial_release_decision
-                .filter(|_| self.pacing_enabled(qconn))
-                // Return the time from the release decision if release_decision.time > now, else None.
-                .and_then(|v| v.time(now))
-        } else {
-            send_info
-                .filter(|_| self.pacing_enabled(qconn))
-                .map(|v| v.at)
-        };
-
         self.write_state.conn_established = qconn.is_established();
         self.write_state.tx_time = tx_time;
-        self.write_state.segment_size =
-            segment_size.unwrap_or(self.write_state.bytes_written);
+        self.write_state.segment_size = packet_size;
 
         if !gcongestion_enabled {
             if let Some(time) = tx_time {
@@ -451,7 +367,7 @@ where
             }
         }
 
-        buffer_write_outcome
+        Ok(bytes_written)
     }
 
     /// Selects a network path, if none already selected.
@@ -492,17 +408,11 @@ where
         self.cfg.pacing_offload
     }
 
-    fn write_packet_to_buffer(
+    fn write_packets_to_buffer(
         &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
-        send_info: &mut Option<SendInfo>, segment_size: Option<usize>,
-        time_sent: &TimeSent, now: Instant,
-    ) -> QuicResult<usize> {
-        let mut send_buf = &mut send_buf[self.write_state.bytes_written..];
-        if send_buf.len() > segment_size.unwrap_or(usize::MAX) {
-            // Never let the buffer be longer than segment size, for GSO to
-            // function properly.
-            send_buf = &mut send_buf[..segment_size.unwrap_or(usize::MAX)];
-        }
+        now: Instant,
+    ) -> QuicResult<Option<GsoSendResult>> {
+        let send_buf = &mut send_buf[self.write_state.bytes_written..];
 
         // On the first call to `select_path()` a path will be chosen based on
         // the local address the connection initially landed on. Once a path is
@@ -516,22 +426,16 @@ where
         // apply to the whole GSO buffer.
         let (from, to) = self.select_path(qconn).unzip();
 
-        match qconn.send_on_path(send_buf, from, to, time_sent, now) {
-            Ok((packet_size, info)) => {
-                let _ = send_info.get_or_insert(info);
-
-                self.write_state.bytes_written += packet_size;
-                self.write_state.num_pkts += 1;
-
-                let from = send_info.as_ref().map(|info| info.from);
-                let to = send_info.as_ref().map(|info| info.to);
-
-                self.write_state.selected_path = from.zip(to);
-
-                self.write_state.has_pending_data = true;
-
-                Ok(packet_size)
-            },
+        match qconn.gso_send_on_path(
+            send_buf,
+            from,
+            to,
+            None,
+            self.cfg.with_gso,
+            self.cfg.pacing_offload,
+            now,
+        ) {
+            Ok(result) => Ok(Some(result)),
 
             Err(QuicheError::Done) => {
                 // Flush the current buffer to network. If no other path needs
@@ -544,7 +448,7 @@ where
                 // Keep writing if there are paths left to try.
                 self.write_state.has_pending_data = has_pending_paths;
 
-                Ok(0)
+                Ok(None)
             },
 
             Err(e) => {

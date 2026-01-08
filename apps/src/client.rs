@@ -33,8 +33,6 @@ use std::rc::Rc;
 
 use std::cell::RefCell;
 
-use std::time::Instant;
-
 use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
@@ -499,13 +497,10 @@ pub fn connect(
 
             for peer_addr in conn.paths_iter(local_addr) {
                 loop {
-                    let now = Instant::now();
                     let (write, send_info) = match conn.send_on_path(
                         &mut out,
                         Some(local_addr),
                         Some(peer_addr),
-                        &quiche::TimeSent::new(&None, now),
-                        now,
                     ) {
                         Ok(v) => v,
 

@@ -513,6 +513,33 @@ const TX_CAP_FACTOR: f64 = 1.0;
 /// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Information about the packets added to the buffer when gso_send_on_path
+/// succeeds.
+pub struct GsoSendSuccess {
+    /// Bytes added to the buffer.
+    pub bytes_written: usize,
+
+    /// Size of the first num_packets - 1 packets in the buffer.
+    pub packet_size: usize,
+
+    /// Number of packets added to the buffer; equal to ceil(bytes_written /
+    /// packet_size).
+    pub num_packets: usize,
+
+    /// Information about where and when the packet burst should be sent.
+    pub send_info: SendInfo,
+}
+
+/// Result from a send attempt with GSO
+pub enum GsoSendResult {
+    /// GSO send was successful.
+    Success(GsoSendSuccess),
+
+    /// The pacer prevents the connection from generating additional
+    /// packets until a future time.
+    PacingLimitedUntil(Instant),
+}
+
 /// A QUIC error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -1984,6 +2011,31 @@ impl Default for QlogInfo {
             logged_peer_params: false,
             level: EventImportance::Base,
         }
+    }
+}
+
+/// Stop queuing GSO packets, if packet size is below this threshold.
+const GSO_THRESHOLD: usize = 1_000;
+
+#[cfg(not(feature = "gcongestion"))]
+/// Returns a new max send buffer size to avoid the fragmentation
+/// at the end. Maximum send buffer size is min(MAX_SEND_BUF_SIZE,
+/// connection's send_quantum).
+/// For example,
+///
+/// - max_send_buf = 1000 and mss = 100, return 1000
+/// - max_send_buf = 1000 and mss = 90, return 990
+///
+/// not to have last 10 bytes packet.
+pub(crate) fn tune_max_send_size(
+    segment_size: Option<usize>, send_quantum: usize, max_capacity: usize,
+) -> usize {
+    let max_send_buf_size = send_quantum.min(max_capacity);
+
+    if let Some(mss) = segment_size {
+        max_send_buf_size / mss * mss
+    } else {
+        max_send_buf_size
     }
 }
 
@@ -3744,8 +3796,163 @@ impl<F: BufFactory> Connection<F> {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn send(&mut self, out: &mut [u8]) -> Result<(usize, SendInfo)> {
-        let now = Instant::now();
-        self.send_on_path(out, None, None, &TimeSent::new(&None, now), now)
+        self.send_on_path(out, None, None)
+    }
+
+    /// Writes a multiple QUIC packet to be sent to the peer from the
+    /// specified local address `from` to the destination address `to`
+    /// as part of a single Linux Generic Segment Offload(GSO) burst.
+    ///
+    /// GSO requires that all packets to be of the same size, except
+    /// for the last which is allowed to be shorter.
+    #[allow(clippy::too_many_arguments)]
+    pub fn gso_send_on_path(
+        &mut self, out: &mut [u8], from: Option<SocketAddr>,
+        to: Option<SocketAddr>, mut segment_size: Option<usize>,
+        gso_enabled: bool, pacing_offload: bool, now: Instant,
+    ) -> Result<GsoSendResult> {
+        let mut bytes_written = 0;
+        let mut num_packets = 0;
+        let mut first_packet_size = None;
+        let mut first_send_info = None;
+
+        #[cfg(feature = "gcongestion")]
+        let gcongestion_enabled = true;
+
+        #[cfg(not(feature = "gcongestion"))]
+        let gcongestion_enabled = self.gcongestion_enabled().unwrap_or(false);
+
+        let initial_release_decision = if gcongestion_enabled {
+            let initial_release_decision =
+                self.get_next_release_time().filter(|_| {
+                    gcongestion_enabled && pacing_offload && self.pacing_enabled()
+                });
+
+            if let Some(future_release_time) =
+                initial_release_decision.as_ref().and_then(|v| v.time(now))
+            {
+                let max_into_fut = self.max_release_into_future();
+                if future_release_time.duration_since(now) >= max_into_fut {
+                    return Ok(GsoSendResult::PacingLimitedUntil(
+                        future_release_time,
+                    ));
+                }
+            }
+
+            initial_release_decision
+        } else {
+            None
+        };
+
+        let time_sent = &TimeSent::new(&initial_release_decision, now);
+
+        let packet_size = loop {
+            let mut send_buf = &mut out[bytes_written..];
+            if send_buf.len() > segment_size.unwrap_or(usize::MAX) {
+                // Never let the buffer be longer than segment size, for GSO to
+                // function properly.
+                send_buf = &mut send_buf[..segment_size.unwrap_or(usize::MAX)];
+            }
+
+            let (packet_size, info) = match self
+                .send_single_on_path(send_buf, from, to, time_sent, now)
+            {
+                Ok(result) => result,
+
+                Err(Error::Done) => {
+                    if let Some(first_packet_size) = first_packet_size {
+                        break first_packet_size;
+                    }
+                    return Err(Error::Done);
+                },
+
+                Err(e) => return Err(e),
+            };
+
+            bytes_written += packet_size;
+            num_packets += 1;
+            first_send_info = Some(info);
+
+            match first_packet_size {
+                None => first_packet_size = Some(packet_size),
+                Some(first_packet_size) =>
+                    if first_packet_size != packet_size {
+                        break first_packet_size;
+                    },
+            }
+
+            // Break after a single packet when GSO is disabled.
+            if !gso_enabled {
+                break packet_size;
+            }
+
+            #[cfg(not(feature = "gcongestion"))]
+            let max_send_size = if !gcongestion_enabled {
+                // Only call qconn.send_quantum when !gcongestion_enabled.
+                tune_max_send_size(
+                    segment_size,
+                    self.send_quantum(),
+                    send_buf.len(),
+                )
+            } else {
+                usize::MAX
+            };
+
+            #[cfg(feature = "gcongestion")]
+            let max_send_size = usize::MAX;
+
+            // Maximum number of packets can be sent in UDP GSO.
+            const UDP_MAX_SEGMENT_COUNT: usize = 64;
+
+            // If segment_size is known, update the maximum of
+            // GSO sender buffer size to the multiple of
+            // segment_size.
+            let buffer_is_full = num_packets == UDP_MAX_SEGMENT_COUNT ||
+                bytes_written >= max_send_size;
+
+            if buffer_is_full {
+                break packet_size;
+            }
+
+            // Flush to network when the newly generated packet size is
+            // different from previously written packet, as GSO needs
+            // packets to have the same size, except
+            // for the last one in the buffer.
+            // The last packet may be smaller than the previous size.
+            match segment_size {
+                // TODO move GSO_THRESHOLD check further up, it should be done
+                // even in cases where segment_size is not set.
+                Some(size)
+                    if packet_size != size || packet_size < GSO_THRESHOLD =>
+                    break packet_size,
+                None => segment_size = Some(packet_size),
+                _ => (),
+            }
+
+            if gcongestion_enabled {
+                // If the release time of next packet is different, or it
+                // can't be part of a burst, start
+                // the next batch
+                if let Some(initial_release_decision) = initial_release_decision {
+                    match self.get_next_release_time() {
+                        Some(release)
+                            if release.can_burst() ||
+                                release.time_eq(
+                                    &initial_release_decision,
+                                    now,
+                                ) => {},
+                        _ => break packet_size,
+                    }
+                }
+            }
+        };
+
+        Ok(GsoSendResult::Success(GsoSendSuccess {
+            bytes_written,
+            packet_size,
+            num_packets,
+            send_info: first_send_info.unwrap(),
+        }))
     }
 
     /// Writes a single QUIC packet to be sent to the peer from the specified
@@ -3813,10 +4020,7 @@ impl<F: BufFactory> Connection<F> {
     /// # let local = socket.local_addr().unwrap();
     /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
     /// loop {
-    ///     let now = std::time::Instant::now();
-    ///     let (write, send_info) = match conn.send_on_path(&mut out, Some(local), Some(peer),
-    ///                                                      &quiche::TimeSent::new(&None, now),
-    ///                                                      now) {
+    ///     let (write, send_info) = match conn.send_on_path(&mut out, Some(local), Some(peer)) {
     ///         Ok(v) => v,
     ///
     ///         Err(quiche::Error::Done) => {
@@ -3835,6 +4039,26 @@ impl<F: BufFactory> Connection<F> {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn send_on_path(
+        &mut self, out: &mut [u8], from: Option<SocketAddr>,
+        to: Option<SocketAddr>,
+    ) -> Result<(usize, SendInfo)> {
+        let now = Instant::now();
+
+        #[cfg(feature = "gcongestion")]
+        let gcongestion_enabled = true;
+
+        #[cfg(not(feature = "gcongestion"))]
+        let gcongestion_enabled = self.gcongestion_enabled().unwrap_or(false);
+
+        let release_decision = self
+            .get_next_release_time()
+            .filter(|_| gcongestion_enabled && self.pacing_enabled());
+
+        let time_sent = &TimeSent::new(&release_decision, now);
+        self.send_single_on_path(out, from, to, time_sent, now)
+    }
+
+    fn send_single_on_path(
         &mut self, out: &mut [u8], from: Option<SocketAddr>,
         to: Option<SocketAddr>, time_sent: &TimeSent, now: Instant,
     ) -> Result<(usize, SendInfo)> {
@@ -6922,11 +7146,8 @@ impl<F: BufFactory> Connection<F> {
     /// // Iterate over possible destinations for the given local `SockAddr`.
     /// for dest in conn.paths_iter(local) {
     ///     loop {
-    ///         let now = std::time::Instant::now();
     ///         let (write, send_info) =
-    ///                 match conn.send_on_path(&mut out, Some(local), Some(dest),
-    ///                                         &quiche::TimeSent::new(&None, now),
-    ///                                         now) {
+    ///             match conn.send_on_path(&mut out, Some(local), Some(dest)) {
     ///                 Ok(v) => v,
     ///
     ///                 Err(quiche::Error::Done) => {

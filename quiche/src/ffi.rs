@@ -828,8 +828,7 @@ pub extern "C" fn quiche_conn_send_on_path(
     let to = optional_std_addr_from_c(to, to_len);
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
-    let now = Instant::now();
-    match conn.send_on_path(out, from, to, &TimeSent::new(&None, now), now) {
+    match conn.send_on_path(out, from, to) {
         Ok((v, info)) => {
             out_info.from_len = std_addr_to_c(&info.from, &mut out_info.from);
             out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);

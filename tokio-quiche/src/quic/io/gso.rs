@@ -46,31 +46,6 @@ mod linux_imports {
 #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 use self::linux_imports::*;
 
-// Maximum number of packets can be sent in UDP GSO.
-pub(crate) const UDP_MAX_SEGMENT_COUNT: usize = 64;
-
-#[cfg(not(feature = "gcongestion"))]
-/// Returns a new max send buffer size to avoid the fragmentation
-/// at the end. Maximum send buffer size is min(MAX_SEND_BUF_SIZE,
-/// connection's send_quantum).
-/// For example,
-///
-/// - max_send_buf = 1000 and mss = 100, return 1000
-/// - max_send_buf = 1000 and mss = 90, return 990
-///
-/// not to have last 10 bytes packet.
-pub(crate) fn tune_max_send_size(
-    segment_size: Option<usize>, send_quantum: usize, max_capacity: usize,
-) -> usize {
-    let max_send_buf_size = send_quantum.min(max_capacity);
-
-    if let Some(mss) = segment_size {
-        max_send_buf_size / mss * mss
-    } else {
-        max_send_buf_size
-    }
-}
-
 // https://wiki.cfdata.org/pages/viewpage.action?pageId=436188159
 pub(crate) const UDP_MAX_GSO_PACKET_SIZE: usize = 65507;
 
