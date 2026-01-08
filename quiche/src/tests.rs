@@ -5149,6 +5149,8 @@ fn client_rst_stream_while_bytes_in_flight(
         pipe.server.stream_send(4, &send_buf, false),
         if cc_algorithm_name == "cubic" {
             Ok(12000)
+        } else if cfg!(feature = "openssl") {
+            Ok(13964)
         } else {
             Ok(13878)
         }
@@ -5240,6 +5242,8 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         pipe.server.stream_send(4, &send_buf, false),
         if cc_algorithm_name == "cubic" {
             Ok(12000)
+        } else if cfg!(feature = "openssl") {
+            Ok(13964)
         } else {
             Ok(13878)
         }
