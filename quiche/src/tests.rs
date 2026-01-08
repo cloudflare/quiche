@@ -5173,7 +5173,12 @@ fn client_rst_stream_while_bytes_in_flight(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => 27756,
+        "bbr2" | "bbr2_gcongestion" =>
+            if cfg!(feature = "openssl") {
+                27928
+            } else {
+                27756
+            },
         _ => 24000,
     };
 
@@ -5263,7 +5268,12 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => 26556,
+        "bbr2" | "bbr2_gcongestion" =>
+            if cfg!(feature = "openssl") {
+                26728
+            } else {
+                26556
+            },
         _ => 8400,
     };
 
