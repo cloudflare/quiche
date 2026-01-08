@@ -1456,7 +1456,8 @@ pub enum TxBufferTrackingState {
     #[default]
     Ok,
     /// The send buffer is in an inconsistent state, which could lead to
-    /// connection stalls or excess buffering.
+    /// connection stalls or excess buffering due to bugs we haven't
+    /// tracked down yet.
     Inconsistent,
 }
 
@@ -8423,6 +8424,14 @@ impl<F: BufFactory> Connection<F> {
     }
 
     fn check_tx_buffered_invariant(&mut self) {
+        // tx_buffered should track bytes queued in the stream buffers
+        // and unacked retransmitable bytes in the network.
+        // If tx_buffered > 0 mark the tx_buffered_state if there are no
+        // flushable streams and there no inflight bytes.
+        //
+        // It is normal to have tx_buffered == 0 while there are inflight bytes
+        // since not QUIC frames are retransmittable; inflight tracks all bytes
+        // on the network which are subject to congestion control.
         if self.tx_buffered > 0 &&
             !self.streams.has_flushable() &&
             !self
