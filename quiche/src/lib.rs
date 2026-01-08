@@ -5825,7 +5825,7 @@ impl<F: BufFactory> Connection<F> {
                         EventData::DataMoved(qlog::events::quic::DataMoved {
                             stream_id: Some(stream_id),
                             offset: Some(final_size),
-                            length: Some(unsent as u64),
+                            length: Some(unsent),
                             from: Some(DataRecipient::Transport),
                             to: Some(DataRecipient::Dropped),
                             ..Default::default()
@@ -7929,7 +7929,7 @@ impl<F: BufFactory> Connection<F> {
                             EventData::DataMoved(qlog::events::quic::DataMoved {
                                 stream_id: Some(stream_id),
                                 offset: Some(final_size),
-                                length: Some(unsent as u64),
+                                length: Some(unsent),
                                 from: Some(DataRecipient::Transport),
                                 to: Some(DataRecipient::Dropped),
                                 ..Default::default()
