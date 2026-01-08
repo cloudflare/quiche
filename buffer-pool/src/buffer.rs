@@ -27,6 +27,7 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use crate::buffer_pool::total_consume_buffer_memory;
 use crate::Reuse;
 
 /// A convinience wrapper around Vec that allows to "consume" data from the
@@ -58,20 +59,34 @@ impl DerefMut for ConsumeBuffer {
 
 impl Reuse for ConsumeBuffer {
     fn reuse(&mut self, val: usize) -> bool {
+        let old_capacity = self.inner.capacity();
         self.inner.clear();
         self.inner.shrink_to(val);
+        self.update_metrics_after_resize(old_capacity);
         self.head = 0;
         self.inner.capacity() > 0
+    }
+
+    fn size(&self) -> usize {
+        self.inner.capacity()
+    }
+}
+
+impl Drop for ConsumeBuffer {
+    fn drop(&mut self) {
+        total_consume_buffer_memory().dec_by(self.inner.capacity() as u64);
     }
 }
 
 impl ConsumeBuffer {
     pub fn from_vec(inner: Vec<u8>) -> Self {
+        total_consume_buffer_memory().inc_by(inner.capacity() as u64);
         ConsumeBuffer { inner, head: 0 }
     }
 
-    pub fn into_vec(self) -> Vec<u8> {
-        let mut inner = self.inner;
+    pub fn into_vec(mut self) -> Vec<u8> {
+        let mut inner = std::mem::take(&mut self.inner);
+        total_consume_buffer_memory().dec_by(inner.capacity() as u64);
         inner.drain(0..self.head);
         inner
     }
@@ -82,7 +97,9 @@ impl ConsumeBuffer {
     }
 
     pub fn expand(&mut self, count: usize) {
+        let old_capacity = self.inner.capacity();
         self.inner.reserve_exact(count);
+        self.update_metrics_after_resize(old_capacity);
         // SAFETY: u8 is always initialized and we reserved the capacity.
         unsafe { self.inner.set_len(count) };
     }
@@ -101,10 +118,66 @@ impl ConsumeBuffer {
 
         true
     }
+
+    fn update_metrics_after_resize(&mut self, old_capacity: usize) {
+        let new_capacity = self.inner.capacity();
+        if new_capacity < old_capacity {
+            total_consume_buffer_memory()
+                .dec_by((old_capacity - new_capacity) as u64);
+        } else if new_capacity > old_capacity {
+            total_consume_buffer_memory()
+                .inc_by((new_capacity - old_capacity) as u64);
+        }
+    }
 }
 
 impl<'a> Extend<&'a u8> for ConsumeBuffer {
     fn extend<T: IntoIterator<Item = &'a u8>>(&mut self, iter: T) {
-        self.inner.extend(iter)
+        let old_capacity = self.inner.capacity();
+        self.inner.extend(iter);
+        self.update_metrics_after_resize(old_capacity);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_metrics() {
+        let mut buf = ConsumeBuffer::default();
+        assert_eq!(buf.inner.capacity(), 0);
+        assert_eq!(total_consume_buffer_memory().get(), 0);
+
+        buf.extend(&[0, 1, 2, 3, 4]);
+        assert_eq!(
+            total_consume_buffer_memory().get(),
+            buf.inner.capacity() as u64
+        );
+
+        drop(buf);
+        assert_eq!(total_consume_buffer_memory().get(), 0);
+
+        let mut buf_a = ConsumeBuffer::from_vec(vec![0, 1, 2, 3, 4]);
+        let buf_b = ConsumeBuffer::from_vec(vec![5, 6, 7]);
+        assert_eq!(
+            total_consume_buffer_memory().get(),
+            (buf_a.inner.capacity() + buf_b.inner.capacity()) as u64
+        );
+
+        buf_a.expand(100000);
+        assert_eq!(
+            total_consume_buffer_memory().get(),
+            (buf_a.inner.capacity() + buf_b.inner.capacity()) as u64
+        );
+
+        buf_b.into_vec();
+        assert_eq!(
+            total_consume_buffer_memory().get(),
+            buf_a.inner.capacity() as u64
+        );
+
+        drop(buf_a);
+        assert_eq!(total_consume_buffer_memory().get(), 0);
     }
 }

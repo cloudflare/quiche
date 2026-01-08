@@ -49,6 +49,10 @@ pub mod buffer_pool {
     pub fn pool_memory(name: &'static str) -> Gauge;
     /// Total number of live objects, ie objects allocated out of pools.
     pub fn live_objects(name: &'static str) -> Gauge;
+    /// Total number of bytes allocated across all `ConsumeBuffer` objects.
+    /// We're not able to track this with better granularity because
+    /// the ConsumeBuffers may be resized, and they don't know their pools.
+    pub fn total_consume_buffer_memory() -> Gauge;
 }
 
 /// A sharded pool of elements.
