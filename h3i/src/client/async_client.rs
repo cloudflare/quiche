@@ -361,6 +361,7 @@ impl ApplicationOverQuic for H3iDriver {
                 Action::StopSending { .. } |
                 Action::OpenUniStream { .. } |
                 Action::ConnectionClose { .. } |
+                Action::RunCallback { .. } |
                 Action::SendHeadersFrame { .. } => {
                     if self.should_fire() {
                         // Reset the fire time such that the next action will
