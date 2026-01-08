@@ -33,6 +33,7 @@ use crate::recovery::RecoveryStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::Sent;
 use crate::recovery::StartupExit;
+use crate::recovery::TimeSent;
 use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
@@ -686,10 +687,9 @@ impl RecoveryOps for GRecovery {
 
     fn on_packet_sent(
         &mut self, pkt: Sent, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        handshake_status: HandshakeStatus, time_sent: &TimeSent, now: Instant,
+        trace_id: &str,
     ) {
-        let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
-
         let epoch = &mut self.epochs[epoch];
 
         let ack_eliciting = pkt.ack_eliciting;
@@ -703,7 +703,7 @@ impl RecoveryOps for GRecovery {
         }
 
         let status = SentStatus::Sent {
-            time_sent,
+            time_sent: time_sent.time,
             ack_eliciting,
             in_flight,
             is_pmtud_probe,
@@ -722,7 +722,7 @@ impl RecoveryOps for GRecovery {
         epoch.sent_packets.push_back(SentPacket { pkt_num, status });
 
         if ack_eliciting {
-            epoch.time_of_last_ack_eliciting_packet = Some(time_sent);
+            epoch.time_of_last_ack_eliciting_packet = Some(time_sent.time);
             self.outstanding_non_ack_eliciting = 0;
         } else {
             self.outstanding_non_ack_eliciting += 1;
@@ -730,7 +730,7 @@ impl RecoveryOps for GRecovery {
 
         if in_flight {
             self.pacer.on_packet_sent(
-                time_sent,
+                time_sent.time,
                 self.bytes_in_flight.get(),
                 pkt_num,
                 sent_bytes,
@@ -740,16 +740,12 @@ impl RecoveryOps for GRecovery {
 
             self.bytes_in_flight.add(sent_bytes, now);
             epoch.pkts_in_flight += 1;
-            self.set_loss_detection_timer(handshake_status, time_sent);
+            self.set_loss_detection_timer(handshake_status, time_sent.time);
         }
 
         self.bytes_sent += sent_bytes;
 
         trace!("{trace_id} {self:?}");
-    }
-
-    fn get_packet_send_time(&self, now: Instant) -> Instant {
-        self.pacer.get_next_release_time().time(now).unwrap_or(now)
     }
 
     // `peer_sent_ack_ranges` should not be used without validation.

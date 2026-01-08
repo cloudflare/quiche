@@ -6534,19 +6534,21 @@ fn handshake_packet_type_corruption(
     test_utils::process_flight(&mut pipe.client, flight).unwrap();
 
     // Client sends Initial packet with ACK.
+    let now = Instant::now();
     let active_pid = pipe.client.paths.get_active_path_id().expect("no active");
     let (ty, len) = pipe
         .client
-        .send_single(&mut buf, active_pid, false, Instant::now())
+        .send_single(&mut buf, active_pid, false, &TimeSent::new(&None, now), now)
         .unwrap();
     assert_eq!(ty, Type::Initial);
 
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
     // Client sends Handshake packet.
+    let now = Instant::now();
     let (ty, len) = pipe
         .client
-        .send_single(&mut buf, active_pid, false, Instant::now())
+        .send_single(&mut buf, active_pid, false, &TimeSent::new(&None, now), now)
         .unwrap();
     assert_eq!(ty, Type::Handshake);
 
