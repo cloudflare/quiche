@@ -1042,7 +1042,6 @@ impl RecoveryOps for GRecovery {
         self.epochs[epoch].pkts_in_flight
     }
 
-    #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
         self.bytes_in_flight.get()
     }

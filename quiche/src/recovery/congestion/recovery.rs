@@ -916,7 +916,6 @@ impl RecoveryOps for LegacyRecovery {
         self.epochs[epoch].in_flight_count
     }
 
-    #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
         self.bytes_in_flight.get()
     }
