@@ -5193,7 +5193,7 @@ fn client_rst_stream_while_bytes_in_flight(
         expected_cwnd
     );
     assert_eq!(pipe.advance(), Ok(()));
-    assert!(!pipe.server.inconsistent_tx_buffered);
+    assert_eq!(pipe.server.tx_buffered_state, TxBufferTrackingState::Ok);
 }
 
 #[rstest]
@@ -5287,7 +5287,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         expected_cwnd
     );
     assert_eq!(pipe.advance(), Ok(()));
-    assert!(!pipe.server.inconsistent_tx_buffered);
+    assert_eq!(pipe.server.tx_buffered_state, TxBufferTrackingState::Ok);
 }
 
 #[rstest]

@@ -1449,6 +1449,17 @@ impl Config {
     }
 }
 
+/// Tracks the health of the tx_buffered value.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum TxBufferTrackingState {
+    /// The send buffer is in a good state
+    #[default]
+    Ok,
+    /// The send buffer is in an inconsistent state, which could lead to
+    /// connection stalls  or excess buffering.
+    Inconsistent,
+}
+
 /// A QUIC connection.
 pub struct Connection<F = DefaultBufFactory>
 where
@@ -1550,9 +1561,8 @@ where
     /// Number of bytes buffered in the send buffer.
     tx_buffered: usize,
 
-    /// True if the connection detected an inconsistency in the tx_buffered
-    /// value.
-    inconsistent_tx_buffered: bool,
+    /// Tracks the health of tx_buffered.
+    tx_buffered_state: TxBufferTrackingState,
 
     /// Total number of bytes sent to the peer.
     tx_data: u64,
@@ -2114,7 +2124,7 @@ impl<F: BufFactory> Connection<F> {
             tx_cap_factor: config.tx_cap_factor,
 
             tx_buffered: 0,
-            inconsistent_tx_buffered: false,
+            tx_buffered_state: TxBufferTrackingState::Ok,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -7319,7 +7329,7 @@ impl<F: BufFactory> Connection<F> {
             stream_data_blocked_recv_count: self.stream_data_blocked_recv_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
-            inconsistent_tx_buffered: self.inconsistent_tx_buffered,
+            tx_buffered_state: self.tx_buffered_state,
         }
     }
 
@@ -8420,7 +8430,7 @@ impl<F: BufFactory> Connection<F> {
                 .iter()
                 .any(|(_, p)| p.recovery.bytes_in_flight() > 0)
         {
-            self.inconsistent_tx_buffered = true;
+            self.tx_buffered_state = TxBufferTrackingState::Inconsistent;
         }
     }
 
@@ -8891,11 +8901,8 @@ pub struct Stats {
     /// actively sending bytes or waiting for those bytes to be acked.
     pub bytes_in_flight_duration: Duration,
 
-    /// True if the connection detected inconsistencies in tx_buffered
-    /// which tracks the size of the connection's send buffer.
-    /// Inaccuracies in tx_buffered could lead to connection stalls or
-    /// excess buffering.
-    pub inconsistent_tx_buffered: bool,
+    /// Health state of the connection's tx_buffered.
+    pub tx_buffered_state: TxBufferTrackingState,
 }
 
 impl std::fmt::Debug for Stats {
