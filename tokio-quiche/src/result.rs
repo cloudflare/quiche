@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::quic::QuicheConnection;
+use quiche::ConnectionError;
 use std::error::Error;
 use std::io;
 
@@ -50,14 +52,67 @@ pub trait QuicResultExt<T, E> {
     fn into_io(self) -> io::Result<T>
     where
         E: Into<BoxError>;
+
+    /// Attaches context to understand a closed connection.
+    fn with_close_context(self, qconn: &QuicheConnection) -> QuicResult<T>
+    where
+        E: Into<BoxError>;
 }
 
-impl<T, E> QuicResultExt<T, E> for Result<T, E> {
+impl<T, E> QuicResultExt<T, E> for Result<T, E>
+where
+    E: Into<BoxError>,
+{
     #[inline]
-    fn into_io(self) -> io::Result<T>
-    where
-        E: Into<BoxError>,
-    {
+    fn into_io(self) -> io::Result<T> {
         self.map_err(io::Error::other)
     }
+
+    #[inline]
+    fn with_close_context(self, qconn: &QuicheConnection) -> QuicResult<T> {
+        self.map_err(|err| {
+            let local_err = qconn.local_error().cloned();
+            let peer_err = qconn.peer_error().cloned();
+
+            CloseError {
+                work_loop_err: err.into(),
+                handshake_complete: qconn.is_established(),
+                did_idle_timeout: qconn.is_timed_out(),
+                local_err,
+                peer_err,
+            }
+            .into()
+        })
+    }
 }
+
+#[derive(Debug)]
+#[allow(
+    dead_code,
+    reason = "Only used for logging so fields are not directly accessed."
+)]
+pub struct CloseError {
+    /// Preserve the original error from the tokio_quiche work loop.
+    pub work_loop_err: BoxError,
+
+    /// True if the handshake has completed.
+    pub handshake_complete: bool,
+
+    /// Connection was closed due to the idle timeout.
+    pub did_idle_timeout: bool,
+
+    /// Either the internal quiche error or the error `quiche::close()` was
+    /// called with.
+    pub local_err: Option<ConnectionError>,
+
+    /// The error received from the peer.
+    pub peer_err: Option<ConnectionError>,
+}
+
+impl std::fmt::Display for CloseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for CloseError {}
