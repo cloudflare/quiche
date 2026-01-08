@@ -1456,7 +1456,7 @@ pub enum TxBufferTrackingState {
     #[default]
     Ok,
     /// The send buffer is in an inconsistent state, which could lead to
-    /// connection stalls  or excess buffering.
+    /// connection stalls or excess buffering.
     Inconsistent,
 }
 

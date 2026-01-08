@@ -562,6 +562,9 @@ typedef struct {
     // The number of QUIC packets that were lost.
     size_t lost;
 
+    // The number of QUIC packets that were marked as lost but later acked.
+    size_t spurious_lost;
+
     // The number of sent QUIC packets with retransmitted data.
     size_t retrans;
 
@@ -580,6 +583,12 @@ typedef struct {
     // The number of stream bytes retransmitted.
     uint64_t stream_retrans_bytes;
 
+    // The number of DATAGRAM frames received.
+    size_t dgram_recv;
+
+    // The number of DATAGRAM frames sent.
+    size_t dgram_sent;
+
     // The number of known paths for the connection.
     size_t paths_count;
 
@@ -594,6 +603,31 @@ typedef struct {
 
     // The number of streams stopped by remote.
     uint64_t stopped_stream_count_remote;
+
+    // The number of DATA_BLOCKED frames sent due to hitting the connection
+    // flow control limit.
+    uint64_t data_blocked_sent_count;
+
+    // The number of STREAM_DATA_BLOCKED frames sent due to a stream hitting
+    // the stream flow control limit.
+    uint64_t stream_data_blocked_sent_count;
+
+    // The number of DATA_BLOCKED frames received from the remote.
+    uint64_t data_blocked_recv_count;
+
+    // The number of STREAM_DATA_BLOCKED frames received from the remote.
+    uint64_t stream_data_blocked_recv_count;
+
+    // The total number of PATH_CHALLENGE frames that were received.
+    uint64_t path_challenge_rx_count;
+
+    // Total duration during which this side of the connection was
+    // actively sending bytes or waiting for those bytes to be acked.
+    uint64_t bytes_in_flight_duration_msec;
+
+    // True if the send buffer is in an inconsistent state, which could lead to
+    // connection stalls  or excess buffering.
+    bool tx_buffered_inconsistent;
 } quiche_stats;
 
 // Collects and returns statistics about the connection.
@@ -671,11 +705,28 @@ typedef struct {
     // The number of sent QUIC packets with retransmitted data on this path.
     size_t retrans;
 
+    // The number of times PTO (probe timeout) fired.
+    //
+    // Loss usually happens in a burst so the number of packets lost will
+    // depend on the volume of inflight packets at the time of loss (which
+    // can be arbitrary). PTO count measures the number of loss events and
+    // provides a normalized loss metric.
+    size_t total_pto_count;
+
+    /// The number of DATAGRAM frames received.
+    size_t dgram_recv;
+
+    /// The number of DATAGRAM frames sent.
+    size_t dgram_sent;
+
     // The estimated round-trip time of the path (in nanoseconds).
     uint64_t rtt;
 
     // The minimum round-trip time observed (in nanoseconds).
     uint64_t min_rtt;
+
+    // The maximum round-trip time observed (in nanoseconds).
+    uint64_t max_rtt;
 
     // The estimated round-trip time variation (in nanoseconds).
     uint64_t rttvar;
@@ -700,6 +751,13 @@ typedef struct {
 
     // The most recent data delivery rate estimate in bytes/s.
     uint64_t delivery_rate;
+
+    /// The maximum bandwidth estimate for the connection in bytes/s.
+    uint64_t max_bandwidth;
+
+    // The congestion window in bytes at the end of the startup or slow start,
+    // or 0 if the connection is still in startup.
+    uint64_t startup_exit_cwnd;
 } quiche_path_stats;
 
 
