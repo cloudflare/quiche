@@ -167,6 +167,11 @@ impl AsSocketStats for QuicConnectionStats {
                 .as_ref()
                 .map(|p| p.delivery_rate)
                 .unwrap_or_default(),
+            pacing_rate_bytes_per_sec: self
+                .path_stats
+                .as_ref()
+                .map(|p| p.pacing_rate_bytes_per_sec)
+                .unwrap_or_default(),
             max_bandwidth: self.path_stats.as_ref().and_then(|p| p.max_bandwidth),
             startup_exit: self
                 .path_stats
@@ -177,6 +182,13 @@ impl AsSocketStats for QuicConnectionStats {
                 .stats
                 .bytes_in_flight_duration
                 .as_micros() as u64,
+            flow_control_recv_win_bytes: self.stats.flow_control_recv_win_bytes,
+            flow_control_send_win_bytes: self.stats.flow_control_send_win_bytes,
+            local_bidi_streams_opened: self.stats.local_bidi_streams_opened,
+            local_bidi_streams_left: self.stats.local_bidi_streams_left,
+            peer_bidi_streams_opened: self.stats.peer_bidi_streams_opened,
+            peer_bidi_streams_left: self.stats.peer_bidi_streams_left,
+            streams_collected: self.stats.streams_collected,
         }
     }
 }

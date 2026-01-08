@@ -7264,6 +7264,15 @@ impl<F: BufFactory> Connection<F> {
             stream_data_blocked_recv_count: self.stream_data_blocked_recv_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
+            flow_control_recv_win_bytes: self.max_rx_data() - self.rx_data,
+            flow_control_send_win_bytes: self.max_tx_data - self.tx_data,
+            local_bidi_streams_opened: self.streams.local_opened_streams_bidi(),
+            // yes, peer_streams_left_bidi() is correct.
+            local_bidi_streams_left: self.streams.peer_streams_left_bidi(),
+            peer_bidi_streams_opened: self.streams.peer_opened_streams_bidi(),
+            peer_bidi_streams_left: self.streams.max_streams_bidi() -
+                self.streams.peer_opened_streams_bidi(),
+            streams_collected: self.streams.num_collected(),
         }
     }
 
@@ -8802,6 +8811,37 @@ pub struct Stats {
     /// Total duration during which this side of the connection was
     /// actively sending bytes or waiting for those bytes to be acked.
     pub bytes_in_flight_duration: Duration,
+
+    /// The amount of available *receive side*, connection level flow
+    /// control. I.e., the `max_data` we advertised to the peer, less
+    /// the amount of data receviced.
+    pub flow_control_recv_win_bytes: u64,
+
+    /// The amount of available *send side*, connection level flow
+    /// control. I.e., the `max_data` limit we received from the peer,
+    /// less the amount of data sent.
+    pub flow_control_send_win_bytes: u64,
+
+    /// The total number of locally initiated, bidirectional streams
+    /// that are have ever been opened.
+    pub local_bidi_streams_opened: u64,
+
+    /// The number of locally initiated, bidirectional streams that can
+    /// be additionally be opened based on the peer's announced
+    /// stream limit.
+    pub local_bidi_streams_left: u64,
+
+    /// The total number of peer initiated, bidirectional streams
+    /// that are have ever been opened.
+    pub peer_bidi_streams_opened: u64,
+
+    /// The number of peer initiated, bidirectional streams that can
+    /// be additionally be opened based on the stream limit we announced
+    /// to the peer.
+    pub peer_bidi_streams_left: u64,
+
+    /// The total number of streamsthat are closed and have been collected.
+    pub streams_collected: u64,
 }
 
 impl std::fmt::Debug for Stats {
