@@ -88,6 +88,7 @@ pub use self::client::ClientH3Driver;
 pub use self::client::ClientH3Event;
 pub use self::client::ClientRequestSender;
 pub use self::client::NewClientRequest;
+pub use self::server::IsInEarlyData;
 pub use self::server::RawPriorityValue;
 pub use self::server::ServerEventStream;
 pub use self::server::ServerH3Command;
