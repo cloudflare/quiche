@@ -78,7 +78,7 @@ libm = "0.2"
 log = { workspace = true, features = ["std"] }
 octets = { workspace = true, features = ["huffman_hpack"] }
 qlog = { workspace = true, optional = true }
-sfv = { version = "0.9", optional = true }
+sfv = { version = "0.14", optional = true }
 slab = "0.4"
 smallvec = { workspace = true, features = ["union"] }
 enum_dispatch = "0.3"
