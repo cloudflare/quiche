@@ -857,7 +857,7 @@ where
         mut self, qconn: &mut QuicheConnection,
         ctx: &mut ConnectionStageContext<A>,
     ) {
-        if self.conn_stage.work_loop_result.is_ok() &&
+        if self.conn_stage.work_loop_result().is_ok() &&
             self.bw_estimator.max_bandwidth > 0
         {
             let metrics = &self.metrics;
@@ -875,7 +875,7 @@ where
             ctx.application.on_conn_close(
                 qconn,
                 &self.metrics,
-                &self.conn_stage.work_loop_result,
+                self.conn_stage.work_loop_result(),
             );
         }
 
@@ -904,7 +904,7 @@ where
 
         self.close_connection(qconn);
 
-        if let Err(work_loop_error) = self.conn_stage.work_loop_result {
+        if let Err(work_loop_error) = self.conn_stage.into_work_loop_result() {
             self.audit_log_stats
                 .set_connection_close_reason(work_loop_error);
         }
