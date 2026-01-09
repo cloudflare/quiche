@@ -51,6 +51,7 @@ fn transport_params() {
         initial_source_connection_id: Some(b"woot woot".to_vec().into()),
         retry_source_connection_id: Some(b"retry".to_vec().into()),
         max_datagram_frame_size: Some(32),
+        version_information: None,
         unknown_params: Default::default(),
     };
 
@@ -81,6 +82,7 @@ fn transport_params() {
         initial_source_connection_id: Some(b"woot woot".to_vec().into()),
         retry_source_connection_id: None,
         max_datagram_frame_size: Some(32),
+        version_information: None,
         unknown_params: Default::default(),
     };
 
@@ -92,6 +94,97 @@ fn transport_params() {
     let new_tp = TransportParams::decode(raw_params, true, None).unwrap();
 
     assert_eq!(new_tp, tp);
+}
+
+#[test]
+fn transport_params_decode_version_information() {
+    // Given an encoded version_information transport parameter, ...
+    let raw_version_information_params = [
+        0x11, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0xfa, 0x5a,
+        0x0a, 0x7a, 0xff, 0x00, 0x00, 0x1d,
+    ];
+    let decoded_version_information_params = TransportParams::decode(
+        &raw_version_information_params,
+        true,
+        None,
+    )
+    .expect(
+        "Could not decode transport parameters with just version information.",
+    );
+
+    // ... make sure that it parses to what is expected.
+
+    let VersionNegotiationParameter {
+        chosen_version,
+        available_versions,
+    } = decoded_version_information_params
+        .version_information
+        .expect(
+            "Could not find the decoded version_information transport param.",
+        );
+    assert_eq!(chosen_version, 1u32);
+
+    let available_versions = available_versions.expect("Could not get the available versions from the decoded version_information transport param.");
+    assert_eq!(available_versions, [1, 0xfa5a0a7a, 0xff00001d]);
+}
+
+#[test]
+fn transport_params_no_available_versions_version_information() {
+    // Given an encoded version_information transport parameter with just chosen
+    // version, ...
+    let raw_version_information_params = [0x11, 0x04, 0x00, 0x00, 0x00, 0x01];
+    let decoded_version_information_params = TransportParams::decode(
+        &raw_version_information_params,
+        true,
+        None,
+    ).expect(
+        "Could not decode transport parameters with just chosen set in the version information transport param.",
+    );
+
+    // ... make sure that it parses to what is expected.
+    let VersionNegotiationParameter {
+        chosen_version,
+        available_versions,
+    } = decoded_version_information_params
+        .version_information
+        .expect(
+            "Could not find the decoded version_information transport param.",
+        );
+    assert_eq!(chosen_version, 1u32);
+    assert!(available_versions.is_none());
+}
+
+#[test]
+fn transport_params_too_short_version_information() {
+    // Given an encoded version_information transport parameter without enough
+    // data,
+    let raw_version_information_params = [0x11, 0x04, 0x00, 0x00];
+
+    // Make sure that decoding fails.
+    let decoded_version_information_params =
+        TransportParams::decode(&raw_version_information_params, true, None);
+    assert_eq!(
+        decoded_version_information_params,
+        Err(Error::BufferTooShort)
+    );
+}
+
+#[test]
+fn transport_params_truncated_available_versions_version_information() {
+    // Given an encoded version_information transport parameter with truncated
+    // list of available versions ("for example, if it is too short or if its
+    // length is not divisible by four" RFC9368, Sec. 4),
+    let raw_version_information_params = [
+        0x11, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0xca, 0xfe,
+    ];
+
+    // ... make sure that decoding fails.
+    let decoded_version_information_params =
+        TransportParams::decode(&raw_version_information_params, true, None);
+    assert_eq!(
+        decoded_version_information_params,
+        Err(Error::BufferTooShort)
+    );
 }
 
 #[test]
