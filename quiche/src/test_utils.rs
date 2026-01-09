@@ -277,6 +277,13 @@ impl Pipe {
         self.server.recv(buf, info)
     }
 
+    pub fn send_pkt_to_client(
+        &mut self, pkt_type: Type, frames: &[frame::Frame], buf: &mut [u8],
+    ) -> Result<usize> {
+        let written = encode_pkt(&mut self.server, pkt_type, frames, buf)?;
+        recv_send(&mut self.client, buf, written)
+    }
+
     pub fn send_pkt_to_server(
         &mut self, pkt_type: Type, frames: &[frame::Frame], buf: &mut [u8],
     ) -> Result<usize> {
