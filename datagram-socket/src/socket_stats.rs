@@ -230,6 +230,7 @@ impl QuicAuditStats {
 
     #[inline]
     pub fn set_connection_close_reason(&self, error: BoxError) {
+        println!("set_connection_close_reason ------ {:?}", error);
         *self.connection_close_reason.write().unwrap() = Some(error);
     }
 

@@ -137,6 +137,7 @@ pub fn received_status_code_on_stream(
         .headers_on_stream(stream)
         .iter()
         .any(|e| {
+            println!("------ actual code {:?}", e.status_code());
             let u16 =
                 std::str::from_utf8(e.status_code().expect("no status code"))
                     .expect("invalid utf8 in status code")

@@ -168,14 +168,22 @@ impl ConnectionStage for RunningApplication {
 
 #[derive(Debug)]
 pub struct Close {
-    pub(crate) work_loop_result: QuicResult<()>,
+    work_loop_result: QuicResult<()>,
 }
 
 impl Close {
     pub fn new(
         work_loop_result: QuicResult<()>, qconn: &QuicheConnection,
     ) -> Self {
+        println!(
+            "CLOSE connection_stage ----------------- {:?}",
+            work_loop_result
+        );
         let work_loop_result = work_loop_result.with_close_context(qconn);
+        println!(
+            "CLOSE connection_stage ----------------- {:?}",
+            work_loop_result
+        );
         Close { work_loop_result }
     }
 

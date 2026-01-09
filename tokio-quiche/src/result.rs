@@ -93,20 +93,20 @@ where
 )]
 pub struct CloseError {
     /// Preserve the original error from the tokio_quiche work loop.
-    work_loop_err: BoxError,
+    pub work_loop_err: BoxError,
 
     /// True if the handshake has completed.
-    handshake_complete: bool,
+    pub handshake_complete: bool,
 
     /// Connection was closed due to the idle timeout.
-    did_idle_timeout: bool,
+    pub did_idle_timeout: bool,
 
     /// Either the internal quiche error or the error `quiche::close()` was
     /// called with.
-    local_err: Option<ConnectionError>,
+    pub local_err: Option<ConnectionError>,
 
     /// The error received from the peer.
-    peer_err: Option<ConnectionError>,
+    pub peer_err: Option<ConnectionError>,
 }
 
 impl std::fmt::Display for CloseError {
