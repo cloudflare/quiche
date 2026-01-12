@@ -925,7 +925,7 @@ pub extern "C" fn quiche_conn_stream_shutdown(
 
 #[no_mangle]
 pub extern "C" fn quiche_conn_stream_capacity(
-    conn: &Connection, stream_id: u64,
+    conn: &mut Connection, stream_id: u64,
 ) -> ssize_t {
     match conn.stream_capacity(stream_id) {
         Ok(v) => v as ssize_t,
