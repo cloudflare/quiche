@@ -67,19 +67,16 @@
 //!
 //! ```
 //! let mut trace = qlog::Trace::new(
-//!     qlog::VantagePoint {
-//!         name: Some("Example client".to_string()),
-//!         ty: qlog::VantagePointType::Client,
-//!         flow: None,
-//!     },
-//!     Some("Example qlog trace".to_string()),
-//!     Some("Example qlog trace description".to_string()),
-//!     Some(qlog::Configuration {
-//!         time_offset: Some(0.0),
-//!         original_uris: None,
-//!     }),
-//!     None,
-//! );
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    None,
+//! #    Some(qlog::VantagePoint {
+//! #        name: Some("Example client".to_string()),
+//! #        ty: qlog::VantagePointType::Client,
+//! #        flow: None,
+//! #    }),
+//! #    vec![qlog::events::QUIC_URI.to_string(), qlog::events::HTTP3_URI.to_string()],
+//! # );
 //! ```
 //!
 //! ### Adding events to a Trace
@@ -91,19 +88,16 @@
 //! of the [`Event`], then appends it to the trace with [`push_event()`].
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new (
-//! #     qlog::VantagePoint {
-//! #         name: Some("Example client".to_string()),
-//! #         ty: qlog::VantagePointType::Client,
-//! #         flow: None,
-//! #     },
-//! #     Some("Example qlog trace".to_string()),
-//! #     Some("Example qlog trace description".to_string()),
-//! #     Some(qlog::Configuration {
-//! #         time_offset: Some(0.0),
-//! #         original_uris: None,
-//! #     }),
-//! #     None
+//! # let mut trace = qlog::Trace::new(
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    None,
+//! #    Some(qlog::VantagePoint {
+//! #        name: Some("Example client".to_string()),
+//! #        ty: qlog::VantagePointType::Client,
+//! #        flow: None,
+//! #    }),
+//! #    vec![qlog::events::QUIC_URI.to_string(), qlog::events::HTTP3_URI.to_string()],
 //! # );
 //!
 //! let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];
@@ -112,7 +106,6 @@
 //! let pkt_hdr = qlog::events::quic::PacketHeader::new(
 //!     qlog::events::quic::PacketType::Initial,
 //!     Some(0),          // packet_number
-//!     None,             // flags
 //!     None,             // token
 //!     None,             // length
 //!     Some(0x00000001), // version
@@ -122,7 +115,7 @@
 //!
 //! let frames = vec![qlog::events::quic::QuicFrame::Crypto {
 //!     offset: 0,
-//!     length: 0,
+//!     raw: None,
 //! }];
 //!
 //! let raw = qlog::events::RawInfo {
@@ -135,12 +128,11 @@
 //!     qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
 //!         header: pkt_hdr,
 //!         frames: Some(frames.into()),
-//!         is_coalesced: None,
-//!         retry_token: None,
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: Some(raw),
 //!         datagram_id: None,
+//!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
 //!     });
@@ -156,19 +148,16 @@
 //! For example, serializing the trace created above:
 //!
 //! ```
-//! # let mut trace = qlog::Trace::new (
-//! #     qlog::VantagePoint {
-//! #         name: Some("Example client".to_string()),
-//! #         ty: qlog::VantagePointType::Client,
-//! #         flow: None,
-//! #     },
-//! #     Some("Example qlog trace".to_string()),
-//! #     Some("Example qlog trace description".to_string()),
-//! #     Some(qlog::Configuration {
-//! #         time_offset: Some(0.0),
-//! #         original_uris: None,
-//! #     }),
-//! #     None
+//! # let mut trace = qlog::Trace::new(
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    None,
+//! #    Some(qlog::VantagePoint {
+//! #        name: Some("Example client".to_string()),
+//! #        ty: qlog::VantagePointType::Client,
+//! #        flow: None,
+//! #    }),
+//! #    vec![qlog::events::QUIC_URI.to_string(), qlog::events::HTTP3_URI.to_string()],
 //! # );
 //! serde_json::to_string_pretty(&trace).unwrap();
 //! ```
@@ -189,7 +178,7 @@
 //!   "events": [
 //!     {
 //!       "time": 0.0,
-//!       "name": "transport:packet_sent",
+//!       "name": "quic:packet_sent",
 //!       "data": {
 //!         "header": {
 //!           "packet_type": "initial",
@@ -233,18 +222,18 @@
 //!
 //! ```
 //! let mut trace = qlog::TraceSeq::new(
-//!     qlog::VantagePoint {
+//!     Some("Example qlog trace".to_string()),
+//!     Some("Example qlog trace description".to_string()),
+//!     None,
+//!     Some(qlog::VantagePoint {
 //!         name: Some("Example client".to_string()),
 //!         ty: qlog::VantagePointType::Client,
 //!         flow: None,
-//!     },
-//!     Some("Example qlog trace".to_string()),
-//!     Some("Example qlog trace description".to_string()),
-//!     Some(qlog::Configuration {
-//!         time_offset: Some(0.0),
-//!         original_uris: None,
 //!     }),
-//!     None,
+//!     vec![
+//!         qlog::events::QUIC_URI.to_string(),
+//!         qlog::events::HTTP3_URI.to_string(),
+//!     ],
 //! );
 //! ```
 //!
@@ -259,25 +248,20 @@
 //!
 //! ```
 //! # let mut trace = qlog::TraceSeq::new(
-//! #    qlog::VantagePoint {
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    None,
+//! #    Some(qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
 //! #        flow: None,
-//! #    },
-//! #    Some("Example qlog trace".to_string()),
-//! #    Some("Example qlog trace description".to_string()),
-//! #    Some(qlog::Configuration {
-//! #        time_offset: Some(0.0),
-//! #        original_uris: None,
 //! #    }),
-//! #    None,
+//! #    vec![qlog::events::QUIC_URI.to_string(), qlog::events::HTTP3_URI.to_string()],
 //! # );
 //! # let mut file = std::fs::File::create("foo.sqlog").unwrap();
 //! let mut streamer = qlog::streamer::QlogStreamer::new(
-//!     qlog::QLOG_VERSION.to_string(),
 //!     Some("Example qlog".to_string()),
 //!     Some("Example qlog description".to_string()),
-//!     None,
 //!     std::time::Instant::now(),
 //!     trace,
 //!     qlog::events::EventImportance::Base,
@@ -296,25 +280,20 @@
 //!
 //! ```
 //! # let mut trace = qlog::TraceSeq::new(
-//! #    qlog::VantagePoint {
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    None,
+//! #    Some(qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
 //! #        flow: None,
-//! #    },
-//! #    Some("Example qlog trace".to_string()),
-//! #    Some("Example qlog trace description".to_string()),
-//! #    Some(qlog::Configuration {
-//! #        time_offset: Some(0.0),
-//! #        original_uris: None,
 //! #    }),
-//! #    None,
+//! #    vec![qlog::events::QUIC_URI.to_string(), qlog::events::HTTP3_URI.to_string()],
 //! # );
 //! # let mut file = std::fs::File::create("foo.qlog").unwrap();
 //! # let mut streamer = qlog::streamer::QlogStreamer::new(
-//! #     qlog::QLOG_VERSION.to_string(),
 //! #     Some("Example qlog".to_string()),
 //! #     Some("Example qlog description".to_string()),
-//! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
 //! #     qlog::events::EventImportance::Base,
@@ -333,24 +312,27 @@
 //! );
 //!
 //! let ping = qlog::events::quic::QuicFrame::Ping {
-//!     length: None,
-//!     payload_length: None,
+//!     raw: None,
 //! };
+//!
+//! let raw = qlog::events::RawInfo {
+//!             length: None,
+//!             payload_length:
+//!             Some(1234), data: None
+//!           };
 //! let padding = qlog::events::quic::QuicFrame::Padding {
-//!     length: None,
-//!     payload_length: 1234,
+//!     raw: Some(raw),
 //! };
 //!
 //! let event_data =
 //!     qlog::events::EventData::PacketSent(qlog::events::quic::PacketSent {
 //!         header: pkt_hdr,
 //!         frames: Some(vec![ping, padding].into()),
-//!         is_coalesced: None,
-//!         retry_token: None,
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: None,
 //!         datagram_id: None,
+//!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
 //!     });
@@ -365,25 +347,20 @@
 //!
 //! ```
 //! # let mut trace = qlog::TraceSeq::new(
-//! #    qlog::VantagePoint {
+//! #    Some("Example qlog trace".to_string()),
+//! #    Some("Example qlog trace description".to_string()),
+//! #    None,
+//! #    Some(qlog::VantagePoint {
 //! #        name: Some("Example client".to_string()),
 //! #        ty: qlog::VantagePointType::Client,
 //! #        flow: None,
-//! #    },
-//! #    Some("Example qlog trace".to_string()),
-//! #    Some("Example qlog trace description".to_string()),
-//! #    Some(qlog::Configuration {
-//! #        time_offset: Some(0.0),
-//! #        original_uris: None,
 //! #    }),
-//! #    None,
+//! #    vec![qlog::events::QUIC_URI.to_string(), qlog::events::HTTP3_URI.to_string()],
 //! # );
 //! # let mut file = std::fs::File::create("foo.qlog").unwrap();
 //! # let mut streamer = qlog::streamer::QlogStreamer::new(
-//! #     qlog::QLOG_VERSION.to_string(),
 //! #     Some("Example qlog".to_string()),
 //! #     Some("Example qlog description".to_string()),
-//! #     None,
 //! #     std::time::Instant::now(),
 //! #     trace,
 //! #     qlog::events::EventImportance::Base,
@@ -454,7 +431,8 @@ impl std::convert::From<std::io::Error> for Error {
     }
 }
 
-pub const QLOG_VERSION: &str = "0.3";
+pub const QLOGFILE_URI: &str = "urn:ietf:params:qlog:file:contained";
+pub const QLOGFILESEQ_URI: &str = "urn:ietf:params:qlog:file:sequential";
 
 pub type Bytes = String;
 pub type StatelessResetToken = Bytes;
@@ -470,22 +448,20 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Qlog {
-    pub qlog_version: String,
-    pub qlog_format: String,
+    pub file_schema: String,
+    pub serialization_format: String,
     pub title: Option<String>,
     pub description: Option<String>,
-    pub summary: Option<String>,
 
     pub traces: Vec<Trace>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct QlogSeq {
-    pub qlog_version: String,
-    pub qlog_format: String,
+    pub file_schema: String,
+    pub serialization_format: String,
     pub title: Option<String>,
     pub description: Option<String>,
-    pub summary: Option<String>,
 
     pub trace: TraceSeq,
 }
@@ -502,13 +478,11 @@ pub enum ImportanceLogLevel {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct Trace {
-    pub vantage_point: VantagePoint,
     pub title: Option<String>,
     pub description: Option<String>,
-
-    pub configuration: Option<Configuration>,
-
     pub common_fields: Option<CommonFields>,
+    pub vantage_point: Option<VantagePoint>,
+    pub event_schemas: Vec<String>,
 
     pub events: Vec<Event>,
 }
@@ -517,16 +491,16 @@ pub struct Trace {
 impl Trace {
     /// Creates a new qlog [Trace]
     pub fn new(
-        vantage_point: VantagePoint, title: Option<String>,
-        description: Option<String>, configuration: Option<Configuration>,
-        common_fields: Option<CommonFields>,
+        title: Option<String>, description: Option<String>,
+        common_fields: Option<CommonFields>, vantage_point: Option<VantagePoint>,
+        event_schemas: Vec<String>,
     ) -> Self {
         Trace {
-            vantage_point,
             title,
             description,
-            configuration,
             common_fields,
+            vantage_point,
+            event_schemas,
             events: Vec::new(),
         }
     }
@@ -540,35 +514,33 @@ impl Trace {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct TraceSeq {
-    pub vantage_point: VantagePoint,
     pub title: Option<String>,
     pub description: Option<String>,
-
-    pub configuration: Option<Configuration>,
-
     pub common_fields: Option<CommonFields>,
+    pub vantage_point: Option<VantagePoint>,
+    pub event_schemas: Vec<String>,
 }
 
 /// Helper functions for using a qlog [TraceSeq].
 impl TraceSeq {
     /// Creates a new qlog [TraceSeq]
     pub fn new(
-        vantage_point: VantagePoint, title: Option<String>,
-        description: Option<String>, configuration: Option<Configuration>,
-        common_fields: Option<CommonFields>,
+        title: Option<String>, description: Option<String>,
+        common_fields: Option<CommonFields>, vantage_point: Option<VantagePoint>,
+        event_schemas: Vec<String>,
     ) -> Self {
         TraceSeq {
-            vantage_point,
             title,
             description,
-            configuration,
             common_fields,
+            vantage_point,
+            event_schemas,
         }
     }
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq, Debug)]
 pub struct VantagePoint {
     pub name: Option<String>,
 
@@ -578,42 +550,32 @@ pub struct VantagePoint {
     pub flow: Option<VantagePointType>,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum VantagePointType {
     Client,
     Server,
     Network,
+    #[default]
     Unknown,
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub struct Configuration {
-    pub time_offset: Option<f64>,
-
-    pub original_uris: Option<Vec<String>>,
-    // TODO: additionalUserSpecifiedProperty
-}
-
-impl Default for Configuration {
-    fn default() -> Self {
-        Configuration {
-            time_offset: Some(0.0),
-            original_uris: None,
-        }
-    }
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub struct ReferenceTime {
+    pub clock_type: String,
+    pub epoch: String,
+    pub wall_clock_time: Option<String>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
 pub struct CommonFields {
     pub group_id: Option<String>,
-    pub protocol_type: Option<Vec<String>>,
+    pub protocol_types: Option<Vec<String>>,
 
-    pub reference_time: Option<f64>,
+    pub reference_time: ReferenceTime,
     pub time_format: Option<String>,
-    // TODO: additionalUserSpecifiedProperty
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -678,7 +640,6 @@ pub mod testing {
             Some(0),
             None,
             None,
-            None,
             Some(0x0000_0001),
             Some(&scid),
             Some(&dcid),
@@ -687,35 +648,29 @@ pub mod testing {
 
     pub fn make_trace() -> Trace {
         Trace::new(
-            VantagePoint {
+            Some("Quiche qlog trace".to_string()),
+            Some("Quiche qlog trace description".to_string()),
+            None,
+            Some(VantagePoint {
                 name: None,
                 ty: VantagePointType::Server,
                 flow: None,
-            },
-            Some("Quiche qlog trace".to_string()),
-            Some("Quiche qlog trace description".to_string()),
-            Some(Configuration {
-                time_offset: Some(0.0),
-                original_uris: None,
             }),
-            None,
+            vec![],
         )
     }
 
     pub fn make_trace_seq() -> TraceSeq {
         TraceSeq::new(
-            VantagePoint {
+            Some("Quiche qlog trace".to_string()),
+            Some("Quiche qlog trace description".to_string()),
+            None,
+            Some(VantagePoint {
                 name: None,
                 ty: VantagePointType::Server,
                 flow: None,
-            },
-            Some("Quiche qlog trace".to_string()),
-            Some("Quiche qlog trace description".to_string()),
-            Some(Configuration {
-                time_offset: Some(0.0),
-                original_uris: None,
             }),
-            None,
+            vec![],
         )
     }
 }
@@ -734,7 +689,7 @@ mod tests {
     fn packet_sent_event_no_frames() {
         let log_string = r#"{
   "time": 0.0,
-  "name": "transport:packet_sent",
+  "name": "quic:packet_sent",
   "data": {
     "header": {
       "packet_type": "initial",
@@ -765,14 +720,17 @@ mod tests {
 
         let ev = Event::with_time(0.0, ev_data);
 
-        assert_eq!(serde_json::to_string_pretty(&ev).unwrap(), log_string);
+        pretty_assertions::assert_eq!(
+            serde_json::to_string_pretty(&ev).unwrap(),
+            log_string
+        );
     }
 
     #[test]
     fn packet_sent_event_some_frames() {
         let log_string = r#"{
   "time": 0.0,
-  "name": "transport:packet_sent",
+  "name": "quic:packet_sent",
   "data": {
     "header": {
       "packet_type": "initial",
@@ -790,7 +748,9 @@ mod tests {
     "frames": [
       {
         "frame_type": "padding",
-        "payload_length": 1234
+        "raw": {
+          "payload_length": 1234
+        }
       },
       {
         "frame_type": "ping"
@@ -799,8 +759,10 @@ mod tests {
         "frame_type": "stream",
         "stream_id": 0,
         "offset": 0,
-        "length": 100,
-        "fin": true
+        "fin": true,
+        "raw": {
+          "payload_length": 100
+        }
       }
     ]
   }
@@ -810,19 +772,22 @@ mod tests {
 
         let frames = vec![
             QuicFrame::Padding {
-                payload_length: 1234,
-                length: None,
+                raw: Some(RawInfo {
+                    length: None,
+                    payload_length: Some(1234),
+                    data: None,
+                }),
             },
-            QuicFrame::Ping {
-                payload_length: None,
-                length: None,
-            },
+            QuicFrame::Ping { raw: None },
             QuicFrame::Stream {
                 stream_id: 0,
-                offset: 0,
-                length: 100,
+                offset: Some(0),
                 fin: Some(true),
-                raw: None,
+                raw: Some(RawInfo {
+                    length: None,
+                    payload_length: Some(100),
+                    data: None,
+                }),
             },
         ];
 
@@ -838,69 +803,66 @@ mod tests {
         });
 
         let ev = Event::with_time(0.0, ev_data);
-        assert_eq!(serde_json::to_string_pretty(&ev).unwrap(), log_string);
+        pretty_assertions::assert_eq!(
+            serde_json::to_string_pretty(&ev).unwrap(),
+            log_string
+        );
     }
 
     #[test]
     fn trace_no_events() {
         let log_string = r#"{
+  "title": "Quiche qlog trace",
+  "description": "Quiche qlog trace description",
   "vantage_point": {
     "type": "server"
   },
-  "title": "Quiche qlog trace",
-  "description": "Quiche qlog trace description",
-  "configuration": {
-    "time_offset": 0.0
-  },
+  "event_schemas": [],
   "events": []
 }"#;
 
         let trace = make_trace();
 
         let serialized = serde_json::to_string_pretty(&trace).unwrap();
-        assert_eq!(serialized, log_string);
+        pretty_assertions::assert_eq!(serialized, log_string);
 
         let deserialized: Trace = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, trace);
+        pretty_assertions::assert_eq!(deserialized, trace);
     }
 
     #[test]
     fn trace_seq_no_events() {
         let log_string = r#"{
+  "title": "Quiche qlog trace",
+  "description": "Quiche qlog trace description",
   "vantage_point": {
     "type": "server"
   },
-  "title": "Quiche qlog trace",
-  "description": "Quiche qlog trace description",
-  "configuration": {
-    "time_offset": 0.0
-  }
+  "event_schemas": []
 }"#;
 
         let trace = make_trace_seq();
 
         let serialized = serde_json::to_string_pretty(&trace).unwrap();
-        assert_eq!(serialized, log_string);
+        pretty_assertions::assert_eq!(serialized, log_string);
 
         let deserialized: TraceSeq = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, trace);
+        pretty_assertions::assert_eq!(deserialized, trace);
     }
 
     #[test]
     fn trace_single_transport_event() {
         let log_string = r#"{
+  "title": "Quiche qlog trace",
+  "description": "Quiche qlog trace description",
   "vantage_point": {
     "type": "server"
   },
-  "title": "Quiche qlog trace",
-  "description": "Quiche qlog trace description",
-  "configuration": {
-    "time_offset": 0.0
-  },
+  "event_schemas": [],
   "events": [
     {
       "time": 0.0,
-      "name": "transport:packet_sent",
+      "name": "quic:packet_sent",
       "data": {
         "header": {
           "packet_type": "initial",
@@ -920,8 +882,10 @@ mod tests {
             "frame_type": "stream",
             "stream_id": 0,
             "offset": 0,
-            "length": 100,
-            "fin": true
+            "fin": true,
+            "raw": {
+              "payload_length": 100
+            }
           }
         ]
       }
@@ -935,10 +899,13 @@ mod tests {
 
         let frames = vec![QuicFrame::Stream {
             stream_id: 0,
-            offset: 0,
-            length: 100,
+            offset: Some(0),
             fin: Some(true),
-            raw: None,
+            raw: Some(RawInfo {
+                length: None,
+                payload_length: Some(100),
+                data: None,
+            }),
         }];
         let event_data = EventData::PacketSent(PacketSent {
             header: pkt_hdr,
@@ -956,10 +923,10 @@ mod tests {
         trace.push_event(ev);
 
         let serialized = serde_json::to_string_pretty(&trace).unwrap();
-        assert_eq!(serialized, log_string);
+        pretty_assertions::assert_eq!(serialized, log_string);
 
         let deserialized: Trace = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, trace);
+        pretty_assertions::assert_eq!(deserialized, trace);
     }
 }
 
