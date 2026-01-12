@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::quic::QuicheConnection;
+use quiche::ConnectionError;
 use std::error::Error;
 use std::io;
 
@@ -52,12 +54,86 @@ pub trait QuicResultExt<T, E> {
         E: Into<BoxError>;
 }
 
-impl<T, E> QuicResultExt<T, E> for Result<T, E> {
+impl<T, E> QuicResultExt<T, E> for Result<T, E>
+where
+    E: Into<BoxError>,
+{
     #[inline]
-    fn into_io(self) -> io::Result<T>
-    where
-        E: Into<BoxError>,
-    {
+    fn into_io(self) -> io::Result<T> {
         self.map_err(io::Error::other)
     }
 }
+
+/// A local tokio-quiche error type that allows for capturing additional
+/// context.
+#[derive(Debug)]
+pub struct TQError {
+    /// Preserve the original error.
+    parent: BoxError,
+
+    /// Reason for this alert.
+    reason: String,
+
+    /// True if the handshake has completed.
+    handshake_complete: bool,
+
+    /// Connection was closed due to the idle timeout.
+    did_idle_timeout: bool,
+
+    /// Either the internal quiche error or the error `quiche::close()` was
+    /// called with.
+    local_err: Option<ConnectionError>,
+
+    /// The error received from the peer.
+    peer_err: Option<ConnectionError>,
+}
+
+impl TQError {
+    pub(crate) fn with_context(
+        parent: BoxError, reason: &str, qconn: &QuicheConnection,
+    ) -> Self {
+        let local_err = qconn.local_error().cloned();
+        let peer_err = qconn.peer_error().cloned();
+
+        TQError {
+            parent,
+            reason: reason.to_string(),
+            handshake_complete: qconn.is_established(),
+            did_idle_timeout: qconn.is_timed_out(),
+            local_err,
+            peer_err,
+        }
+    }
+
+    pub fn parent(&self) -> &BoxError {
+        &self.parent
+    }
+
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+
+    pub fn handshake_complete(&self) -> bool {
+        self.handshake_complete
+    }
+
+    pub fn did_idle_timeout(&self) -> bool {
+        self.did_idle_timeout
+    }
+
+    pub fn local_err(&self) -> Option<&ConnectionError> {
+        self.local_err.as_ref()
+    }
+
+    pub fn peer_err(&self) -> Option<&ConnectionError> {
+        self.peer_err.as_ref()
+    }
+}
+
+impl std::fmt::Display for TQError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::error::Error for TQError {}

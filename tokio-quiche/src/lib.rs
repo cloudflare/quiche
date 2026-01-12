@@ -130,6 +130,7 @@ pub use crate::quic::connection::InitialQuicConnection;
 pub use crate::quic::connection::QuicConnection;
 pub use crate::result::BoxError;
 pub use crate::result::QuicResult;
+pub use crate::result::TQError;
 pub use crate::settings::ConnectionParams;
 
 #[doc(hidden)]

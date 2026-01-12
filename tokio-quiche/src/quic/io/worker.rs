@@ -49,6 +49,7 @@ use crate::quic::connection::Incoming;
 use crate::quic::connection::QuicConnectionStats;
 use crate::quic::router::ConnectionMapCommand;
 use crate::quic::QuicheConnection;
+use crate::result::TQError;
 use crate::QuicResult;
 
 use boring::ssl::SslRef;
@@ -338,12 +339,17 @@ where
         };
 
         let buffer_write_outcome = loop {
-            let outcome = self.write_packet_to_buffer(
-                qconn,
-                send_buf,
-                &mut send_info,
-                segment_size,
-            );
+            let outcome = self
+                .write_packet_to_buffer(
+                    qconn,
+                    send_buf,
+                    &mut send_info,
+                    segment_size,
+                )
+                .map_err(|err| {
+                    let msg = "Error writing packet. Opt: `AOQ::write_packet_to_buffer`";
+                    TQError::with_context(err, msg, qconn).into()
+                });
 
             let packet_size = match outcome {
                 Ok(0) => break Ok(0),
@@ -619,10 +625,19 @@ where
 
         if let Some(gro) = pkt.gro {
             for dgram in pkt.buf.chunks_mut(gro as usize) {
-                qconn.recv(dgram, recv_info)?;
+                qconn.recv(dgram, recv_info).map_err(|err| {
+                    let msg = "Error receiving gro'd packet. Opt: `quiche::recv`";
+                    TQError::with_context(Box::new(err), msg, qconn)
+                })?;
             }
         } else {
-            qconn.recv(&mut pkt.buf, recv_info)?;
+            qconn.recv(&mut pkt.buf, recv_info).map_err(|err| {
+                TQError::with_context(
+                    Box::new(err),
+                    "Error receiving packet. Opt: `quiche::recv`",
+                    qconn,
+                )
+            })?;
         }
 
         Ok(())
@@ -635,7 +650,10 @@ where
         &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
     ) -> QuicResult<()> {
         if quic_application.should_act() {
-            quic_application.wait_for_data(qconn).await
+            quic_application.wait_for_data(qconn).await.map_err(|err| {
+                let msg = "Error waiting for H3 data. Opt: `AOQ::wait_for_data`";
+                TQError::with_context(err, msg, qconn).into()
+            })
         } else {
             self.wait_for_quiche(qconn, quic_application).await
         }
@@ -857,7 +875,7 @@ where
         mut self, qconn: &mut QuicheConnection,
         ctx: &mut ConnectionStageContext<A>,
     ) {
-        if self.conn_stage.work_loop_result.is_ok() &&
+        if self.conn_stage.work_loop_result().is_ok() &&
             self.bw_estimator.max_bandwidth > 0
         {
             let metrics = &self.metrics;
@@ -875,7 +893,7 @@ where
             ctx.application.on_conn_close(
                 qconn,
                 &self.metrics,
-                &self.conn_stage.work_loop_result,
+                self.conn_stage.work_loop_result(),
             );
         }
 
@@ -904,7 +922,7 @@ where
 
         self.close_connection(qconn);
 
-        if let Err(work_loop_error) = self.conn_stage.work_loop_result {
+        if let Err(work_loop_error) = self.conn_stage.into_work_loop_result() {
             self.audit_log_stats
                 .set_connection_close_reason(work_loop_error);
         }

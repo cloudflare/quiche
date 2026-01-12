@@ -32,6 +32,8 @@ use h3i_fixtures::h3i_config;
 use h3i_fixtures::received_status_code_on_stream;
 use h3i_fixtures::summarize_connection;
 
+use datagram_socket::QuicAuditStats;
+use futures::StreamExt;
 use h3i::actions::h3::send_headers_frame;
 use h3i::actions::h3::Action;
 use h3i::actions::h3::StreamEvent;
@@ -39,6 +41,17 @@ use h3i::actions::h3::StreamEventType;
 use h3i::actions::h3::WaitType;
 use h3i::quiche;
 use h3i::quiche::h3::Header;
+use quiche::h3::frame::Frame;
+use quiche::h3::frame::DATA_FRAME_TYPE_ID;
+use std::sync::Arc;
+use std::sync::RwLock;
+use tokio_quiche::listen;
+use tokio_quiche::metrics::DefaultMetrics;
+use tokio_quiche::quic::SimpleConnectionIdGenerator;
+use tokio_quiche::settings::Hooks;
+use tokio_quiche::settings::TlsCertificatePaths;
+use tokio_quiche::ConnectionParams;
+use tokio_quiche::TQError;
 
 #[tokio::test]
 async fn test_requests_per_connection_limit() -> QuicResult<()> {
@@ -94,7 +107,7 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
 }
 
 #[tokio::test]
-async fn test_max_header_list_size_limit() -> QuicResult<()> {
+async fn test_max_header_list_size_limit() {
     let hook = TestConnectionHook::new();
     let url = start_server_with_settings(
         QuicSettings::default(),
@@ -138,8 +151,6 @@ async fn test_max_header_list_size_limit() -> QuicResult<()> {
         error.error_code,
         quiche::h3::WireErrorCode::ExcessiveLoad as u64
     );
-
-    Ok(())
 }
 
 #[tokio::test]
@@ -167,4 +178,87 @@ async fn test_no_connection_close_frame_on_idle_timeout() -> QuicResult<()> {
     assert!(summary.conn_close_details.no_err());
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_tokio_quiche_error_with_additional_context() {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://127.0.0.1:{}", socket.local_addr().unwrap().port());
+    let tls_cert_settings = TlsCertificatePaths {
+        cert: TEST_CERT_FILE,
+        private_key: TEST_KEY_FILE,
+        kind: tokio_quiche::settings::CertificateKind::X509,
+    };
+    let hooks = Hooks {
+        connection_hook: Some(TestConnectionHook::new()),
+    };
+    let params = ConnectionParams::new_server(
+        QuicSettings::default(),
+        tls_cert_settings,
+        hooks,
+    );
+    // Start the server.
+    let mut stream = listen(
+        vec![socket],
+        params,
+        SimpleConnectionIdGenerator,
+        DefaultMetrics,
+    )
+    .unwrap()
+    .remove(0);
+
+    let audit_log: Arc<RwLock<Option<Arc<QuicAuditStats>>>> =
+        Arc::new(RwLock::new(None));
+    let audit_logs_clone = Arc::clone(&audit_log);
+
+    // Extract Audit logs from the H3 server.
+    let _ = tokio::spawn(async move {
+        let (h3_driver, h3_controller) = ServerH3Driver::new(Http3Settings {
+            ..Default::default()
+        });
+        let conn = stream.next().await.unwrap().unwrap();
+
+        let quic_connection = conn.start(h3_driver);
+        let h3_over_quic =
+            ServerH3Connection::new(quic_connection, h3_controller);
+
+        let audit_stats = Arc::clone(h3_over_quic.audit_log_stats());
+        *audit_logs_clone.write().unwrap() = Some(audit_stats);
+        let _ = tokio::spawn(async move {
+            handle_connection(h3_over_quic).await;
+        })
+        .await;
+    });
+
+    let actions = vec![
+        Action::SendDatagram { payload: vec![] },
+        Action::SendFrame {
+            stream_id: 0,
+            fin_stream: true,
+            frame: Frame::from_bytes(DATA_FRAME_TYPE_ID, 0, &[0]).unwrap(),
+        },
+    ];
+    let url = format!("{url}/1");
+    let _summary = summarize_connection(h3i_config(&url), actions).await;
+
+    // Close error is also exposed from the Audit Log.
+    let audit_log = audit_log.read().unwrap();
+    let connection_close_reason =
+        audit_log.as_ref().unwrap().connection_close_reason();
+
+    let tq_error = (*connection_close_reason).as_ref().unwrap();
+    let tq_error = tq_error.downcast_ref::<TQError>().unwrap();
+    // tokio-quiche specific context
+    assert_eq!(
+        tq_error.reason(),
+        "Error processing packets. Opt: `AOQ::process_reads`"
+    );
+    assert_eq!(tq_error.handshake_complete(), true);
+    assert_eq!(tq_error.did_idle_timeout(), false);
+    assert!(tq_error.peer_err().is_none());
+    // quiche local_err
+    assert_eq!(
+        tq_error.local_err().clone().unwrap().reason,
+        format!("Unexpected frame type {}", DATA_FRAME_TYPE_ID).as_bytes()
+    );
 }
