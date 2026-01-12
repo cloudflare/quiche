@@ -61,3 +61,7 @@ impl<T, E> QuicResultExt<T, E> for Result<T, E> {
         self.map_err(io::Error::other)
     }
 }
+
+pub fn to_box_error<T: ToString>(msg: T) -> BoxError {
+    msg.to_string().into()
+}
