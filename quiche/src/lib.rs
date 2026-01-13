@@ -3343,10 +3343,35 @@ impl<F: BufFactory> Connection<F> {
 
                         stream.send.ack_and_drop(offset, length);
 
+                        let priority_key = Arc::clone(&stream.priority_key);
+
                         // Only collect the stream if it is complete and not
-                        // readable. If it is readable, it will get collected when
-                        // stream_recv() is used.
-                        if stream.is_complete() && !stream.is_readable() {
+                        // readable or writable.
+                        //
+                        // If it is readable, it will get collected when
+                        // stream_recv() is next used.
+                        //
+                        // If it is writable, it might mean that the stream
+                        // has been stopped by the peer (i.e. a STOP_SENDING
+                        // frame is received), in which case before collecting
+                        // the stream we will need to propagate the
+                        // `StreamStopped` error to the application. It will
+                        // instead get collected when one of stream_capacity(),
+                        // stream_writable(), stream_send(), ... is next called.
+                        //
+                        // Note that we can't use `is_writable()` here because
+                        // it returns false if the stream is stopped. Instead,
+                        // since the stream is marked as writable when a
+                        // STOP_SENDING frame is received, we check the writable
+                        // queue directly instead.
+                        let is_writable = priority_key.writable.is_linked() &&
+                            // Ensure that the stream is actually stopped.
+                            stream.send.is_stopped();
+
+                        let is_complete = stream.is_complete();
+                        let is_readable = stream.is_readable();
+
+                        if is_complete && !is_readable && !is_writable {
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
                         }
@@ -3367,10 +3392,35 @@ impl<F: BufFactory> Connection<F> {
                             None => continue,
                         };
 
+                        let priority_key = Arc::clone(&stream.priority_key);
+
                         // Only collect the stream if it is complete and not
-                        // readable. If it is readable, it will get collected when
-                        // stream_recv() is used.
-                        if stream.is_complete() && !stream.is_readable() {
+                        // readable or writable.
+                        //
+                        // If it is readable, it will get collected when
+                        // stream_recv() is next used.
+                        //
+                        // If it is writable, it might mean that the stream
+                        // has been stopped by the peer (i.e. a STOP_SENDING
+                        // frame is received), in which case before collecting
+                        // the stream we will need to propagate the
+                        // `StreamStopped` error to the application. It will
+                        // instead get collected when one of stream_capacity(),
+                        // stream_writable(), stream_send(), ... is next called.
+                        //
+                        // Note that we can't use `is_writable()` here because
+                        // it returns false if the stream is stopped. Instead,
+                        // since the stream is marked as writable when a
+                        // STOP_SENDING frame is received, we check the writable
+                        // queue directly instead.
+                        let is_writable = priority_key.writable.is_linked() &&
+                            // Ensure that the stream is actually stopped.
+                            stream.send.is_stopped();
+
+                        let is_complete = stream.is_complete();
+                        let is_readable = stream.is_readable();
+
+                        if is_complete && !is_readable && !is_writable {
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
                         }
@@ -3810,12 +3860,14 @@ impl<F: BufFactory> Connection<F> {
                         fin,
                     } => {
                         let stream = match self.streams.get_mut(stream_id) {
-                            Some(v) => v,
+                            // Only retransmit data if the stream is not closed
+                            // or stopped.
+                            Some(v) if !v.send.is_stopped() => v,
 
-                            None => {
-                                // Update tx_buffered and qlog. Data on a closed
-                                // stream will not be retransmitted or ACKed after
-                                // it is declared lost.
+                            // Data on a closed stream will not be retransmitted
+                            // or acked after it is declared lost, so update
+                            // tx_buffered and qlog.
+                            _ => {
                                 self.tx_buffered =
                                     self.tx_buffered.saturating_sub(length);
 
@@ -5355,7 +5407,26 @@ impl<F: BufFactory> Connection<F> {
 
         let was_flushable = stream.is_flushable();
 
+        let is_complete = stream.is_complete();
+        let is_readable = stream.is_readable();
+
         let priority_key = Arc::clone(&stream.priority_key);
+
+        // Return early if the stream has been stopped, and collect its state
+        // if complete.
+        if let Err(Error::StreamStopped(e)) = stream.send.cap() {
+            // Only collect the stream if it is complete and not readable.
+            // If it is readable, it will get collected when stream_recv()
+            // is used.
+            //
+            // The stream can't be writable if it has been stopped.
+            if is_complete && !is_readable {
+                let local = stream.local;
+                self.streams.collect(stream_id, local);
+            }
+
+            return Err(Error::StreamStopped(e));
+        };
 
         // Truncate the input buffer based on the connection's send capacity if
         // necessary.
@@ -5638,9 +5709,27 @@ impl<F: BufFactory> Connection<F> {
     /// [`InvalidStreamState`]: enum.Error.html#variant.InvalidStreamState
     /// [`StreamStopped`]: enum.Error.html#variant.StreamStopped
     #[inline]
-    pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
+    pub fn stream_capacity(&mut self, stream_id: u64) -> Result<usize> {
         if let Some(stream) = self.streams.get(stream_id) {
-            let cap = cmp::min(self.tx_cap, stream.send.cap()?);
+            let stream_cap = match stream.send.cap() {
+                Ok(v) => v,
+
+                Err(Error::StreamStopped(e)) => {
+                    // Only collect the stream if it is complete and not
+                    // readable. If it is readable, it will get collected when
+                    // stream_recv() is used.
+                    if stream.is_complete() && !stream.is_readable() {
+                        let local = stream.local;
+                        self.streams.collect(stream_id, local);
+                    }
+
+                    return Err(Error::StreamStopped(e));
+                },
+
+                Err(e) => return Err(e),
+            };
+
+            let cap = cmp::min(self.tx_cap, stream_cap);
             return Ok(cap);
         };
 

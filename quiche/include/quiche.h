@@ -420,7 +420,7 @@ int quiche_conn_stream_shutdown(quiche_conn *conn, uint64_t stream_id,
                                 enum quiche_shutdown direction, uint64_t err);
 
 // Returns the stream's send capacity in bytes.
-ssize_t quiche_conn_stream_capacity(const quiche_conn *conn, uint64_t stream_id);
+ssize_t quiche_conn_stream_capacity(quiche_conn *conn, uint64_t stream_id);
 
 // Returns true if the stream has data that can be read.
 bool quiche_conn_stream_readable(const quiche_conn *conn, uint64_t stream_id);

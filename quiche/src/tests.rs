@@ -2708,7 +2708,8 @@ fn stop_sending(
         Err(Error::StreamStopped(42)),
     );
 
-    assert_eq!(pipe.server.streams.len(), 1);
+    // Returning `StreamStopped` causes the stream to be collected.
+    assert_eq!(pipe.server.streams.len(), 0);
 
     // Client acks RESET_STREAM frame.
     let mut ranges = ranges::RangeSet::default();
@@ -2721,9 +2722,6 @@ fn stop_sending(
     }];
 
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
-
-    // Stream is collected on the server after RESET_STREAM is acked.
-    assert_eq!(pipe.server.streams.len(), 0);
 
     // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
     let frames = [frame::Frame::StopSending {
@@ -2893,6 +2891,249 @@ fn stop_sending_unsent_tx_cap(
         Err(Error::Done)
     );
     assert_eq!(pipe.advance(), Ok(()));
+}
+
+#[rstest]
+/// Tests that the `StreamStopped` error is propagated even if the RESET_STREAM
+/// in response to STOP_SENDING is acked before the application processes
+/// writable streams.
+fn stop_sending_ack_race(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut b = [0; 15];
+
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends some data, and closes stream.
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server gets data.
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
+    assert!(pipe.server.stream_finished(0));
+
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), None);
+
+    // Server sends data, until blocked.
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    while pipe.server.stream_send(0, b"world", false) != Err(Error::Done) {
+        assert_eq!(pipe.advance(), Ok(()));
+    }
+
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), None);
+
+    // Client sends STOP_SENDING.
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let pkt_type = Type::Short;
+    let len = pipe
+        .send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    // Server sent a RESET_STREAM frame in response.
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    let mut iter = frames.iter();
+
+    // Skip ACK frame.
+    iter.next();
+
+    assert_eq!(
+        iter.next(),
+        Some(&frame::Frame::ResetStream {
+            stream_id: 0,
+            error_code: 42,
+            final_size: 15,
+        })
+    );
+
+    // Client acks RESET_STREAM frame *before* server calls `writable()`.
+    let mut ranges = ranges::RangeSet::default();
+    ranges.insert(pipe.server.next_pkt_num - 5..pipe.server.next_pkt_num);
+
+    let frames = [frame::Frame::ACK {
+        ack_delay: 15,
+        ranges,
+        ecn_counts: None,
+    }];
+
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
+
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Stream is writable, but writing returns an error.
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(
+        pipe.server.stream_send(0, b"world", true),
+        Err(Error::StreamStopped(42)),
+    );
+
+    // Stream is collected on the server after `StreamStopped` is returned.
+    assert_eq!(pipe.server.streams.len(), 0);
+
+    // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let len = pipe
+        .send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    assert_eq!(frames.len(), 1);
+
+    match frames.first() {
+        Some(frame::Frame::ACK { .. }) => (),
+
+        f => panic!("expected ACK frame, got {f:?}"),
+    };
+
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), None);
+}
+
+#[rstest]
+/// Tests that the `StreamStopped` error is propagated even if a STREAM frame
+/// is acked before the application processes writable streams.
+fn stop_sending_stream_ack_race(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut b = [0; 15];
+
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends some data, and closes stream.
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server gets data.
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
+    assert!(pipe.server.stream_finished(0));
+
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), None);
+
+    // Server sends data and finishes the stream.
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(pipe.server.stream_send(0, b"world", true), Ok(5));
+
+    // Client receives STREAM frame but doesn't ack yet.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // Client sends STOP_SENDING.
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let pkt_type = Type::Short;
+    let len = pipe
+        .send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    // Server sent a RESET_STREAM frame in response.
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    let mut iter = frames.iter();
+
+    // Skip ACK frame.
+    iter.next();
+
+    assert_eq!(
+        iter.next(),
+        Some(&frame::Frame::ResetStream {
+            stream_id: 0,
+            error_code: 42,
+            final_size: 5,
+        })
+    );
+
+    // Client acks RESET_STREAM and STREAM frames *before* server calls
+    // `writable()`.
+    let mut ranges = ranges::RangeSet::default();
+    ranges.insert(pipe.server.next_pkt_num - 5..pipe.server.next_pkt_num);
+
+    let frames = [frame::Frame::ACK {
+        ack_delay: 15,
+        ranges,
+        ecn_counts: None,
+    }];
+
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
+
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Stream is writable, but writing returns an error.
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(
+        pipe.server.stream_send(0, b"world", true),
+        Err(Error::StreamStopped(42)),
+    );
+
+    // Stream is collected on the server after `StreamStopped` is returned.
+    assert_eq!(pipe.server.streams.len(), 0);
+
+    // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let len = pipe
+        .send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    assert_eq!(frames.len(), 1);
+
+    match frames.first() {
+        Some(frame::Frame::ACK { .. }) => (),
+
+        f => panic!("expected ACK frame, got {f:?}"),
+    };
+
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), None);
 }
 
 #[rstest]
@@ -3127,16 +3368,17 @@ fn stream_shutdown_read_update_max_data(
     assert_eq!(pipe.server.rx_data, 21);
     assert!(!pipe.server.stream_readable(0)); // nothing can be consumed
 
-    // Server sends fin to fully close the stream
+    // Server sends fin to fully close the stream.
     assert_eq!(pipe.server.stream_send(0, &[], true), Ok(0));
     assert_eq!(pipe.advance(), Ok(()));
     assert_eq!(pipe.client.stream_recv(0, &mut buf), Ok((0, true)));
+
     assert!(pipe.server.streams.is_collected(0));
     assert!(pipe.client.streams.is_collected(0));
 }
 
-// Sending a reset should drop the receive buffer on the peer and
-// return flow control credit
+/// Tests that sending a reset should drop the receive buffer on the peer and
+/// return flow control credit.
 #[rstest]
 fn stream_shutdown_write_update_max_data(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -3957,7 +4199,8 @@ fn stop_sending_before_flushed_packets(
         Err(Error::StreamStopped(42)),
     );
 
-    assert_eq!(pipe.server.streams.len(), 1);
+    // Returning `StreamStopped` causes the stream to be collected.
+    assert_eq!(pipe.server.streams.len(), 0);
 
     // Client acks RESET_STREAM frame.
     let mut ranges = ranges::RangeSet::default();
@@ -3970,9 +4213,6 @@ fn stop_sending_before_flushed_packets(
     }];
 
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
-
-    // Client has ACK'd the RESET_STREAM so the stream is collected.
-    assert_eq!(pipe.server.streams.len(), 0);
 }
 
 #[rstest]
@@ -5261,8 +5501,10 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
 
     // Lose the first packet of the server flight.
     server_flight.remove(0);
+
     test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
     test_utils::process_flight(&mut pipe.client, server_flight).unwrap();
+
     assert_eq!(pipe.advance(), Ok(()));
 
     // tx_buffered goes down to 0 after the reset and acks are
@@ -5278,6 +5520,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
     };
 
     assert_eq!(pipe.server.tx_buffered, 0);
+
     let send_result = pipe.server.stream_send(8, &send_buf, false).unwrap();
     if cc_algorithm_name != "cubic" {
         assert_eq!(send_result, expected_cwnd);
@@ -9994,8 +10237,9 @@ fn stop_sending_stream_send_after_reset_stream_ack(
         Err(Error::StreamStopped(42))
     );
 
-    assert_eq!(pipe.server.writable().len(), 10);
-    assert_eq!(pipe.server.streams.len(), 10);
+    // Returning `StreamStopped` causes the stream to be collected.
+    assert_eq!(pipe.server.streams.len(), 9);
+    assert_eq!(pipe.server.writable().len(), 9);
 
     // Client acks RESET_STREAM frame.
     let mut ranges = ranges::RangeSet::default();
