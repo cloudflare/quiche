@@ -10856,3 +10856,138 @@ fn configuration_values_are_limited_to_max_varint() {
     // do not panic because of too large values that we try to encode via varint.
     assert_eq!(pipe.handshake(), Err(Error::InvalidTransportParam));
 }
+
+#[rstest]
+fn send_av_token() {
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+
+    let avt_data = Vec::from([0xa; 20]);
+
+    pipe.server.send_new_token(avt_data.clone());
+
+    // Client sends initial flight.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // Server sends initial flight.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // Even though AVT was enqueued, it must not be sent in this flight
+    let received_token = pipe.client.take_token_for_path(test_utils::Pipe::client_addr(), test_utils::Pipe::server_addr()).unwrap();
+
+    assert!(received_token.is_none());
+
+    // Client sends Handshake packet and completes handshake.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // Server completes and confirms handshake, and sends HANDSHAKE_DONE & NEW_TOKEN
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // AVT should now be sent
+    let received_token = pipe.client.take_token_for_path(test_utils::Pipe::client_addr(), test_utils::Pipe::server_addr()).unwrap().unwrap();
+
+    assert_eq!(&avt_data[..], &received_token[..]);
+}
+
+#[rstest]
+fn send_multiple_av_tokens() {
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+
+    // Big AVT, where only 1 fits per packet
+    let avt_data = Vec::from([0xc; 1100]);
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    pipe.server.send_new_token(avt_data.clone());
+    pipe.server.send_new_token(avt_data.clone());
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    assert!(flight.len() > 1);
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    let received_token = pipe.client.take_token_for_path(test_utils::Pipe::client_addr(), test_utils::Pipe::server_addr()).unwrap().unwrap();
+    assert_eq!(&avt_data[..], &received_token[..]);
+
+    let received_token = pipe.client.take_token_for_path(test_utils::Pipe::client_addr(), test_utils::Pipe::server_addr()).unwrap().unwrap();
+    assert_eq!(&avt_data[..], &received_token[..]);
+
+    let received_token = pipe.client.take_token_for_path(test_utils::Pipe::client_addr(), test_utils::Pipe::server_addr()).unwrap();
+    assert!(received_token.is_none());
+}
+
+#[rstest]
+fn prevalidate_address() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name("cubic"), Ok(()));
+    config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+    config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+    config.set_application_protos(&[b"proto1", b"proto2"]).unwrap();
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(15);
+    config.set_initial_max_stream_data_bidi_remote(15);
+    config.set_initial_max_stream_data_uni(10);
+    config.set_initial_max_streams_bidi(3);
+    config.set_initial_max_streams_uni(3);
+    config.set_max_idle_timeout(180_000);
+    config.set_ack_delay_exponent(8);
+
+    config.set_handshake_path_verified();
+
+    let pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+    assert!(pipe.server.paths.get_active().unwrap().verified_peer_address);
+
+    // On reuse of config object: Reset handshake path verified status
+    let pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+    assert!(!pipe.server.paths.get_active().unwrap().verified_peer_address);
+}
+
+#[rstest]
+fn client_send_av_token() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name("cubic"), Ok(()));
+    config.load_cert_chain_from_pem_file("examples/cert.crt").unwrap();
+    config.load_priv_key_from_pem_file("examples/cert.key").unwrap();
+    config.set_application_protos(&[b"proto1", b"proto2"]).unwrap();
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(15);
+    config.set_initial_max_stream_data_bidi_remote(15);
+    config.set_initial_max_stream_data_uni(10);
+    config.set_initial_max_streams_bidi(3);
+    config.set_initial_max_streams_uni(3);
+    config.set_max_idle_timeout(180_000);
+    config.set_ack_delay_exponent(8);
+
+    let avt = Vec::from([0xa; 20]);
+
+    config.set_address_verification_token(&avt);
+
+    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+
+    let token = pipe.client.token.clone().unwrap();
+
+    assert_eq!(&token[..], &avt[..]);
+
+
+    let mut buf = [0; 65535];
+
+    // Client sends Initial.
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+
+    // Server receives client's Initial and sends own Initial and Handshake
+    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    let _flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    let mut b = octets::OctetsMut::with_slice(&mut buf);
+    let hdr = Header::from_bytes(&mut b, pipe.client.source_id().len()).unwrap();
+
+    assert_eq!(hdr.ty, Type::Initial);
+    assert!(hdr.token.is_some());
+    assert_eq!(&hdr.token.unwrap()[..], &avt[..]);
+
+    assert!(!pipe.server.paths.get_active().unwrap().verified_peer_address);
+}
