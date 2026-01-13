@@ -454,7 +454,7 @@ Provides the script to test quiche within the [quic-interop-runner](https://gith
 Disclaimers and Notes
 ---------
 
-⚠️ This repository includes a number of example client and server example
+⚠️ This repository includes a number of client and server example
 applications that are provided to demonstrate simple usage of the quiche library
 API. They are not intended to be used in production environments; no
 performance, security or reliability guarantees are provided.
