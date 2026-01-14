@@ -613,10 +613,13 @@ impl ProbeBW {
             self.cycle.probe_up_acked += congestion_event.bytes_acked;
         }
 
-        if let Some(probe_up_bytes) = self.cycle.probe_up_bytes.as_mut() {
-            if self.cycle.probe_up_acked >= *probe_up_bytes {
-                let delta = self.cycle.probe_up_acked / *probe_up_bytes;
-                self.cycle.probe_up_acked -= delta * *probe_up_bytes;
+        if let Some(probe_up_bytes) = self.cycle.probe_up_bytes {
+            if self.cycle.probe_up_acked >= probe_up_bytes {
+                let delta = self.cycle.probe_up_acked / probe_up_bytes;
+                // probe_up_acked is set to the remainder mod probe_up_bytes;
+                // probe_up_acked >= delta * probe_up_bytes so this
+                // can't underflow.
+                self.cycle.probe_up_acked -= delta * probe_up_bytes;
                 let new_inflight_hi =
                     self.model.inflight_hi() + delta * DEFAULT_MSS;
                 if new_inflight_hi > self.model.inflight_hi() {
