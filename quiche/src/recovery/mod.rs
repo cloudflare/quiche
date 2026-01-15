@@ -183,7 +183,7 @@ pub struct OnLossDetectionTimeoutOutcome {
 pub trait RecoveryOps {
     fn lost_count(&self) -> usize;
     fn bytes_lost(&self) -> u64;
-
+    
     /// Returns whether or not we should elicit an ACK even if we wouldn't
     /// otherwise have constructed an ACK eliciting packet.
     fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool;
@@ -316,6 +316,8 @@ pub trait RecoveryOps {
     fn get_next_release_time(&self) -> ReleaseDecision;
 
     fn gcongestion_enabled(&self) -> bool;
+
+    fn sent_packets_empty(&self) -> bool;
 }
 
 impl Recovery {
