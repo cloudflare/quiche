@@ -78,7 +78,6 @@ pub(super) trait CongestionControl: Debug {
     fn on_packet_sent(
         &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
-        rtt_stats: &RttStats,
     );
 
     /// Inform that `packet_number` has been neutered.

@@ -36,7 +36,6 @@ use crate::recovery::gcongestion::bbr::BandwidthSampler;
 use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::gcongestion::Lost;
-use crate::recovery::rtt::RttStats;
 
 use super::Acked;
 use super::BBRv2CongestionEvent;
@@ -272,7 +271,6 @@ impl BBRv2NetworkModel {
     pub(super) fn on_packet_sent(
         &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
-        _rtt_stats: &RttStats,
     ) {
         // Updating the min here ensures a more realistic (0) value when flows
         // exit quiescence.

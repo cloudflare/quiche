@@ -34,7 +34,10 @@ publish = false
 [workspace.dependencies]
 anyhow = { version = "1" }
 assert_matches = { version = "1" }
-boring = { version = "4.3" }
+# pin boring things as temporary workaround for quiche_windows
+# (i686-pc-windows-gnu) failures observed in boring-sys 4.20
+boring = { version = "=4.19" }
+boring-sys = { version = "=4.19" }
 buffer-pool = { version = "0.1.0", path = "./buffer-pool" }
 crossbeam = { version = "0.8.1", default-features = false }
 dashmap = { version = "6" }
@@ -54,7 +57,7 @@ octets = { version = "0.3.4", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
 qlog = { version = "0.15.2", path = "./qlog" }
-quiche = { version = "0.24.6", path = "./quiche" }
+quiche = { version = "0.24.7", path = "./quiche" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
 rstest = { version = "0.26.1" }
@@ -67,7 +70,7 @@ smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.2.0", path = "./task-killswitch" }
 thiserror = { version = "2" }
 tokio = { version = "1.44", default-features = false }
-tokio-quiche = { version = "0.12.0", path = "./tokio-quiche" }
+tokio-quiche = { version = "0.13.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 triomphe = { version = "0.1" }

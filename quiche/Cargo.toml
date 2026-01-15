@@ -1,6 +1,6 @@
 [package]
 name = "quiche"
-version = "0.24.6"
+version = "0.24.7"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 repository = { workspace = true }
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
@@ -70,7 +70,6 @@ cdylib-link-lines = { version = "0.1", optional = true }
 
 [dependencies]
 boring = { workspace = true, optional = true }
-debug_panic = { version = "0.2.1" }
 either = { version = "1.8", default-features = false }
 foreign-types-shared = { version = "0.3.0", optional = true }
 intrusive-collections = "0.9.5"
@@ -89,6 +88,9 @@ windows-sys = { version = "0.59", features = [
   "Win32_Networking_WinSock",
   "Win32_Security_Cryptography",
 ] }
+# temporary workaround for quiche_windows
+# (i686-pc-windows-gnu) failures observed in boring-sys 4.20
+boring-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
 mio = { workspace = true, features = ["net", "os-poll"] }

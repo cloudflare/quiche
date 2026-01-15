@@ -332,8 +332,8 @@ impl<'a> Octets<'a> {
             return Err(BufferTooShortError);
         }
 
-        let cap = self.cap();
-        Ok(&self.buf[cap - len..])
+        let end = self.buf.len();
+        Ok(&self.buf[end - len..end])
     }
 
     /// Advances the buffer's offset.
@@ -747,8 +747,8 @@ impl<'a> OctetsMut<'a> {
             return Err(BufferTooShortError);
         }
 
-        let cap = self.cap();
-        Ok(&mut self.buf[cap - len..])
+        let end = self.buf.len();
+        Ok(&mut self.buf[end - len..end])
     }
 
     /// Advances the buffer's offset.
@@ -1489,6 +1489,13 @@ mod tests {
         }
 
         {
+            let mut b = Octets::with_slice(&d);
+            b.get_bytes(5).unwrap();
+            let exp = b"orld".to_vec();
+            assert_eq!(b.slice_last(4), Ok(&exp[..]));
+        }
+
+        {
             let b = Octets::with_slice(&d);
             let exp = b"d".to_vec();
             assert_eq!(b.slice_last(1), Ok(&exp[..]));
@@ -1518,6 +1525,13 @@ mod tests {
 
         {
             let mut b = OctetsMut::with_slice(&mut d);
+            let mut exp = b"orld".to_vec();
+            assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = OctetsMut::with_slice(&mut d);
+            b.get_bytes(5).unwrap();
             let mut exp = b"orld".to_vec();
             assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
         }

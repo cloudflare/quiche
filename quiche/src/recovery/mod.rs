@@ -265,7 +265,6 @@ pub trait RecoveryOps {
     #[cfg(test)]
     fn sent_packets_len(&self, epoch: packet::Epoch) -> usize;
 
-    #[cfg(test)]
     fn bytes_in_flight(&self) -> usize;
 
     fn bytes_in_flight_duration(&self) -> Duration;
@@ -368,10 +367,6 @@ pub enum CongestionControlAlgorithm {
     Reno            = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
     CUBIC           = 1,
-    /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR             = 2,
-    /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2            = 3,
     /// BBRv2 congestion control algorithm implementation from gcongestion
     /// branch. `bbr2_gcongestion` in a string form.
     Bbr2Gcongestion = 4,
@@ -387,10 +382,7 @@ impl FromStr for CongestionControlAlgorithm {
         match name {
             "reno" => Ok(CongestionControlAlgorithm::Reno),
             "cubic" => Ok(CongestionControlAlgorithm::CUBIC),
-            "bbr" => Ok(CongestionControlAlgorithm::BBR),
-            #[cfg(not(feature = "gcongestion"))]
-            "bbr2" => Ok(CongestionControlAlgorithm::BBR2),
-            #[cfg(feature = "gcongestion")]
+            "bbr" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             "bbr2" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             _ => Err(crate::Error::CongestionControl),
@@ -714,7 +706,6 @@ pub enum StartupExitReason {
 mod tests {
     use super::*;
     use crate::packet;
-    use crate::recovery::congestion::PACING_MULTIPLIER;
     use crate::test_utils;
     use crate::CongestionControlAlgorithm;
     use crate::DEFAULT_INITIAL_RTT;
@@ -739,20 +730,12 @@ mod tests {
         assert!(!recovery_for_alg(algo).gcongestion_enabled());
 
         let algo = CongestionControlAlgorithm::from_str("bbr").unwrap();
-        assert_eq!(algo, CongestionControlAlgorithm::BBR);
-        assert!(!recovery_for_alg(algo).gcongestion_enabled());
+        assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
+        assert!(recovery_for_alg(algo).gcongestion_enabled());
 
         let algo = CongestionControlAlgorithm::from_str("bbr2").unwrap();
-        #[cfg(not(feature = "gcongestion"))]
-        {
-            assert_eq!(algo, CongestionControlAlgorithm::BBR2);
-            assert!(!recovery_for_alg(algo).gcongestion_enabled());
-        }
-        #[cfg(feature = "gcongestion")]
-        {
-            assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
-            assert!(recovery_for_alg(algo).gcongestion_enabled());
-        }
+        assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
+        assert!(recovery_for_alg(algo).gcongestion_enabled());
 
         let algo =
             CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
@@ -770,7 +753,7 @@ mod tests {
 
     #[rstest]
     fn loss_on_pto(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -1057,7 +1040,7 @@ mod tests {
 
     #[rstest]
     fn loss_on_timer(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -1254,7 +1237,7 @@ mod tests {
 
     #[rstest]
     fn loss_on_reordering(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -1741,7 +1724,7 @@ mod tests {
 
     #[rstest]
     fn pacing(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -1788,7 +1771,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
         // Next packet will be sent out immediately.
-        if cc_algorithm_name != "bbr2_gcongestion" {
+        if cc_algorithm_name == "cubic" || cc_algorithm_name == "reno" {
             assert_eq!(r.pacing_rate(), 0);
         } else {
             assert_eq!(r.pacing_rate(), 103963);
@@ -1863,8 +1846,8 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 6000);
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
 
-        if cc_algorithm_name != "bbr2_gcongestion" {
-            // Pacing is not done during initial phase of connection.
+        if cc_algorithm_name == "cubic" || cc_algorithm_name == "reno" {
+            // Pacing is disabled.
             assert_eq!(r.get_packet_send_time(now), now);
         } else {
             // Pacing is done from the beginning.
@@ -1938,18 +1921,7 @@ mod tests {
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
         let pacing_rate = match cc_algorithm_name {
-            "bbr" => {
-                // Constants from congestion/bbr/mod.rs
-                let cwnd_gain = 2.0;
-                let startup_pacing_gain = 2.89;
-                // Adjust for cwnd_gain.  BW estimate was made before the CWND
-                // increase.
-                let bw = r.cwnd() as f64 /
-                    cwnd_gain /
-                    Duration::from_millis(50).as_secs_f64();
-                (bw * startup_pacing_gain) as u64
-            },
-            "bbr2_gcongestion" => {
+            "bbr2_gcongestion" | "bbr2" => {
                 let cwnd_gain: f64 = 2.0;
                 // Adjust for cwnd_gain.  BW estimate was made before the CWND
                 // increase.
@@ -1958,27 +1930,13 @@ mod tests {
                     Duration::from_millis(50).as_secs_f64();
                 bw as u64
             },
-            "bbr2" => {
-                // Constants from congestion/bbr2/mod.rs
-                let cwnd_gain = 2.0;
-                let startup_pacing_gain = 2.77;
-                let pacing_margin_percent = 0.01;
-                // Adjust for cwnd_gain.  BW estimate was made before the CWND
-                // increase.
-                let bw = r.cwnd() as f64 /
-                    cwnd_gain /
-                    Duration::from_millis(50).as_secs_f64();
-                (bw * startup_pacing_gain * (1.0 - pacing_margin_percent)) as u64
-            },
-            _ => {
-                let bw =
-                    r.cwnd() as f64 / Duration::from_millis(50).as_secs_f64();
-                (bw * PACING_MULTIPLIER) as u64
-            },
+            _ => 0,
         };
         assert_eq!(r.pacing_rate(), pacing_rate);
 
-        let scale_factor = if cc_algorithm_name == "bbr2_gcongestion" {
+        let scale_factor = if cc_algorithm_name == "bbr2_gcongestion" ||
+            cc_algorithm_name == "bbr2"
+        {
             // For bbr2_gcongestion, send time is almost 13000 / pacing_rate.
             // Don't know where 13000 comes from.
             1.08333332
@@ -1987,7 +1945,15 @@ mod tests {
         };
         assert_eq!(
             r.get_packet_send_time(now) - now,
-            Duration::from_secs_f64(scale_factor * 12000.0 / pacing_rate as f64)
+            if cc_algorithm_name == "bbr2_gcongestion" ||
+                cc_algorithm_name == "bbr2"
+            {
+                Duration::from_secs_f64(
+                    scale_factor * 12000.0 / pacing_rate as f64,
+                )
+            } else {
+                Duration::ZERO
+            }
         );
         assert_eq!(r.startup_exit(), None);
     }
@@ -2180,7 +2146,7 @@ mod tests {
 
     #[rstest]
     fn pmtud_loss_on_timer(
-        #[values("reno", "cubic", "bbr", "bbr2", "bbr2_gcongestion")]
+        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -2327,11 +2293,7 @@ mod tests {
         assert_eq!(r.in_flight_count(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_micros(11250));
-        assert_eq!(r.cwnd(), match cc_algorithm_name {
-            "bbr" => 14000,
-            "bbr2" => 14000,
-            _ => 12000,
-        });
+        assert_eq!(r.cwnd(), 12000);
 
         assert_eq!(r.lost_count(), 0);
 
@@ -2355,7 +2317,7 @@ mod tests {
     // congestion specific algorithms.
     #[rstest]
     fn congestion_delivery_rate(
-        #[values("reno", "cubic", "bbr", "bbr2")] cc_algorithm_name: &str,
+        #[values("reno", "cubic", "bbr2")] cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -2551,10 +2513,12 @@ mod tests {
             assert_eq!(r.bytes_in_flight_duration(), rtt, "{iter}");
             assert_eq!(
                 r.pacing_rate(),
-                if cc_algorithm_name == "bbr2_gcongestion" {
+                if cc_algorithm_name == "bbr2_gcongestion" ||
+                    cc_algorithm_name == "bbr2"
+                {
                     120000
                 } else {
-                    150000
+                    0
                 },
                 "{iter}"
             );

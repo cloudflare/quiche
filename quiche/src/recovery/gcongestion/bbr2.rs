@@ -613,7 +613,6 @@ impl CongestionControl for BBRv2 {
     fn on_packet_sent(
         &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
-        rtt_stats: &RttStats,
     ) {
         if bytes_in_flight == 0 && self.params.avoid_unnecessary_probe_rtt {
             self.on_exit_quiescence(sent_time);
@@ -626,7 +625,6 @@ impl CongestionControl for BBRv2 {
             packet_number,
             bytes,
             is_retransmissible,
-            rtt_stats,
         );
     }
 
