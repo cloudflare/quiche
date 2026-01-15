@@ -360,7 +360,7 @@ where
                     mut qconn,
                 }) => {
                     let hs_result = make_handshake_result(&work_loop_result);
-                    IoWorker::new(params, Close { work_loop_result })
+                    IoWorker::new(params, Close::new(work_loop_result))
                         .close(&mut qconn, &mut context)
                         .await;
                     hs_result
@@ -419,7 +419,7 @@ where
                 mut qconn,
             } = running_worker.run(qconn, context).await;
 
-            IoWorker::new(params, Close { work_loop_result })
+            IoWorker::new(params, Close::new(work_loop_result))
                 .close(&mut qconn, &mut context)
                 .await;
         };

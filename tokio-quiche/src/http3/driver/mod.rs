@@ -1176,7 +1176,14 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
                     // Don't bubble error up, instead keep the worker loop going
                     // until quiche reports the connection is
                     // closed.
-                    log::debug!("connection closed due to h3 protocol error"; "error"=>?err);
+                    log::debug!(
+                        "connection closed due to h3 protocol error";
+                        "error"=>?err,
+                        "local_err"=>?qconn.local_error(),
+                        "peer_err"=>?qconn.peer_error(),
+                        "handshake_complete"=>qconn.is_established(),
+                        "idle_timeout"=>qconn.is_timed_out(),
+                    );
                     return Ok(());
                 },
             };
