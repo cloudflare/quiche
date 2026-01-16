@@ -49,6 +49,11 @@ pub mod buffer_pool {
     pub fn pool_idle_bytes(name: &'static str) -> Gauge;
     /// Number of objects currently active and in-use.
     pub fn pool_active_count(name: &'static str) -> Gauge;
+    /// Total number of bytes allocated across all `ConsumeBuffer` objects.
+    ///
+    /// We're not able to track this with better granularity because
+    /// the ConsumeBuffers may be resized, and they don't know their pools.
+    pub fn consume_buffer_total_bytes() -> Gauge;
 }
 
 /// A sharded pool of elements.
