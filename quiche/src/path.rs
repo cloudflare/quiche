@@ -569,6 +569,37 @@ impl Path {
     }
 }
 
+/// Opaque identifier for a Path on a QUIC connection.
+#[derive(Clone, Copy, Debug)]
+pub struct PathId {
+    pub(crate) path_id: usize,
+}
+
+/// An iterator over PathId.
+#[derive(Default)]
+pub struct PathIdIter {
+    pub(crate) paths: SmallVec<[PathId; 8]>,
+    pub(crate) index: usize,
+}
+
+impl Iterator for PathIdIter {
+    type Item = PathId;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let v = self.paths.get(self.index)?;
+        self.index += 1;
+        Some(*v)
+    }
+}
+
+impl ExactSizeIterator for PathIdIter {
+    #[inline]
+    fn len(&self) -> usize {
+        self.paths.len() - self.index
+    }
+}
+
 /// An iterator over SocketAddr.
 #[derive(Default)]
 pub struct SocketAddrIter {

@@ -3834,6 +3834,91 @@ impl<F: BufFactory> Connection<F> {
         &mut self, out: &mut [u8], from: Option<SocketAddr>,
         to: Option<SocketAddr>,
     ) -> Result<(usize, SendInfo)> {
+        let path_id = match (from, to) {
+            (Some(f), Some(t)) => self
+                .paths
+                .path_id_from_addrs(&(f, t))
+                .ok_or(Error::InvalidState)?,
+
+            _ => self.get_send_path_id(from, to)?,
+        };
+
+        let now = Instant::now();
+
+        self.send_with_path_id(out, PathId { path_id }, now)
+    }
+
+    /// Writes a single QUIC packet to be sent to the peer from the
+    /// specified path_id.  Call `paths_id_iter()` to get a list of
+    /// path_ids to call `send_with_path_id()` on.
+    ///
+    /// On success the number of bytes written to the output buffer is
+    /// returned, or [`Done`] if there was nothing to write.
+    ///
+    /// The application should call `send_with_path_id()` multiple times until
+    /// [`Done`] is returned, indicating that there are no more packets to
+    /// send. It is recommended that `send_with_path_id()` be called in the
+    /// following cases:
+    ///
+    ///  * When the application receives QUIC packets from the peer (that is,
+    ///    any time [`recv()`] is also called).
+    ///
+    ///  * When the connection timer expires (that is, any time [`on_timeout()`]
+    ///    is also called).
+    ///
+    ///  * When the application sends data to the peer (for examples, any time
+    ///    [`stream_send()`] or [`stream_shutdown()`] are called).
+    ///
+    ///  * When the application receives data from the peer (for example any
+    ///    time [`stream_recv()`] is called).
+    ///
+    /// Once [`is_draining()`] returns `true`, it is no longer necessary to call
+    /// `send_with_path_id()` and all calls will return [`Done`].
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`InvalidState`]: enum.Error.html#InvalidState
+    /// [`recv()`]: struct.Connection.html#method.recv
+    /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
+    /// [`stream_send()`]: struct.Connection.html#method.stream_send
+    /// [`stream_shutdown()`]: struct.Connection.html#method.stream_shutdown
+    /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
+    /// [`path_event_next()`]: struct.Connection.html#method.path_event_next
+    /// [`paths_iter()`]: struct.Connection.html#method.paths_iter
+    /// [`is_draining()`]: struct.Connection.html#method.is_draining
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut out = [0; 512];
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
+    /// # let peer = "127.0.0.1:1234".parse().unwrap();
+    /// # let local = socket.local_addr().unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
+    /// loop {
+    ///     for path_id in self.paths_id_iter(local) {
+    ///     let (write, send_info) = match conn.send_with_path_id(&mut out, path_id, Instant::now()) {
+    ///         Ok(v) => v,
+    ///
+    ///         Err(quiche::Error::Done) => {
+    ///             // Done writing.
+    ///             break;
+    ///         },
+    ///
+    ///         Err(e) => {
+    ///             // An error occurred, handle it.
+    ///             break;
+    ///         },
+    ///     };
+    ///
+    ///     socket.send_to(&out[..write], &send_info.to).unwrap();
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn send_with_path_id(
+        &mut self, out: &mut [u8], path_id: PathId, now: Instant,
+    ) -> Result<(usize, SendInfo)> {
         if out.is_empty() {
             return Err(Error::BufferTooShort);
         }
@@ -3841,8 +3926,6 @@ impl<F: BufFactory> Connection<F> {
         if self.is_closed() || self.is_draining() {
             return Err(Error::Done);
         }
-
-        let now = Instant::now();
 
         if self.local_error.is_none() {
             self.do_handshake(now)?;
@@ -3870,15 +3953,7 @@ impl<F: BufFactory> Connection<F> {
         // maximum UDP payload size limit.
         let mut left = cmp::min(out.len(), self.max_send_udp_payload_size());
 
-        let send_pid = match (from, to) {
-            (Some(f), Some(t)) => self
-                .paths
-                .path_id_from_addrs(&(f, t))
-                .ok_or(Error::InvalidState)?,
-
-            _ => self.get_send_path_id(from, to)?,
-        };
-
+        let send_pid = path_id.path_id;
         let send_path = self.paths.get_mut(send_pid)?;
 
         // Update max datagram size to allow path MTU discovery probe to be sent.
@@ -3937,13 +4012,6 @@ impl<F: BufFactory> Connection<F> {
                 if self.paths.get_mut(send_pid)?.recovery.loss_probes(epoch) > 0 {
                     break;
                 }
-            }
-
-            // Don't coalesce packets that must go on different paths.
-            if !(from.is_some() && to.is_some()) &&
-                self.get_send_path_id(from, to)? != send_pid
-            {
-                break;
             }
         }
 
@@ -5226,16 +5294,43 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
-    /// Returns the desired send time for the next packet.
+    /// Returns the desired send time for the next packet on the desired path.
     #[inline]
-    pub fn get_next_release_time(&self) -> Option<ReleaseDecision> {
+    pub fn get_next_release_time(
+        &self, path_id: PathId,
+    ) -> Option<ReleaseDecision> {
         Some(
             self.paths
-                .get_active()
+                .get(path_id.path_id)
                 .ok()?
                 .recovery
                 .get_next_release_time(),
         )
+    }
+
+    /// Latches the packet send time for the selected path.  The desired send
+    /// time must be >= now. Send time remains latched until cleared.
+    pub fn latch_packet_send_time(
+        &mut self, path_id: PathId, send_time: Instant,
+    ) -> Result<()> {
+        self.paths
+            .get_mut(path_id.path_id)?
+            .recovery
+            .latch_packet_send_time(send_time);
+
+        Ok(())
+    }
+
+    /// Clear the latched packet send time on the selected path.
+    pub fn clear_latched_packet_send_time(
+        &mut self, path_id: PathId,
+    ) -> Result<()> {
+        self.paths
+            .get_mut(path_id.path_id)?
+            .recovery
+            .clear_latched_packet_send_time();
+
+        Ok(())
     }
 
     /// Returns whether gcongestion is enabled.
@@ -6944,6 +7039,35 @@ impl<F: BufFactory> Connection<F> {
                 .filter(|(_, p)| p.usable() || p.probing_required())
                 .filter(|(_, p)| p.local_addr() == from)
                 .map(|(_, p)| p.peer_addr())
+                .collect(),
+
+            index: 0,
+        }
+    }
+
+    /// Returns an iterator over `PathId`s whose association with `from` forms
+    /// a known QUIC path on which packets can be sent to.
+    ///
+    /// This function is typically used in combination with [`send_with_path_id()`].
+    ///
+    /// Note that the iterator includes all the possible combination of
+    /// destination `PathId`s, even those whose sending is not required now.
+    /// In other words, this is another way for the application to recall from
+    /// past [`PathEvent::New`] events.
+    ///
+    /// [`PathEvent::New`]: enum.PathEvent.html#variant.New
+    /// [`send_with_path_id()`]: struct.Connection.html#method.send_with_path_id
+    pub fn paths_id_iter(&self, from: SocketAddr) -> PathIdIter {
+        // Instead of trying to identify whether packets will be sent on the
+        // given 4-tuple, simply filter paths that cannot be used.
+        PathIdIter {
+            paths: self
+                .paths
+                .iter()
+                .filter(|(_, p)| p.active_dcid_seq.is_some())
+                .filter(|(_, p)| p.usable() || p.probing_required())
+                .filter(|(_, p)| p.local_addr() == from)
+                .map(|(path_id, _p)| PathId { path_id })
                 .collect(),
 
             index: 0,
@@ -9417,6 +9541,8 @@ pub use crate::packet::Header;
 pub use crate::packet::Type;
 
 pub use crate::path::PathEvent;
+pub use crate::path::PathId;
+pub use crate::path::PathIdIter;
 pub use crate::path::PathStats;
 pub use crate::path::SocketAddrIter;
 

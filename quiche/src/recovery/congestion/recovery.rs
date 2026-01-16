@@ -631,6 +631,13 @@ impl RecoveryOps for LegacyRecovery {
         now
     }
 
+    fn latch_packet_send_time(&mut self, _now: Instant) {
+        // Not needed because recovery algorithms in this directory do
+        // not implement pacing.
+    }
+
+    fn clear_latched_packet_send_time(&mut self) {}
+
     // `peer_sent_ack_ranges` should not be used without validation.
     fn on_ack_received(
         &mut self, peer_sent_ack_ranges: &RangeSet, ack_delay: u64, epoch: Epoch,

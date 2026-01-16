@@ -8896,7 +8896,7 @@ fn send_on_path_test(
     // There is nothing to send on the initial path.
     assert_eq!(
         pipe.client
-            .send_on_path(&mut buf, Some(client_addr), Some(server_addr)),
+            .send_on_path(&mut buf, Some(client_addr), Some(server_addr),),
         Err(Error::Done)
     );
 
@@ -8925,7 +8925,7 @@ fn send_on_path_test(
         pipe.client.send_on_path(
             &mut buf,
             Some(client_addr_3),
-            Some(server_addr)
+            Some(server_addr),
         ),
         Err(Error::InvalidState)
     );
@@ -8933,7 +8933,7 @@ fn send_on_path_test(
         pipe.client.send_on_path(
             &mut buf,
             Some(client_addr),
-            Some(server_addr_2)
+            Some(server_addr_2),
         ),
         Err(Error::InvalidState)
     );
@@ -9013,11 +9013,11 @@ fn send_on_path_test(
 
     // No more data to exchange leads to Error::Done.
     assert_eq!(
-        pipe.client.send_on_path(&mut buf, Some(client_addr), None),
+        pipe.client.send_on_path(&mut buf, Some(client_addr), None,),
         Err(Error::Done)
     );
     assert_eq!(
-        pipe.client.send_on_path(&mut buf, None, Some(server_addr)),
+        pipe.client.send_on_path(&mut buf, None, Some(server_addr),),
         Err(Error::Done)
     );
 

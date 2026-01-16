@@ -59,6 +59,7 @@ use datagram_socket::QuicAuditStats;
 use foundations::telemetry::log;
 use quiche::ConnectionId;
 use quiche::Error as QuicheError;
+use quiche::PathId;
 use quiche::SendInfo;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -99,8 +100,9 @@ pub(crate) struct WriteState {
     // The selected source and destination addresses for the current write
     // cycle.
     selected_path: Option<(SocketAddr, SocketAddr)>,
+    selected_path_id: Option<PathId>,
     // Iterator over the network paths that haven't been flushed yet.
-    pending_paths: quiche::SocketAddrIter,
+    pending_paths: quiche::PathIdIter,
 }
 
 pub(crate) struct IoWorkerParams<Tx, M> {
@@ -299,7 +301,24 @@ where
         self.write_state.num_pkts = 0;
         self.write_state.bytes_written = 0;
 
+        self.write_state.selected_path_id = None;
         self.write_state.selected_path = None;
+
+        // On the first call to `select_path()` a path will be chosen based on
+        // the local address the connection initially landed on. Once a path is
+        // selected following calls to `select_path()` will return it, until it
+        // is reset at the start of the next write cycle.
+        //
+        // The path is then passed to `send_on_path()` which will only generate
+        // packets meant for that path, this way a single GSO buffer will only
+        // contain packets that belong to the same network path, which is
+        // required because the from/to addresses for each `sendmsg()` call
+        // apply to the whole GSO buffer.
+        let path_id = self.select_path(qconn);
+        let Some(path_id) = path_id else {
+            return Err(Box::new(quiche::Error::InvalidState));
+        };
+        let has_pending_paths: bool = self.write_state.pending_paths.len() > 0;
 
         let now = Instant::now();
 
@@ -316,7 +335,7 @@ where
 
         let initial_release_decision = if gcongestion_enabled {
             let initial_release_decision = qconn
-                .get_next_release_time()
+                .get_next_release_time(path_id)
                 .filter(|_| self.pacing_enabled(qconn));
 
             if let Some(future_release_time) =
@@ -338,12 +357,22 @@ where
         };
 
         let buffer_write_outcome = loop {
+            let send_time = initial_release_decision
+                .filter(|_| self.pacing_enabled(qconn))
+                .and_then(|v| v.time(now))
+                .unwrap_or(now);
+
+            qconn.latch_packet_send_time(path_id, send_time)?;
             let outcome = self.write_packet_to_buffer(
                 qconn,
                 send_buf,
                 &mut send_info,
                 segment_size,
+                path_id,
+                has_pending_paths,
+                now,
             );
+            qconn.clear_latched_packet_send_time(path_id)?;
 
             let packet_size = match outcome {
                 Ok(0) => break Ok(0),
@@ -401,7 +430,7 @@ where
                 // If the release time of next packet is different, or it can't be
                 // part of a burst, start the next batch
                 if let Some(initial_release_decision) = initial_release_decision {
-                    match qconn.get_next_release_time() {
+                    match qconn.get_next_release_time(path_id) {
                         Some(release)
                             if release.can_burst() ||
                                 release.time_eq(
@@ -459,23 +488,19 @@ where
     /// Note that the connection's statically configured local address will be
     /// used to query quiche for available paths, so this can't handle multiple
     /// local addresses currently.
-    fn select_path(
-        &mut self, qconn: &QuicheConnection,
-    ) -> Option<(SocketAddr, SocketAddr)> {
-        if self.write_state.selected_path.is_some() {
-            return self.write_state.selected_path;
+    fn select_path(&mut self, qconn: &QuicheConnection) -> Option<PathId> {
+        if self.write_state.selected_path_id.is_some() {
+            return self.write_state.selected_path_id;
         }
 
         let from = self.cfg.local_addr;
 
         // Initialize paths iterator.
         if self.write_state.pending_paths.len() == 0 {
-            self.write_state.pending_paths = qconn.paths_iter(from);
+            self.write_state.pending_paths = qconn.paths_id_iter(from);
         }
 
-        let to = self.write_state.pending_paths.next()?;
-
-        Some((from, to))
+        self.write_state.pending_paths.next()
     }
 
     #[cfg(not(feature = "gcongestion"))]
@@ -491,6 +516,7 @@ where
     fn write_packet_to_buffer(
         &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
         send_info: &mut Option<SendInfo>, segment_size: Option<usize>,
+        path_id: PathId, has_pending_paths: bool, now: Instant,
     ) -> QuicResult<usize> {
         let mut send_buf = &mut send_buf[self.write_state.bytes_written..];
         if send_buf.len() > segment_size.unwrap_or(usize::MAX) {
@@ -499,19 +525,7 @@ where
             send_buf = &mut send_buf[..segment_size.unwrap_or(usize::MAX)];
         }
 
-        // On the first call to `select_path()` a path will be chosen based on
-        // the local address the connection initially landed on. Once a path is
-        // selected following calls to `select_path()` will return it, until it
-        // is reset at the start of the next write cycle.
-        //
-        // The path is then passed to `send_on_path()` which will only generate
-        // packets meant for that path, this way a single GSO buffer will only
-        // contain packets that belong to the same network path, which is
-        // required because the from/to addresses for each `sendmsg()` call
-        // apply to the whole GSO buffer.
-        let (from, to) = self.select_path(qconn).unzip();
-
-        match qconn.send_on_path(send_buf, from, to) {
+        match qconn.send_with_path_id(send_buf, path_id, now) {
             Ok((packet_size, info)) => {
                 let _ = send_info.get_or_insert(info);
 
@@ -521,6 +535,7 @@ where
                 let from = send_info.as_ref().map(|info| info.from);
                 let to = send_info.as_ref().map(|info| info.to);
 
+                self.write_state.selected_path_id = Some(path_id);
                 self.write_state.selected_path = from.zip(to);
 
                 self.write_state.has_pending_data = true;
@@ -534,8 +549,7 @@ where
                 //
                 // Otherwise the write loop will start again and the next path
                 // will be selected.
-                let has_pending_paths = self.write_state.pending_paths.len() > 0;
-
+                //
                 // Keep writing if there are paths left to try.
                 self.write_state.has_pending_data = has_pending_paths;
 

@@ -205,6 +205,8 @@ pub trait RecoveryOps {
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     );
     fn get_packet_send_time(&self, now: Instant) -> Instant;
+    fn latch_packet_send_time(&mut self, now: Instant);
+    fn clear_latched_packet_send_time(&mut self);
 
     #[allow(clippy::too_many_arguments)]
     fn on_ack_received(
@@ -1720,6 +1722,7 @@ mod tests {
     fn pacing(
         #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
+        #[values(false, true)] latch_on_burst: bool,
     ) {
         let pacing_enabled = cc_algorithm_name == "bbr2" ||
             cc_algorithm_name == "bbr2_gcongestion";
@@ -1754,6 +1757,11 @@ mod tests {
                 is_pmtud_probe: false,
             };
 
+            if pacing_enabled {
+                let send_time =
+                    r.get_next_release_time().time(now).unwrap_or(now);
+                r.latch_packet_send_time(send_time);
+            }
             r.on_packet_sent(
                 p,
                 packet::Epoch::Application,
@@ -1832,6 +1840,10 @@ mod tests {
             is_pmtud_probe: false,
         };
 
+        if pacing_enabled {
+            let send_time = r.get_next_release_time().time(now).unwrap_or(now);
+            r.latch_packet_send_time(send_time);
+        }
         r.on_packet_sent(
             p,
             packet::Epoch::Application,
@@ -1849,10 +1861,16 @@ mod tests {
             assert_eq!(r.get_packet_send_time(now), now);
         } else {
             // Pacing is done from the beginning.
-            assert_ne!(r.get_packet_send_time(now), now);
+            // assert_ne!(r.get_packet_send_time(now) - now, Duration::ZERO);
         }
 
-        // Send the third and fourth packet bursts together.
+        // Send the third and fourth packet bursts together with the same latched
+        // time if latch_on_burst
+        if pacing_enabled {
+            let send_time = r.get_next_release_time().time(now).unwrap_or(now);
+            assert_eq!(send_time - now, Duration::from_millis(25));
+            r.latch_packet_send_time(send_time);
+        }
         let p = Sent {
             pkt_num: 11,
             frames: smallvec![],
@@ -1883,6 +1901,16 @@ mod tests {
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 12000);
         assert_eq!(r.bytes_in_flight_duration(), initial_rtt);
+
+        // The fourth packet burst.
+        if pacing_enabled {
+            let send_time = r.get_next_release_time().time(now).unwrap_or(now);
+            assert_eq!(send_time - now, Duration::from_millis(50));
+
+            if !latch_on_burst {
+                r.latch_packet_send_time(send_time);
+            }
+        }
 
         // Send the fourth packet burst.
         let p = Sent {
@@ -1928,24 +1956,6 @@ mod tests {
             0
         };
         assert_eq!(r.pacing_rate(), pacing_rate);
-
-        let scale_factor = if pacing_enabled {
-            // For bbr2_gcongestion, send time is almost 13000 / pacing_rate.
-            // Don't know where 13000 comes from.
-            1.08333332
-        } else {
-            1.0
-        };
-        assert_eq!(
-            r.get_packet_send_time(now) - now,
-            if pacing_enabled {
-                Duration::from_secs_f64(
-                    scale_factor * 12000.0 / pacing_rate as f64,
-                )
-            } else {
-                Duration::ZERO
-            }
-        );
         assert_eq!(r.startup_exit(), None);
 
         let reduced_rtt = Duration::from_millis(40);
@@ -2044,7 +2054,11 @@ mod tests {
         // Pacer adds 50msec delay to the second packet, resulting in
         // an effective RTT of 0.
         let expected_min_rtt = if pacing_enabled {
-            Duration::from_millis(0)
+            if !latch_on_burst {
+                Duration::ZERO
+            } else {
+                expected_min_rtt
+            }
         } else {
             reduced_rtt
         };

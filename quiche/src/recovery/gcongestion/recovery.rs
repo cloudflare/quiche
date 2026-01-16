@@ -465,6 +465,8 @@ pub struct GRecovery {
     lost_reuse: Vec<Lost>,
 
     pacer: Pacer,
+
+    latched_packet_send_time: Option<Instant>,
 }
 
 impl GRecovery {
@@ -518,6 +520,7 @@ impl GRecovery {
 
             newly_acked: Vec::new(),
             lost_reuse: Vec::new(),
+            latched_packet_send_time: None,
         })
     }
 
@@ -688,7 +691,7 @@ impl RecoveryOps for GRecovery {
         &mut self, pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
-        let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
+        let time_sent = self.get_packet_send_time(now);
 
         let epoch = &mut self.epochs[epoch];
 
@@ -749,7 +752,18 @@ impl RecoveryOps for GRecovery {
     }
 
     fn get_packet_send_time(&self, now: Instant) -> Instant {
-        self.pacer.get_next_release_time().time(now).unwrap_or(now)
+        // TODO debug_assert that latched time >= now.
+        self.latched_packet_send_time
+            .filter(|v| *v > now)
+            .unwrap_or(now)
+    }
+
+    fn latch_packet_send_time(&mut self, send_time: Instant) {
+        self.latched_packet_send_time = Some(send_time);
+    }
+
+    fn clear_latched_packet_send_time(&mut self) {
+        self.latched_packet_send_time = None;
     }
 
     // `peer_sent_ack_ranges` should not be used without validation.
@@ -802,6 +816,7 @@ impl RecoveryOps for GRecovery {
             has_ack_eliciting;
         if update_rtt {
             let latest_rtt = now - largest_newly_acked.time_sent;
+
             self.rtt_stats.update_rtt(
                 latest_rtt,
                 Duration::from_micros(ack_delay),
