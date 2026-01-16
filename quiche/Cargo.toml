@@ -64,7 +64,7 @@ features = ["boringssl-boring-crate", "qlog"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [build-dependencies]
-cmake = "0.1"
+cmake = "0.1.57"
 pkg-config = { version = "0.3", optional = true }
 cdylib-link-lines = { version = "0.1", optional = true }
 
