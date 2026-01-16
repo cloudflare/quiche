@@ -35,7 +35,6 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
-use tokio_quiche::quic::SimpleConnectionIdGenerator;
 use tokio_quiche::settings::Hooks;
 use tokio_quiche::settings::TlsCertificatePaths;
 use tokio_quiche::ConnectionParams;
@@ -171,14 +170,9 @@ async fn test_ioworker_state_machine_pause() {
         tls_cert_settings,
         hooks,
     );
-    let mut stream = listen(
-        vec![socket],
-        params,
-        SimpleConnectionIdGenerator,
-        DefaultMetrics,
-    )
-    .unwrap()
-    .remove(0);
+    let mut stream = listen(vec![socket], params, DefaultMetrics)
+        .unwrap()
+        .remove(0);
 
     tokio::spawn(async move {
         loop {
@@ -233,14 +227,9 @@ async fn test_so_mark_receieve_data() {
         tls_cert_settings,
         hooks,
     );
-    let mut stream = listen(
-        vec![socket],
-        params,
-        SimpleConnectionIdGenerator,
-        DefaultMetrics,
-    )
-    .unwrap()
-    .remove(0);
+    let mut stream = listen(vec![socket], params, DefaultMetrics)
+        .unwrap()
+        .remove(0);
 
     let audit_log: Arc<RwLock<Option<Arc<QuicAuditStats>>>> =
         Arc::new(RwLock::new(None));
