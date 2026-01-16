@@ -46,7 +46,7 @@ env_logger = "0.11"
 foundations = { version = ">=4,<6", default-features = false }
 futures = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false }
-h3i = { version = "0.5", path = "./h3i" }
+h3i = { version = "0.6", path = "./h3i" }
 ipnetwork = { version = "0.20" }
 libc = { version = "0.2.76", default-features = false }
 log = { version = "0.4.20" }
