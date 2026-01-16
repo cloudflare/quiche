@@ -650,6 +650,15 @@ where
         &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
     ) -> QuicResult<()> {
         if quic_application.should_act() {
+            // Poll the application to make progress.
+            //
+            // Once the connection has been established (i.e. the handshake is
+            // complete), we only poll the application.
+            //
+            // The exception is 0-RTT in TLS 1.3, where the full handshake is
+            // still in progress but we have 0-RTT keys to process early data.
+            // This means TLS callbacks might only be polled on the next timeout
+            // or when a packet is received from the peer.
             quic_application.wait_for_data(qconn).await.map_err(|err| {
                 to_box_error(format!(
                     "app_err={} while waiting for H3 data with AOQ::wait_for_data",
@@ -657,6 +666,7 @@ where
                 ))
             })
         } else {
+            // Poll quiche to make progress on handshake callbacks.
             self.wait_for_quiche(qconn, quic_application).await
         }
     }
@@ -739,8 +749,8 @@ where
         A: ApplicationOverQuic,
     {
         // This makes an assumption that the waker being set in ex_data is stable
-        // accross the active task's lifetime. Moving a future that encompasses an
-        // async callback from this task accross a channel, for example, will
+        // across the active task's lifetime. Moving a future that encompasses an
+        // async callback from this task across a channel, for example, will
         // cause issues as this waker will then be stale and attempt to
         // wake the wrong task.
         std::future::poll_fn(|cx| {
