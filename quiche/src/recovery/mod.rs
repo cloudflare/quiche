@@ -1719,12 +1719,17 @@ mod tests {
     fn pacing(
         #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
+        #[values(false, true)] set_time_sent_to_now: bool,
     ) {
         let pacing_enabled = cc_algorithm_name == "bbr2" ||
             cc_algorithm_name == "bbr2_gcongestion";
 
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        cfg.set_custom_bbr_params(BbrParams {
+            set_time_sent_to_now: Some(set_time_sent_to_now),
+            ..Default::default()
+        });
 
         let mut r = Recovery::new(&cfg);
 
@@ -2004,7 +2009,7 @@ mod tests {
         // When enabled, the pacer adds a 25msec delay to the packet
         // sends which will be applied to the sent times tracked by
         // the recovery module, bringing down RTT to 15msec.
-        let expected_min_rtt = if pacing_enabled {
+        let expected_min_rtt = if pacing_enabled && !set_time_sent_to_now {
             reduced_rtt - Duration::from_millis(25)
         } else {
             reduced_rtt
@@ -2042,7 +2047,7 @@ mod tests {
 
         // Pacer adds 50msec delay to the second packet, resulting in
         // an effective RTT of 0.
-        let expected_min_rtt = if pacing_enabled {
+        let expected_min_rtt = if pacing_enabled && !set_time_sent_to_now {
             Duration::from_millis(0)
         } else {
             reduced_rtt
