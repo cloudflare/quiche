@@ -202,13 +202,6 @@ jobs:
         with:
           args: install nasm
 
-      # https://github.com/rust-lang/cmake-rs/pull/259 breaks handling of long Windows paths
-      # https://github.com/cloudflare/boring/issues/414
-      # https://github.com/0x676e67/boring/commit/efacedb5bf409d0d773e8ce4f5080cb4b4c10f54
-      - name: Pin some dependencies, temporary patch for cmake breakage
-        run: |
-          cargo update --package cmake --precise 0.1.54
-
       - name: Run cargo build
         if: endsWith(matrix.target, '-gnu')
         run: cargo build --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --exclude qlog-dancer --features=boringssl-boring-crate
