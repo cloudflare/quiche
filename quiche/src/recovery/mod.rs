@@ -1726,6 +1726,8 @@ mod tests {
 
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        #[cfg(feature = "internal")]
         cfg.set_custom_bbr_params(BbrParams {
             set_time_sent_to_now: Some(set_time_sent_to_now),
             ..Default::default()
@@ -2009,7 +2011,10 @@ mod tests {
         // When enabled, the pacer adds a 25msec delay to the packet
         // sends which will be applied to the sent times tracked by
         // the recovery module, bringing down RTT to 15msec.
-        let expected_min_rtt = if pacing_enabled && !set_time_sent_to_now {
+        let expected_min_rtt = if pacing_enabled &&
+            !set_time_sent_to_now &&
+            cfg!(feature = "internal")
+        {
             reduced_rtt - Duration::from_millis(25)
         } else {
             reduced_rtt
@@ -2047,7 +2052,10 @@ mod tests {
 
         // Pacer adds 50msec delay to the second packet, resulting in
         // an effective RTT of 0.
-        let expected_min_rtt = if pacing_enabled && !set_time_sent_to_now {
+        let expected_min_rtt = if pacing_enabled &&
+            !set_time_sent_to_now &&
+            cfg!(feature = "internal")
+        {
             Duration::from_millis(0)
         } else {
             reduced_rtt
