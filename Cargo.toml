@@ -46,7 +46,7 @@ env_logger = "0.11"
 foundations = { version = ">=4,<6", default-features = false }
 futures = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false }
-h3i = { version = "0.5", path = "./h3i" }
+h3i = { version = "0.6", path = "./h3i" }
 ipnetwork = { version = "0.20" }
 libc = { version = "0.2.76", default-features = false }
 log = { version = "0.4.20" }
@@ -57,7 +57,7 @@ octets = { version = "0.3.4", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
 qlog = { version = "0.15.2", path = "./qlog" }
-quiche = { version = "0.24.7", path = "./quiche" }
+quiche = { version = "0.24.8", path = "./quiche" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
 rstest = { version = "0.26.1" }
@@ -70,7 +70,7 @@ smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.2.0", path = "./task-killswitch" }
 thiserror = { version = "2" }
 tokio = { version = "1.44", default-features = false }
-tokio-quiche = { version = "0.13.0", path = "./tokio-quiche" }
+tokio-quiche = { version = "0.14.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 triomphe = { version = "0.1" }
