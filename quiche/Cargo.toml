@@ -88,9 +88,6 @@ windows-sys = { version = "0.59", features = [
   "Win32_Networking_WinSock",
   "Win32_Security_Cryptography",
 ] }
-# temporary workaround for quiche_windows
-# (i686-pc-windows-gnu) failures observed in boring-sys 4.20
-boring-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
 mio = { workspace = true, features = ["net", "os-poll"] }
