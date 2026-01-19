@@ -507,8 +507,8 @@ impl BBRv2 {
         }
     }
 
-    pub fn use_next_release_time_as_time_sent(&self) -> bool {
-        !self.params.set_time_sent_to_now
+    pub fn set_time_sent_to_now(&self) -> bool {
+        self.params.set_time_sent_to_now
     }
 
     fn on_exit_quiescence(&mut self, now: Instant) {
