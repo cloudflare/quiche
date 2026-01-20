@@ -203,7 +203,7 @@ struct Params {
     /// slightly over estimated.  The pacer can only schedule packets
     /// 1/8th of an RTT into the future, so the error introduced by
     /// setting `time_sent` to `now` is bounded.
-    set_time_sent_to_now: bool,
+    time_sent_set_to_now: bool,
 }
 
 impl Params {
@@ -247,7 +247,7 @@ impl Params {
         apply_override!(ignore_app_limited_for_no_bandwidth_growth);
         apply_override!(scale_pacing_rate_by_mss);
         apply_override!(disable_probe_down_early_exit);
-        apply_override!(set_time_sent_to_now);
+        apply_override!(time_sent_set_to_now);
         apply_optional_override!(initial_pacing_rate_bytes_per_second);
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
@@ -343,7 +343,7 @@ const DEFAULT_PARAMS: Params = Params {
 
     disable_probe_down_early_exit: false,
 
-    set_time_sent_to_now: true,
+    time_sent_set_to_now: true,
 };
 
 #[derive(Debug, PartialEq)]
@@ -507,8 +507,8 @@ impl BBRv2 {
         }
     }
 
-    pub fn set_time_sent_to_now(&self) -> bool {
-        self.params.set_time_sent_to_now
+    pub fn time_sent_set_to_now(&self) -> bool {
+        self.params.time_sent_set_to_now
     }
 
     fn on_exit_quiescence(&mut self, now: Instant) {

@@ -447,7 +447,7 @@ pub struct GRecovery {
     pub bytes_lost: u64,
 
     max_datagram_size: usize,
-    set_time_sent_to_now: bool,
+    time_sent_set_to_now: bool,
 
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
@@ -500,7 +500,7 @@ impl GRecovery {
             bytes_lost: 0,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
-            set_time_sent_to_now: cc.set_time_sent_to_now(),
+            time_sent_set_to_now: cc.time_sent_set_to_now(),
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
@@ -690,7 +690,7 @@ impl RecoveryOps for GRecovery {
         &mut self, pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
-        let time_sent = if self.set_time_sent_to_now {
+        let time_sent = if self.time_sent_set_to_now {
             now
         } else {
             self.get_next_release_time().time(now).unwrap_or(now)

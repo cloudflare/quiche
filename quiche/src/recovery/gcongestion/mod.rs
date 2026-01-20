@@ -232,7 +232,7 @@ pub struct BbrParams {
     /// instead of `get_next_release_time()`.  Setting the time based
     /// on `get_next_release_time()` can result in artificially low
     /// minRTT measurements which will make BBR misbehave.
-    pub set_time_sent_to_now: Option<bool>,
+    pub time_sent_set_to_now: Option<bool>,
 }
 
 /// Controls BBR's bandwidth reduction strategy on congestion event.

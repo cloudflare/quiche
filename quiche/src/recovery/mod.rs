@@ -1719,7 +1719,7 @@ mod tests {
     fn pacing(
         #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
-        #[values(false, true)] set_time_sent_to_now: bool,
+        #[values(false, true)] time_sent_set_to_now: bool,
     ) {
         let pacing_enabled = cc_algorithm_name == "bbr2" ||
             cc_algorithm_name == "bbr2_gcongestion";
@@ -1729,7 +1729,7 @@ mod tests {
 
         #[cfg(feature = "internal")]
         cfg.set_custom_bbr_params(BbrParams {
-            set_time_sent_to_now: Some(set_time_sent_to_now),
+            time_sent_set_to_now: Some(time_sent_set_to_now),
             ..Default::default()
         });
 
@@ -2012,7 +2012,7 @@ mod tests {
         // sends which will be applied to the sent times tracked by
         // the recovery module, bringing down RTT to 15msec.
         let expected_min_rtt = if pacing_enabled &&
-            !set_time_sent_to_now &&
+            !time_sent_set_to_now &&
             cfg!(feature = "internal")
         {
             reduced_rtt - Duration::from_millis(25)
@@ -2053,7 +2053,7 @@ mod tests {
         // Pacer adds 50msec delay to the second packet, resulting in
         // an effective RTT of 0.
         let expected_min_rtt = if pacing_enabled &&
-            !set_time_sent_to_now &&
+            !time_sent_set_to_now &&
             cfg!(feature = "internal")
         {
             Duration::from_millis(0)
