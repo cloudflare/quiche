@@ -193,6 +193,17 @@ struct Params {
     /// Disable `has_stayed_long_enough_in_probe_down` which can cause ProbeDown
     /// to exit early.
     disable_probe_down_early_exit: bool,
+
+    /// Set the expected send time for packets when using BBR to `now`
+    /// instead of `get_next_release_time()`.  Setting the time based
+    /// on `get_next_release_time()` can result in artificially low
+    /// RTT measurements due to the pacer's use of burst_tokens to
+    /// make up for lost time.  BBR has significant problems when
+    /// minRTT is under estimated, so it is better to have the RTT be
+    /// slightly over estimated.  The pacer can only schedule packets
+    /// 1/8th of an RTT into the future, so the error introduced by
+    /// setting `time_sent` to `now` is bounded.
+    time_sent_set_to_now: bool,
 }
 
 impl Params {
@@ -236,6 +247,7 @@ impl Params {
         apply_override!(ignore_app_limited_for_no_bandwidth_growth);
         apply_override!(scale_pacing_rate_by_mss);
         apply_override!(disable_probe_down_early_exit);
+        apply_override!(time_sent_set_to_now);
         apply_optional_override!(initial_pacing_rate_bytes_per_second);
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
@@ -330,6 +342,8 @@ const DEFAULT_PARAMS: Params = Params {
     scale_pacing_rate_by_mss: false,
 
     disable_probe_down_early_exit: false,
+
+    time_sent_set_to_now: true,
 };
 
 #[derive(Debug, PartialEq)]
@@ -469,6 +483,7 @@ impl BBRv2 {
         custom_bbr_params: Option<&BbrParams>,
     ) -> Self {
         let cwnd = initial_congestion_window * max_segment_size;
+
         let params = if let Some(custom_bbr_settings) = custom_bbr_params {
             DEFAULT_PARAMS.with_overrides(custom_bbr_settings)
         } else {
@@ -490,6 +505,10 @@ impl BBRv2 {
             mss: max_segment_size,
             params,
         }
+    }
+
+    pub fn time_sent_set_to_now(&self) -> bool {
+        self.params.time_sent_set_to_now
     }
 
     fn on_exit_quiescence(&mut self, now: Instant) {

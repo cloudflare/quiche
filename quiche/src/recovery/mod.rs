@@ -592,7 +592,6 @@ pub struct ReleaseDecision {
 
 impl ReleaseTime {
     /// Add the specific delay to the current time
-    #[allow(dead_code)]
     fn inc(&mut self, delay: Duration) {
         match self {
             ReleaseTime::Immediate => {},
@@ -601,7 +600,6 @@ impl ReleaseTime {
     }
 
     /// Set the time to the later of two times
-    #[allow(dead_code)]
     fn set_max(&mut self, other: Instant) {
         match self {
             ReleaseTime::Immediate => *self = ReleaseTime::At(other),
@@ -615,7 +613,6 @@ impl ReleaseDecision {
 
     /// Get the [`Instant`] the next packet should be released. It will never be
     /// in the past.
-    #[allow(dead_code)]
     #[inline]
     pub fn time(&self, now: Instant) -> Option<Instant> {
         match self.time {
@@ -625,14 +622,12 @@ impl ReleaseDecision {
     }
 
     /// Can this packet be appended to a previous burst
-    #[allow(dead_code)]
     #[inline]
     pub fn can_burst(&self) -> bool {
         self.allow_burst
     }
 
     /// Check if the two packets can be released at the same time
-    #[allow(dead_code)]
     #[inline]
     pub fn time_eq(&self, other: &Self, now: Instant) -> bool {
         let delta = match (self.time(now), other.time(now)) {
@@ -1724,9 +1719,19 @@ mod tests {
     fn pacing(
         #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
         cc_algorithm_name: &str,
+        #[values(false, true)] time_sent_set_to_now: bool,
     ) {
+        let pacing_enabled = cc_algorithm_name == "bbr2" ||
+            cc_algorithm_name == "bbr2_gcongestion";
+
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        #[cfg(feature = "internal")]
+        cfg.set_custom_bbr_params(BbrParams {
+            time_sent_set_to_now: Some(time_sent_set_to_now),
+            ..Default::default()
+        });
 
         let mut r = Recovery::new(&cfg);
 
@@ -1768,8 +1773,7 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 12000);
         assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
 
-        // Next packet will be sent out immediately.
-        if cc_algorithm_name == "cubic" || cc_algorithm_name == "reno" {
+        if !pacing_enabled {
             assert_eq!(r.pacing_rate(), 0);
         } else {
             assert_eq!(r.pacing_rate(), 103963);
@@ -1780,7 +1784,8 @@ mod tests {
         assert_eq!(r.cwnd_available(), 0);
 
         // Wait 50ms for ACK.
-        now += Duration::from_millis(50);
+        let initial_rtt = Duration::from_millis(50);
+        now += initial_rtt;
 
         let mut acked = RangeSet::default();
         acked.insert(0..10);
@@ -1806,8 +1811,9 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
-        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
-        assert_eq!(r.rtt(), Duration::from_millis(50));
+        assert_eq!(r.bytes_in_flight_duration(), initial_rtt);
+        assert_eq!(r.min_rtt(), Some(initial_rtt));
+        assert_eq!(r.rtt(), initial_rtt);
 
         // 10 MSS increased due to acks.
         assert_eq!(r.cwnd(), 12000 + 1200 * 10);
@@ -1842,9 +1848,9 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
         assert_eq!(r.bytes_in_flight(), 6000);
-        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
+        assert_eq!(r.bytes_in_flight_duration(), initial_rtt);
 
-        if cc_algorithm_name == "cubic" || cc_algorithm_name == "reno" {
+        if !pacing_enabled {
             // Pacing is disabled.
             assert_eq!(r.get_packet_send_time(now), now);
         } else {
@@ -1852,7 +1858,7 @@ mod tests {
             assert_ne!(r.get_packet_send_time(now), now);
         }
 
-        // Send the third packet burst.
+        // Send the third and fourth packet bursts together.
         let p = Sent {
             pkt_num: 11,
             frames: smallvec![],
@@ -1882,7 +1888,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
         assert_eq!(r.bytes_in_flight(), 12000);
-        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
+        assert_eq!(r.bytes_in_flight_duration(), initial_rtt);
 
         // Send the fourth packet burst.
         let p = Sent {
@@ -1914,27 +1920,22 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 3);
         assert_eq!(r.bytes_in_flight(), 13000);
-        assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(50));
+        assert_eq!(r.bytes_in_flight_duration(), initial_rtt);
 
         // We pace this outgoing packet. as all conditions for pacing
         // are passed.
-        let pacing_rate = match cc_algorithm_name {
-            "bbr2_gcongestion" | "bbr2" => {
-                let cwnd_gain: f64 = 2.0;
-                // Adjust for cwnd_gain.  BW estimate was made before the CWND
-                // increase.
-                let bw = r.cwnd() as f64 /
-                    cwnd_gain /
-                    Duration::from_millis(50).as_secs_f64();
-                bw as u64
-            },
-            _ => 0,
+        let pacing_rate = if pacing_enabled {
+            let cwnd_gain: f64 = 2.0;
+            // Adjust for cwnd_gain.  BW estimate was made before the CWND
+            // increase.
+            let bw = r.cwnd() as f64 / cwnd_gain / initial_rtt.as_secs_f64();
+            bw as u64
+        } else {
+            0
         };
         assert_eq!(r.pacing_rate(), pacing_rate);
 
-        let scale_factor = if cc_algorithm_name == "bbr2_gcongestion" ||
-            cc_algorithm_name == "bbr2"
-        {
+        let scale_factor = if pacing_enabled {
             // For bbr2_gcongestion, send time is almost 13000 / pacing_rate.
             // Don't know where 13000 comes from.
             1.08333332
@@ -1943,9 +1944,7 @@ mod tests {
         };
         assert_eq!(
             r.get_packet_send_time(now) - now,
-            if cc_algorithm_name == "bbr2_gcongestion" ||
-                cc_algorithm_name == "bbr2"
-            {
+            if pacing_enabled {
                 Duration::from_secs_f64(
                     scale_factor * 12000.0 / pacing_rate as f64,
                 )
@@ -1954,6 +1953,120 @@ mod tests {
             }
         );
         assert_eq!(r.startup_exit(), None);
+
+        let reduced_rtt = Duration::from_millis(40);
+        now += reduced_rtt;
+
+        let mut acked = RangeSet::default();
+        acked.insert(10..11);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                0,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 6000,
+                spurious_losses: 0,
+            }
+        );
+
+        let expected_srtt = (7 * initial_rtt + reduced_rtt) / 8;
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 2);
+        assert_eq!(r.bytes_in_flight(), 7000);
+        assert_eq!(r.bytes_in_flight_duration(), initial_rtt + reduced_rtt);
+        assert_eq!(r.min_rtt(), Some(reduced_rtt));
+        assert_eq!(r.rtt(), expected_srtt);
+
+        let mut acked = RangeSet::default();
+        acked.insert(11..12);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                0,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 6000,
+                spurious_losses: 0,
+            }
+        );
+
+        // When enabled, the pacer adds a 25msec delay to the packet
+        // sends which will be applied to the sent times tracked by
+        // the recovery module, bringing down RTT to 15msec.
+        let expected_min_rtt = if pacing_enabled &&
+            !time_sent_set_to_now &&
+            cfg!(feature = "internal")
+        {
+            reduced_rtt - Duration::from_millis(25)
+        } else {
+            reduced_rtt
+        };
+
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 1);
+        assert_eq!(r.bytes_in_flight(), 1000);
+        assert_eq!(r.bytes_in_flight_duration(), initial_rtt + reduced_rtt);
+        assert_eq!(r.min_rtt(), Some(expected_min_rtt));
+
+        let expected_srtt = (7 * expected_srtt + expected_min_rtt) / 8;
+        assert_eq!(r.rtt(), expected_srtt);
+
+        let mut acked = RangeSet::default();
+        acked.insert(12..13);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                0,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 1000,
+                spurious_losses: 0,
+            }
+        );
+
+        // Pacer adds 50msec delay to the second packet, resulting in
+        // an effective RTT of 0.
+        let expected_min_rtt = if pacing_enabled &&
+            !time_sent_set_to_now &&
+            cfg!(feature = "internal")
+        {
+            Duration::from_millis(0)
+        } else {
+            reduced_rtt
+        };
+        assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
+        assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.bytes_in_flight_duration(), initial_rtt + reduced_rtt);
+        assert_eq!(r.min_rtt(), Some(expected_min_rtt));
+
+        let expected_srtt = (7 * expected_srtt + expected_min_rtt) / 8;
+        assert_eq!(r.rtt(), expected_srtt);
     }
 
     #[rstest]
