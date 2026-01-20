@@ -41,7 +41,7 @@ use foundations::telemetry::metrics::Gauge;
 pub use crate::buffer::*;
 pub use crate::raw_pool_buf_io::*;
 
-#[metrics(unprefixed)]
+#[metrics]
 pub mod buffer_pool {
     /// Number of objects available for reuse in the pool.
     pub fn pool_idle_count(name: &'static str) -> Gauge;
