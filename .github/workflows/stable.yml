@@ -169,6 +169,13 @@ jobs:
     strategy:
       matrix:
         target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc", "x86_64-pc-windows-gnu", "i686-pc-windows-gnu"]
+        include:
+          - target: "i686-pc-windows-gnu"
+            cflags: "-mlong-double-64" # bindgen detects that Rust doesn't support 80-bit long double
+    env:
+      CFLAGS: ${{ matrix.cflags }}
+      CXXFLAGS: ${{ matrix.cflags }}
+      BINDGEN_EXTRA_CLANG_ARGS: ${{ matrix.cflags }}
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -201,13 +208,6 @@ jobs:
         uses: crazy-max/ghaction-chocolatey@v3
         with:
           args: install nasm
-
-      # https://github.com/rust-lang/cmake-rs/pull/259 breaks handling of long Windows paths
-      # https://github.com/cloudflare/boring/issues/414
-      # https://github.com/0x676e67/boring/commit/efacedb5bf409d0d773e8ce4f5080cb4b4c10f54
-      - name: Pin some dependencies, temporary patch for cmake breakage
-        run: |
-          cargo update --package cmake --precise 0.1.54
 
       - name: Run cargo build
         if: endsWith(matrix.target, '-gnu')

@@ -55,16 +55,20 @@ const MAX_POOL_BUF_SIZE: usize = 64 * 1024;
 
 type BufPool = Pool<POOL_SHARDS, ConsumeBuffer>;
 
-static TINY_POOL: BufPool = BufPool::new(TINY_BUF_SIZE, TINY_BUF_SIZE);
-static SMALL_POOL: BufPool = BufPool::new(SMALL_BUF_SIZE, SMALL_BUF_SIZE);
-static MEDIUM_POOL: BufPool = BufPool::new(MEDIUM_BUF_SIZE, MEDIUM_BUF_SIZE);
+static TINY_POOL: BufPool =
+    BufPool::new(TINY_BUF_SIZE, TINY_BUF_SIZE, "tiny_pool");
+static SMALL_POOL: BufPool =
+    BufPool::new(SMALL_BUF_SIZE, SMALL_BUF_SIZE, "small_pool");
+static MEDIUM_POOL: BufPool =
+    BufPool::new(MEDIUM_BUF_SIZE, MEDIUM_BUF_SIZE, "medium_pool");
 
 /// A generic buffer pool used to pass data around without copying.
-static BUF_POOL: BufPool = BufPool::new(POOL_SIZE, MAX_POOL_BUF_SIZE);
+static BUF_POOL: BufPool =
+    BufPool::new(POOL_SIZE, MAX_POOL_BUF_SIZE, "generic_pool");
 
 /// A datagram pool shared for both UDP streams, and incoming QUIC packets.
 static DATAGRAM_POOL: BufPool =
-    BufPool::new(DATAGRAM_POOL_SIZE, MAX_DATAGRAM_SIZE);
+    BufPool::new(DATAGRAM_POOL_SIZE, MAX_DATAGRAM_SIZE, "datagram_pool");
 
 /// A pooled byte buffer to pass stream data around without copying.
 pub type PooledBuf = Pooled<ConsumeBuffer>;

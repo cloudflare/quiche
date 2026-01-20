@@ -10,3 +10,6 @@ description = "Pooled in-memory buffers"
 
 [dependencies]
 crossbeam = { workspace = true, features = ["alloc"] }
+foundations = { workspace = true, default-features = false, features = [
+  "metrics",
+] }

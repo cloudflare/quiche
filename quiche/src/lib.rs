@@ -7072,6 +7072,17 @@ impl<F: BufFactory> Connection<F> {
         self.handshake.is_in_early_data()
     }
 
+    /// Returns the early data reason for the connection.
+    ///
+    /// This status can be useful for logging and debugging. See [BoringSSL]
+    /// documentation for a definition of the reasons.
+    ///
+    /// [BoringSSL]: https://commondatastorage.googleapis.com/chromium-boringssl-docs/ssl.h.html#ssl_early_data_reason_t
+    #[inline]
+    pub fn early_data_reason(&self) -> u32 {
+        self.handshake.early_data_reason()
+    }
+
     /// Returns whether there is stream or DATAGRAM data available to read.
     #[inline]
     pub fn is_readable(&self) -> bool {
