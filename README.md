@@ -330,16 +330,17 @@ cargo can also be used to run the testsuite:
 Note that [BoringSSL], which is used to implement QUIC's cryptographic handshake
 based on TLS, needs to be built and linked to quiche. This is done automatically
 when building quiche using cargo, but requires the `cmake` command to be
-available during the build process. On Windows you also need
-[NASM](https://www.nasm.us/). The [official BoringSSL
+available during the build process.
+
+On Windows [NASM](https://www.nasm.us/) is also required. The [official BoringSSL
 documentation](https://github.com/google/boringssl/blob/master/BUILDING.md) has
 more details.
 
-In alternative you can use your own custom build of BoringSSL by configuring
-the BoringSSL directory with the ``QUICHE_BSSL_PATH`` environment variable:
+In alternative you can use your own custom build of BoringSSL by configuring the
+BoringSSL directory with the ``BORING_BSSL_PATH`` environment variable:
 
 ```bash
- $ QUICHE_BSSL_PATH="/path/to/boringssl" cargo build --examples
+ $ BORING_BSSL_PATH="/path/to/boringssl" cargo build --examples
 ```
 
 Alternatively you can use [OpenSSL/quictls]. To enable quiche to use this vendor
