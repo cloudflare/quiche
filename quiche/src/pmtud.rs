@@ -89,16 +89,16 @@ impl Pmtud {
 
                     self.restart_pmtud();
 
-                    // Record the failed probe again after restarting PMTUD
-                    // to ensure the next probe size is reduced (binary search down)
+                    // Record the failed probe again after restarting PMTUD to
+                    // ensure the next probe size is reduced (binary search down)
                     // instead of resetting to the maximum MTU.
                     //
-                    // NOTE: `failed_probe()` internally calls `update_probe_size()`,
-                    // so this is an intentional and bounded recursive call. After
-                    // `restart_pmtud()` the state is reset, and re-recording the
-                    // failed probe brings the PMTUD state back into a consistent
-                    // configuration for the next probe without causing unbounded
-                    // recursion.
+                    // NOTE: `failed_probe()` internally calls
+                    // `update_probe_size()`, so this is an intentional and
+                    // bounded recursive call. After `restart_pmtud()` the state
+                    // is reset, and re-recording the failed probe brings the
+                    // PMTUD state back into a consistent configuration for the
+                    // next probe without causing unbounded recursion.
                     self.failed_probe(failed_probe_size);
 
                     return;
@@ -398,7 +398,7 @@ mod tests {
         // The largest successful probe should be reset after restarting PMTUD
         assert_eq!(pmtud.largest_successful_probe_size, None);
 
-        // The smallest failed probe should be recorded again after restarting PMTUD
+        // The smallest failed probe should be recorded again
         assert_eq!(pmtud.smallest_failed_probe_size, Some(1300));
 
         // Run the PMTUD test runner to verify handling of inconsistent results
