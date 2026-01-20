@@ -35,7 +35,7 @@ publish = false
 anyhow = { version = "1" }
 assert_matches = { version = "1" }
 boring = { version = "4.3" }
-buffer-pool = { version = "0.1.0", path = "./buffer-pool" }
+buffer-pool = { version = "0.2.0", path = "./buffer-pool" }
 crossbeam = { version = "0.8.1", default-features = false }
 dashmap = { version = "6" }
 datagram-socket = { version = "0.5.0", path = "./datagram-socket" }
