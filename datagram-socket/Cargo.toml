@@ -1,6 +1,6 @@
 [package]
 name = "datagram-socket"
-version = "0.5.0"
+version = "0.6.0"
 repository = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
