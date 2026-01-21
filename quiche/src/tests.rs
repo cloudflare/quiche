@@ -10856,3 +10856,45 @@ fn configuration_values_are_limited_to_max_varint() {
     // do not panic because of too large values that we try to encode via varint.
     assert_eq!(pipe.handshake(), Err(Error::InvalidTransportParam));
 }
+
+#[cfg(feature = "boringssl-boring-crate")]
+#[rstest]
+#[cfg_attr(feature = "pq-experimental", case::x25519_mlkem768(
+    boring::ssl::SslCurve::X25519_MLKEM768
+))]
+#[case::x25519(boring::ssl::SslCurve::X25519)]
+#[case::secp256r1(boring::ssl::SslCurve::SECP256R1)]
+#[case::secp384r1(boring::ssl::SslCurve::SECP384R1)]
+#[case::secp521r1(boring::ssl::SslCurve::SECP521R1)]
+fn handshake_curve(
+    #[case] curve: boring::ssl::SslCurve
+) {
+    use boring::ssl::{SslContextBuilder, SslMethod};
+
+    let mut c_config = {
+        let mut scb = SslContextBuilder::new(SslMethod::tls()).unwrap();
+        scb.set_curves(&[curve]).unwrap();
+        let mut c = Config::with_boring_ssl_ctx_builder(PROTOCOL_VERSION, scb).unwrap();
+        c.set_application_protos(&[b"proto1"]).unwrap();
+        c
+    };
+
+    let mut s_config = {
+        let mut scb = SslContextBuilder::new(SslMethod::tls()).unwrap();
+        scb.set_curves(&[curve]).unwrap();
+        scb.set_certificate_chain_file("examples/cert.crt")
+            .unwrap();
+        scb
+            .set_private_key_file("examples/cert.key", boring::ssl::SslFiletype::PEM)
+            .unwrap();
+        let mut c = Config::with_boring_ssl_ctx_builder(PROTOCOL_VERSION, scb).unwrap();
+        c.set_application_protos(&[b"proto1"]).unwrap();
+        c
+    };
+
+    let mut pipe = test_utils::Pipe::with_client_and_server_config(&mut c_config, &mut s_config).unwrap();
+
+    pipe.handshake().unwrap();
+
+    assert_eq!(pipe.client.handshake.curve().unwrap(), curve.name().unwrap());
+}
