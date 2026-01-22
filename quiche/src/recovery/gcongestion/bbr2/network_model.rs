@@ -498,10 +498,11 @@ impl BBRv2NetworkModel {
         // sample_max_bandwidth will be None if the loss is triggered by a timer
         // expiring. Ideally we'd use the most recent bandwidth sample,
         // but bandwidth_latest is safer than None.
-        if congestion_event.sample_max_bandwidth.is_some() {
+        if let Some(sample_max_bandwidth) = congestion_event.sample_max_bandwidth
+        {
             // bandwidth_latest is the max bandwidth for the round, but to allow
             // fast, conservation style response to loss, use the last sample.
-            last_bandwidth = congestion_event.sample_max_bandwidth.unwrap();
+            last_bandwidth = sample_max_bandwidth;
         }
         if self.pacing_gain > params.full_bw_threshold {
             // In STARTUP, `pacing_gain` is applied to `bandwidth_lo` in
