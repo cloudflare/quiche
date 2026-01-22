@@ -8473,9 +8473,12 @@ fn last_tx_data_larger_than_tx_data(
     test_utils::emit_flight(&mut pipe.server).unwrap();
 
     // Server buffers some data, until send capacity limit reached.
+    // Buffer stream 8 first with 1200 bytes, then stream 4 gets remaining 800.
+    // This proves the first PTO packet sends NEW data from whichever stream
+    // is picked first (stream 8, due to lower sequence number).
     let mut buf = [0; 1200];
-    assert_eq!(pipe.server.stream_send(4, &buf, false), Ok(1200));
-    assert_eq!(pipe.server.stream_send(8, &buf, false), Ok(800));
+    assert_eq!(pipe.server.stream_send(8, &buf, false), Ok(1200));
+    assert_eq!(pipe.server.stream_send(4, &buf, false), Ok(800));
     assert_eq!(pipe.server.stream_send(4, &buf, false), Err(Error::Done));
 
     // Wait for PTO to expire.
@@ -8484,10 +8487,12 @@ fn last_tx_data_larger_than_tx_data(
 
     pipe.server.on_timeout();
 
-    // Server sends PTO probe (not limited to cwnd),
-    // to update last_tx_data.
+    // Server sends PTO probe (not limited to cwnd), to update last_tx_data.
+    //
+    // Stream 8 (1200 bytes) is picked first because it has a lower sequence
+    // number than stream 4 (which was cycled many times during emit_flight).
     let (len, _) = pipe.server.send(&mut buf).unwrap();
-    assert_eq!(len, 848);
+    assert_eq!(len, 1200);
 
     // Client sends STOP_SENDING to decrease tx_data
     // by unsent data. It will make last_tx_data > tx_data
