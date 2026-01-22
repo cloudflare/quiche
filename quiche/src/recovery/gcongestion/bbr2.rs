@@ -167,7 +167,9 @@ struct Params {
     /// STARTUP.
     decrease_startup_pacing_at_end_of_round: bool,
 
-    /// Avoid Overestimation in Bandwidth Sampler with ack aggregation
+    /// Avoid Overestimation in Bandwidth Sampler with ack aggregation.
+    /// This is an old experiment that we have found to under-perform the
+    /// algorithm described in the spec.  Use is not recommended.
     enable_overestimate_avoidance: bool,
 
     /// If true, apply the fix to A0 point selection logic so the
@@ -175,6 +177,7 @@ struct Params {
     /// google/quiche implementation.
     choose_a0_point_fix: bool,
 
+    /// Controls the behavior of BBRAdaptLowerBoundsFromCongestion().
     bw_lo_mode: BwLoMode,
 
     /// Determines whether app limited rounds with no bandwidth growth count
@@ -291,7 +294,7 @@ const DEFAULT_PARAMS: Params = Params {
 
     probe_bw_default_pacing_gain: 1.0,
 
-    probe_bw_cwnd_gain: 2.25, // BBRv3
+    probe_bw_cwnd_gain: 2.0, // BBRv3
 
     probe_bw_up_cwnd_gain: 2.25, // BBRv3
 
@@ -329,13 +332,13 @@ const DEFAULT_PARAMS: Params = Params {
 
     decrease_startup_pacing_at_end_of_round: true,
 
-    enable_overestimate_avoidance: true,
+    enable_overestimate_avoidance: false,
 
     choose_a0_point_fix: false,
 
-    bw_lo_mode: BwLoMode::InflightReduction,
+    bw_lo_mode: BwLoMode::Default,
 
-    ignore_app_limited_for_no_bandwidth_growth: false,
+    ignore_app_limited_for_no_bandwidth_growth: true,
 
     initial_pacing_rate_bytes_per_second: None,
 
@@ -348,9 +351,26 @@ const DEFAULT_PARAMS: Params = Params {
 
 #[derive(Debug, PartialEq)]
 enum BwLoMode {
+    /// Mode that implements the BBRAdaptLowerBoundsFromCongestion()
+    /// behavior described in the BBR RFC draft.
     Default,
+
+    /// BBRAdaptLowerBoundsFromCongestion experiment that reduces
+    /// bw_lo by bytes_lost/min_rtt.
+    ///
+    /// Not recommended.
     MinRttReduction,
+
+    /// BBRAdaptLowerBoundsFromCongestion experiment that reduces
+    /// bw_lo by bw_lo * bytes_lost/inflight.
+    ///
+    /// Not recommended.
     InflightReduction,
+
+    /// BBRAdaptLowerBoundsFromCongestion experiment that reduces
+    /// bw_lo by bw_lo * bytes_lost/cwnd
+    ///
+    /// Not recommended.
     CwndReduction,
 }
 
