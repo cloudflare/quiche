@@ -309,6 +309,7 @@ pub enum RecoveryEventType {
     LossTimerUpdated,
     PacketLost,
     MarkedForRetransmit,
+    CarefulResumePhaseUpdated,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
