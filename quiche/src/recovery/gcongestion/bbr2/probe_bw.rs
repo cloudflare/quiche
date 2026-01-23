@@ -690,7 +690,7 @@ mod tests {
         };
 
         let params = &DEFAULT_PARAMS;
-        let model = BBRv2NetworkModel::new(&params, Duration::from_millis(333));
+        let model = BBRv2NetworkModel::new(params, Duration::from_millis(333));
         let cycle = Cycle::default();
         let mut probe_bw = ProbeBW { model, cycle };
         probe_bw.model.set_inflight_hi(100_000);
@@ -699,7 +699,7 @@ mod tests {
         assert_eq!(probe_bw.cycle.probe_up_bytes, Some(100_000));
 
         assert_eq!(probe_bw.model.inflight_hi(), 100_000);
-        do_probe_up(&mut probe_bw, &params, 1_000_000);
+        do_probe_up(&mut probe_bw, params, 1_000_000);
         // End inflight_hi should be independent of step size.
         assert_eq!(probe_bw.model.inflight_hi(), 113_000);
 
@@ -711,7 +711,7 @@ mod tests {
         assert_eq!(probe_bw.cycle.probe_up_rounds, 2);
         assert_eq!(probe_bw.cycle.probe_up_bytes, Some(56500));
 
-        do_probe_up(&mut probe_bw, &params, 1_000_000);
+        do_probe_up(&mut probe_bw, params, 1_000_000);
         // End inflight_hi should be independent of step size.
         assert_eq!(probe_bw.model.inflight_hi(), 135_100);
 
@@ -722,7 +722,7 @@ mod tests {
         assert_eq!(probe_bw.cycle.probe_up_rounds, 3);
         assert_eq!(probe_bw.cycle.probe_up_bytes, Some(33775));
 
-        do_probe_up(&mut probe_bw, &params, 1_000_000);
+        do_probe_up(&mut probe_bw, params, 1_000_000);
         // End inflight_hi should be independent of step size.
         assert_eq!(probe_bw.model.inflight_hi(), 174_100);
     }
