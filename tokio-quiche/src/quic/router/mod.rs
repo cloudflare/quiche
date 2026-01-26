@@ -351,10 +351,8 @@ where
         self.conns.insert(scid, &conn);
 
         // Add the client-generated "pending" connection ID to the map as well.
-        //
-        // This is only required when client address validation is disabled.
-        // When validation is enabled, the client is already using the
-        // server-generated connection ID by the time we get here.
+        // This is only required for QUIC servers, because clients can send
+        // Initial packets with arbitrary DCIDs to servers.
         if let Some(pending_cid) = pending_cid {
             self.conns.map_cid(pending_cid, &conn);
         }
