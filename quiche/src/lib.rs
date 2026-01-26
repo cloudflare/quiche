@@ -1502,8 +1502,9 @@ where
 ///
 /// The `scid` parameter represents the server's source connection ID, while
 /// the optional `odcid` parameter represents the original destination ID the
-/// client sent before a stateless retry (this is only required when using
-/// the [`retry()`] function).
+/// client sent before a Retry packet (this is only required when using the
+/// [`retry()`] function). See also the [`accept_with_retry()`] function for
+/// more advanced retry cases.
 ///
 /// [`retry()`]: fn.retry.html
 ///
@@ -1517,14 +1518,12 @@ where
 /// let conn = quiche::accept(&scid, None, local, peer, &mut config)?;
 /// # Ok::<(), quiche::Error>(())
 /// ```
-#[inline]
+#[inline(always)]
 pub fn accept(
     scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection> {
-    let conn = Connection::new(scid, odcid, local, peer, config, true)?;
-
-    Ok(conn)
+    accept_with_buf_factory(scid, odcid, local, peer, config)
 }
 
 /// Creates a new server-side connection, with a custom buffer generation
@@ -1537,9 +1536,49 @@ pub fn accept_with_buf_factory<F: BufFactory>(
     scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    let conn = Connection::new(scid, odcid, local, peer, config, true)?;
+    // For connections with `odcid` set, we historically used `retry_source_cid =
+    // scid`. Keep this behavior to preserve backwards compatibility.
+    // `accept_with_retry` allows the SCIDs to be specified separately.
+    let retry_cids = odcid.map(|odcid| RetryConnectionIds {
+        original_destination_cid: odcid,
+        retry_source_cid: scid,
+    });
 
-    Ok(conn)
+    Connection::new(scid, retry_cids, local, peer, config, true)
+}
+
+/// A wrapper for connection IDs used in [`accept_with_retry`].
+pub struct RetryConnectionIds<'a> {
+    /// The DCID of the first Initial packet received by the server, which
+    /// triggered the Retry packet.
+    pub original_destination_cid: &'a ConnectionId<'a>,
+    /// The SCID of the Retry packet sent by the server. This can be different
+    /// from the new connection's SCID.
+    pub retry_source_cid: &'a ConnectionId<'a>,
+}
+
+/// Creates a new server-side connection after the client responded to a Retry
+/// packet.
+///
+/// To generate a Retry packet in the first place, use the [`retry()`] function.
+///
+/// The `scid` parameter represents the server's source connection ID, which can
+/// be freshly generated after the application has successfully verified the
+/// Retry. `retry_cids` is used to tie the new connection to the Initial + Retry
+/// exchange that preceded the connection's creation.
+///
+/// The DCID of the client's Initial packet is inherently untrusted data. It is
+/// safe to use the DCID in the `retry_source_cid` field of the
+/// `RetryConnectionIds` provided to this function. However, using the Initial's
+/// DCID for the `scid` parameter carries risks. Applications are advised to
+/// implement their own DCID validation steps before using the DCID in that
+/// manner.
+#[inline]
+pub fn accept_with_retry<F: BufFactory>(
+    scid: &ConnectionId, retry_cids: RetryConnectionIds, local: SocketAddr,
+    peer: SocketAddr, config: &mut Config,
+) -> Result<Connection<F>> {
+    Connection::new(scid, Some(retry_cids), local, peer, config, true)
 }
 
 /// Creates a new client-side connection.
@@ -1777,16 +1816,20 @@ impl Default for QlogInfo {
 
 impl<F: BufFactory> Connection<F> {
     fn new(
-        scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
-        peer: SocketAddr, config: &mut Config, is_server: bool,
+        scid: &ConnectionId, retry_cids: Option<RetryConnectionIds>,
+        local: SocketAddr, peer: SocketAddr, config: &mut Config,
+        is_server: bool,
     ) -> Result<Connection<F>> {
         let tls = config.tls_ctx.new_handshake()?;
-        Connection::with_tls(scid, odcid, local, peer, config, tls, is_server)
+        Connection::with_tls(
+            scid, retry_cids, local, peer, config, tls, is_server,
+        )
     }
 
     fn with_tls(
-        scid: &ConnectionId, odcid: Option<&ConnectionId>, local: SocketAddr,
-        peer: SocketAddr, config: &Config, tls: tls::Handshake, is_server: bool,
+        scid: &ConnectionId, retry_cids: Option<RetryConnectionIds>,
+        local: SocketAddr, peer: SocketAddr, config: &Config,
+        tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection<F>> {
         let max_rx_data = config.local_transport_params.initial_max_data;
 
@@ -1810,8 +1853,8 @@ impl<F: BufFactory> Connection<F> {
             Some(config),
         );
 
-        // If we did stateless retry assume the peer's address is verified.
-        path.verified_peer_address = odcid.is_some();
+        // If we sent a Retry assume the peer's address is verified.
+        path.verified_peer_address = retry_cids.is_some();
         // Assume clients validate the server's address implicitly.
         path.peer_verified_local_address = is_server;
 
@@ -1994,12 +2037,13 @@ impl<F: BufFactory> Connection<F> {
             max_amplification_factor: config.max_amplification_factor,
         };
 
-        if let Some(odcid) = odcid {
+        if let Some(retry_cids) = retry_cids {
             conn.local_transport_params
-                .original_destination_connection_id = Some(odcid.to_vec().into());
+                .original_destination_connection_id =
+                Some(retry_cids.original_destination_cid.to_vec().into());
 
             conn.local_transport_params.retry_source_connection_id =
-                Some(conn.ids.get_scid(0)?.cid.to_vec().into());
+                Some(retry_cids.retry_source_cid.to_vec().into());
 
             conn.did_retry = true;
         }
