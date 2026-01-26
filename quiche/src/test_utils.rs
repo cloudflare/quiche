@@ -513,7 +513,7 @@ pub fn create_cid_and_reset_token(
 ) -> (ConnectionId<'static>, u128) {
     let mut cid = vec![0; cid_len];
     rand::rand_bytes(&mut cid[..]);
-    let cid = ConnectionId::from_ref(&cid).into_owned();
+    let cid = ConnectionId::from(cid);
 
     let mut reset_token = [0; 16];
     rand::rand_bytes(&mut reset_token);
