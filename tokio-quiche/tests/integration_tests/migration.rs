@@ -224,7 +224,7 @@ fn process_h3_events(
 
             Ok((stream_id, quiche::h3::Event::Data)) => {
                 // Drain stream and drop the data.
-                while let Ok(_) = h3_conn.recv_body(conn, stream_id, &mut buf) {}
+                while h3_conn.recv_body(conn, stream_id, &mut buf).is_ok() {}
             },
 
             Ok((_, quiche::h3::Event::Finished)) => {
