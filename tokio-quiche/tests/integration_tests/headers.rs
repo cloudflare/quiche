@@ -48,11 +48,10 @@ async fn test_additional_headers() {
 
             while let Some(event) = event_rx.recv().await {
                 match event {
-                    ServerH3Event::Core(event) => match event {
-                        H3Event::ConnectionShutdown(_) => break,
-
-                        _ => (),
-                    },
+                    ServerH3Event::Core(event) =>
+                        if let H3Event::ConnectionShutdown(_) = event {
+                            break;
+                        },
 
                     ServerH3Event::Headers {
                         incoming_headers, ..
