@@ -99,13 +99,14 @@ impl ModeImpl for ProbeRTT {
                     self.inflight_target(params)
                 {
                     self.exit_time = Some(
-                        congestion_event.event_time + params.probe_rtt_duration,
+                        congestion_event.meta.event_time +
+                            params.probe_rtt_duration,
                     )
                 }
                 Mode::ProbeRTT(self)
             },
             Some(exit_time) =>
-                if congestion_event.event_time > exit_time {
+                if congestion_event.meta.event_time > exit_time {
                     self.into_probe_bw(event_time, Some(congestion_event), params)
                 } else {
                     Mode::ProbeRTT(self)

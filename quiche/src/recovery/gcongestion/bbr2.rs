@@ -440,13 +440,21 @@ pub(crate) struct BBRv2 {
     params: Params,
 }
 
-struct BBRv2CongestionEvent {
+struct BBRv2CongestionEventMeta {
     event_time: Instant,
 
     /// The congestion window prior to the processing of the ack/loss events.
     prior_cwnd: usize,
+
     /// Total bytes inflight before the processing of the ack/loss events.
     prior_bytes_in_flight: usize,
+
+    // When the event happened, whether the sender is probing for bandwidth.
+    is_probing_for_bandwidth: bool,
+}
+
+struct BBRv2CongestionEvent {
+    meta: BBRv2CongestionEventMeta,
 
     /// Total bytes inflight after the processing of the ack/loss events.
     bytes_in_flight: usize,
@@ -457,8 +465,6 @@ struct BBRv2CongestionEvent {
 
     /// Whether acked_packets indicates the end of a round trip.
     end_of_round_trip: bool,
-    // When the event happened, whether the sender is probing for bandwidth.
-    is_probing_for_bandwidth: bool,
 
     // Maximum bandwidth of all bandwidth samples from acked_packets.
     // This sample may be app-limited, and will be None if there are no newly
@@ -473,27 +479,6 @@ struct BBRv2CongestionEvent {
     /// empty. If acked_packets is empty, it's the send state of the largest
     /// packet in lost_packets.
     last_packet_send_state: SendTimeState,
-}
-
-impl BBRv2CongestionEvent {
-    fn new(
-        event_time: Instant, prior_cwnd: usize, prior_bytes_in_flight: usize,
-        is_probing_for_bandwidth: bool,
-    ) -> Self {
-        BBRv2CongestionEvent {
-            event_time,
-            prior_cwnd,
-            prior_bytes_in_flight,
-            is_probing_for_bandwidth,
-            bytes_in_flight: 0,
-            bytes_acked: 0,
-            bytes_lost: 0,
-            end_of_round_trip: false,
-            last_packet_send_state: Default::default(),
-            sample_max_bandwidth: None,
-            sample_min_rtt: None,
-        }
-    }
 }
 
 impl BBRv2 {
@@ -673,20 +658,22 @@ impl CongestionControl for BBRv2 {
         lost_packets: &[Lost], least_unacked: u64, _rtt_stats: &RttStats,
         recovery_stats: &mut RecoveryStats,
     ) {
-        let mut congestion_event = BBRv2CongestionEvent::new(
+        let meta = BBRv2CongestionEventMeta {
             event_time,
-            self.cwnd,
-            prior_in_flight,
-            self.mode.is_probing_for_bandwidth(),
-        );
+            prior_cwnd: self.cwnd,
+            prior_bytes_in_flight: prior_in_flight,
+            is_probing_for_bandwidth: self.mode.is_probing_for_bandwidth(),
+        };
 
         let network_model = self.mode.network_model_mut();
-        network_model.on_congestion_event_start(
+        let Some(mut congestion_event) = network_model.on_congestion_event_start(
+            meta,
             acked_packets,
             lost_packets,
-            &mut congestion_event,
             &self.params,
-        );
+        ) else {
+            return;
+        };
 
         // Number of mode changes allowed for this congestion event.
         let mut mode_changes_allowed = MAX_MODE_CHANGES_PER_CONGESTION_EVENT;
