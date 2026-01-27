@@ -326,6 +326,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         max_window,
         max_stream_window,
         session: None,
+        enable_early_data: false,
         enable_dgram,
         dgram_recv_queue_len,
         dgram_send_queue_len,

@@ -192,8 +192,8 @@ where
     let ctx = TelemetryContext::current();
 
     if cfg!(feature = "tokio-task-metrics") {
-        killswitch_spawn(Instrumented::new(name, metrics, ctx.apply(future)))
+        killswitch_spawn(Instrumented::new(name, metrics, ctx.apply(future)));
     } else {
-        killswitch_spawn(ctx.apply(future))
+        killswitch_spawn(ctx.apply(future));
     }
 }

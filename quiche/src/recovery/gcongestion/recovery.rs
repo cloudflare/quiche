@@ -447,6 +447,7 @@ pub struct GRecovery {
     pub bytes_lost: u64,
 
     max_datagram_size: usize,
+    time_sent_set_to_now: bool,
 
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
@@ -499,6 +500,7 @@ impl GRecovery {
             bytes_lost: 0,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
+            time_sent_set_to_now: cc.time_sent_set_to_now(),
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
@@ -688,7 +690,11 @@ impl RecoveryOps for GRecovery {
         &mut self, pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
-        let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
+        let time_sent = if self.time_sent_set_to_now {
+            now
+        } else {
+            self.get_next_release_time().time(now).unwrap_or(now)
+        };
 
         let epoch = &mut self.epochs[epoch];
 
@@ -1042,7 +1048,6 @@ impl RecoveryOps for GRecovery {
         self.epochs[epoch].pkts_in_flight
     }
 
-    #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
         self.bytes_in_flight.get()
     }

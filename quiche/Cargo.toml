@@ -1,6 +1,6 @@
 [package]
 name = "quiche"
-version = "0.24.6"
+version = "0.24.8"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 repository = { workspace = true }
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
@@ -70,7 +70,6 @@ cdylib-link-lines = { version = "0.1", optional = true }
 
 [dependencies]
 boring = { workspace = true, optional = true }
-debug_panic = { version = "0.2.1" }
 either = { version = "1.8", default-features = false }
 foreign-types-shared = { version = "0.3.0", optional = true }
 intrusive-collections = "0.9.5"

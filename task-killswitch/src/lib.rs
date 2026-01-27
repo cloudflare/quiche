@@ -29,6 +29,7 @@ use parking_lot::Mutex;
 use tokio::sync::watch;
 use tokio::task;
 use tokio::task::AbortHandle;
+use tokio::task::Id;
 
 use std::future::Future;
 use std::sync::atomic::AtomicBool;
@@ -96,9 +97,11 @@ impl TaskKillswitch {
         self.activated.load(Ordering::Relaxed)
     }
 
-    fn spawn_task(&self, fut: impl Future<Output = ()> + Send + 'static) {
+    fn spawn_task(
+        &self, fut: impl Future<Output = ()> + Send + 'static,
+    ) -> Option<Id> {
         if self.was_activated() {
-            return;
+            return None;
         }
 
         let storage = self.storage;
@@ -109,11 +112,15 @@ impl TaskKillswitch {
         })
         .abort_handle();
 
+        let id = handle.id();
+
         let res = self.storage.add_task_if(handle, || !self.was_activated());
         if let Err(handle) = res {
             // Killswitch was activated by the time we got a lock on the map shard
             handle.abort();
+            return None;
         }
+        Some(id)
     }
 
     fn activate(&self) {
@@ -213,8 +220,10 @@ static TASK_KILLSWITCH: LazyLock<TaskKillswitch> =
 ///
 /// Under the hood, [`tokio::spawn`] schedules the actual execution.
 #[inline]
-pub fn spawn_with_killswitch(fut: impl Future<Output = ()> + Send + 'static) {
-    TASK_KILLSWITCH.spawn_task(fut);
+pub fn spawn_with_killswitch(
+    fut: impl Future<Output = ()> + Send + 'static,
+) -> Option<Id> {
+    TASK_KILLSWITCH.spawn_task(fut)
 }
 
 #[deprecated = "activate() was unnecessarily declared async. Use activate_now() instead."]

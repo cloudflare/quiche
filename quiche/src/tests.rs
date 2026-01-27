@@ -2708,7 +2708,8 @@ fn stop_sending(
         Err(Error::StreamStopped(42)),
     );
 
-    assert_eq!(pipe.server.streams.len(), 1);
+    // Returning `StreamStopped` causes the stream to be collected.
+    assert_eq!(pipe.server.streams.len(), 0);
 
     // Client acks RESET_STREAM frame.
     let mut ranges = ranges::RangeSet::default();
@@ -2721,9 +2722,6 @@ fn stop_sending(
     }];
 
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
-
-    // Stream is collected on the server after RESET_STREAM is acked.
-    assert_eq!(pipe.server.streams.len(), 0);
 
     // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
     let frames = [frame::Frame::StopSending {
@@ -2896,6 +2894,249 @@ fn stop_sending_unsent_tx_cap(
 }
 
 #[rstest]
+/// Tests that the `StreamStopped` error is propagated even if the RESET_STREAM
+/// in response to STOP_SENDING is acked before the application processes
+/// writable streams.
+fn stop_sending_ack_race(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut b = [0; 15];
+
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends some data, and closes stream.
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server gets data.
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
+    assert!(pipe.server.stream_finished(0));
+
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), None);
+
+    // Server sends data, until blocked.
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    while pipe.server.stream_send(0, b"world", false) != Err(Error::Done) {
+        assert_eq!(pipe.advance(), Ok(()));
+    }
+
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), None);
+
+    // Client sends STOP_SENDING.
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let pkt_type = Type::Short;
+    let len = pipe
+        .send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    // Server sent a RESET_STREAM frame in response.
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    let mut iter = frames.iter();
+
+    // Skip ACK frame.
+    iter.next();
+
+    assert_eq!(
+        iter.next(),
+        Some(&frame::Frame::ResetStream {
+            stream_id: 0,
+            error_code: 42,
+            final_size: 15,
+        })
+    );
+
+    // Client acks RESET_STREAM frame *before* server calls `writable()`.
+    let mut ranges = ranges::RangeSet::default();
+    ranges.insert(pipe.server.next_pkt_num - 5..pipe.server.next_pkt_num);
+
+    let frames = [frame::Frame::ACK {
+        ack_delay: 15,
+        ranges,
+        ecn_counts: None,
+    }];
+
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
+
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Stream is writable, but writing returns an error.
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(
+        pipe.server.stream_send(0, b"world", true),
+        Err(Error::StreamStopped(42)),
+    );
+
+    // Stream is collected on the server after `StreamStopped` is returned.
+    assert_eq!(pipe.server.streams.len(), 0);
+
+    // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let len = pipe
+        .send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    assert_eq!(frames.len(), 1);
+
+    match frames.first() {
+        Some(frame::Frame::ACK { .. }) => (),
+
+        f => panic!("expected ACK frame, got {f:?}"),
+    };
+
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), None);
+}
+
+#[rstest]
+/// Tests that the `StreamStopped` error is propagated even if a STREAM frame
+/// is acked before the application processes writable streams.
+fn stop_sending_stream_ack_race(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut b = [0; 15];
+
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends some data, and closes stream.
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server gets data.
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
+    assert!(pipe.server.stream_finished(0));
+
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), None);
+
+    // Server sends data and finishes the stream.
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(pipe.server.stream_send(0, b"world", true), Ok(5));
+
+    // Client receives STREAM frame but doesn't ack yet.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // Client sends STOP_SENDING.
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let pkt_type = Type::Short;
+    let len = pipe
+        .send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    // Server sent a RESET_STREAM frame in response.
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    let mut iter = frames.iter();
+
+    // Skip ACK frame.
+    iter.next();
+
+    assert_eq!(
+        iter.next(),
+        Some(&frame::Frame::ResetStream {
+            stream_id: 0,
+            error_code: 42,
+            final_size: 5,
+        })
+    );
+
+    // Client acks RESET_STREAM and STREAM frames *before* server calls
+    // `writable()`.
+    let mut ranges = ranges::RangeSet::default();
+    ranges.insert(pipe.server.next_pkt_num - 5..pipe.server.next_pkt_num);
+
+    let frames = [frame::Frame::ACK {
+        ack_delay: 15,
+        ranges,
+        ecn_counts: None,
+    }];
+
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
+
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Stream is writable, but writing returns an error.
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), Some(0));
+    assert_eq!(r.next(), None);
+
+    assert_eq!(
+        pipe.server.stream_send(0, b"world", true),
+        Err(Error::StreamStopped(42)),
+    );
+
+    // Stream is collected on the server after `StreamStopped` is returned.
+    assert_eq!(pipe.server.streams.len(), 0);
+
+    // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let len = pipe
+        .send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    assert_eq!(frames.len(), 1);
+
+    match frames.first() {
+        Some(frame::Frame::ACK { .. }) => (),
+
+        f => panic!("expected ACK frame, got {f:?}"),
+    };
+
+    let mut r = pipe.server.writable();
+    assert_eq!(r.next(), None);
+}
+
+#[rstest]
 fn stream_shutdown_read(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
@@ -2928,15 +3169,12 @@ fn stream_shutdown_read(
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
     // make sure the pkt contains the expected StopSending frame
-    assert!(frames
-        .iter()
-        .find(|f| {
-            **f == frame::Frame::StopSending {
-                stream_id: 4,
-                error_code: 42,
-            }
-        })
-        .is_some(),);
+    assert!(frames.iter().any(|f| {
+        *f == frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        }
+    }));
 
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
@@ -3130,16 +3368,17 @@ fn stream_shutdown_read_update_max_data(
     assert_eq!(pipe.server.rx_data, 21);
     assert!(!pipe.server.stream_readable(0)); // nothing can be consumed
 
-    // Server sends fin to fully close the stream
+    // Server sends fin to fully close the stream.
     assert_eq!(pipe.server.stream_send(0, &[], true), Ok(0));
     assert_eq!(pipe.advance(), Ok(()));
     assert_eq!(pipe.client.stream_recv(0, &mut buf), Ok((0, true)));
+
     assert!(pipe.server.streams.is_collected(0));
     assert!(pipe.client.streams.is_collected(0));
 }
 
-// Sending a reset should drop the receive buffer on the peer and
-// return flow control credit
+/// Tests that sending a reset should drop the receive buffer on the peer and
+/// return flow control credit.
 #[rstest]
 fn stream_shutdown_write_update_max_data(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -3681,6 +3920,16 @@ fn flow_control_limit_send(
     assert!(r.next().is_some());
     assert!(r.next().is_some());
     assert!(r.next().is_none());
+
+    assert_eq!(pipe.server.data_blocked_sent_count, 0);
+    assert_eq!(pipe.server.stream_data_blocked_sent_count, 0);
+    assert_eq!(pipe.server.data_blocked_recv_count, 1);
+    assert_eq!(pipe.server.stream_data_blocked_recv_count, 0);
+
+    assert_eq!(pipe.client.data_blocked_sent_count, 1);
+    assert_eq!(pipe.client.stream_data_blocked_sent_count, 0);
+    assert_eq!(pipe.client.data_blocked_recv_count, 0);
+    assert_eq!(pipe.client.stream_data_blocked_recv_count, 0);
 }
 
 #[rstest]
@@ -3950,7 +4199,8 @@ fn stop_sending_before_flushed_packets(
         Err(Error::StreamStopped(42)),
     );
 
-    assert_eq!(pipe.server.streams.len(), 1);
+    // Returning `StreamStopped` causes the stream to be collected.
+    assert_eq!(pipe.server.streams.len(), 0);
 
     // Client acks RESET_STREAM frame.
     let mut ranges = ranges::RangeSet::default();
@@ -3963,9 +4213,6 @@ fn stop_sending_before_flushed_packets(
     }];
 
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
-
-    // Client has ACK'd the RESET_STREAM so the stream is collected.
-    assert_eq!(pipe.server.streams.len(), 0);
 }
 
 #[rstest]
@@ -4029,6 +4276,16 @@ fn reset_before_flushed_packets(
 
     // Client has ACK'd the RESET_STREAM so the stream is collected.
     assert_eq!(pipe.server.streams.len(), 0);
+
+    assert_eq!(pipe.server.data_blocked_sent_count, 0);
+    assert_eq!(pipe.server.stream_data_blocked_sent_count, 1);
+    assert_eq!(pipe.server.data_blocked_recv_count, 0);
+    assert_eq!(pipe.server.stream_data_blocked_recv_count, 0);
+
+    assert_eq!(pipe.client.data_blocked_sent_count, 0);
+    assert_eq!(pipe.client.stream_data_blocked_sent_count, 0);
+    assert_eq!(pipe.client.data_blocked_recv_count, 0);
+    assert_eq!(pipe.client.stream_data_blocked_recv_count, 1);
 }
 
 #[rstest]
@@ -5081,6 +5338,209 @@ fn tx_cap_factor() {
     assert_eq!(pipe.client.stream_recv(4, &mut b), Ok((12000, false)));
 
     assert_eq!(r.next(), None);
+}
+
+#[rstest]
+fn client_rst_stream_while_bytes_in_flight(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] use_stop_sending: bool,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config.set_initial_max_data(50000);
+    config.set_initial_max_stream_data_bidi_local(120000);
+    config.set_initial_max_stream_data_bidi_remote(120000);
+    config.set_initial_max_streams_bidi(3);
+    config.set_initial_max_streams_uni(3);
+    config.set_max_recv_udp_payload_size(1200);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends stream data.
+    assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
+    // Send FIN if we want to exercise the case of the client sending
+    // STOP_SENDING instead of RESET_STREAM.
+    assert_eq!(pipe.client.stream_send(4, b"a", use_stop_sending), Ok(1));
+    assert_eq!(pipe.client.stream_send(8, b"a", true), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut b = [0; 50000];
+
+    // Server reads stream data.
+    pipe.server.stream_recv(0, &mut b).unwrap();
+    pipe.server.stream_recv(4, &mut b).unwrap();
+    pipe.server.stream_recv(8, &mut b).unwrap();
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server sends stream data bigger than cwnd.
+    let send_buf = [0; 50000];
+    assert_eq!(
+        pipe.server.stream_send(4, &send_buf, false),
+        if cc_algorithm_name == "cubic" {
+            Ok(12000)
+        } else if cfg!(feature = "openssl") {
+            Ok(13964)
+        } else {
+            Ok(13878)
+        }
+    );
+    let server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    // And generate a stop sending or reset at the client.
+    assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+    if !use_stop_sending {
+        // Client did not send a FIN on stream 4, shutdown both sides to send a
+        // RESET_STREAM.
+        assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+    }
+    let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+
+    test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
+    test_utils::process_flight(&mut pipe.client, server_flight).unwrap();
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // tx_buffered goes down to 0 after the reset and acks are
+    // processed.  A full cwnd's worth of packets can be sent.
+    let expected_cwnd = match cc_algorithm_name {
+        "bbr2" | "bbr2_gcongestion" =>
+            if cfg!(feature = "openssl") {
+                27928
+            } else {
+                27756
+            },
+        _ => 24000,
+    };
+
+    assert_eq!(pipe.server.tx_buffered, 0);
+    assert_eq!(
+        pipe.server.stream_send(8, &send_buf, false),
+        Ok(expected_cwnd)
+    );
+    assert_eq!(pipe.server.tx_buffered, expected_cwnd);
+    assert_eq!(
+        pipe.server
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .cwnd(),
+        expected_cwnd
+    );
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.tx_buffered_state, TxBufferTrackingState::Ok);
+}
+
+#[rstest]
+fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config.set_initial_max_data(50000);
+    config.set_initial_max_stream_data_bidi_local(120000);
+    config.set_initial_max_stream_data_bidi_remote(120000);
+    config.set_initial_max_streams_bidi(3);
+    config.set_initial_max_streams_uni(3);
+    config.set_max_recv_udp_payload_size(1200);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends stream data.
+    assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
+    assert_eq!(pipe.client.stream_send(4, b"a", true), Ok(1));
+    assert_eq!(pipe.client.stream_send(8, b"a", true), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut b = [0; 50000];
+
+    // Server reads stream data.
+    pipe.server.stream_recv(0, &mut b).unwrap();
+    pipe.server.stream_recv(4, &mut b).unwrap();
+    pipe.server.stream_recv(8, &mut b).unwrap();
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server sends stream data bigger than cwnd.
+    let send_buf = [0; 50000];
+    assert_eq!(
+        pipe.server.stream_send(4, &send_buf, false),
+        if cc_algorithm_name == "cubic" {
+            Ok(12000)
+        } else if cfg!(feature = "openssl") {
+            Ok(13964)
+        } else {
+            Ok(13878)
+        }
+    );
+    let mut server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    // And generate a STOP_SENDING at the client.
+    assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+    let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+
+    // Lose the first packet of the server flight.
+    server_flight.remove(0);
+
+    test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
+    test_utils::process_flight(&mut pipe.client, server_flight).unwrap();
+
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // tx_buffered goes down to 0 after the reset and acks are
+    // processed.  A full cwnd's worth of packets can be sent.
+    let expected_cwnd = match cc_algorithm_name {
+        "bbr2" | "bbr2_gcongestion" =>
+            if cfg!(feature = "openssl") {
+                26728
+            } else {
+                26556
+            },
+        _ => 8400,
+    };
+
+    assert_eq!(pipe.server.tx_buffered, 0);
+
+    let send_result = pipe.server.stream_send(8, &send_buf, false).unwrap();
+    if cc_algorithm_name != "cubic" {
+        assert_eq!(send_result, expected_cwnd);
+    } else {
+        // cubic adjusts the congestion window downwards due to the
+        // lost packet.  The exact send size varies.
+        assert!((15000..17000).contains(&send_result));
+    }
+    assert_eq!(pipe.server.tx_buffered, send_result);
+    assert_eq!(
+        pipe.server
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .cwnd(),
+        expected_cwnd
+    );
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.tx_buffered_state, TxBufferTrackingState::Ok);
 }
 
 #[rstest]
@@ -6591,6 +7051,10 @@ fn dgram_send_app_limited(
         assert_eq!(pipe.client.dgram_send(&send_buf), Ok(()));
     }
 
+    // bbr2_gcongestion uses different logic to set app_limited
+    // TODO fix
+    let should_be_app_limited =
+        cc_algorithm_name == "cubic" || cc_algorithm_name == "reno";
     assert_eq!(
         !pipe
             .client
@@ -6599,9 +7063,7 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        // bbr2_gcongestion uses different logic to set app_limited
-        // TODO fix
-        cc_algorithm_name != "bbr2_gcongestion"
+        should_be_app_limited
     );
     assert_eq!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
 
@@ -6617,7 +7079,7 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        cc_algorithm_name != "bbr2_gcongestion"
+        should_be_app_limited
     );
 
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
@@ -6639,7 +7101,7 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        cc_algorithm_name != "bbr2_gcongestion"
+        should_be_app_limited
     );
 }
 
@@ -9432,9 +9894,9 @@ fn resilience_against_migration_attack(
     let send1_bytes = pipe.server.stream_send(1, &buf, true).unwrap();
     assert_eq!(send1_bytes, match cc_algorithm_name {
         #[cfg(feature = "openssl")]
-        "bbr2" => 14041,
+        "bbr2" => 13966,
         #[cfg(not(feature = "openssl"))]
-        "bbr2" => 13955,
+        "bbr2" => 13880,
         #[cfg(feature = "openssl")]
         "bbr2_gcongestion" => 13966,
         #[cfg(not(feature = "openssl"))]
@@ -9775,8 +10237,9 @@ fn stop_sending_stream_send_after_reset_stream_ack(
         Err(Error::StreamStopped(42))
     );
 
-    assert_eq!(pipe.server.writable().len(), 10);
-    assert_eq!(pipe.server.streams.len(), 10);
+    // Returning `StreamStopped` causes the stream to be collected.
+    assert_eq!(pipe.server.streams.len(), 9);
+    assert_eq!(pipe.server.writable().len(), 9);
 
     // Client acks RESET_STREAM frame.
     let mut ranges = ranges::RangeSet::default();

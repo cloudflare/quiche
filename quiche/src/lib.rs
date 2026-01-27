@@ -506,229 +506,6 @@ const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
 // The send capacity factor.
 const TX_CAP_FACTOR: f64 = 1.0;
 
-/// A specialized [`Result`] type for quiche operations.
-///
-/// This type is used throughout quiche's public API for any operation that
-/// can produce an error.
-///
-/// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
-pub type Result<T> = std::result::Result<T, Error>;
-
-/// A QUIC error.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Error {
-    /// There is no more work to do.
-    Done,
-
-    /// The provided buffer is too short.
-    BufferTooShort,
-
-    /// The provided packet cannot be parsed because its version is unknown.
-    UnknownVersion,
-
-    /// The provided packet cannot be parsed because it contains an invalid
-    /// frame.
-    InvalidFrame,
-
-    /// The provided packet cannot be parsed.
-    InvalidPacket,
-
-    /// The operation cannot be completed because the connection is in an
-    /// invalid state.
-    InvalidState,
-
-    /// The operation cannot be completed because the stream is in an
-    /// invalid state.
-    ///
-    /// The stream ID is provided as associated data.
-    InvalidStreamState(u64),
-
-    /// The peer's transport params cannot be parsed.
-    InvalidTransportParam,
-
-    /// A cryptographic operation failed.
-    CryptoFail,
-
-    /// The TLS handshake failed.
-    TlsFail,
-
-    /// The peer violated the local flow control limits.
-    FlowControl,
-
-    /// The peer violated the local stream limits.
-    StreamLimit,
-
-    /// The specified stream was stopped by the peer.
-    ///
-    /// The error code sent as part of the `STOP_SENDING` frame is provided as
-    /// associated data.
-    StreamStopped(u64),
-
-    /// The specified stream was reset by the peer.
-    ///
-    /// The error code sent as part of the `RESET_STREAM` frame is provided as
-    /// associated data.
-    StreamReset(u64),
-
-    /// The received data exceeds the stream's final size.
-    FinalSize,
-
-    /// Error in congestion control.
-    CongestionControl,
-
-    /// Too many identifiers were provided.
-    IdLimit,
-
-    /// Not enough available identifiers.
-    OutOfIdentifiers,
-
-    /// Error in key update.
-    KeyUpdate,
-
-    /// The peer sent more data in CRYPTO frames than we can buffer.
-    CryptoBufferExceeded,
-
-    /// The peer sent an ACK frame with an invalid range.
-    InvalidAckRange,
-
-    /// The peer send an ACK frame for a skipped packet used for Optimistic ACK
-    /// mitigation.
-    OptimisticAckDetected,
-}
-
-/// QUIC error codes sent on the wire.
-///
-/// As defined in [RFC9000](https://www.rfc-editor.org/rfc/rfc9000.html#name-error-codes).
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum WireErrorCode {
-    /// An endpoint uses this with CONNECTION_CLOSE to signal that the
-    /// connection is being closed abruptly in the absence of any error.
-    NoError              = 0x0,
-    /// The endpoint encountered an internal error and cannot continue with the
-    /// connection.
-    InternalError        = 0x1,
-    /// The server refused to accept a new connection.
-    ConnectionRefused    = 0x2,
-    /// An endpoint received more data than it permitted in its advertised data
-    /// limits; see Section 4.
-    FlowControlError     = 0x3,
-    /// An endpoint received a frame for a stream identifier that exceeded its
-    /// advertised stream limit for the corresponding stream type.
-    StreamLimitError     = 0x4,
-    /// An endpoint received a frame for a stream that was not in a state that
-    /// permitted that frame.
-    StreamStateError     = 0x5,
-    /// (1) An endpoint received a STREAM frame containing data that exceeded
-    /// the previously established final size, (2) an endpoint received a
-    /// STREAM frame or a RESET_STREAM frame containing a final size that
-    /// was lower than the size of stream data that was already received, or
-    /// (3) an endpoint received a STREAM frame or a RESET_STREAM frame
-    /// containing a different final size to the one already established.
-    FinalSizeError       = 0x6,
-    /// An endpoint received a frame that was badly formatted -- for instance, a
-    /// frame of an unknown type or an ACK frame that has more
-    /// acknowledgment ranges than the remainder of the packet could carry.
-    FrameEncodingError   = 0x7,
-    /// An endpoint received transport parameters that were badly formatted,
-    /// included an invalid value, omitted a mandatory transport parameter,
-    /// included a forbidden transport parameter, or were otherwise in
-    /// error.
-    TransportParameterError = 0x8,
-    /// An endpoint received transport parameters that were badly formatted,
-    /// included an invalid value, omitted a mandatory transport parameter,
-    /// included a forbidden transport parameter, or were otherwise in
-    /// error.
-    ConnectionIdLimitError = 0x9,
-    /// An endpoint detected an error with protocol compliance that was not
-    /// covered by more specific error codes.
-    ProtocolViolation    = 0xa,
-    /// A server received a client Initial that contained an invalid Token
-    /// field.
-    InvalidToken         = 0xb,
-    /// The application or application protocol caused the connection to be
-    /// closed.
-    ApplicationError     = 0xc,
-    /// An endpoint has received more data in CRYPTO frames than it can buffer.
-    CryptoBufferExceeded = 0xd,
-    /// An endpoint detected errors in performing key updates.
-    KeyUpdateError       = 0xe,
-    /// An endpoint has reached the confidentiality or integrity limit for the
-    /// AEAD algorithm used by the given connection.
-    AeadLimitReached     = 0xf,
-    /// An endpoint has determined that the network path is incapable of
-    /// supporting QUIC. An endpoint is unlikely to receive a
-    /// CONNECTION_CLOSE frame carrying this code except when the path does
-    /// not support a large enough MTU.
-    NoViablePath         = 0x10,
-}
-
-impl Error {
-    fn to_wire(self) -> u64 {
-        match self {
-            Error::Done => WireErrorCode::NoError as u64,
-            Error::InvalidFrame => WireErrorCode::FrameEncodingError as u64,
-            Error::InvalidStreamState(..) =>
-                WireErrorCode::StreamStateError as u64,
-            Error::InvalidTransportParam =>
-                WireErrorCode::TransportParameterError as u64,
-            Error::FlowControl => WireErrorCode::FlowControlError as u64,
-            Error::StreamLimit => WireErrorCode::StreamLimitError as u64,
-            Error::IdLimit => WireErrorCode::ConnectionIdLimitError as u64,
-            Error::FinalSize => WireErrorCode::FinalSizeError as u64,
-            Error::CryptoBufferExceeded =>
-                WireErrorCode::CryptoBufferExceeded as u64,
-            Error::KeyUpdate => WireErrorCode::KeyUpdateError as u64,
-            _ => WireErrorCode::ProtocolViolation as u64,
-        }
-    }
-
-    #[cfg(feature = "ffi")]
-    fn to_c(self) -> libc::ssize_t {
-        match self {
-            Error::Done => -1,
-            Error::BufferTooShort => -2,
-            Error::UnknownVersion => -3,
-            Error::InvalidFrame => -4,
-            Error::InvalidPacket => -5,
-            Error::InvalidState => -6,
-            Error::InvalidStreamState(_) => -7,
-            Error::InvalidTransportParam => -8,
-            Error::CryptoFail => -9,
-            Error::TlsFail => -10,
-            Error::FlowControl => -11,
-            Error::StreamLimit => -12,
-            Error::FinalSize => -13,
-            Error::CongestionControl => -14,
-            Error::StreamStopped { .. } => -15,
-            Error::StreamReset { .. } => -16,
-            Error::IdLimit => -17,
-            Error::OutOfIdentifiers => -18,
-            Error::KeyUpdate => -19,
-            Error::CryptoBufferExceeded => -20,
-            Error::InvalidAckRange => -21,
-            Error::OptimisticAckDetected => -22,
-        }
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
-impl From<octets::BufferTooShortError> for Error {
-    fn from(_err: octets::BufferTooShortError) -> Self {
-        Error::BufferTooShort
-    }
-}
-
 /// Ancillary information about incoming packets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecvInfo {
@@ -754,19 +531,6 @@ pub struct SendInfo {
     ///
     /// [Pacing]: index.html#pacing
     pub at: Instant,
-}
-
-/// Represents information carried by `CONNECTION_CLOSE` frames.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConnectionError {
-    /// Whether the error came from the application or the transport layer.
-    pub is_app: bool,
-
-    /// The error code carried by the `CONNECTION_CLOSE` frame.
-    pub error_code: u64,
-
-    /// The reason carried by the `CONNECTION_CLOSE` frame.
-    pub reason: Vec<u8>,
 }
 
 /// The side of the stream to be shut down.
@@ -1491,6 +1255,18 @@ impl Config {
     }
 }
 
+/// Tracks the health of the tx_buffered value.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum TxBufferTrackingState {
+    /// The send buffer is in a good state
+    #[default]
+    Ok,
+    /// The send buffer is in an inconsistent state, which could lead to
+    /// connection stalls or excess buffering due to bugs we haven't
+    /// tracked down yet.
+    Inconsistent,
+}
+
 /// A QUIC connection.
 pub struct Connection<F = DefaultBufFactory>
 where
@@ -1591,6 +1367,9 @@ where
 
     /// Number of bytes buffered in the send buffer.
     tx_buffered: usize,
+
+    /// Tracks the health of tx_buffered.
+    tx_buffered_state: TxBufferTrackingState,
 
     /// Total number of bytes sent to the peer.
     tx_data: u64,
@@ -1735,6 +1514,21 @@ where
 
     /// The number of streams stopped by remote.
     stopped_stream_remote_count: u64,
+
+    /// The number of DATA_BLOCKED frames sent due to hitting the connection
+    /// flow control limit.
+    data_blocked_sent_count: u64,
+
+    /// The number of STREAM_DATA_BLOCKED frames sent due to a stream hitting
+    /// the stream flow control limit.
+    stream_data_blocked_sent_count: u64,
+
+    /// The number of DATA_BLOCKED frames received from the remote endpoint.
+    data_blocked_recv_count: u64,
+
+    /// The number of STREAM_DATA_BLOCKED frames received from the remote
+    /// endpoint.
+    stream_data_blocked_recv_count: u64,
 
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
@@ -2150,6 +1944,7 @@ impl<F: BufFactory> Connection<F> {
             tx_cap_factor: config.tx_cap_factor,
 
             tx_buffered: 0,
+            tx_buffered_state: TxBufferTrackingState::Ok,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -2246,6 +2041,11 @@ impl<F: BufFactory> Connection<F> {
             stopped_stream_local_count: 0,
             reset_stream_remote_count: 0,
             stopped_stream_remote_count: 0,
+
+            data_blocked_sent_count: 0,
+            stream_data_blocked_sent_count: 0,
+            data_blocked_recv_count: 0,
+            stream_data_blocked_recv_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
         };
@@ -3585,14 +3385,10 @@ impl<F: BufFactory> Connection<F> {
                         length,
                         ..
                     } => {
-                        let stream = match self.streams.get_mut(stream_id) {
-                            Some(v) => v,
-
-                            None => continue,
-                        };
-
-                        stream.send.ack_and_drop(offset, length);
-
+                        // Update tx_buffered and emit qlog before checking if the
+                        // stream still exists.  The client does need to ACK
+                        // frames that were received after the client sends a
+                        // ResetStream.
                         self.tx_buffered =
                             self.tx_buffered.saturating_sub(length);
 
@@ -3611,10 +3407,43 @@ impl<F: BufFactory> Connection<F> {
                             q.add_event_data_with_instant(ev_data, now).ok();
                         });
 
+                        let stream = match self.streams.get_mut(stream_id) {
+                            Some(v) => v,
+
+                            None => continue,
+                        };
+
+                        stream.send.ack_and_drop(offset, length);
+
+                        let priority_key = Arc::clone(&stream.priority_key);
+
                         // Only collect the stream if it is complete and not
-                        // readable. If it is readable, it will get collected when
-                        // stream_recv() is used.
-                        if stream.is_complete() && !stream.is_readable() {
+                        // readable or writable.
+                        //
+                        // If it is readable, it will get collected when
+                        // stream_recv() is next used.
+                        //
+                        // If it is writable, it might mean that the stream
+                        // has been stopped by the peer (i.e. a STOP_SENDING
+                        // frame is received), in which case before collecting
+                        // the stream we will need to propagate the
+                        // `StreamStopped` error to the application. It will
+                        // instead get collected when one of stream_capacity(),
+                        // stream_writable(), stream_send(), ... is next called.
+                        //
+                        // Note that we can't use `is_writable()` here because
+                        // it returns false if the stream is stopped. Instead,
+                        // since the stream is marked as writable when a
+                        // STOP_SENDING frame is received, we check the writable
+                        // queue directly instead.
+                        let is_writable = priority_key.writable.is_linked() &&
+                            // Ensure that the stream is actually stopped.
+                            stream.send.is_stopped();
+
+                        let is_complete = stream.is_complete();
+                        let is_readable = stream.is_readable();
+
+                        if is_complete && !is_readable && !is_writable {
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
                         }
@@ -3635,10 +3464,35 @@ impl<F: BufFactory> Connection<F> {
                             None => continue,
                         };
 
+                        let priority_key = Arc::clone(&stream.priority_key);
+
                         // Only collect the stream if it is complete and not
-                        // readable. If it is readable, it will get collected when
-                        // stream_recv() is used.
-                        if stream.is_complete() && !stream.is_readable() {
+                        // readable or writable.
+                        //
+                        // If it is readable, it will get collected when
+                        // stream_recv() is next used.
+                        //
+                        // If it is writable, it might mean that the stream
+                        // has been stopped by the peer (i.e. a STOP_SENDING
+                        // frame is received), in which case before collecting
+                        // the stream we will need to propagate the
+                        // `StreamStopped` error to the application. It will
+                        // instead get collected when one of stream_capacity(),
+                        // stream_writable(), stream_send(), ... is next called.
+                        //
+                        // Note that we can't use `is_writable()` here because
+                        // it returns false if the stream is stopped. Instead,
+                        // since the stream is marked as writable when a
+                        // STOP_SENDING frame is received, we check the writable
+                        // queue directly instead.
+                        let is_writable = priority_key.writable.is_linked() &&
+                            // Ensure that the stream is actually stopped.
+                            stream.send.is_stopped();
+
+                        let is_complete = stream.is_complete();
+                        let is_readable = stream.is_readable();
+
+                        if is_complete && !is_readable && !is_writable {
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
                         }
@@ -4078,9 +3932,35 @@ impl<F: BufFactory> Connection<F> {
                         fin,
                     } => {
                         let stream = match self.streams.get_mut(stream_id) {
-                            Some(v) => v,
+                            // Only retransmit data if the stream is not closed
+                            // or stopped.
+                            Some(v) if !v.send.is_stopped() => v,
 
-                            None => continue,
+                            // Data on a closed stream will not be retransmitted
+                            // or acked after it is declared lost, so update
+                            // tx_buffered and qlog.
+                            _ => {
+                                self.tx_buffered =
+                                    self.tx_buffered.saturating_sub(length);
+
+                                qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
+                                    let ev_data = EventData::DataMoved(
+                                        qlog::events::quic::DataMoved {
+                                            stream_id: Some(stream_id),
+                                            offset: Some(offset),
+                                            length: Some(length as u64),
+                                            from: Some(DataRecipient::Transport),
+                                            to: Some(DataRecipient::Dropped),
+                                            ..Default::default()
+                                        },
+                                    );
+
+                                    q.add_event_data_with_instant(ev_data, now)
+                                        .ok();
+                                });
+
+                                continue;
+                            },
                         };
 
                         let was_flushable = stream.is_flushable();
@@ -4159,6 +4039,7 @@ impl<F: BufFactory> Connection<F> {
                 }
             }
         }
+        self.check_tx_buffered_invariant();
 
         let is_app_limited = self.delivery_rate_check_if_app_limited();
         let n_paths = self.paths.len();
@@ -4545,6 +4426,8 @@ impl<F: BufFactory> Connection<F> {
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.blocked_limit = None;
+                    self.data_blocked_sent_count =
+                        self.data_blocked_sent_count.saturating_add(1);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -4668,6 +4551,8 @@ impl<F: BufFactory> Connection<F> {
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.streams.remove_blocked(stream_id);
+                    self.stream_data_blocked_sent_count =
+                        self.stream_data_blocked_sent_count.saturating_add(1);
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -4912,9 +4797,9 @@ impl<F: BufFactory> Connection<F> {
                                     ack_eliciting = true;
                                     in_flight = true;
                                     dgram_emitted = true;
-                                    let _ =
+                                    self.dgram_sent_count =
                                         self.dgram_sent_count.saturating_add(1);
-                                    let _ =
+                                    path.dgram_sent_count =
                                         path.dgram_sent_count.saturating_add(1);
                                 }
                             },
@@ -5622,7 +5507,26 @@ impl<F: BufFactory> Connection<F> {
 
         let was_flushable = stream.is_flushable();
 
+        let is_complete = stream.is_complete();
+        let is_readable = stream.is_readable();
+
         let priority_key = Arc::clone(&stream.priority_key);
+
+        // Return early if the stream has been stopped, and collect its state
+        // if complete.
+        if let Err(Error::StreamStopped(e)) = stream.send.cap() {
+            // Only collect the stream if it is complete and not readable.
+            // If it is readable, it will get collected when stream_recv()
+            // is used.
+            //
+            // The stream can't be writable if it has been stopped.
+            if is_complete && !is_readable {
+                let local = stream.local;
+                self.streams.collect(stream_id, local);
+            }
+
+            return Err(Error::StreamStopped(e));
+        };
 
         // Truncate the input buffer based on the connection's send capacity if
         // necessary.
@@ -5705,6 +5609,7 @@ impl<F: BufFactory> Connection<F> {
         self.tx_data += sent as u64;
 
         self.tx_buffered += sent;
+        self.check_tx_buffered_invariant();
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
             let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
@@ -5855,6 +5760,26 @@ impl<F: BufFactory> Connection<F> {
                 self.tx_buffered =
                     self.tx_buffered.saturating_sub(unsent as usize);
 
+                // These drops in qlog are a bit weird, but the only way to ensure
+                // that all bytes that are moved from App to Transport in
+                // stream_do_send are eventually moved from Transport to Dropped.
+                // Ideally we would add a Transport to Network transition also as
+                // a way to indicate when bytes were transmitted vs dropped
+                // without ever being sent.
+                qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
+                    let ev_data =
+                        EventData::DataMoved(qlog::events::quic::DataMoved {
+                            stream_id: Some(stream_id),
+                            offset: Some(final_size),
+                            length: Some(unsent),
+                            from: Some(DataRecipient::Transport),
+                            to: Some(DataRecipient::Dropped),
+                            ..Default::default()
+                        });
+
+                    q.add_event_data_with_instant(ev_data, Instant::now()).ok();
+                });
+
                 // Update send capacity.
                 self.update_tx_cap();
 
@@ -5884,9 +5809,27 @@ impl<F: BufFactory> Connection<F> {
     /// [`InvalidStreamState`]: enum.Error.html#variant.InvalidStreamState
     /// [`StreamStopped`]: enum.Error.html#variant.StreamStopped
     #[inline]
-    pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
+    pub fn stream_capacity(&mut self, stream_id: u64) -> Result<usize> {
         if let Some(stream) = self.streams.get(stream_id) {
-            let cap = cmp::min(self.tx_cap, stream.send.cap()?);
+            let stream_cap = match stream.send.cap() {
+                Ok(v) => v,
+
+                Err(Error::StreamStopped(e)) => {
+                    // Only collect the stream if it is complete and not
+                    // readable. If it is readable, it will get collected when
+                    // stream_recv() is used.
+                    if stream.is_complete() && !stream.is_readable() {
+                        let local = stream.local;
+                        self.streams.collect(stream_id, local);
+                    }
+
+                    return Err(Error::StreamStopped(e));
+                },
+
+                Err(e) => return Err(e),
+            };
+
+            let cap = cmp::min(self.tx_cap, stream_cap);
             return Ok(cap);
         };
 
@@ -7229,6 +7172,17 @@ impl<F: BufFactory> Connection<F> {
         self.handshake.is_in_early_data()
     }
 
+    /// Returns the early data reason for the connection.
+    ///
+    /// This status can be useful for logging and debugging. See [BoringSSL]
+    /// documentation for a definition of the reasons.
+    ///
+    /// [BoringSSL]: https://commondatastorage.googleapis.com/chromium-boringssl-docs/ssl.h.html#ssl_early_data_reason_t
+    #[inline]
+    pub fn early_data_reason(&self) -> u32 {
+        self.handshake.early_data_reason()
+    }
+
     /// Returns whether there is stream or DATAGRAM data available to read.
     #[inline]
     pub fn is_readable(&self) -> bool {
@@ -7334,8 +7288,13 @@ impl<F: BufFactory> Connection<F> {
             stopped_stream_count_local: self.stopped_stream_local_count,
             reset_stream_count_remote: self.reset_stream_remote_count,
             stopped_stream_count_remote: self.stopped_stream_remote_count,
+            data_blocked_sent_count: self.data_blocked_sent_count,
+            stream_data_blocked_sent_count: self.stream_data_blocked_sent_count,
+            data_blocked_recv_count: self.data_blocked_recv_count,
+            stream_data_blocked_recv_count: self.stream_data_blocked_recv_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
+            tx_buffered_state: self.tx_buffered_state,
         }
     }
 
@@ -7935,6 +7894,26 @@ impl<F: BufFactory> Connection<F> {
                     self.tx_buffered =
                         self.tx_buffered.saturating_sub(unsent as usize);
 
+                    // These drops in qlog are a bit weird, but the only way to
+                    // ensure that all bytes that are moved from App to Transport
+                    // in stream_do_send are eventually moved from Transport to
+                    // Dropped.  Ideally we would add a Transport to Network
+                    // transition also as a way to indicate when bytes were
+                    // transmitted vs dropped without ever being sent.
+                    qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
+                        let ev_data =
+                            EventData::DataMoved(qlog::events::quic::DataMoved {
+                                stream_id: Some(stream_id),
+                                offset: Some(final_size),
+                                length: Some(unsent),
+                                from: Some(DataRecipient::Transport),
+                                to: Some(DataRecipient::Dropped),
+                                ..Default::default()
+                            });
+
+                        q.add_event_data_with_instant(ev_data, now).ok();
+                    });
+
                     self.streams.insert_reset(stream_id, error_code, final_size);
 
                     if !was_writable {
@@ -8112,9 +8091,15 @@ impl<F: BufFactory> Connection<F> {
                 self.streams.update_peer_max_streams_uni(max);
             },
 
-            frame::Frame::DataBlocked { .. } => (),
+            frame::Frame::DataBlocked { .. } => {
+                self.data_blocked_recv_count =
+                    self.data_blocked_recv_count.saturating_add(1);
+            },
 
-            frame::Frame::StreamDataBlocked { .. } => (),
+            frame::Frame::StreamDataBlocked { .. } => {
+                self.stream_data_blocked_recv_count =
+                    self.stream_data_blocked_recv_count.saturating_add(1);
+            },
 
             frame::Frame::StreamsBlockedBidi { limit } => {
                 if limit > MAX_STREAM_ID {
@@ -8267,12 +8252,10 @@ impl<F: BufFactory> Connection<F> {
 
                 self.dgram_recv_queue.push(data)?;
 
-                let _ = self.dgram_recv_count.saturating_add(1);
-                let _ = self
-                    .paths
-                    .get_mut(recv_path_id)?
-                    .dgram_recv_count
-                    .saturating_add(1);
+                self.dgram_recv_count = self.dgram_recv_count.saturating_add(1);
+
+                let path = self.paths.get_mut(recv_path_id)?;
+                path.dgram_recv_count = path.dgram_recv_count.saturating_add(1);
             },
 
             frame::Frame::DatagramHeader { .. } => unreachable!(),
@@ -8405,6 +8388,26 @@ impl<F: BufFactory> Connection<F> {
             (self.tx_data.saturating_sub(self.last_tx_data)) <
                 cwin_available as u64 &&
             cwin_available > 0
+    }
+
+    fn check_tx_buffered_invariant(&mut self) {
+        // tx_buffered should track bytes queued in the stream buffers
+        // and unacked retransmitable bytes in the network.
+        // If tx_buffered > 0 mark the tx_buffered_state if there are no
+        // flushable streams and there no inflight bytes.
+        //
+        // It is normal to have tx_buffered == 0 while there are inflight bytes
+        // since not QUIC frames are retransmittable; inflight tracks all bytes
+        // on the network which are subject to congestion control.
+        if self.tx_buffered > 0 &&
+            !self.streams.has_flushable() &&
+            !self
+                .paths
+                .iter()
+                .any(|(_, p)| p.recovery.bytes_in_flight() > 0)
+        {
+            self.tx_buffered_state = TxBufferTrackingState::Inconsistent;
+        }
     }
 
     fn set_initial_dcid(
@@ -8853,12 +8856,29 @@ pub struct Stats {
     /// The number of streams stopped by remote.
     pub stopped_stream_count_remote: u64,
 
+    /// The number of DATA_BLOCKED frames sent due to hitting the connection
+    /// flow control limit.
+    pub data_blocked_sent_count: u64,
+
+    /// The number of STREAM_DATA_BLOCKED frames sent due to a stream hitting
+    /// the stream flow control limit.
+    pub stream_data_blocked_sent_count: u64,
+
+    /// The number of DATA_BLOCKED frames received from the remote.
+    pub data_blocked_recv_count: u64,
+
+    /// The number of STREAM_DATA_BLOCKED frames received from the remote.
+    pub stream_data_blocked_recv_count: u64,
+
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
 
     /// Total duration during which this side of the connection was
     /// actively sending bytes or waiting for those bytes to be acked.
     pub bytes_in_flight_duration: Duration,
+
+    /// Health state of the connection's tx_buffered.
+    pub tx_buffered_state: TxBufferTrackingState,
 }
 
 impl std::fmt::Debug for Stats {
@@ -9488,9 +9508,15 @@ pub use crate::stream::StreamIter;
 pub use crate::range_buf::BufFactory;
 pub use crate::range_buf::BufSplit;
 
+pub use crate::error::ConnectionError;
+pub use crate::error::Error;
+pub use crate::error::Result;
+pub use crate::error::WireErrorCode;
+
 mod cid;
 mod crypto;
 mod dgram;
+mod error;
 #[cfg(feature = "ffi")]
 mod ffi;
 mod flowcontrol;

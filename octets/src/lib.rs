@@ -306,6 +306,17 @@ impl<'a> Octets<'a> {
         Ok(out)
     }
 
+    /// Rewinds the buffer offset by `len` elements.
+    pub fn rewind(&mut self, len: usize) -> Result<()> {
+        if self.off() < len {
+            return Err(BufferTooShortError);
+        }
+
+        self.off -= len;
+
+        Ok(())
+    }
+
     /// Returns a slice of `len` elements from the current offset.
     pub fn slice(&self, len: usize) -> Result<&'a [u8]> {
         if len > self.cap() {
@@ -321,8 +332,8 @@ impl<'a> Octets<'a> {
             return Err(BufferTooShortError);
         }
 
-        let cap = self.cap();
-        Ok(&self.buf[cap - len..])
+        let end = self.buf.len();
+        Ok(&self.buf[end - len..end])
     }
 
     /// Advances the buffer's offset.
@@ -693,6 +704,17 @@ impl<'a> OctetsMut<'a> {
         Ok(())
     }
 
+    /// Rewinds the buffer offset by `len` elements.
+    pub fn rewind(&mut self, len: usize) -> Result<()> {
+        if self.off() < len {
+            return Err(BufferTooShortError);
+        }
+
+        self.off -= len;
+
+        Ok(())
+    }
+
     /// Splits the buffer in two at the given absolute offset.
     pub fn split_at(
         &mut self, off: usize,
@@ -725,8 +747,8 @@ impl<'a> OctetsMut<'a> {
             return Err(BufferTooShortError);
         }
 
-        let cap = self.cap();
-        Ok(&mut self.buf[cap - len..])
+        let end = self.buf.len();
+        Ok(&mut self.buf[end - len..end])
     }
 
     /// Advances the buffer's offset.
@@ -1278,6 +1300,56 @@ mod tests {
     }
 
     #[test]
+    fn rewind() {
+        let d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.get_varint().unwrap(), 151288809941952652);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 8);
+
+        assert_eq!(b.rewind(4), Ok(()));
+        assert_eq!(b.cap(), 4);
+        assert_eq!(b.off(), 4);
+
+        assert_eq!(b.get_u8().unwrap(), 0xff);
+        assert_eq!(b.cap(), 3);
+        assert_eq!(b.off(), 5);
+
+        assert!(b.rewind(6).is_err());
+
+        assert_eq!(b.rewind(5), Ok(()));
+        assert_eq!(b.cap(), 8);
+        assert_eq!(b.off(), 0);
+
+        assert!(b.rewind(1).is_err());
+    }
+
+    #[test]
+    fn rewind_mut() {
+        let mut d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
+        let mut b = OctetsMut::with_slice(&mut d);
+        assert_eq!(b.get_varint().unwrap(), 151288809941952652);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 8);
+
+        assert_eq!(b.rewind(4), Ok(()));
+        assert_eq!(b.cap(), 4);
+        assert_eq!(b.off(), 4);
+
+        assert_eq!(b.get_u8().unwrap(), 0xff);
+        assert_eq!(b.cap(), 3);
+        assert_eq!(b.off(), 5);
+
+        assert!(b.rewind(6).is_err());
+
+        assert_eq!(b.rewind(5), Ok(()));
+        assert_eq!(b.cap(), 8);
+        assert_eq!(b.off(), 0);
+
+        assert!(b.rewind(1).is_err());
+    }
+
+    #[test]
     fn split() {
         let mut d = b"helloworld".to_vec();
 
@@ -1417,6 +1489,13 @@ mod tests {
         }
 
         {
+            let mut b = Octets::with_slice(&d);
+            b.get_bytes(5).unwrap();
+            let exp = b"orld".to_vec();
+            assert_eq!(b.slice_last(4), Ok(&exp[..]));
+        }
+
+        {
             let b = Octets::with_slice(&d);
             let exp = b"d".to_vec();
             assert_eq!(b.slice_last(1), Ok(&exp[..]));
@@ -1446,6 +1525,13 @@ mod tests {
 
         {
             let mut b = OctetsMut::with_slice(&mut d);
+            let mut exp = b"orld".to_vec();
+            assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = OctetsMut::with_slice(&mut d);
+            b.get_bytes(5).unwrap();
             let mut exp = b"orld".to_vec();
             assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
         }

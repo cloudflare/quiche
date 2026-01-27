@@ -337,20 +337,22 @@ fn main() {
                 for stream_id in client.conn.writable() {
                     handle_writable(client, stream_id);
                 }
+            }
 
+            if let Some(http3_conn) = client.http3_conn.as_mut() {
                 // Process HTTP/3 events.
                 loop {
-                    let http3_conn = client.http3_conn.as_mut().unwrap();
-
                     match http3_conn.poll(&mut client.conn) {
                         Ok((
                             stream_id,
                             quiche::h3::Event::Headers { list, .. },
                         )) => {
                             handle_request(
-                                client,
+                                &mut client.conn,
+                                http3_conn,
                                 stream_id,
                                 &list,
+                                &mut client.partial_responses,
                                 "examples/root",
                             );
                         },
@@ -501,12 +503,10 @@ fn validate_token<'a>(
 
 /// Handles incoming HTTP/3 requests.
 fn handle_request(
-    client: &mut Client, stream_id: u64, headers: &[quiche::h3::Header],
-    root: &str,
+    conn: &mut quiche::Connection, http3_conn: &mut quiche::h3::Connection,
+    stream_id: u64, headers: &[quiche::h3::Header],
+    partial_responses: &mut HashMap<u64, PartialResponse>, root: &str,
 ) {
-    let conn = &mut client.conn;
-    let http3_conn = &mut client.http3_conn.as_mut().unwrap();
-
     info!(
         "{} got request {:?} on stream id {}",
         conn.trace_id(),
@@ -532,7 +532,7 @@ fn handle_request(
                 written: 0,
             };
 
-            client.partial_responses.insert(stream_id, response);
+            partial_responses.insert(stream_id, response);
             return;
         },
 
@@ -560,7 +560,7 @@ fn handle_request(
             written,
         };
 
-        client.partial_responses.insert(stream_id, response);
+        partial_responses.insert(stream_id, response);
     }
 }
 

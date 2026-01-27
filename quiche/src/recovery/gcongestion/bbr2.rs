@@ -167,7 +167,9 @@ struct Params {
     /// STARTUP.
     decrease_startup_pacing_at_end_of_round: bool,
 
-    /// Avoid Overestimation in Bandwidth Sampler with ack aggregation
+    /// Avoid Overestimation in Bandwidth Sampler with ack aggregation.
+    /// This is an old experiment that we have found to under-perform the
+    /// algorithm described in the spec.  Use is not recommended.
     enable_overestimate_avoidance: bool,
 
     /// If true, apply the fix to A0 point selection logic so the
@@ -175,6 +177,7 @@ struct Params {
     /// google/quiche implementation.
     choose_a0_point_fix: bool,
 
+    /// Controls the behavior of BBRAdaptLowerBoundsFromCongestion().
     bw_lo_mode: BwLoMode,
 
     /// Determines whether app limited rounds with no bandwidth growth count
@@ -193,6 +196,17 @@ struct Params {
     /// Disable `has_stayed_long_enough_in_probe_down` which can cause ProbeDown
     /// to exit early.
     disable_probe_down_early_exit: bool,
+
+    /// Set the expected send time for packets when using BBR to `now`
+    /// instead of `get_next_release_time()`.  Setting the time based
+    /// on `get_next_release_time()` can result in artificially low
+    /// RTT measurements due to the pacer's use of burst_tokens to
+    /// make up for lost time.  BBR has significant problems when
+    /// minRTT is under estimated, so it is better to have the RTT be
+    /// slightly over estimated.  The pacer can only schedule packets
+    /// 1/8th of an RTT into the future, so the error introduced by
+    /// setting `time_sent` to `now` is bounded.
+    time_sent_set_to_now: bool,
 }
 
 impl Params {
@@ -236,6 +250,7 @@ impl Params {
         apply_override!(ignore_app_limited_for_no_bandwidth_growth);
         apply_override!(scale_pacing_rate_by_mss);
         apply_override!(disable_probe_down_early_exit);
+        apply_override!(time_sent_set_to_now);
         apply_optional_override!(initial_pacing_rate_bytes_per_second);
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
@@ -279,7 +294,7 @@ const DEFAULT_PARAMS: Params = Params {
 
     probe_bw_default_pacing_gain: 1.0,
 
-    probe_bw_cwnd_gain: 2.25, // BBRv3
+    probe_bw_cwnd_gain: 2.0, // BBRv3
 
     probe_bw_up_cwnd_gain: 2.25, // BBRv3
 
@@ -317,26 +332,45 @@ const DEFAULT_PARAMS: Params = Params {
 
     decrease_startup_pacing_at_end_of_round: true,
 
-    enable_overestimate_avoidance: true,
+    enable_overestimate_avoidance: false,
 
     choose_a0_point_fix: false,
 
-    bw_lo_mode: BwLoMode::InflightReduction,
+    bw_lo_mode: BwLoMode::Default,
 
-    ignore_app_limited_for_no_bandwidth_growth: false,
+    ignore_app_limited_for_no_bandwidth_growth: true,
 
     initial_pacing_rate_bytes_per_second: None,
 
     scale_pacing_rate_by_mss: false,
 
     disable_probe_down_early_exit: false,
+
+    time_sent_set_to_now: true,
 };
 
 #[derive(Debug, PartialEq)]
 enum BwLoMode {
+    /// Mode that implements the BBRAdaptLowerBoundsFromCongestion()
+    /// behavior described in the BBR RFC draft.
     Default,
+
+    /// BBRAdaptLowerBoundsFromCongestion experiment that reduces
+    /// bw_lo by bytes_lost/min_rtt.
+    ///
+    /// Not recommended.
     MinRttReduction,
+
+    /// BBRAdaptLowerBoundsFromCongestion experiment that reduces
+    /// bw_lo by bw_lo * bytes_lost/inflight.
+    ///
+    /// Not recommended.
     InflightReduction,
+
+    /// BBRAdaptLowerBoundsFromCongestion experiment that reduces
+    /// bw_lo by bw_lo * bytes_lost/cwnd
+    ///
+    /// Not recommended.
     CwndReduction,
 }
 
@@ -469,6 +503,7 @@ impl BBRv2 {
         custom_bbr_params: Option<&BbrParams>,
     ) -> Self {
         let cwnd = initial_congestion_window * max_segment_size;
+
         let params = if let Some(custom_bbr_settings) = custom_bbr_params {
             DEFAULT_PARAMS.with_overrides(custom_bbr_settings)
         } else {
@@ -490,6 +525,10 @@ impl BBRv2 {
             mss: max_segment_size,
             params,
         }
+    }
+
+    pub fn time_sent_set_to_now(&self) -> bool {
+        self.params.time_sent_set_to_now
     }
 
     fn on_exit_quiescence(&mut self, now: Instant) {
@@ -613,7 +652,6 @@ impl CongestionControl for BBRv2 {
     fn on_packet_sent(
         &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
-        rtt_stats: &RttStats,
     ) {
         if bytes_in_flight == 0 && self.params.avoid_unnecessary_probe_rtt {
             self.on_exit_quiescence(sent_time);
@@ -626,7 +664,6 @@ impl CongestionControl for BBRv2 {
             packet_number,
             bytes,
             is_retransmissible,
-            rtt_stats,
         );
     }
 

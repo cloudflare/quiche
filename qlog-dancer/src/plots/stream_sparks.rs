@@ -1113,10 +1113,15 @@ pub fn plot_sparks(
             &mut rel_dl_chart,
         );
 
+        let y_max = match ds.vantage_point {
+            VantagePoint::Client => ss.y_max_stream_recv_plot,
+            VantagePoint::Server => ss.y_max_stream_send_plot,
+        };
+
         draw_request_timing_lines(
             ds,
             *stream_id,
-            ss.y_max_stream_plot,
+            y_max,
             &mut abs_dl_chart,
             &mut rel_dl_chart,
         );

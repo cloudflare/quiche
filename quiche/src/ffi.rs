@@ -925,7 +925,7 @@ pub extern "C" fn quiche_conn_stream_shutdown(
 
 #[no_mangle]
 pub extern "C" fn quiche_conn_stream_capacity(
-    conn: &Connection, stream_id: u64,
+    conn: &mut Connection, stream_id: u64,
 ) -> ssize_t {
     match conn.stream_capacity(stream_id) {
         Ok(v) => v as ssize_t,
@@ -1256,17 +1256,27 @@ pub struct Stats {
     recv: usize,
     sent: usize,
     lost: usize,
+    spurious_lost: usize,
     retrans: usize,
     sent_bytes: u64,
     recv_bytes: u64,
     acked_bytes: u64,
     lost_bytes: u64,
     stream_retrans_bytes: u64,
+    dgram_recv: usize,
+    dgram_sent: usize,
     paths_count: usize,
     reset_stream_count_local: u64,
     stopped_stream_count_local: u64,
     reset_stream_count_remote: u64,
     stopped_stream_count_remote: u64,
+    data_blocked_sent_count: u64,
+    stream_data_blocked_sent_count: u64,
+    data_blocked_recv_count: u64,
+    stream_data_blocked_recv_count: u64,
+    path_challenge_rx_count: u64,
+    bytes_in_flight_duration_msec: u64,
+    tx_buffered_inconsistent: bool,
 }
 
 pub struct TransportParams {
@@ -1292,17 +1302,29 @@ pub extern "C" fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.recv = stats.recv;
     out.sent = stats.sent;
     out.lost = stats.lost;
+    out.spurious_lost = stats.spurious_lost;
     out.retrans = stats.retrans;
     out.sent_bytes = stats.sent_bytes;
     out.recv_bytes = stats.recv_bytes;
     out.acked_bytes = stats.acked_bytes;
     out.lost_bytes = stats.lost_bytes;
     out.stream_retrans_bytes = stats.stream_retrans_bytes;
+    out.dgram_recv = stats.dgram_recv;
+    out.dgram_sent = stats.dgram_sent;
     out.paths_count = stats.paths_count;
     out.reset_stream_count_local = stats.reset_stream_count_local;
     out.stopped_stream_count_local = stats.stopped_stream_count_local;
     out.reset_stream_count_remote = stats.reset_stream_count_remote;
     out.stopped_stream_count_remote = stats.stopped_stream_count_remote;
+    out.data_blocked_sent_count = stats.data_blocked_sent_count;
+    out.stream_data_blocked_sent_count = stats.stream_data_blocked_sent_count;
+    out.data_blocked_recv_count = stats.data_blocked_recv_count;
+    out.stream_data_blocked_recv_count = stats.stream_data_blocked_recv_count;
+    out.path_challenge_rx_count = stats.path_challenge_rx_count;
+    out.bytes_in_flight_duration_msec =
+        stats.bytes_in_flight_duration.as_millis() as u64;
+    out.tx_buffered_inconsistent =
+        stats.tx_buffered_state != TxBufferTrackingState::Ok;
 }
 
 #[no_mangle]
@@ -1349,8 +1371,12 @@ pub struct PathStats {
     sent: usize,
     lost: usize,
     retrans: usize,
+    total_pto_count: usize,
+    dgram_recv: usize,
+    dgram_sent: usize,
     rtt: u64,
     min_rtt: u64,
+    max_rtt: u64,
     rttvar: u64,
     cwnd: usize,
     sent_bytes: u64,
@@ -1359,6 +1385,8 @@ pub struct PathStats {
     stream_retrans_bytes: u64,
     pmtu: usize,
     delivery_rate: u64,
+    max_bandwidth: u64,
+    startup_exit_cwnd: u64,
 }
 
 #[no_mangle]
@@ -1378,6 +1406,9 @@ pub extern "C" fn quiche_conn_path_stats(
     out.sent = stats.sent;
     out.lost = stats.lost;
     out.retrans = stats.retrans;
+    out.total_pto_count = stats.total_pto_count;
+    out.dgram_recv = stats.dgram_recv;
+    out.dgram_sent = stats.dgram_sent;
     out.rtt = stats.rtt.as_nanos() as u64;
     out.min_rtt = stats.min_rtt.unwrap_or_default().as_nanos() as u64;
     out.rttvar = stats.rttvar.as_nanos() as u64;
@@ -1388,6 +1419,9 @@ pub extern "C" fn quiche_conn_path_stats(
     out.stream_retrans_bytes = stats.stream_retrans_bytes;
     out.pmtu = stats.pmtu;
     out.delivery_rate = stats.delivery_rate;
+    out.max_bandwidth = stats.max_bandwidth.unwrap_or(0);
+    out.startup_exit_cwnd =
+        stats.startup_exit.map(|s| s.cwnd as u64).unwrap_or(0);
 
     0
 }

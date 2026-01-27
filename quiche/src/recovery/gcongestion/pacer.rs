@@ -133,7 +133,6 @@ impl Pacer {
             packet_number,
             bytes,
             is_retransmissible,
-            rtt_stats,
         );
 
         if !self.enabled || !is_retransmissible {
