@@ -220,6 +220,9 @@ pub struct Path {
 
     /// Whether or not we should force eliciting of an ACK (e.g. via PING frame)
     pub needs_ack_eliciting: bool,
+
+
+    pub(crate) address_verification_tokens: VecDeque<Vec<u8>>,
 }
 
 impl Path {
@@ -287,6 +290,7 @@ impl Path {
             failure_notified: false,
             migrating: false,
             needs_ack_eliciting: false,
+            address_verification_tokens: VecDeque::new(),
         }
     }
 
@@ -566,6 +570,13 @@ impl Path {
 
     pub fn bytes_in_flight_duration(&self) -> Duration {
         self.recovery.bytes_in_flight_duration()
+    }
+
+    /// This function gets the last received address verification token. This can only be
+    /// called once for every time an address verification token was received in a NEW_TOKEN
+    /// frame.
+    pub fn take_received_address_verification_token(&mut self) -> Option<Vec<u8>> {
+        self.address_verification_tokens.pop_front()
     }
 }
 
