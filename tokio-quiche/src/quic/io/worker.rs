@@ -168,8 +168,10 @@ where
         let sleep = time::sleep(DEFAULT_SLEEP);
         tokio::pin!(sleep);
 
+        let mut had_flushable_streams = qconn.has_flushable_stream();
         loop {
             let now = Instant::now();
+            qconn.work_loop_round_start(had_flushable_streams, &now);
 
             if let Some(deadline) = current_deadline {
                 if deadline <= now {
@@ -257,6 +259,7 @@ where
                     .reset(new_deadline.unwrap_or(now + DEFAULT_SLEEP).into());
             }
 
+            had_flushable_streams = qconn.has_flushable_stream();
             let incoming_recv = &mut ctx.incoming_pkt_receiver;
             let application = &mut ctx.application;
             select! {

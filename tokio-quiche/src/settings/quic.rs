@@ -315,6 +315,14 @@ pub struct QuicSettings {
     ///
     /// [`enable_track_unknown_transport_parameters()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.enable_track_unknown_transport_parameters
     pub track_unknown_transport_parameters: Option<usize>,
+
+    /// Temporary parameter to enable a rework of how the BBR congestion control
+    /// implementation computes app-limited.  This parameter will be removed
+    /// after we build confidence on the new implementation or decide to roll it
+    /// back.
+    ///
+    /// Defaults to `false`.
+    pub enable_bbr_app_limited_fix: bool,
 }
 
 impl QuicSettings {
