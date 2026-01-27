@@ -40,10 +40,10 @@ use task_killswitch::spawn_with_killswitch;
 use crate::metrics::labels;
 use crate::metrics::Metrics;
 use crate::quic::addr_validation_token::AddrValidationTokenManager;
+use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::quic::make_qlog_writer;
 use crate::quic::router::NewConnection;
 use crate::quic::Incoming;
-use crate::ConnectionIdGenerator;
 use crate::QuicResultExt;
 
 use super::InitialPacketHandler;
@@ -53,9 +53,8 @@ use super::InitialPacketHandler;
 pub(crate) struct ConnectionAcceptor<S, M> {
     config: ConnectionAcceptorConfig,
     socket: Arc<S>,
-    socket_cookie: u64,
     token_manager: AddrValidationTokenManager,
-    cid_generator: Box<dyn ConnectionIdGenerator<'static>>,
+    cid_generator: SharedConnectionIdGenerator,
     metrics: M,
 }
 
@@ -73,14 +72,13 @@ where
     M: Metrics,
 {
     pub(crate) fn new(
-        config: ConnectionAcceptorConfig, socket: Arc<S>, socket_cookie: u64,
+        config: ConnectionAcceptorConfig, socket: Arc<S>,
         token_manager: AddrValidationTokenManager,
-        cid_generator: Box<dyn ConnectionIdGenerator<'static>>, metrics: M,
+        cid_generator: SharedConnectionIdGenerator, metrics: M,
     ) -> Self {
         Self {
             config,
             socket,
-            socket_cookie,
             token_manager,
             cid_generator,
             metrics,
@@ -136,6 +134,7 @@ where
             conn,
             handshake_start_time,
             pending_cid,
+            cid_generator: Some(Arc::clone(&self.cid_generator)),
             initial_pkt: Some(incoming),
         }))
     }
@@ -193,7 +192,7 @@ where
     fn stateless_retry(
         &mut self, incoming: Incoming, hdr: Header,
     ) -> io::Result<Option<NewConnection>> {
-        let scid = self.new_connection_id();
+        let scid = self.cid_generator.new_connection_id();
 
         let token = self.token_manager.gen(&hdr.dcid, incoming.peer_addr);
 
@@ -201,10 +200,6 @@ where
             quiche::retry(&hdr.scid, &hdr.dcid, &scid, &token, hdr.version, buf)
                 .into_io()
         })
-    }
-
-    fn new_connection_id(&self) -> ConnectionId<'static> {
-        self.cid_generator.new_connection_id(self.socket_cookie)
     }
 }
 
@@ -220,10 +215,7 @@ where
         if hdr.ty != PacketType::Initial {
             // Non-initial packets should have a valid CID, but we want to have
             // some telemetry if this isn't the case.
-            if let Err(e) = self
-                .cid_generator
-                .verify_connection_id(self.socket_cookie, &hdr.dcid)
-            {
+            if let Err(e) = self.cid_generator.verify_connection_id(&hdr.dcid) {
                 self.metrics.invalid_cid_packet_count(e).inc();
             }
 
@@ -240,7 +232,7 @@ where
             .config
             .disable_client_ip_validation
         {
-            (self.new_connection_id(), None, Some(hdr.dcid))
+            (self.cid_generator.new_connection_id(), None, Some(hdr.dcid))
         } else {
             // NOTE: token is always present in Initial packets
             let token = hdr.token.as_ref().unwrap();

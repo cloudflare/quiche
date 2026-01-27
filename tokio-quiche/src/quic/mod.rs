@@ -108,7 +108,7 @@ pub mod raw;
 mod router;
 
 use self::connection::ApplicationOverQuic;
-use self::connection::ConnectionIdGenerator;
+use self::connection::ConnectionIdGenerator as _;
 use self::connection::QuicConnection;
 use self::router::acceptor::ConnectionAcceptor;
 use self::router::acceptor::ConnectionAcceptorConfig;
@@ -198,7 +198,7 @@ where
     App: ApplicationOverQuic,
 {
     let mut client_config = Config::new(params, socket.capabilities)?;
-    let scid = SimpleConnectionIdGenerator.new_connection_id(0);
+    let scid = SimpleConnectionIdGenerator.new_connection_id();
 
     #[cfg(feature = "zero-copy")]
     let mut quiche_conn = quiche::connect_with_buffer_factory(
@@ -279,8 +279,7 @@ where
 }
 
 pub(crate) fn start_listener<M>(
-    socket: QuicListener, params: &ConnectionParams,
-    cid_generator: impl ConnectionIdGenerator<'static>, metrics: M,
+    socket: QuicListener, params: &ConnectionParams, metrics: M,
 ) -> std::io::Result<QuicConnectionStream<M>>
 where
     M: Metrics,
@@ -313,9 +312,8 @@ where
             },
         },
         Arc::clone(&socket_tx),
-        socket.socket_cookie,
         Default::default(),
-        Box::new(cid_generator),
+        socket.cid_generator,
         metrics.clone(),
     );
 
