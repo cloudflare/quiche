@@ -94,7 +94,7 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
 }
 
 #[tokio::test]
-async fn test_max_header_list_size_limit() {
+async fn test_max_header_list_size_limit() -> QuicResult<()> {
     let hook = TestConnectionHook::new();
     let url = start_server_with_settings(
         QuicSettings::default(),
@@ -138,6 +138,8 @@ async fn test_max_header_list_size_limit() {
         error.error_code,
         quiche::h3::WireErrorCode::ExcessiveLoad as u64
     );
+
+    Ok(())
 }
 
 #[tokio::test]
