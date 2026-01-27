@@ -90,7 +90,7 @@ async fn handle_0_rtt_request() {
             assert_eq!(context.hosts_seen.len(), 1);
             assert!(context.hosts_seen.contains(&"test.com".to_string()));
             assert_eq!(context.requests_handled_count, 1);
-            assert_eq!(context.did_recv_early_data_request, false);
+            assert!(!context.did_recv_early_data_request);
         }
 
         // Get Session data from this connection to resume the 0-RTT connection.
@@ -125,7 +125,7 @@ async fn handle_0_rtt_request() {
             assert_eq!(context.hosts_seen.len(), 2);
             assert_eq!(context.hosts_seen, vec!["early.test.com", "test.com"]);
             assert_eq!(context.requests_handled_count, 2);
-            assert_eq!(context.did_recv_early_data_request, true);
+            assert!(context.did_recv_early_data_request);
         }
     }
 }
@@ -182,10 +182,10 @@ fn helper_server_handler(
 
         while let Some(event) = event_rx.recv().await {
             match event {
-                ServerH3Event::Core(event) => match event {
-                    H3Event::ConnectionShutdown(_) => break,
-
-                    _ => (),
+                ServerH3Event::Core(event) => {
+                    if let H3Event::ConnectionShutdown(_) = event {
+                        break;
+                    }
                 },
 
                 ServerH3Event::Headers {
@@ -206,7 +206,7 @@ fn helper_server_handler(
                         let mut context = context.lock().unwrap();
                         context.requests_handled_count += 1;
                         context.did_recv_early_data_request |= *is_in_early_data;
-                        let host = str::from_utf8(authority.value())
+                        let host = std::str::from_utf8(authority.value())
                             .unwrap()
                             .to_string();
                         context.hosts_seen.push(host);

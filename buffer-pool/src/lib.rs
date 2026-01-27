@@ -272,7 +272,7 @@ mod tests {
     fn test_sharding() {
         const SHARDS: usize = 3;
         const MAX_IN_SHARD: usize = 2;
-        const POOL_NAME: &'static str = "test_sharding_pool";
+        const POOL_NAME: &str = "test_sharding_pool";
 
         let pool = Box::leak(Box::new(Pool::<SHARDS, Vec<u8>>::new(
             SHARDS * MAX_IN_SHARD,
@@ -440,7 +440,7 @@ mod tests {
     fn test_creation() {
         const SHARDS: usize = 3;
         const MAX_IN_SHARD: usize = 2;
-        const POOL_NAME: &'static str = "test_creation_pool";
+        const POOL_NAME: &str = "test_creation_pool";
 
         let pool = Box::leak(Box::new(Pool::<SHARDS, Vec<u8>>::new(
             SHARDS * MAX_IN_SHARD,
