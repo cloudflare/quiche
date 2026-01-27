@@ -426,6 +426,7 @@ use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
 use crate::recovery::ReleaseDecision;
 
+use crate::stream::RecvAction;
 use crate::stream::StreamPriorityKey;
 
 /// The current QUIC wire version.
@@ -5167,7 +5168,7 @@ impl<F: BufFactory> Connection<F> {
     /// is returned as a tuple, or [`Done`] if there is no data to read.
     ///
     /// Reading data from a stream may trigger queueing of control messages
-    /// (e.g. MAX_STREAM_DATA). [`send()`] should be called after reading.
+    /// (e.g. MAX_STREAM_DATA). [`send()`] should be called afterwards.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     /// [`send()`]: struct.Connection.html#method.send
@@ -5191,6 +5192,63 @@ impl<F: BufFactory> Connection<F> {
     pub fn stream_recv(
         &mut self, stream_id: u64, out: &mut [u8],
     ) -> Result<(usize, bool)> {
+        self.do_stream_recv(stream_id, RecvAction::Emit { out })
+    }
+
+    /// Discard contiguous data from a stream without copying.
+    ///
+    /// On success the amount of bytes discarded and a flag indicating the fin
+    /// state is returned as a tuple, or [`Done`] if there is no data to
+    /// discard.
+    ///
+    /// Discarding data from a stream may trigger queueing of control messages
+    /// (e.g. MAX_STREAM_DATA). [`send()`] should be called afterwards.
+    ///
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`send()`]: struct.Connection.html#method.send
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
+    /// # let peer = "127.0.0.1:1234".parse().unwrap();
+    /// # let local = socket.local_addr().unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
+    /// # let stream_id = 0;
+    /// while let Ok((read, fin)) = conn.stream_discard(stream_id, 1) {
+    ///     println!("Discarded {} byte(s) on stream {}", read, stream_id);
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn stream_discard(
+        &mut self, stream_id: u64, len: usize,
+    ) -> Result<(usize, bool)> {
+        self.do_stream_recv(stream_id, RecvAction::Discard { len })
+    }
+
+    // Reads or discards contiguous data from a stream.
+    //
+    // Passing an `action` of `StreamRecvAction::Emit` results in a read into
+    // the provided slice. It must be sized by the caller and will be populated
+    // up to its capacity.
+    //
+    // Passing an `action` of `StreamRecvAction::Discard` results in discard up
+    // to the indicated length.
+    //
+    // On success the amount of bytes read or discarded, and a flag indicating
+    // the fin state, is returned as a tuple, or [`Done`] if there is no data to
+    // read or discard.
+    //
+    // Reading or discarding data from a stream may trigger queueing of control
+    // messages (e.g. MAX_STREAM_DATA). [`send()`] should be called afterwards.
+    //
+    // [`Done`]: enum.Error.html#variant.Done
+    // [`send()`]: struct.Connection.html#method.send
+    fn do_stream_recv(
+        &mut self, stream_id: u64, action: RecvAction,
+    ) -> Result<(usize, bool)> {
         // We can't read on our own unidirectional streams.
         if !stream::is_bidi(stream_id) &&
             stream::is_local(stream_id, self.is_server)
@@ -5213,7 +5271,14 @@ impl<F: BufFactory> Connection<F> {
         #[cfg(feature = "qlog")]
         let offset = stream.recv.off_front();
 
-        let (read, fin) = match stream.recv.emit(out) {
+        #[cfg(feature = "qlog")]
+        let to = match action {
+            RecvAction::Emit { .. } => Some(DataRecipient::Application),
+
+            RecvAction::Discard { .. } => Some(DataRecipient::Dropped),
+        };
+
+        let (read, fin) = match stream.recv.emit_or_discard(action) {
             Ok(v) => v,
 
             Err(e) => {
@@ -5254,7 +5319,7 @@ impl<F: BufFactory> Connection<F> {
                 offset: Some(offset),
                 length: Some(read as u64),
                 from: Some(DataRecipient::Transport),
-                to: Some(DataRecipient::Application),
+                to,
                 ..Default::default()
             });
 
