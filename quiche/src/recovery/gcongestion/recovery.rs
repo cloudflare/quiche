@@ -31,6 +31,7 @@ use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryOps;
 use crate::recovery::RecoveryStats;
 use crate::recovery::ReleaseDecision;
+use crate::recovery::ReleaseTime;
 use crate::recovery::Sent;
 use crate::recovery::StartupExit;
 use crate::recovery::GRANULARITY;
@@ -466,6 +467,8 @@ pub struct GRecovery {
     lost_reuse: Vec<Lost>,
 
     pacer: Pacer,
+
+    enable_bbr_app_limited_fix: bool,
 }
 
 impl GRecovery {
@@ -520,6 +523,8 @@ impl GRecovery {
 
             newly_acked: Vec::new(),
             lost_reuse: Vec::new(),
+            enable_bbr_app_limited_fix: recovery_config
+                .enable_bbr_app_limited_fix,
         })
     }
 
@@ -1035,7 +1040,9 @@ impl RecoveryOps for GRecovery {
 
     // FIXME only used by gcongestion
     fn on_app_limited(&mut self) {
-        self.pacer.on_app_limited(self.bytes_in_flight.get())
+        if !self.enable_bbr_app_limited_fix {
+            self.pacer.on_app_limited(self.bytes_in_flight.get())
+        }
     }
 
     #[cfg(test)]
@@ -1099,7 +1106,7 @@ impl RecoveryOps for GRecovery {
 
     #[cfg(test)]
     fn app_limited(&self) -> bool {
-        self.pacer.is_app_limited(self.bytes_in_flight.get())
+        self.pacer.is_app_limited()
     }
 
     // FIXME only used by congestion
@@ -1122,6 +1129,49 @@ impl RecoveryOps for GRecovery {
 
     fn gcongestion_enabled(&self) -> bool {
         true
+    }
+
+    fn bbr_check_if_app_limited(
+        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
+    ) {
+        if !self.enable_bbr_app_limited_fix {
+            return;
+        }
+
+        // Implements CheckIfApplicationLimited from the BBR RFC.
+        //
+        // had_flushable_data_before_poll is used to check for `NoUnsentData()`
+        // and skips this check there is data on the connection's tx
+        // buffer. Retransmisions are done with the help of stream send
+        // buffers so the `NoUnsentData()` check also covers the
+        // `C.lost_out <= C.retrans_out` check.
+        //
+        // The cwnd vs inflight check needs to take frame overheads
+        // into account since due to these overheads it may not be
+        // possible for the connection to use every last byte of the
+        // available window.  The check could be relaxed further by
+        // asserting that cwnd - inflight is less than 1 packet's
+        // worth of bytes.
+        //
+        // The check for C.pending_transmissions == 0 is done by
+        // checking !pacer_has_pending_transmissions by comparing the
+        // pacer's next release time vs 'now'.
+        //
+        // The case of Immediate next_release_time results in the work_loop
+        // iterating until min(cwnd, tx buffer) is exhausted.  If we decide to
+        // exit the send loop earlier we should mark the connection in some way so
+        // the next call to bbr_check_if_app_limited does not mark the
+        // connection app-limited after yielding when C.pending_transmissions > 0.
+        if !had_flushable_data_before_poll &&
+            self.cwnd() >
+                self.bytes_in_flight.get() + frame::MAX_STREAM_OVERHEAD &&
+            !pacer_has_pending_transmissions(
+                &self.pacer.get_next_release_time(),
+                now,
+            )
+        {
+            self.pacer.on_app_limited(self.bytes_in_flight.get())
+        }
     }
 
     #[cfg(feature = "qlog")]
@@ -1186,10 +1236,52 @@ impl std::fmt::Debug for GRecovery {
     }
 }
 
+fn pacer_has_pending_transmissions(
+    next_release_time: &ReleaseDecision, now: &Instant,
+) -> bool {
+    match next_release_time.time {
+        ReleaseTime::Immediate => false,
+        ReleaseTime::At(time) => time.gt(now),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Config;
+
+    #[test]
+    fn test_pacer_has_pending_transmissions() {
+        let now = &Instant::now();
+        assert!(!pacer_has_pending_transmissions(
+            &ReleaseDecision {
+                time: ReleaseTime::Immediate,
+                allow_burst: true
+            },
+            now
+        ));
+        assert!(!pacer_has_pending_transmissions(
+            &ReleaseDecision {
+                time: ReleaseTime::At(*now),
+                allow_burst: true
+            },
+            now
+        ));
+        assert!(pacer_has_pending_transmissions(
+            &ReleaseDecision {
+                time: ReleaseTime::At(*now + Duration::from_millis(1)),
+                allow_burst: true
+            },
+            now
+        ));
+        assert!(!pacer_has_pending_transmissions(
+            &ReleaseDecision {
+                time: ReleaseTime::At(*now - Duration::from_millis(1)),
+                allow_burst: true
+            },
+            now
+        ));
+    }
 
     #[test]
     fn loss_threshold() {

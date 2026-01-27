@@ -130,6 +130,7 @@ pub struct RecoveryConfig {
     pub max_send_udp_payload_size: usize,
     pub max_ack_delay: Duration,
     pub cc_algorithm: CongestionControlAlgorithm,
+    pub enable_bbr_app_limited_fix: bool,
     pub custom_bbr_params: Option<BbrParams>,
     pub hystart: bool,
     pub pacing: bool,
@@ -145,6 +146,7 @@ impl RecoveryConfig {
             max_send_udp_payload_size: config.max_send_udp_payload_size,
             max_ack_delay: Duration::ZERO,
             cc_algorithm: config.cc_algorithm,
+            enable_bbr_app_limited_fix: config.enable_bbr_app_limited_fix,
             custom_bbr_params: config.custom_bbr_params,
             hystart: config.hystart,
             pacing: config.pacing,
@@ -315,6 +317,10 @@ pub trait RecoveryOps {
     fn get_next_release_time(&self) -> ReleaseDecision;
 
     fn gcongestion_enabled(&self) -> bool;
+
+    fn bbr_check_if_app_limited(
+        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
+    );
 }
 
 impl Recovery {
