@@ -542,3 +542,15 @@ pub fn helper_packet_sent(pkt_num: u64, now: Instant, size: usize) -> Sent {
         is_pmtud_probe: false,
     }
 }
+
+// Helper function for testing either stream receive or discard.
+pub fn stream_recv_discard(
+    conn: &mut Connection, discard: bool, stream_id: u64,
+) -> Result<(usize, bool)> {
+    let mut buf = [0; 65535];
+    if discard {
+        conn.stream_discard(stream_id, 65535)
+    } else {
+        conn.stream_recv(stream_id, &mut buf)
+    }
+}
