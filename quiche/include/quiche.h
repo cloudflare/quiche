@@ -234,8 +234,7 @@ void quiche_config_set_initial_congestion_window_packets(quiche_config *config, 
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
     QUICHE_CC_CUBIC = 1,
-    QUICHE_CC_BBR = 2,
-    QUICHE_CC_BBR2 = 3,
+    QUICHE_CC_BBR2_GCONGESTION = 4,
 };
 
 // Sets the congestion control algorithm used.
