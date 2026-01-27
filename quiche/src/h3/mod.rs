@@ -290,29 +290,6 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Write;
 
-#[cfg(feature = "qlog")]
-use qlog::events::h3::H3FrameCreated;
-#[cfg(feature = "qlog")]
-use qlog::events::h3::H3FrameParsed;
-#[cfg(feature = "qlog")]
-use qlog::events::h3::H3Owner;
-#[cfg(feature = "qlog")]
-use qlog::events::h3::H3PriorityTargetStreamType;
-#[cfg(feature = "qlog")]
-use qlog::events::h3::H3StreamType;
-#[cfg(feature = "qlog")]
-use qlog::events::h3::H3StreamTypeSet;
-#[cfg(feature = "qlog")]
-use qlog::events::h3::Http3EventType;
-#[cfg(feature = "qlog")]
-use qlog::events::h3::Http3Frame;
-#[cfg(feature = "qlog")]
-use qlog::events::EventData;
-#[cfg(feature = "qlog")]
-use qlog::events::EventImportance;
-#[cfg(feature = "qlog")]
-use qlog::events::EventType;
-
 use crate::range_buf::BufFactory;
 use crate::BufSplit;
 
@@ -335,16 +312,6 @@ const PRIORITY_URGENCY_LOWER_BOUND: u8 = 0;
 const PRIORITY_URGENCY_UPPER_BOUND: u8 = 7;
 const PRIORITY_URGENCY_DEFAULT: u8 = 3;
 const PRIORITY_INCREMENTAL_DEFAULT: bool = false;
-
-#[cfg(feature = "qlog")]
-const QLOG_FRAME_CREATED: EventType =
-    EventType::Http3EventType(Http3EventType::FrameCreated);
-#[cfg(feature = "qlog")]
-const QLOG_FRAME_PARSED: EventType =
-    EventType::Http3EventType(Http3EventType::FrameParsed);
-#[cfg(feature = "qlog")]
-const QLOG_STREAM_TYPE_SET: EventType =
-    EventType::Http3EventType(Http3EventType::StreamTypeSet);
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///
@@ -1460,27 +1427,13 @@ impl Connection {
             fin
         );
 
-        qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-            let qlog_headers = headers
-                .iter()
-                .map(|h| qlog::events::h3::HttpHeader {
-                    name: String::from_utf8_lossy(h.name()).into_owned(),
-                    value: String::from_utf8_lossy(h.value()).into_owned(),
-                })
-                .collect();
-
-            let frame = Http3Frame::Headers {
-                headers: qlog_headers,
-            };
-            let ev_data = EventData::H3FrameCreated(H3FrameCreated {
-                stream_id,
-                length: Some(header_block.len() as u64),
-                frame,
-                ..Default::default()
-            });
-
-            q.add_event_data_now(ev_data).ok();
-        });
+        #[cfg(feature = "qlog")]
+        qlog::log_frame_created_headers(
+            &mut conn.qlog,
+            stream_id,
+            header_block.len() as u64,
+            headers,
+        );
 
         if let Some(s) = self.streams.get_mut(&stream_id) {
             s.initialize_local();
@@ -1692,17 +1645,8 @@ impl Connection {
             fin
         );
 
-        qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-            let frame = Http3Frame::Data { raw: None };
-            let ev_data = EventData::H3FrameCreated(H3FrameCreated {
-                stream_id,
-                length: Some(written as u64),
-                frame,
-                ..Default::default()
-            });
-
-            q.add_event_data_now(ev_data).ok();
-        });
+        #[cfg(feature = "qlog")]
+        qlog::log_frame_created_data(&mut conn.qlog, stream_id, written as u64);
 
         if written < len {
             // Ensure the peer is notified that the connection or stream is
@@ -1900,22 +1844,14 @@ impl Connection {
             field_value,
         );
 
-        qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-            let frame = Http3Frame::PriorityUpdate {
-                target_stream_type: H3PriorityTargetStreamType::Request,
-                prioritized_element_id: stream_id,
-                priority_field_value: field_value.clone(),
-            };
-
-            let ev_data = EventData::H3FrameCreated(H3FrameCreated {
-                stream_id,
-                length: Some(priority_field_value.len() as u64),
-                frame,
-                ..Default::default()
-            });
-
-            q.add_event_data_now(ev_data).ok();
-        });
+        #[cfg(feature = "qlog")]
+        qlog::log_frame_created_priority_update(
+            &mut conn.qlog,
+            stream_id,
+            priority_field_value.len() as u64,
+            stream_id,
+            field_value.clone(),
+        );
 
         Ok(())
     }
@@ -2121,16 +2057,13 @@ impl Connection {
 
             trace!("{} tx frm {:?}", conn.trace_id(), frame);
 
-            qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-                let ev_data = EventData::H3FrameCreated(H3FrameCreated {
-                    stream_id,
-                    length: Some(octets::varint_len(id) as u64),
-                    frame: frame.to_qlog(),
-                    ..Default::default()
-                });
-
-                q.add_event_data_now(ev_data).ok();
-            });
+            #[cfg(feature = "qlog")]
+            qlog::log_frame_created_from(
+                &mut conn.qlog,
+                stream_id,
+                octets::varint_len(id) as u64,
+                &frame,
+            );
 
             let off = b.off();
             conn.stream_send(stream_id, &d[..off], false)?;
@@ -2193,16 +2126,12 @@ impl Connection {
 
         self.local_qpack_streams.encoder_stream_id = Some(stream_id);
 
-        qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
-            let ev_data = EventData::H3StreamTypeSet(H3StreamTypeSet {
-                stream_id,
-                owner: Some(H3Owner::Local),
-                stream_type: H3StreamType::QpackEncode,
-                ..Default::default()
-            });
-
-            q.add_event_data_now(ev_data).ok();
-        });
+        #[cfg(feature = "qlog")]
+        qlog::log_stream_type_set_local(
+            &mut conn.qlog,
+            stream_id,
+            ::qlog::events::h3::H3StreamType::QpackEncode,
+        );
 
         Ok(())
     }
@@ -2215,16 +2144,12 @@ impl Connection {
 
         self.local_qpack_streams.decoder_stream_id = Some(stream_id);
 
-        qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
-            let ev_data = EventData::H3StreamTypeSet(H3StreamTypeSet {
-                stream_id,
-                owner: Some(H3Owner::Local),
-                stream_type: H3StreamType::QpackDecode,
-                ..Default::default()
-            });
-
-            q.add_event_data_now(ev_data).ok();
-        });
+        #[cfg(feature = "qlog")]
+        qlog::log_stream_type_set_local(
+            &mut conn.qlog,
+            stream_id,
+            ::qlog::events::h3::H3StreamType::QpackDecode,
+        );
 
         Ok(())
     }
@@ -2276,17 +2201,8 @@ impl Connection {
             stream_id
         );
 
-        qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-            let frame = Http3Frame::Reserved { length: Some(0) };
-            let ev_data = EventData::H3FrameCreated(H3FrameCreated {
-                stream_id,
-                length: Some(0),
-                frame,
-                ..Default::default()
-            });
-
-            q.add_event_data_now(ev_data).ok();
-        });
+        #[cfg(feature = "qlog")]
+        qlog::log_frame_created_reserved(&mut conn.qlog, stream_id, 0);
 
         // GREASE frame with payload.
         let mut b = octets::OctetsMut::with_slice(&mut d);
@@ -2304,19 +2220,12 @@ impl Connection {
             grease_payload.len()
         );
 
-        qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-            let frame = Http3Frame::Reserved {
-                length: Some(grease_payload.len() as u64),
-            };
-            let ev_data = EventData::H3FrameCreated(H3FrameCreated {
-                stream_id,
-                length: Some(grease_payload.len() as u64),
-                frame,
-                ..Default::default()
-            });
-
-            q.add_event_data_now(ev_data).ok();
-        });
+        #[cfg(feature = "qlog")]
+        qlog::log_frame_created_reserved(
+            &mut conn.qlog,
+            stream_id,
+            grease_payload.len() as u64,
+        );
 
         Ok(())
     }
@@ -2333,17 +2242,12 @@ impl Connection {
 
                 trace!("{} open GREASE stream {}", conn.trace_id(), stream_id);
 
-                qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
-                    let ev_data = EventData::H3StreamTypeSet(H3StreamTypeSet {
-                        stream_id,
-                        owner: Some(H3Owner::Local),
-                        stream_type: H3StreamType::Unknown,
-                        stream_type_value: Some(ty),
-                        ..Default::default()
-                    });
-
-                    q.add_event_data_now(ev_data).ok();
-                });
+                #[cfg(feature = "qlog")]
+                qlog::log_stream_type_set_local_unknown(
+                    &mut conn.qlog,
+                    stream_id,
+                    ty,
+                );
             },
 
             Err(Error::IdError) => {
@@ -2380,16 +2284,12 @@ impl Connection {
 
         self.control_stream_id = Some(stream_id);
 
-        qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
-            let ev_data = EventData::H3StreamTypeSet(H3StreamTypeSet {
-                stream_id,
-                owner: Some(H3Owner::Local),
-                stream_type: H3StreamType::Control,
-                ..Default::default()
-            });
-
-            q.add_event_data_now(ev_data).ok();
-        });
+        #[cfg(feature = "qlog")]
+        qlog::log_stream_type_set_local(
+            &mut conn.qlog,
+            stream_id,
+            ::qlog::events::h3::H3StreamType::Control,
+        );
 
         let grease = if conn.grease {
             Some((grease_value(), grease_value()))
@@ -2429,17 +2329,8 @@ impl Connection {
                 off
             );
 
-            qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-                let frame = frame.to_qlog();
-                let ev_data = EventData::H3FrameCreated(H3FrameCreated {
-                    stream_id: id,
-                    length: Some(off as u64),
-                    frame,
-                    ..Default::default()
-                });
-
-                q.add_event_data_now(ev_data).ok();
-            });
+            #[cfg(feature = "qlog")]
+            qlog::log_frame_created_from(&mut conn.qlog, id, off as u64, &frame);
         }
 
         Ok(())
@@ -2496,24 +2387,20 @@ impl Connection {
                         return Err(e);
                     }
 
-                    qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
-                        let ty_val = if matches!(ty, stream::Type::Unknown) {
-                            Some(varint)
-                        } else {
-                            None
-                        };
+                    #[cfg(feature = "qlog")]
+                    let ty_val = if matches!(ty, stream::Type::Unknown) {
+                        Some(varint)
+                    } else {
+                        None
+                    };
 
-                        let ev_data =
-                            EventData::H3StreamTypeSet(H3StreamTypeSet {
-                                stream_id,
-                                owner: Some(H3Owner::Remote),
-                                stream_type: ty.to_qlog(),
-                                stream_type_value: ty_val,
-                                ..Default::default()
-                            });
-
-                        q.add_event_data_now(ev_data).ok();
-                    });
+                    #[cfg(feature = "qlog")]
+                    qlog::log_stream_type_set_remote_from(
+                        &mut conn.qlog,
+                        stream_id,
+                        ty,
+                        ty_val,
+                    );
 
                     match &ty {
                         stream::Type::Control => {
@@ -2675,19 +2562,12 @@ impl Connection {
                             payload_len
                         );
 
-                        qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
-                            let frame = Http3Frame::Data { raw: None };
-
-                            let ev_data =
-                                EventData::H3FrameParsed(H3FrameParsed {
-                                    stream_id,
-                                    length: Some(payload_len),
-                                    frame,
-                                    ..Default::default()
-                                });
-
-                            q.add_event_data_now(ev_data).ok();
-                        });
+                        #[cfg(feature = "qlog")]
+                        qlog::log_frame_parsed_data(
+                            &mut conn.qlog,
+                            stream_id,
+                            payload_len,
+                        );
                     }
 
                     if let Err(e) = stream.set_frame_payload_len(payload_len) {
@@ -2826,20 +2706,16 @@ impl Connection {
             payload_len
         );
 
-        qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
-            // HEADERS frames are special case and will be logged below.
-            if !matches!(frame, frame::Frame::Headers { .. }) {
-                let frame = frame.to_qlog();
-                let ev_data = EventData::H3FrameParsed(H3FrameParsed {
-                    stream_id,
-                    length: Some(payload_len),
-                    frame,
-                    ..Default::default()
-                });
-
-                q.add_event_data_now(ev_data).ok();
-            }
-        });
+        // HEADERS frames are special case and will be logged below.
+        #[cfg(feature = "qlog")]
+        if !matches!(frame, frame::Frame::Headers { .. }) {
+            qlog::log_frame_parsed_from(
+                &mut conn.qlog,
+                stream_id,
+                payload_len,
+                &frame,
+            );
+        }
 
         match frame {
             frame::Frame::Settings {
@@ -2918,29 +2794,13 @@ impl Connection {
                     },
                 };
 
-                qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
-                    let qlog_headers = headers
-                        .iter()
-                        .map(|h| qlog::events::h3::HttpHeader {
-                            name: String::from_utf8_lossy(h.name()).into_owned(),
-                            value: String::from_utf8_lossy(h.value())
-                                .into_owned(),
-                        })
-                        .collect();
-
-                    let frame = Http3Frame::Headers {
-                        headers: qlog_headers,
-                    };
-
-                    let ev_data = EventData::H3FrameParsed(H3FrameParsed {
-                        stream_id,
-                        length: Some(payload_len),
-                        frame,
-                        ..Default::default()
-                    });
-
-                    q.add_event_data_now(ev_data).ok();
-                });
+                #[cfg(feature = "qlog")]
+                qlog::log_frame_parsed_headers(
+                    &mut conn.qlog,
+                    stream_id,
+                    payload_len,
+                    &headers,
+                );
 
                 let more_frames = !conn.stream_finished(stream_id);
 
@@ -7543,6 +7403,8 @@ mod ffi;
 pub mod frame;
 #[cfg(not(feature = "internal"))]
 mod frame;
+#[cfg(feature = "qlog")]
+mod qlog;
 #[doc(hidden)]
 pub mod qpack;
 mod stream;

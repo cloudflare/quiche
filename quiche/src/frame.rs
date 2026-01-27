@@ -33,15 +33,6 @@ use crate::packet;
 use crate::range_buf::RangeBuf;
 use crate::ranges;
 
-#[cfg(feature = "qlog")]
-use qlog::events::quic::AckedRanges;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::ErrorSpace;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::QuicFrame;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::StreamType;
-
 pub const MAX_CRYPTO_OVERHEAD: usize = 8;
 pub const MAX_DGRAM_OVERHEAD: usize = 2;
 pub const MAX_STREAM_OVERHEAD: usize = 12;
@@ -833,7 +824,12 @@ impl Frame {
     }
 
     #[cfg(feature = "qlog")]
-    pub fn to_qlog(&self) -> QuicFrame {
+    pub fn to_qlog(&self) -> qlog::events::quic::QuicFrame {
+        use qlog::events::quic::AckedRanges;
+        use qlog::events::quic::ErrorSpace;
+        use qlog::events::quic::QuicFrame;
+        use qlog::events::quic::StreamType;
+
         match self {
             Frame::Padding { len } => QuicFrame::Padding {
                 length: None,
