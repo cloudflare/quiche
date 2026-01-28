@@ -41,6 +41,7 @@ use tokio_quiche::settings::TlsCertificatePaths;
 use tokio_quiche::ConnectionParams;
 use tokio_quiche::InitialQuicConnection;
 
+pub mod app_limited;
 pub mod async_callbacks;
 pub mod connection_close;
 pub mod headers;

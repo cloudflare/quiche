@@ -501,7 +501,7 @@ impl BandwidthSampler {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn is_app_limited(&self) -> bool {
         self.is_app_limited
     }
