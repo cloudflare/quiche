@@ -366,7 +366,7 @@ fn verify_client_anonymous() {
 
 #[rstest]
 fn missing_initial_source_connection_id(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -390,7 +390,7 @@ fn missing_initial_source_connection_id(
 
 #[rstest]
 fn invalid_initial_source_connection_id(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -414,7 +414,7 @@ fn invalid_initial_source_connection_id(
 
 #[rstest]
 fn change_idle_timeout(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(0x1).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -450,9 +450,7 @@ fn change_idle_timeout(
 }
 
 #[rstest]
-fn handshake(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn handshake(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -466,7 +464,7 @@ fn handshake(
 
 #[rstest]
 fn handshake_done(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
@@ -481,7 +479,7 @@ fn handshake_done(
 
 #[rstest]
 fn handshake_confirmation(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
@@ -542,7 +540,7 @@ fn handshake_confirmation(
 
 #[rstest]
 fn handshake_resumption(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     #[cfg(not(feature = "openssl"))]
     const SESSION_TICKET_KEY: [u8; 48] = [0xa; 48];
@@ -615,7 +613,7 @@ fn handshake_resumption(
 
 #[rstest]
 fn handshake_alpn_mismatch(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -643,7 +641,7 @@ fn handshake_alpn_mismatch(
 #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
 #[rstest]
 fn handshake_0rtt(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -708,7 +706,7 @@ fn handshake_0rtt(
 #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
 #[rstest]
 fn handshake_0rtt_reordered(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -783,7 +781,7 @@ fn handshake_0rtt_reordered(
 #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
 #[rstest]
 fn handshake_0rtt_truncated(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -843,9 +841,7 @@ fn handshake_0rtt_truncated(
 }
 
 #[rstest]
-fn crypto_limit(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn crypto_limit(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
@@ -915,7 +911,7 @@ fn crypto_limit(
 
 #[rstest]
 fn limit_handshake_data(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -943,7 +939,7 @@ fn limit_handshake_data(
 
 #[rstest]
 fn custom_limit_handshake_data(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     const CUSTOM_AMPLIFICATION_FACTOR: usize = 2;
 
@@ -973,9 +969,7 @@ fn custom_limit_handshake_data(
 }
 
 #[rstest]
-fn streamio(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn streamio(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -997,9 +991,7 @@ fn streamio(
 
 #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
 #[rstest]
-fn zero_rtt(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn zero_rtt(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
@@ -1061,7 +1053,7 @@ fn zero_rtt(
 
 #[rstest]
 fn stream_send_on_32bit_arch(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -1096,7 +1088,7 @@ fn stream_send_on_32bit_arch(
 
 #[rstest]
 fn empty_stream_frame(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1143,7 +1135,7 @@ fn empty_stream_frame(
 
 #[rstest]
 fn update_key_request(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut b = [0; 15];
 
@@ -1198,7 +1190,7 @@ fn update_key_request(
 
 #[rstest]
 fn update_key_request_twice_error(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1236,7 +1228,7 @@ fn update_key_request_twice_error(
 /// Tests that receiving a MAX_STREAM_DATA frame for a receive-only
 /// unidirectional stream is forbidden.
 fn max_stream_data_receive_uni(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1261,9 +1253,7 @@ fn max_stream_data_receive_uni(
 }
 
 #[rstest]
-fn empty_payload(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn empty_payload(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -1278,9 +1268,7 @@ fn empty_payload(
 }
 
 #[rstest]
-fn min_payload(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn min_payload(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -1324,7 +1312,7 @@ fn min_payload(
 
 #[rstest]
 fn flow_control_limit(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1355,7 +1343,7 @@ fn flow_control_limit(
 
 #[rstest]
 fn flow_control_limit_dup(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1385,7 +1373,7 @@ fn flow_control_limit_dup(
 
 #[rstest]
 fn flow_control_update(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1442,7 +1430,7 @@ fn flow_control_update(
 /// Tests that flow control is properly updated even when a stream is shut
 /// down.
 fn flow_control_drain(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65536];
 
@@ -1545,7 +1533,7 @@ fn flow_control_drain(
 #[rstest]
 /// Tests that flow control is properly updated when a stream receives a RESET
 fn flow_control_reset_stream(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values("reset", "fin")] inconsistent_final_size_frame: &str,
 ) {
     let mut buf = [0; 65536];
@@ -1691,7 +1679,7 @@ fn flow_control_reset_stream(
 
 #[rstest]
 fn stream_flow_control_limit_bidi(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1712,7 +1700,7 @@ fn stream_flow_control_limit_bidi(
 
 #[rstest]
 fn stream_flow_control_limit_uni(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1733,7 +1721,7 @@ fn stream_flow_control_limit_uni(
 
 #[rstest]
 fn stream_flow_control_update(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1780,7 +1768,7 @@ fn stream_flow_control_update(
 
 #[rstest]
 fn stream_left_bidi(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1808,7 +1796,7 @@ fn stream_left_bidi(
 
 #[rstest]
 fn stream_left_uni(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1836,7 +1824,7 @@ fn stream_left_uni(
 
 #[rstest]
 fn stream_limit_bidi(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1883,7 +1871,7 @@ fn stream_limit_bidi(
 
 #[rstest]
 fn stream_limit_max_bidi(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1908,7 +1896,7 @@ fn stream_limit_max_bidi(
 
 #[rstest]
 fn stream_limit_uni(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1955,7 +1943,7 @@ fn stream_limit_uni(
 
 #[rstest]
 fn stream_limit_max_uni(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -1980,7 +1968,7 @@ fn stream_limit_max_uni(
 
 #[rstest]
 fn stream_left_reset_bidi(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2068,7 +2056,7 @@ fn stream_left_reset_bidi(
 
 #[rstest]
 fn stream_reset_counts(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -2138,7 +2126,7 @@ fn stream_reset_counts(
 
 #[rstest]
 fn stream_stop_counts(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -2197,7 +2185,7 @@ fn stream_stop_counts(
 
 #[rstest]
 fn streams_blocked_max_bidi(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2224,7 +2212,7 @@ fn streams_blocked_max_bidi(
 
 #[rstest]
 fn streams_blocked_max_uni(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2251,7 +2239,7 @@ fn streams_blocked_max_uni(
 
 #[rstest]
 fn stream_data_overlap(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2284,7 +2272,7 @@ fn stream_data_overlap(
 
 #[rstest]
 fn stream_data_overlap_with_reordering(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2319,7 +2307,7 @@ fn stream_data_overlap_with_reordering(
 /// Tests that receiving a valid RESET_STREAM frame when all data has
 /// already been read, notifies the application.
 fn reset_stream_data_recvd(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut b = [0; 15];
     let mut buf = [0; 65535];
@@ -2389,7 +2377,7 @@ fn reset_stream_data_recvd(
 /// Tests that receiving a valid RESET_STREAM frame when all data has _not_
 /// been read, discards all buffered data and notifies the application.
 fn reset_stream_data_not_recvd(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut b = [0; 15];
     let mut buf = [0; 65535];
@@ -2458,7 +2446,7 @@ fn reset_stream_data_not_recvd(
 /// Tests that RESET_STREAM frames exceeding the connection-level flow
 /// control limit cause an error.
 fn reset_stream_flow_control(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2496,7 +2484,7 @@ fn reset_stream_flow_control(
 /// Tests that RESET_STREAM frames exceeding the stream-level flow control
 /// limit cause an error.
 fn reset_stream_flow_control_stream(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2524,7 +2512,7 @@ fn reset_stream_flow_control_stream(
 
 #[rstest]
 fn path_challenge(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2559,7 +2547,7 @@ fn path_challenge(
 /// Simulates reception of an early 1-RTT packet on the server, by
 /// delaying the client's Handshake packet that completes the handshake.
 fn early_1rtt_packet(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2632,9 +2620,7 @@ fn early_1rtt_packet(
 }
 
 #[rstest]
-fn stop_sending(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn stop_sending(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut b = [0; 15];
 
     let mut buf = [0; 65535];
@@ -2750,7 +2736,7 @@ fn stop_sending(
 
 #[rstest]
 fn stop_sending_fin(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut b = [0; 15];
 
@@ -2821,7 +2807,7 @@ fn stop_sending_fin(
 #[rstest]
 /// Tests that resetting a stream restores flow control for unsent data.
 fn stop_sending_unsent_tx_cap(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -2898,7 +2884,7 @@ fn stop_sending_unsent_tx_cap(
 /// in response to STOP_SENDING is acked before the application processes
 /// writable streams.
 fn stop_sending_ack_race(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut b = [0; 15];
 
@@ -3019,7 +3005,7 @@ fn stop_sending_ack_race(
 /// Tests that the `StreamStopped` error is propagated even if a STREAM frame
 /// is acked before the application processes writable streams.
 fn stop_sending_stream_ack_race(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut b = [0; 15];
 
@@ -3138,7 +3124,7 @@ fn stop_sending_stream_ack_race(
 
 #[rstest]
 fn stream_shutdown_read(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -3216,7 +3202,7 @@ fn stream_shutdown_read(
 
 #[rstest]
 fn stream_shutdown_read_after_fin(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -3280,7 +3266,7 @@ fn stream_shutdown_read_after_fin(
 
 #[rstest]
 fn stream_shutdown_read_update_max_data(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -3381,7 +3367,7 @@ fn stream_shutdown_read_update_max_data(
 /// return flow control credit.
 #[rstest]
 fn stream_shutdown_write_update_max_data(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -3441,7 +3427,7 @@ fn stream_shutdown_write_update_max_data(
 
 #[rstest]
 fn stream_shutdown_uni(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -3467,7 +3453,7 @@ fn stream_shutdown_uni(
 
 #[rstest]
 fn stream_shutdown_write(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -3560,7 +3546,7 @@ fn stream_shutdown_write(
 #[rstest]
 /// Tests that shutting down a stream restores flow control for unsent data.
 fn stream_shutdown_write_unsent_tx_cap(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -3633,7 +3619,7 @@ fn stream_shutdown_write_unsent_tx_cap(
 /// Tests that the order of flushable streams scheduled on the wire is the
 /// same as the order of `stream_send()` calls done by the application.
 fn stream_round_robin(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -3692,7 +3678,7 @@ fn stream_round_robin(
 #[rstest]
 /// Tests the readable iterator.
 fn stream_readable(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -3764,7 +3750,7 @@ fn stream_readable(
 #[rstest]
 /// Tests the writable iterator.
 fn stream_writable(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -3840,7 +3826,7 @@ fn stream_writable(
 
 #[rstest]
 fn stream_writable_blocked(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -3898,7 +3884,7 @@ fn stream_writable_blocked(
 /// Tests that we don't exceed the per-connection flow control limit set by
 /// the peer.
 fn flow_control_limit_send(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -3936,7 +3922,7 @@ fn flow_control_limit_send(
 /// Tests that invalid packets received before any other valid ones cause
 /// the server to close the connection immediately.
 fn invalid_initial_server(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -3970,7 +3956,7 @@ fn invalid_initial_server(
 /// Tests that invalid Initial packets received to cause
 /// the client to close the connection immediately.
 fn invalid_initial_client(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -4010,7 +3996,7 @@ fn invalid_initial_client(
 /// Tests that packets with invalid payload length received before any other
 /// valid packet cause the server to close the connection immediately.
 fn invalid_initial_payload(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -4086,7 +4072,7 @@ fn invalid_initial_payload(
 #[rstest]
 /// Tests that invalid packets don't cause the connection to be closed.
 fn invalid_packet(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -4114,7 +4100,7 @@ fn invalid_packet(
 
 #[rstest]
 fn recv_empty_buffer(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -4126,7 +4112,7 @@ fn recv_empty_buffer(
 
 #[rstest]
 fn stop_sending_before_flushed_packets(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut b = [0; 15];
 
@@ -4217,7 +4203,7 @@ fn stop_sending_before_flushed_packets(
 
 #[rstest]
 fn reset_before_flushed_packets(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut b = [0; 15];
 
@@ -4291,7 +4277,7 @@ fn reset_before_flushed_packets(
 #[rstest]
 /// Tests that the MAX_STREAMS frame is sent for bidirectional streams.
 fn stream_limit_update_bidi(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -4370,7 +4356,7 @@ fn stream_limit_update_bidi(
 #[rstest]
 /// Tests that the MAX_STREAMS frame is sent for unidirectional streams.
 fn stream_limit_update_uni(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -4438,7 +4424,7 @@ fn stream_limit_update_uni(
 /// data in the buffer, and that the buffer becomes readable on the other
 /// side.
 fn stream_zero_length_fin(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -4485,7 +4471,7 @@ fn stream_zero_length_fin(
 /// data in the buffer, that the buffer becomes readable on the other
 /// side and stays readable even if the stream is fin'd locally.
 fn stream_zero_length_fin_deferred_collection(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -4546,7 +4532,7 @@ fn stream_zero_length_fin_deferred_collection(
 /// Tests that the stream gets created with stream_send() even if there's
 /// no data in the buffer and the fin flag is not set.
 fn stream_zero_length_non_fin(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -4566,7 +4552,7 @@ fn stream_zero_length_non_fin(
 #[rstest]
 /// Tests that completed streams are garbage collected.
 fn collect_streams(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -4633,9 +4619,7 @@ fn config_set_cc_algorithm_name() {
 }
 
 #[rstest]
-fn peer_cert(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn peer_cert(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -4648,7 +4632,7 @@ fn peer_cert(
 
 #[rstest]
 fn peer_cert_chain(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -4673,7 +4657,7 @@ fn peer_cert_chain(
 }
 
 #[rstest]
-fn retry(#[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str) {
+fn retry(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
@@ -4735,7 +4719,7 @@ fn retry(#[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str)
 
 #[rstest]
 fn retry_with_pto(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -4803,7 +4787,7 @@ fn retry_with_pto(
 
 #[rstest]
 fn missing_retry_source_connection_id(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -4865,7 +4849,7 @@ fn missing_retry_source_connection_id(
 
 #[rstest]
 fn invalid_retry_source_connection_id(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -4929,7 +4913,7 @@ fn invalid_retry_source_connection_id(
 #[rstest]
 /// Tests that a zero-length NEW_TOKEN frame is detected as an error.
 fn zero_length_new_token(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -4953,7 +4937,7 @@ fn zero_length_new_token(
 #[rstest]
 /// Tests that a NEW_TOKEN frame sent by client is detected as an error.
 fn client_sent_new_token(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -4980,7 +4964,7 @@ fn check_send(_: &mut impl Send) {}
 
 #[rstest]
 fn config_must_be_send(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -4989,7 +4973,7 @@ fn config_must_be_send(
 
 #[rstest]
 fn connection_must_be_send(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     check_send(&mut pipe.client);
@@ -4999,7 +4983,7 @@ fn check_sync(_: &mut impl Sync) {}
 
 #[rstest]
 fn config_must_be_sync(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -5008,16 +4992,14 @@ fn config_must_be_sync(
 
 #[rstest]
 fn connection_must_be_sync(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     check_sync(&mut pipe.client);
 }
 
 #[rstest]
-fn data_blocked(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn data_blocked(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -5057,7 +5039,7 @@ fn data_blocked(
 
 #[rstest]
 fn stream_data_blocked(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -5136,7 +5118,7 @@ fn stream_data_blocked(
 
 #[rstest]
 fn stream_data_blocked_unblocked_flow_control(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -5204,7 +5186,7 @@ fn stream_data_blocked_unblocked_flow_control(
 
 #[rstest]
 fn app_limited_true(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -5246,7 +5228,7 @@ fn app_limited_true(
 
 #[rstest]
 fn app_limited_false(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -5342,7 +5324,7 @@ fn tx_cap_factor() {
 
 #[rstest]
 fn client_rst_stream_while_bytes_in_flight(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(false, true)] use_stop_sending: bool,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
@@ -5443,7 +5425,7 @@ fn client_rst_stream_while_bytes_in_flight(
 
 #[rstest]
 fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -5545,7 +5527,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
 
 #[rstest]
 fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -5622,7 +5604,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
 /// ack_eliciting is explicitly requested.
 #[rstest]
 fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledging(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -5707,7 +5689,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
 
 #[rstest]
 fn validate_peer_sent_ack_range(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
@@ -5795,7 +5777,7 @@ fn validate_peer_sent_ack_range(
 
 #[rstest]
 fn validate_peer_sent_ack_range_for_multi_path(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -5911,7 +5893,7 @@ fn validate_peer_sent_ack_range_for_multi_path(
 // Both Client and Server should skip pn to prevent an optimistic ack attack
 #[rstest]
 fn optimistic_ack_mitigation_via_skip_pn(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
@@ -5968,7 +5950,7 @@ fn optimistic_ack_mitigation_via_skip_pn(
 // Connection should validate skip pn to prevent an optimistic ack attack
 #[rstest]
 fn prevent_optimistic_ack(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
@@ -6038,7 +6020,7 @@ fn prevent_optimistic_ack(
 
 #[rstest]
 fn app_limited_false_no_frame(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -6082,7 +6064,7 @@ fn app_limited_false_no_frame(
 
 #[rstest]
 fn app_limited_false_no_header(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -6126,7 +6108,7 @@ fn app_limited_false_no_header(
 
 #[rstest]
 fn app_limited_not_changed_on_no_new_frames(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -6176,7 +6158,7 @@ fn app_limited_not_changed_on_no_new_frames(
 
 #[rstest]
 fn limit_ack_ranges(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -6229,7 +6211,7 @@ fn limit_ack_ranges(
 #[rstest]
 /// Tests that streams are correctly scheduled based on their priority.
 fn stream_priority(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     // Limit 1-RTT packet size to avoid congestion control interference.
     const MAX_TEST_PACKET_SIZE: usize = 540;
@@ -6458,7 +6440,7 @@ fn stream_priority(
 #[rstest]
 /// Tests that changing a stream's priority is correctly propagated.
 fn stream_reprioritize(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -6578,7 +6560,7 @@ fn stream_reprioritize(
 #[rstest]
 /// Tests that streams and datagrams are correctly scheduled.
 fn stream_datagram_priority(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     // Limit 1-RTT packet size to avoid congestion control interference.
     const MAX_TEST_PACKET_SIZE: usize = 540;
@@ -6716,7 +6698,7 @@ fn stream_datagram_priority(
 #[rstest]
 /// Tests that old data is retransmitted on PTO.
 fn early_retransmit(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -6781,7 +6763,7 @@ fn early_retransmit(
 #[rstest]
 /// Tests that PTO probe packets are not coalesced together.
 fn dont_coalesce_probes(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -6869,7 +6851,7 @@ fn dont_coalesce_probes(
 
 #[rstest]
 fn coalesce_padding_short(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -6905,7 +6887,7 @@ fn coalesce_padding_short(
 #[rstest]
 /// Tests that client avoids handshake deadlock by arming PTO.
 fn handshake_anti_deadlock(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -6960,7 +6942,7 @@ fn handshake_anti_deadlock(
 /// Tests that packets with corrupted type (from Handshake to Initial) are
 /// properly ignored.
 fn handshake_packet_type_corruption(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -7005,7 +6987,7 @@ fn handshake_packet_type_corruption(
 
 #[rstest]
 fn dgram_send_fails_invalidstate(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -7018,7 +7000,7 @@ fn dgram_send_fails_invalidstate(
 
 #[rstest]
 fn dgram_send_app_limited(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
     let send_buf = [0xcf; 1000];
@@ -7107,7 +7089,7 @@ fn dgram_send_app_limited(
 
 #[rstest]
 fn dgram_single_datagram(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -7147,7 +7129,7 @@ fn dgram_single_datagram(
 
 #[rstest]
 fn dgram_multiple_datagrams(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -7224,7 +7206,7 @@ fn dgram_multiple_datagrams(
 
 #[rstest]
 fn dgram_send_queue_overflow(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -7273,7 +7255,7 @@ fn dgram_send_queue_overflow(
 
 #[rstest]
 fn dgram_recv_queue_overflow(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -7323,7 +7305,7 @@ fn dgram_recv_queue_overflow(
 
 #[rstest]
 fn dgram_send_max_size(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; MAX_DGRAM_FRAME_SIZE as usize];
 
@@ -7376,9 +7358,7 @@ fn dgram_send_max_size(
 
 #[rstest]
 /// Tests is_readable check.
-fn is_readable(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn is_readable(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
@@ -7463,7 +7443,7 @@ fn is_readable(
 }
 
 #[rstest]
-fn close(#[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str) {
+fn close(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -7493,7 +7473,7 @@ fn close(#[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str)
 
 #[rstest]
 fn app_close_by_client(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -7523,7 +7503,7 @@ fn app_close_by_client(
 #[cfg(not(feature = "openssl"))]
 #[rstest]
 fn app_close_by_server_during_handshake_private_key_failure(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     pipe.server.handshake.set_failing_private_key_method();
@@ -7582,7 +7562,7 @@ fn app_close_by_server_during_handshake_private_key_failure(
 
 #[rstest]
 fn app_close_by_server_during_handshake_not_established(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
@@ -7634,7 +7614,7 @@ fn app_close_by_server_during_handshake_not_established(
 
 #[rstest]
 fn app_close_by_server_during_handshake_established(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
@@ -7690,7 +7670,7 @@ fn app_close_by_server_during_handshake_established(
 
 #[rstest]
 fn transport_close_by_client_during_handshake_established(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
@@ -7733,9 +7713,7 @@ fn transport_close_by_client_during_handshake_established(
 }
 
 #[rstest]
-fn peer_error(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn peer_error(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -7754,7 +7732,7 @@ fn peer_error(
 
 #[rstest]
 fn app_peer_error(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -7773,9 +7751,7 @@ fn app_peer_error(
 }
 
 #[rstest]
-fn local_error(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn local_error(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -7795,7 +7771,7 @@ fn local_error(
 
 #[rstest]
 fn update_max_datagram_size(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut client_scid = [0; 16];
     rand::rand_bytes(&mut client_scid[..]);
@@ -7901,9 +7877,7 @@ fn update_max_datagram_size(
 #[rstest]
 /// Tests that connection-level send capacity decreases as more stream data
 /// is buffered.
-fn send_capacity(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
-) {
+fn send_capacity(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
@@ -7987,7 +7961,7 @@ fn send_capacity(
 #[cfg(feature = "boringssl-boring-crate")]
 #[rstest]
 fn user_provided_boring_ctx(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) -> Result<()> {
     // Manually construct boring ssl ctx for server
     let mut server_tls_ctx_builder =
@@ -8038,7 +8012,7 @@ fn user_provided_boring_ctx(
 #[cfg(feature = "boringssl-boring-crate")]
 #[rstest]
 fn in_handshake_config(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) -> Result<()> {
     let mut buf = [0; 65535];
 
@@ -8144,7 +8118,7 @@ fn in_handshake_config(
 
 #[rstest]
 fn initial_cwnd(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) -> Result<()> {
     const CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 30;
 
@@ -8205,7 +8179,7 @@ fn initial_cwnd(
 #[rstest]
 /// Tests that resetting a stream restores flow control for unsent data.
 fn last_tx_data_larger_than_tx_data(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -8270,7 +8244,7 @@ fn last_tx_data_larger_than_tx_data(
 /// reaches the server and notifies the application.
 #[rstest]
 fn send_connection_ids(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -8331,7 +8305,7 @@ fn send_connection_ids(
 #[rstest]
 /// Tests that NEW_CONNECTION_ID with zero-length CID are rejected.
 fn connection_id_zero(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -8404,7 +8378,7 @@ fn connection_id_zero(
 #[rstest]
 /// Tests that NEW_CONNECTION_ID with too long CID are rejected.
 fn connection_id_invalid_max_len(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -8479,7 +8453,7 @@ fn connection_id_invalid_max_len(
 /// Exercises the handling of NEW_CONNECTION_ID and RETIRE_CONNECTION_ID
 /// frames.
 fn connection_id_handling(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -8567,7 +8541,7 @@ fn connection_id_handling(
 
 #[rstest]
 fn lost_connection_id_frames(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -8627,7 +8601,7 @@ fn lost_connection_id_frames(
 
 #[rstest]
 fn sending_duplicate_scids(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -8675,7 +8649,7 @@ fn sending_duplicate_scids(
 #[rstest]
 /// Tests the limit to retired DCID sequence numbers.
 fn connection_id_retire_limit(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -8766,7 +8740,7 @@ fn connection_id_retire_limit(
 
 #[rstest]
 fn connection_id_retire_exotic_sequence(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -8910,7 +8884,7 @@ fn pipe_with_exchanged_cids(
 
 #[rstest]
 fn path_validation(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -8998,7 +8972,7 @@ fn path_validation(
 
 #[rstest]
 fn losing_probing_packets(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9066,7 +9040,7 @@ fn losing_probing_packets(
 
 #[rstest]
 fn failed_path_validation(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9121,7 +9095,7 @@ fn failed_path_validation(
 
 #[rstest]
 fn client_discard_unknown_address(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9157,7 +9131,7 @@ fn client_discard_unknown_address(
 
 #[rstest]
 fn path_validation_limited_mtu(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9213,7 +9187,7 @@ fn path_validation_limited_mtu(
 
 #[rstest]
 fn path_probing_dos(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9282,7 +9256,7 @@ fn path_probing_dos(
 
 #[rstest]
 fn retiring_active_path_dcid(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9308,7 +9282,7 @@ fn retiring_active_path_dcid(
 
 #[rstest]
 fn send_on_path_test(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9496,7 +9470,7 @@ fn send_on_path_test(
 
 #[rstest]
 fn connection_migration(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9712,7 +9686,7 @@ fn connection_migration(
 
 #[rstest]
 fn connection_migration_zero_length_cid(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9792,7 +9766,7 @@ fn connection_migration_zero_length_cid(
 
 #[rstest]
 fn connection_migration_reordered_non_probing(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -9862,7 +9836,7 @@ fn connection_migration_reordered_non_probing(
 
 #[rstest]
 fn resilience_against_migration_attack(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -10003,7 +9977,7 @@ fn resilience_against_migration_attack(
 
 #[rstest]
 fn consecutive_non_ack_eliciting(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
 
@@ -10048,7 +10022,7 @@ fn consecutive_non_ack_eliciting(
 
 #[rstest]
 fn send_ack_eliciting_causes_ping(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     // First establish a connection
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -10070,7 +10044,7 @@ fn send_ack_eliciting_causes_ping(
 
 #[rstest]
 fn send_ack_eliciting_no_ping(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     // First establish a connection
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
@@ -10105,7 +10079,7 @@ fn send_ack_eliciting_no_ping(
 /// on reset.
 #[rstest]
 fn stop_sending_stream_send_after_reset_stream_ack(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut b = [0; 15];
 
@@ -10296,7 +10270,7 @@ fn stop_sending_stream_send_after_reset_stream_ack(
 
 #[rstest]
 fn challenge_no_cids(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -10398,7 +10372,7 @@ fn challenge_no_cids(
 
 #[rstest]
 fn pmtud_probe_success(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
@@ -10442,7 +10416,7 @@ fn pmtud_probe_success(
 /// This test verifies that multiple send() calls after handshake completion
 /// only generate one PMTUD probe packet, not multiple identical probes.
 fn pmtud_no_duplicate_probes(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
@@ -10509,7 +10483,7 @@ fn pmtud_no_duplicate_probes(
 #[rstest]
 /// Test that PMTUD retries with smaller probe size after loss
 fn pmtud_probe_retry_after_loss(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
@@ -10619,7 +10593,7 @@ fn pmtud_probe_retry_after_loss(
 #[cfg(feature = "boringssl-boring-crate")]
 #[rstest]
 fn enable_pmtud_mid_handshake(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     // Manually construct `SslContextBuilder` for the server so we can enable
     // PMTUD during the handshake.
@@ -10708,7 +10682,7 @@ fn enable_pmtud_mid_handshake(
 #[cfg(feature = "boringssl-boring-crate")]
 #[rstest]
 fn disable_pmtud_mid_handshake(
-    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     // Manually construct `SslContextBuilder` for the server so we can disable
     // PMTUD during the handshake.
