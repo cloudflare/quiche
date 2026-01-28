@@ -746,8 +746,7 @@ mod tests {
 
     #[rstest]
     fn loss_on_pto(
-        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -1033,8 +1032,7 @@ mod tests {
 
     #[rstest]
     fn loss_on_timer(
-        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -1230,8 +1228,7 @@ mod tests {
 
     #[rstest]
     fn loss_on_reordering(
-        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -1717,8 +1714,7 @@ mod tests {
 
     #[rstest]
     fn pacing(
-        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
         #[values(false, true)] time_sent_set_to_now: bool,
     ) {
         let pacing_enabled = cc_algorithm_name == "bbr2" ||
@@ -2173,7 +2169,7 @@ mod tests {
 
     #[rstest]
     fn validate_ack_range_on_ack_received(
-        #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+        #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
@@ -2257,8 +2253,7 @@ mod tests {
 
     #[rstest]
     fn pmtud_loss_on_timer(
-        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
-        cc_algorithm_name: &str,
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     ) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
