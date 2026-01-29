@@ -1044,7 +1044,7 @@ impl Frame {
                 error: Some(ConnectionClosedFrameError::TransportError(
                     qlog::events::quic::TransportError::Unknown,
                 )),
-                error_space: Some(ErrorSpace::TransportError),
+                error_space: Some(ErrorSpace::Transport),
                 error_code: Some(*error_code),
                 reason: Some(String::from_utf8_lossy(reason).into_owned()),
                 reason_bytes: None,
@@ -1056,7 +1056,7 @@ impl Frame {
                     error: Some(ConnectionClosedFrameError::ApplicationError(
                         qlog::events::ApplicationError::Unknown,
                     )),
-                    error_space: Some(ErrorSpace::ApplicationError),
+                    error_space: Some(ErrorSpace::Application),
                     error_code: Some(*error_code),
                     reason: Some(String::from_utf8_lossy(reason).into_owned()),
                     reason_bytes: None,
