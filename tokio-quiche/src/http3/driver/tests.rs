@@ -1367,6 +1367,95 @@ mod server_side_driver {
         assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
     }
 
+    // Test that dropping the H3 event receiver when there are no active streams
+    // and datagram flows causes the connection to close immediately.
+    #[test]
+    fn h3_controller_drop_closes_connection_when_maps_empty() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+
+        assert!(helper.driver.stream_map.is_empty());
+        assert!(helper.driver.flow_map.is_empty());
+        assert!(helper.pipe.server.local_error().is_none());
+
+        // drop the controller to trigger receiver drop detection
+        drop(helper.controller);
+
+        // run wait_for_data to detect the receiver drop
+        tokio::task::unconstrained(
+            helper.driver.wait_for_data(&mut helper.pipe.server),
+        )
+        .now_or_never();
+
+        // connection closed with H3 NoError
+        let local_error = helper
+            .pipe
+            .server
+            .local_error()
+            .expect("connection should be closing");
+        assert!(local_error.is_app, "should be application-level close");
+        assert_eq!(
+            local_error.error_code,
+            h3::WireErrorCode::NoError as u64,
+            "should close with H3 NoError"
+        );
+    }
+
+    // Test that dropping the H3Controller when there are active streams/flows
+    // does NOT close the connection immediately (e.g. tunnel scenarios).
+    #[test]
+    fn h3_controller_drop_keeps_connection_alive_when_streams_exist() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // CONNECT-UDP request creates both a stream and a datagram flow
+        let connect_headers = vec![
+            h3::Header::new(b":method", b"CONNECT-UDP"),
+            h3::Header::new(b":scheme", b"https"),
+            h3::Header::new(b":authority", b"quic.tech"),
+            h3::Header::new(b":path", b"/"),
+            h3::Header::new(b"datagram-flow-id", b"0"),
+        ];
+        helper
+            .peer_client_send_request(connect_headers, false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Consume events to keep channels alive
+        assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Core(H3Event::NewFlow { .. })
+        );
+        assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { .. }
+        );
+
+        assert_eq!(helper.driver.stream_map.len(), 1);
+        assert_eq!(helper.driver.flow_map.len(), 1);
+
+        drop(helper.controller);
+        tokio::task::unconstrained(
+            helper.driver.wait_for_data(&mut helper.pipe.server),
+        )
+        .now_or_never();
+
+        // Connection closes even with active streams because the
+        // application dropped the event receiver.
+        let local_error = helper
+            .pipe
+            .server
+            .local_error()
+            .expect("connection should be closing");
+        assert!(local_error.is_app, "should be application-level close");
+        assert_eq!(
+            local_error.error_code,
+            h3::WireErrorCode::NoError as u64,
+            "should close with H3 NoError"
+        );
+    }
+
     /// Test that calling `H3Controller::shutdown_stream` with
     /// `StreamShutdown::Write` sends a RESET_STREAM frame to the peer.
     #[test]
@@ -1393,11 +1482,12 @@ mod server_side_driver {
         let audit_stats = req.h3_audit_stats.clone();
 
         // Server calls shutdown_stream via the controller
-        helper
-            .controller
-            .shutdown_stream(stream_id, StreamShutdown::Write {
+        helper.controller.shutdown_stream(
+            stream_id,
+            StreamShutdown::Write {
                 error_code: CUSTOM_ERROR_CODE,
-            });
+            },
+        );
 
         helper.advance_and_run_loop().unwrap();
 
@@ -1443,11 +1533,12 @@ mod server_side_driver {
         let audit_stats = req.h3_audit_stats.clone();
 
         // Server calls shutdown_stream with Read direction (STOP_SENDING)
-        helper
-            .controller
-            .shutdown_stream(stream_id, StreamShutdown::Read {
+        helper.controller.shutdown_stream(
+            stream_id,
+            StreamShutdown::Read {
                 error_code: CUSTOM_ERROR_CODE,
-            });
+            },
+        );
 
         helper.advance_and_run_loop().unwrap();
 
@@ -1495,12 +1586,13 @@ mod server_side_driver {
         let audit_stats = req.h3_audit_stats.clone();
 
         // Server calls shutdown_stream with Both directions
-        helper
-            .controller
-            .shutdown_stream(stream_id, StreamShutdown::Both {
+        helper.controller.shutdown_stream(
+            stream_id,
+            StreamShutdown::Both {
                 read_error_code: READ_ERROR_CODE,
                 write_error_code: WRITE_ERROR_CODE,
-            });
+            },
+        );
 
         helper.advance_and_run_loop().unwrap();
 

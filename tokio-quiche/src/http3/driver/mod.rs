@@ -367,6 +367,9 @@ pub struct H3Driver<H: DriverHooks> {
     /// Tracks whether we have forwarded the HTTP/3 SETTINGS frame
     /// to the [H3Controller] once.
     settings_received_and_forwarded: bool,
+    /// Tracks whether the H3 event receiver has been dropped.
+    /// Used to avoid busy-looping on `h3_event_sender.closed()`.
+    h3_event_receiver_dropped: bool,
 }
 
 impl<H: DriverHooks> H3Driver<H> {
@@ -399,6 +402,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 waiting_streams: FuturesUnordered::new(),
 
                 settings_received_and_forwarded: false,
+                h3_event_receiver_dropped: false,
             },
             H3Controller {
                 cmd_sender,
@@ -972,6 +976,16 @@ impl<H: DriverHooks> H3Driver<H> {
                 .send(H3Event::StreamClosed { stream_id }.into());
         }
 
+        // If the event receiver was already dropped and all work is done, close
+        // the connection now.
+        if self.h3_event_receiver_dropped &&
+            self.stream_map.is_empty() &&
+            self.flow_map.is_empty()
+        {
+            let _ =
+                qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
+        }
+
         Ok(())
     }
 
@@ -1136,14 +1150,16 @@ impl<H: DriverHooks> H3Driver<H> {
             match recv.try_recv() {
                 Ok(frame) => ctx.queued_frame = Some(frame),
                 Err(TryRecvError::Disconnected) => {
-                    if !ctx.fin_or_reset_sent &&
-                        ctx.associated_dgram_flow_id.is_none()
-                    // The channel might be closed if the stream was used to
-                    // initiate a datagram exchange.
-                    // TODO: ideally, the application would still shut down the
-                    // stream properly. Once applications code
-                    // is fixed, we can remove this check.
-                    {
+                    // Skip cleanup for active datagram streams
+                    // (e.g. WebTransport) where the application
+                    // drops the per-stream channel after upgrading
+                    // to datagram mode. If response headers were
+                    // never sent, the request was rejected and the
+                    // stream is orphaned — clean it up.
+                    let is_active_dgram_stream =
+                        ctx.associated_dgram_flow_id.is_some()
+                            && ctx.initial_headers_sent;
+                    if !ctx.fin_or_reset_sent && !is_active_dgram_stream {
                         // The channel closed without having written a fin. Send a
                         // RESET_STREAM to indicate we won't be writing anything
                         // else
@@ -1303,6 +1319,14 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
             Some(dgram) = self.dgram_recv.recv() => self.dgram_ready(qconn, dgram),
             Some(cmd) = self.cmd_recv.recv() => H::conn_command(self, qconn, cmd),
             r = self.hooks.wait_for_action(qconn), if H::has_wait_action(self) => r,
+            _ = self.h3_event_sender.closed(), if !self.h3_event_receiver_dropped => {
+                self.h3_event_receiver_dropped = true;
+                // The application dropped its event receiver. Close
+                // the connection — any remaining streams are
+                // orphaned since nobody will process their data.
+                let _ = qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
+                Ok(())
+            }
         }?;
 
         // Make sure controller is not starved, but also not prioritized in the
