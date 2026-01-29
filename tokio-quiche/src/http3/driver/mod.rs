@@ -366,6 +366,9 @@ pub struct H3Driver<H: DriverHooks> {
     /// Tracks whether we have forwarded the HTTP/3 SETTINGS frame
     /// to the [H3Controller] once.
     settings_received_and_forwarded: bool,
+    /// Tracks whether the H3 event receiver has been dropped.
+    /// Used to avoid busy-looping on `h3_event_sender.closed()`.
+    h3_event_receiver_dropped: bool,
 }
 
 impl<H: DriverHooks> H3Driver<H> {
@@ -398,6 +401,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 waiting_streams: FuturesUnordered::new(),
 
                 settings_received_and_forwarded: false,
+                h3_event_receiver_dropped: false,
             },
             H3Controller {
                 cmd_sender,
@@ -981,6 +985,16 @@ impl<H: DriverHooks> H3Driver<H> {
                 .send(H3Event::StreamClosed { stream_id }.into());
         }
 
+        // If the event receiver was already dropped and all work is done, close
+        // the connection now.
+        if self.h3_event_receiver_dropped &&
+            self.stream_map.is_empty() &&
+            self.flow_map.is_empty()
+        {
+            let _ =
+                qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
+        }
+
         Ok(())
     }
 
@@ -1252,6 +1266,15 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
             Some(dgram) = self.dgram_recv.recv() => self.dgram_ready(qconn, dgram),
             Some(cmd) = self.cmd_recv.recv() => H::conn_command(self, qconn, cmd),
             r = self.hooks.wait_for_action(qconn), if H::has_wait_action(self) => r,
+            _ = self.h3_event_sender.closed(), if !self.h3_event_receiver_dropped => {
+                self.h3_event_receiver_dropped = true;
+                if self.stream_map.is_empty() && self.flow_map.is_empty() {
+                    let _ = qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
+                }
+                // If maps are not empty, connection stays alive.
+                // finish_stream() will close when maps become empty.
+                Ok(())
+            }
         }?;
 
         // Make sure controller is not starved, but also not prioritized in the
