@@ -28,6 +28,7 @@ use crate::fixtures::*;
 
 use futures::SinkExt;
 use parking_lot::Mutex;
+use rstest::rstest;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Notify;
@@ -46,8 +47,14 @@ use tokio_quiche::quiche::h3::Header;
 // A response that slowly trickles to the client will always be
 // app-limited.  The connection should not exit the BBR startup phase
 // since has_bandwidth_growth ignores app-limited rounds.
+#[rstest]
+#[case::cubic("cubic", false)]
+#[case::bbr2_app_limited_broken("bbr2", false)]
+#[case::bbr2_app_limited_fixed("bbr2", true)]
 #[tokio::test]
-async fn test_app_limited_slow_upstream() {
+async fn test_app_limited_slow_upstream(
+    #[case] cc_algorithm_name: &str, #[case] enable_bbr_app_limited_fix: bool,
+) {
     let hook = TestConnectionHook::new();
 
     // The size of the response to trickle at 1 byte / msec.
@@ -65,8 +72,8 @@ async fn test_app_limited_slow_upstream() {
     });
 
     let mut quic_settings = QuicSettings::default();
-    quic_settings.cc_algorithm = "bbr2".to_string();
-    quic_settings.enable_bbr_app_limited_fix = true;
+    quic_settings.cc_algorithm = cc_algorithm_name.to_string();
+    quic_settings.enable_bbr_app_limited_fix = enable_bbr_app_limited_fix;
 
     let url = start_server_with_settings(
         quic_settings,
@@ -155,7 +162,13 @@ async fn test_app_limited_slow_upstream() {
     // and there was no loss.
     let server_path_stats = server_path_stats.lock().clone().unwrap();
     assert_eq!(server_path_stats.lost, 0);
-    assert_eq!(server_path_stats.startup_exit, None);
+    if cc_algorithm_name == "cubic" || enable_bbr_app_limited_fix {
+        assert_eq!(server_path_stats.startup_exit, None);
+    } else {
+        // BBR incorrectly exits startup when enable_bbr_app_limited_fix is not
+        // enabled.
+        assert_ne!(server_path_stats.startup_exit, None);
+    }
 }
 
 fn body_bytes(summary: &ConnectionSummary, stream_id: u64) -> usize {

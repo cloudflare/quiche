@@ -644,14 +644,6 @@ impl GRecovery {
             self.loss_timer.update(timeout);
         }
     }
-
-    fn next_release_time_in_past(&self, now: &Instant) -> bool {
-        let next_release_time = self.pacer.get_next_release_time();
-        match next_release_time.time {
-            ReleaseTime::Immediate => true,
-            ReleaseTime::At(time) => time.lt(now),
-        }
-    }
 }
 
 impl RecoveryOps for GRecovery {
@@ -1161,10 +1153,9 @@ impl RecoveryOps for GRecovery {
         // asserting that cwnd - inflight is less than 1 packet's
         // worth of bytes.
         //
-        // The check for C.pending_transmissions == 0 is done by the
-        // call to next_release_time_in_past; this method returns true
-        // when lower layers and the pacer would send a packet on the
-        // network immediately if one were provided.
+        // The check for C.pending_transmissions == 0 is done by
+        // checking !pacer_has_pending_transmissions by comparing the
+        // pacer's next release time vs 'now'.
         //
         // The case of Immediate next_release_time results in the work_loop
         // iterating until min(cwnd, tx buffer) is exhausted.  If we decide to
@@ -1174,7 +1165,10 @@ impl RecoveryOps for GRecovery {
         if !had_flushable_stream_before_poll &&
             self.cwnd() >
                 self.bytes_in_flight.get() + frame::MAX_STREAM_OVERHEAD &&
-            self.next_release_time_in_past(now)
+            !pacer_has_pending_transmissions(
+                &self.pacer.get_next_release_time(),
+                now,
+            )
         {
             self.pacer.on_app_limited(self.bytes_in_flight.get())
         }
@@ -1242,10 +1236,52 @@ impl std::fmt::Debug for GRecovery {
     }
 }
 
+fn pacer_has_pending_transmissions(
+    next_release_time: &ReleaseDecision, now: &Instant,
+) -> bool {
+    match next_release_time.time {
+        ReleaseTime::Immediate => false,
+        ReleaseTime::At(time) => time.gt(now),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Config;
+
+    #[test]
+    fn test_pacer_has_pending_transmissions() {
+        let now = &Instant::now();
+        assert!(!pacer_has_pending_transmissions(
+            &ReleaseDecision {
+                time: ReleaseTime::Immediate,
+                allow_burst: true
+            },
+            now
+        ));
+        assert!(!pacer_has_pending_transmissions(
+            &ReleaseDecision {
+                time: ReleaseTime::At(*now),
+                allow_burst: true
+            },
+            now
+        ));
+        assert!(pacer_has_pending_transmissions(
+            &ReleaseDecision {
+                time: ReleaseTime::At(*now + Duration::from_millis(1)),
+                allow_burst: true
+            },
+            now
+        ));
+        assert!(!pacer_has_pending_transmissions(
+            &ReleaseDecision {
+                time: ReleaseTime::At(*now - Duration::from_millis(1)),
+                allow_burst: true
+            },
+            now
+        ));
+    }
 
     #[test]
     fn loss_threshold() {
