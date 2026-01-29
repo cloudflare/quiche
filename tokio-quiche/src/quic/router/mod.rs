@@ -741,7 +741,22 @@ where
                 },
 
                 Poll::Ready(Err(e)) => {
-                    log::error!("Incoming packet router encountered recvmsg error"; "error" => e);
+                    // Check if this is a fatal error that means the socket is
+                    // closed.
+                    let is_fatal = matches!(
+                        e.kind(),
+                        io::ErrorKind::BrokenPipe |
+                            io::ErrorKind::ConnectionReset |
+                            io::ErrorKind::NotConnected |
+                            io::ErrorKind::UnexpectedEof
+                    ) || e.raw_os_error() == Some(libc::EBADF);
+
+                    if is_fatal {
+                        log::debug!("Incoming packet router socket closed"; "error" => ?e);
+                        return Poll::Ready(Ok(()));
+                    }
+
+                    log::error!("Incoming packet router encountered recvmsg error"; "error" => %e);
                     continue;
                 },
 
