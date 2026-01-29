@@ -221,7 +221,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: ["aarch64-unknown-linux-gnu","armv7-unknown-linux-gnueabihf","i686-unknown-linux-gnu"]
+        targets:
+          - ["aarch64-unknown-linux-gnu", "arm64", "aarch64-linux-gnu"]
+          - ["armv7-unknown-linux-gnueabihf", "armhf", "arm-linux-gnueabihf"]
+          - ["i686-unknown-linux-gnu", "i386", "i686-linux-gnu"]
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -235,15 +238,35 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
+          targets: ${{ matrix.targets[0] }}
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+      - name: Debian cross setup ${{ matrix.targets[1] }}
+        run: |
+          QEMU_PACKAGES=""
+          if [[ "${{ matrix.targets[1] }}" != "i386" ]]; then
+            QEMU_PACKAGES="qemu-user libc6:${{ matrix.targets[1] }}"
 
-      - name: Install cross
-        run: cargo-binstall -y cross
+            sudo dpkg --add-architecture ${{ matrix.targets[1] }}
+            # In Ubuntu only ports have packages for other architectures
+            THE_ANIMAL_DJ=$(lsb_release -sc)
+            echo "
+            deb [arch=${{ matrix.targets[1] }}] http://ports.ubuntu.com/ubuntu-ports/ ${THE_ANIMAL_DJ} main restricted universe multiverse
+            deb [arch=${{ matrix.targets[1] }}] http://ports.ubuntu.com/ubuntu-ports/ ${THE_ANIMAL_DJ}-updates main restricted universe multiverse
+            deb [arch=${{ matrix.targets[1] }}] http://ports.ubuntu.com/ubuntu-ports/ ${THE_ANIMAL_DJ}-security main restricted universe multiverse
+            " | sudo tee /etc/apt/sources.list.d/cross-${{ matrix.targets[1] }}.list
+            sudo apt-get update || true
 
-      - name: Run cargo test using cross
-        run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer
+            echo >> $GITHUB_ENV CARGO_TARGET_$(echo ${{ matrix.targets[0] }} | tr '[:lower:]-' '[:upper:]_')_RUNNER=qemu-${{ matrix.targets[1] }}
+          fi
+
+          sudo apt-get -y --no-install-recommends install crossbuild-essential-${{ matrix.targets[1] }} libclang-dev $QEMU_PACKAGES
+
+          echo >> $GITHUB_ENV CC=/usr/bin/${{ matrix.targets[2] }}-gcc
+          echo >> $GITHUB_ENV CXX=/usr/bin/${{ matrix.targets[2] }}-g++
+          echo >> $GITHUB_ENV CARGO_TARGET_$(echo ${{ matrix.targets[0] }} | tr '[:lower:]-' '[:upper:]_')_LINKER=/usr/bin/${{ matrix.targets[2] }}-gcc
+
+      - name: Run cargo test ${{ matrix.targets[1] }}
+        run: cargo test --target=${{ matrix.targets[0] }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer
 
   http3_test:
     runs-on: ubuntu-latest
