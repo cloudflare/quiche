@@ -1005,7 +1005,7 @@ impl Frame {
             Frame::ConnectionClose {
                 error_code, reason, ..
             } => QuicFrame::ConnectionClose {
-                error_space: Some(ErrorSpace::TransportError),
+                error_space: Some(ErrorSpace::Transport),
                 error_code: Some(*error_code),
                 error_code_value: None, // raw error is no different for us
                 reason: Some(String::from_utf8_lossy(reason).into_owned()),
@@ -1014,7 +1014,7 @@ impl Frame {
 
             Frame::ApplicationClose { error_code, reason } => {
                 QuicFrame::ConnectionClose {
-                    error_space: Some(ErrorSpace::ApplicationError),
+                    error_space: Some(ErrorSpace::Application),
                     error_code: Some(*error_code),
                     error_code_value: None, // raw error is no different for us
                     reason: Some(String::from_utf8_lossy(reason).into_owned()),
