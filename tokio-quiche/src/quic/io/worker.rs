@@ -26,6 +26,8 @@
 
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
@@ -213,7 +215,15 @@ where
                         return Ok(());
                     }
 
+                    let flush_token =
+                        TrackCompleteToken::new(self.metrics.clone(), |metric| {
+                            metric.incomplete_flush_operation_count().inc();
+                        });
+
                     self.flush_buffer_to_socket(ctx.buffer()).await;
+
+                    flush_token.mark_complete();
+
                     packets_sent += self.write_state.num_pkts;
 
                     if let ControlFlow::Break(reason) =
@@ -943,5 +953,34 @@ fn min_of_some<T: Ord>(v1: Option<T>, v2: Option<T>) -> Option<T> {
         (Some(a), Some(b)) => Some(a.min(b)),
         (Some(v), _) | (_, Some(v)) => Some(v),
         (None, None) => None,
+    }
+}
+
+/// A Token which records a metric on `Drop` unless it is marked complete.
+struct TrackCompleteToken<M: Metrics, F: Fn(&M)> {
+    complete: AtomicBool,
+    metrics: M,
+    f: F,
+}
+
+impl<M: Metrics, F: Fn(&M)> TrackCompleteToken<M, F> {
+    fn new(metrics: M, f: F) -> Self {
+        Self {
+            complete: AtomicBool::from(false),
+            metrics,
+            f,
+        }
+    }
+
+    fn mark_complete(&self) {
+        self.complete.store(true, Ordering::Release);
+    }
+}
+
+impl<M: Metrics, F: Fn(&M)> Drop for TrackCompleteToken<M, F> {
+    fn drop(&mut self) {
+        if !self.complete.load(Ordering::Acquire) {
+            (self.f)(&self.metrics)
+        }
     }
 }
