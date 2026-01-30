@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BLUEY_BLACK","BLUEY_GREY","BROWN","DARK_MODE","FOREST_GREEN","LIGHT_MODE","MID_GREY","MUSTARD","ORANGE","PURPLE","SOFT_PINK","TAUPE"],"struct":["ColorCycle","PlotColors"]};
