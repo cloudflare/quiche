@@ -97,6 +97,7 @@ impl TaskKillswitch {
         self.activated.load(Ordering::Relaxed)
     }
 
+    #[track_caller]
     fn spawn_task(
         &self, fut: impl Future<Output = ()> + Send + 'static,
     ) -> Option<Id> {
@@ -220,6 +221,7 @@ static TASK_KILLSWITCH: LazyLock<TaskKillswitch> =
 ///
 /// Under the hood, [`tokio::spawn`] schedules the actual execution.
 #[inline]
+#[track_caller]
 pub fn spawn_with_killswitch(
     fut: impl Future<Output = ()> + Send + 'static,
 ) -> Option<Id> {
