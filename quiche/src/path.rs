@@ -324,11 +324,13 @@ impl Path {
 
     /// Returns whether the path is unused.
     #[inline]
-    fn unused(&self) -> bool {
-        // FIXME: we should check that there is nothing in the sent queue.
-        !self.active() && self.active_dcid_seq.is_none()
+    fn unused(&self) -> bool {  
+        // FIXME: we should check that there is nothing in the sent queue.  
+        !self.active() &&   
+        self.active_dcid_seq.is_none() &&   
+        self.recovery.bytes_in_flight_duration() == Duration::ZERO &&  
+        self.recovery.sent_packets_empty()  
     }
-
     /// Returns whether the path requires sending a probing packet.
     #[inline]
     pub fn probing_required(&self) -> bool {
