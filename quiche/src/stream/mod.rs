@@ -192,6 +192,18 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
 
     /// The maximum size of a stream window.
     max_stream_window: u64,
+
+    /// Monotonically increasing counter used for round-robin scheduling of
+    /// incremental streams. Each time a stream is created or cycled, it gets
+    /// the next sequence number, pushing it to the back of its priority group.
+    ///
+    /// This counter uses wrapping arithmetic. In the unlikely event of a wrap
+    /// (after 2^64 increments, which would take ~584 years at 1 billion/sec),
+    /// streams with pre-wrap sequences would temporarily be deprioritized
+    /// relative to post-wrap streams. However, this resolves itself naturally:
+    /// when a stream is cycled after sending data, it receives a fresh
+    /// post-wrap sequence number and rejoins normal round-robin scheduling.
+    sequence_counter: u64,
 }
 
 impl<F: BufFactory> StreamMap<F> {
@@ -219,6 +231,12 @@ impl<F: BufFactory> StreamMap<F> {
     /// Returns the mutable stream with the given ID if it exists.
     pub fn get_mut(&mut self, id: u64) -> Option<&mut Stream<F>> {
         self.streams.get_mut(&id)
+    }
+
+    /// Returns the next sequence number for priority ordering.
+    pub fn next_sequence(&mut self) -> u64 {
+        self.sequence_counter = self.sequence_counter.wrapping_add(1);
+        self.sequence_counter
     }
 
     /// Returns the mutable stream with the given ID if it exists, or creates
@@ -329,7 +347,10 @@ impl<F: BufFactory> StreamMap<F> {
                     },
                 };
 
-                let s = Stream::new(
+                // Assign a unique sequence number for priority ordering
+                self.sequence_counter = self.sequence_counter.wrapping_add(1);
+
+                let mut s = Stream::new(
                     id,
                     max_rx_data,
                     max_tx_data,
@@ -337,6 +358,15 @@ impl<F: BufFactory> StreamMap<F> {
                     local,
                     self.max_stream_window,
                 );
+
+                // Set proper sequence for priority ordering
+                s.priority_key = Arc::new(StreamPriorityKey {
+                    id,
+                    sequence: self.sequence_counter,
+                    urgency: s.urgency,
+                    incremental: s.incremental,
+                    ..Default::default()
+                });
 
                 let is_writable = s.is_writable();
 
@@ -434,6 +464,90 @@ impl<F: BufFactory> StreamMap<F> {
         self.flushable.front().clone_pointer()
     }
 
+    /// Cycles an incremental stream to the back of the flushable queue.
+    ///
+    /// This is used for round-robin scheduling: after sending data from an
+    /// incremental stream, it should be moved to the back of its priority
+    /// group to give other streams a chance.
+    ///
+    /// Returns `true` if the stream was successfully cycled.
+    pub fn cycle_flushable(&mut self, stream_id: u64) -> bool {
+        let stream = match self.streams.get_mut(&stream_id) {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let old_priority_key = Arc::clone(&stream.priority_key);
+
+        // Only cycle if currently in the flushable set
+        if !old_priority_key.flushable.is_linked() {
+            return false;
+        }
+
+        // Bump the global sequence counter
+        self.sequence_counter = self.sequence_counter.wrapping_add(1);
+
+        // Create a new priority key with the updated sequence
+        let new_priority_key = Arc::new(StreamPriorityKey {
+            urgency: stream.urgency,
+            incremental: stream.incremental,
+            id: stream_id,
+            sequence: self.sequence_counter,
+            ..Default::default()
+        });
+
+        // Replace the stream's priority key
+        stream.priority_key = Arc::clone(&new_priority_key);
+
+        // Remove from flushable with old key and re-insert with new key
+        self.remove_flushable(&old_priority_key);
+        self.flushable.insert(new_priority_key);
+
+        true
+    }
+
+    /// Cycles a readable stream to the back of the queue.
+    ///
+    /// This is used for round-robin scheduling: after processing some data from
+    /// a stream, it can be moved to the back of its priority group to give
+    /// other streams a chance of being read.
+    ///
+    /// Returns `true` if the stream was successfully cycled.
+    pub fn cycle_readable(&mut self, stream_id: u64) -> bool {
+        let stream = match self.streams.get_mut(&stream_id) {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let old_priority_key = Arc::clone(&stream.priority_key);
+
+        // Only cycle if currently in the readable set
+        if !old_priority_key.readable.is_linked() {
+            return false;
+        }
+
+        // Bump the global sequence counter
+        self.sequence_counter = self.sequence_counter.wrapping_add(1);
+
+        // Create a new priority key with the updated sequence
+        let new_priority_key = Arc::new(StreamPriorityKey {
+            urgency: stream.urgency,
+            incremental: stream.incremental,
+            id: stream_id,
+            sequence: self.sequence_counter,
+            ..Default::default()
+        });
+
+        // Replace the stream's priority key
+        stream.priority_key = Arc::clone(&new_priority_key);
+
+        // Remove from readable with old key and re-insert with new key
+        self.remove_readable(&old_priority_key);
+        self.readable.insert(new_priority_key);
+
+        true
+    }
+
     /// Updates the priorities of a stream.
     pub fn update_priority(
         &mut self, old: &Arc<StreamPriorityKey>, new: &Arc<StreamPriorityKey>,
@@ -452,6 +566,88 @@ impl<F: BufFactory> StreamMap<F> {
             self.remove_flushable(old);
             self.flushable.insert(Arc::clone(new));
         }
+    }
+
+    /// Cycles a stream to the back of all priority queues it belongs to.
+    ///
+    /// This bumps the stream's sequence number, causing it to be ordered after
+    /// other streams with the same urgency and incremental setting. Used for
+    /// round-robin scheduling of incremental streams.
+    ///
+    /// Returns `true` if the stream was found and cycled.
+    #[cfg(test)]
+    pub fn cycle_priority(&mut self, stream_id: u64) -> bool {
+        let stream = match self.streams.get_mut(&stream_id) {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let old_priority_key = Arc::clone(&stream.priority_key);
+
+        // Bump the global sequence counter
+        self.sequence_counter = self.sequence_counter.wrapping_add(1);
+
+        // Create a new priority key with the updated sequence
+        let new_priority_key = Arc::new(StreamPriorityKey {
+            urgency: stream.urgency,
+            incremental: stream.incremental,
+            id: stream_id,
+            sequence: self.sequence_counter,
+            ..Default::default()
+        });
+
+        // Replace the stream's priority key
+        stream.priority_key = Arc::clone(&new_priority_key);
+
+        // Update all queues the stream belongs to
+        self.update_priority(&old_priority_key, &new_priority_key);
+
+        true
+    }
+
+    /// Sets a stream's priority (urgency and incremental flag).
+    ///
+    /// The stream is placed at the back of its new priority group by assigning
+    /// a new sequence number. Returns `true` if the stream was found and
+    /// updated.
+    #[cfg(test)]
+    pub fn set_priority(
+        &mut self, stream_id: u64, urgency: u8, incremental: bool,
+    ) -> bool {
+        let stream = match self.streams.get_mut(&stream_id) {
+            Some(s) => s,
+            None => return false,
+        };
+
+        // Early return if nothing changed
+        if stream.urgency == urgency && stream.incremental == incremental {
+            return true;
+        }
+
+        let old_priority_key = Arc::clone(&stream.priority_key);
+
+        stream.urgency = urgency;
+        stream.incremental = incremental;
+
+        // Bump the global sequence counter
+        self.sequence_counter = self.sequence_counter.wrapping_add(1);
+
+        // Create a new priority key with the updated values
+        let new_priority_key = Arc::new(StreamPriorityKey {
+            urgency,
+            incremental,
+            id: stream_id,
+            sequence: self.sequence_counter,
+            ..Default::default()
+        });
+
+        // Replace the stream's priority key
+        stream.priority_key = Arc::clone(&new_priority_key);
+
+        // Update all queues the stream belongs to
+        self.update_priority(&old_priority_key, &new_priority_key);
+
+        true
     }
 
     /// Adds the stream ID to the almost full streams set.
@@ -796,6 +992,9 @@ pub struct StreamPriorityKey {
     pub urgency: u8,
     pub incremental: bool,
     pub id: u64,
+    /// Sequence number for round-robin scheduling of incremental streams.
+    /// Incremented each time a stream is cycled, pushing it to the back.
+    pub sequence: u64,
 
     pub readable: RBTreeAtomicLink,
     pub writable: RBTreeAtomicLink,
@@ -808,6 +1007,7 @@ impl Default for StreamPriorityKey {
             urgency: DEFAULT_URGENCY,
             incremental: true,
             id: Default::default(),
+            sequence: 0,
             readable: Default::default(),
             writable: Default::default(),
             flushable: Default::default(),
@@ -855,10 +1055,12 @@ impl Ord for StreamPriorityKey {
             return cmp::Ordering::Less;
         }
 
-        // ...finally, when both are incremental, `other` takes precedence (so
-        // `self` is always sorted after other same-urgency incremental
-        // entries).
-        cmp::Ordering::Greater
+        // ...finally, when both are incremental, order by sequence number
+        // (for round-robin scheduling), then by ID for stability.
+        match self.sequence.cmp(&other.sequence) {
+            cmp::Ordering::Equal => self.id.cmp(&other.id),
+            ord => ord,
+        }
     }
 }
 
@@ -1832,8 +2034,7 @@ mod tests {
     }
 
     fn cycle_stream_priority(stream_id: u64, streams: &mut StreamMap) {
-        let key = streams.get(stream_id).unwrap().priority_key.clone();
-        streams.update_priority(&key.clone(), &key);
+        streams.cycle_priority(stream_id);
     }
 
     #[test]
@@ -1935,27 +2136,10 @@ mod tests {
         ];
 
         for (id, urgency) in input.clone() {
-            // this duplicates some code from stream_priority in order to access
-            // streams and the collection they're in
-            let stream = streams
+            streams
                 .get_or_create(id, &local_tp, &peer_tp, false, true)
                 .unwrap();
-
-            stream.urgency = urgency;
-
-            let new_priority_key = Arc::new(StreamPriorityKey {
-                urgency: stream.urgency,
-                incremental: stream.incremental,
-                id,
-                ..Default::default()
-            });
-
-            let old_priority_key = std::mem::replace(
-                &mut stream.priority_key,
-                new_priority_key.clone(),
-            );
-
-            streams.update_priority(&old_priority_key, &new_priority_key);
+            streams.set_priority(id, urgency, true);
         }
 
         let walk_1: Vec<u64> = streams.writable().collect();
@@ -1963,27 +2147,7 @@ mod tests {
 
         // Re-applying priority to a stream does not cause duplication.
         for (id, urgency) in input {
-            // this duplicates some code from stream_priority in order to access
-            // streams and the collection they're in
-            let stream = streams
-                .get_or_create(id, &local_tp, &peer_tp, false, true)
-                .unwrap();
-
-            stream.urgency = urgency;
-
-            let new_priority_key = Arc::new(StreamPriorityKey {
-                urgency: stream.urgency,
-                incremental: stream.incremental,
-                id,
-                ..Default::default()
-            });
-
-            let old_priority_key = std::mem::replace(
-                &mut stream.priority_key,
-                new_priority_key.clone(),
-            );
-
-            streams.update_priority(&old_priority_key, &new_priority_key);
+            streams.set_priority(id, urgency, true);
         }
 
         let walk_2: Vec<u64> = streams.writable().collect();
@@ -2037,27 +2201,10 @@ mod tests {
         ];
 
         for (id, urgency) in input.clone() {
-            // this duplicates some code from stream_priority in order to access
-            // streams and the collection they're in
-            let stream = streams
+            streams
                 .get_or_create(id, &local_tp, &peer_tp, false, true)
                 .unwrap();
-
-            stream.urgency = urgency;
-
-            let new_priority_key = Arc::new(StreamPriorityKey {
-                urgency: stream.urgency,
-                incremental: stream.incremental,
-                id,
-                ..Default::default()
-            });
-
-            let old_priority_key = std::mem::replace(
-                &mut stream.priority_key,
-                new_priority_key.clone(),
-            );
-
-            streams.update_priority(&old_priority_key, &new_priority_key);
+            streams.set_priority(id, urgency, true);
         }
 
         let walk_1: Vec<u64> = streams.writable().collect();
@@ -2114,24 +2261,10 @@ mod tests {
         assert_eq!(walk_10, vec![40, 4, 12, 36, 28, 32, 24, 16, 8, 0]);
 
         // Adding streams doesn't break expected ordering.
-        let stream = streams
+        streams
             .get_or_create(44, &local_tp, &peer_tp, false, true)
             .unwrap();
-
-        stream.urgency = 20;
-        stream.incremental = true;
-
-        let new_priority_key = Arc::new(StreamPriorityKey {
-            urgency: stream.urgency,
-            incremental: stream.incremental,
-            id: 44,
-            ..Default::default()
-        });
-
-        let old_priority_key =
-            std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
-
-        streams.update_priority(&old_priority_key, &new_priority_key);
+        streams.set_priority(44, 20, true);
 
         let walk_11: Vec<u64> = streams.writable().collect();
         assert_eq!(walk_11, vec![40, 4, 12, 36, 44, 28, 32, 24, 16, 8, 0]);
@@ -2173,6 +2306,196 @@ mod tests {
         let walk_2: Vec<u64> =
             prioritized_writable.iter().map(|s| s.id).collect();
         assert_eq!(walk_2, vec![0, 0, 4, 4, 8, 8, 12, 12]);
+    }
+
+    /// Tests that StreamPriorityKey's Ord implementation satisfies the
+    /// antisymmetry property: if a < b then b > a (and vice versa).
+    #[test]
+    fn priority_key_ord_antisymmetry() {
+        // Test incremental streams with same urgency but different sequences
+        let a = StreamPriorityKey {
+            urgency: 100,
+            incremental: true,
+            id: 4,
+            sequence: 1,
+            ..Default::default()
+        };
+        let b = StreamPriorityKey {
+            urgency: 100,
+            incremental: true,
+            id: 8,
+            sequence: 2,
+            ..Default::default()
+        };
+
+        // a has lower sequence, so a < b
+        assert_eq!(a.cmp(&b), cmp::Ordering::Less);
+        // Antisymmetry: b > a
+        assert_eq!(b.cmp(&a), cmp::Ordering::Greater);
+
+        // Test with same sequence, should fall back to ID comparison
+        let c = StreamPriorityKey {
+            urgency: 100,
+            incremental: true,
+            id: 4,
+            sequence: 1,
+            ..Default::default()
+        };
+        let d = StreamPriorityKey {
+            urgency: 100,
+            incremental: true,
+            id: 8,
+            sequence: 1,
+            ..Default::default()
+        };
+
+        assert_eq!(c.cmp(&d), cmp::Ordering::Less);
+        assert_eq!(d.cmp(&c), cmp::Ordering::Greater);
+    }
+
+    /// Tests that StreamPriorityKey's Ord implementation satisfies
+    /// transitivity: if a < b and b < c then a < c.
+    #[test]
+    fn priority_key_ord_transitivity() {
+        let a = StreamPriorityKey {
+            urgency: 100,
+            incremental: true,
+            id: 4,
+            sequence: 1,
+            ..Default::default()
+        };
+        let b = StreamPriorityKey {
+            urgency: 100,
+            incremental: true,
+            id: 8,
+            sequence: 2,
+            ..Default::default()
+        };
+        let c = StreamPriorityKey {
+            urgency: 100,
+            incremental: true,
+            id: 12,
+            sequence: 3,
+            ..Default::default()
+        };
+
+        assert_eq!(a.cmp(&b), cmp::Ordering::Less);
+        assert_eq!(b.cmp(&c), cmp::Ordering::Less);
+        // Transitivity: a < c
+        assert_eq!(a.cmp(&c), cmp::Ordering::Less);
+    }
+
+    /// Tests that StreamPriorityKey's Ord implementation provides a total
+    /// ordering: for any two elements, exactly one of a < b, a == b, or a > b
+    /// holds.
+    #[test]
+    fn priority_key_ord_totality() {
+        let keys = [
+            StreamPriorityKey {
+                urgency: 50,
+                incremental: false,
+                id: 4,
+                sequence: 1,
+                ..Default::default()
+            },
+            StreamPriorityKey {
+                urgency: 50,
+                incremental: true,
+                id: 8,
+                sequence: 2,
+                ..Default::default()
+            },
+            StreamPriorityKey {
+                urgency: 100,
+                incremental: true,
+                id: 12,
+                sequence: 3,
+                ..Default::default()
+            },
+            StreamPriorityKey {
+                urgency: 100,
+                incremental: true,
+                id: 16,
+                sequence: 3,
+                ..Default::default()
+            },
+        ];
+
+        // Every pair must have a defined ordering
+        for (i, a) in keys.iter().enumerate() {
+            for (j, b) in keys.iter().enumerate() {
+                let ord = a.cmp(b);
+                if i == j {
+                    assert_eq!(ord, cmp::Ordering::Equal);
+                } else {
+                    assert!(ord != cmp::Ordering::Equal);
+                    // Verify antisymmetry for non-equal pairs
+                    assert_eq!(a.cmp(b).reverse(), b.cmp(a));
+                }
+            }
+        }
+    }
+
+    /// Tests that cycle_flushable actually moves incremental streams to the
+    /// back of the queue for round-robin scheduling.
+    #[test]
+    fn round_robin_cycle_flushable() {
+        let local_tp = crate::TransportParams::default();
+        let peer_tp = crate::TransportParams {
+            initial_max_stream_data_bidi_local: 100,
+            initial_max_stream_data_uni: 100,
+            ..Default::default()
+        };
+
+        let mut streams = StreamMap::new(100, 100, 100);
+
+        // Create 3 incremental streams with same urgency
+        for id in [4, 8, 12] {
+            streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .unwrap();
+            // Write some data to make them flushable
+            streams
+                .get_mut(id)
+                .unwrap()
+                .send
+                .write(b"data", false)
+                .unwrap();
+            let priority_key = Arc::clone(&streams.get(id).unwrap().priority_key);
+            streams.insert_flushable(&priority_key);
+        }
+
+        // Initial order based on creation sequence
+        let get_flushable_order = |streams: &StreamMap| -> Vec<u64> {
+            let mut order = Vec::new();
+            let mut cursor = streams.flushable.front();
+            while let Some(key) = cursor.get() {
+                order.push(key.id);
+                cursor.move_next();
+            }
+            order
+        };
+
+        let order1 = get_flushable_order(&streams);
+        assert_eq!(order1, vec![4, 8, 12]);
+
+        // Cycle stream 4 - should move to back
+        assert!(streams.cycle_flushable(4));
+        let order2 = get_flushable_order(&streams);
+        assert_eq!(order2, vec![8, 12, 4]);
+
+        // Cycle stream 8 - should move to back
+        assert!(streams.cycle_flushable(8));
+        let order3 = get_flushable_order(&streams);
+        assert_eq!(order3, vec![12, 4, 8]);
+
+        // Cycle stream 12 - should move to back
+        assert!(streams.cycle_flushable(12));
+        let order4 = get_flushable_order(&streams);
+        assert_eq!(order4, vec![4, 8, 12]);
+
+        // Full cycle returns to original relative order
+        // (but with new sequence numbers)
     }
 }
 
