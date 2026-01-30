@@ -206,6 +206,9 @@ fn make_quiche_config(
     if params.settings.enable_early_data {
         config.enable_early_data();
     }
+    config.set_enable_bbr_app_limited_fix(
+        params.settings.enable_bbr_app_limited_fix,
+    );
 
     if should_log_keys {
         config.log_keys();

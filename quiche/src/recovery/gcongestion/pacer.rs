@@ -273,12 +273,7 @@ impl Pacer {
     }
 
     #[cfg(test)]
-    pub fn is_app_limited(&self, bytes_in_flight: usize) -> bool {
-        !self.is_cwnd_limited(bytes_in_flight)
-    }
-
-    #[cfg(test)]
-    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
-        !self.pacing_limited && self.sender.is_cwnd_limited(bytes_in_flight)
+    pub fn is_app_limited(&self) -> bool {
+        self.sender.is_app_limited()
     }
 }
