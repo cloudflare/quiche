@@ -319,7 +319,7 @@ pub trait RecoveryOps {
     fn gcongestion_enabled(&self) -> bool;
 
     fn bbr_check_if_app_limited(
-        &mut self, had_flushable_stream_before_poll: bool, now: &Instant,
+        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
     );
 }
 

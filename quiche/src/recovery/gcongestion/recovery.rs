@@ -1132,7 +1132,7 @@ impl RecoveryOps for GRecovery {
     }
 
     fn bbr_check_if_app_limited(
-        &mut self, had_flushable_stream_before_poll: bool, now: &Instant,
+        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
     ) {
         if !self.enable_bbr_app_limited_fix {
             return;
@@ -1140,7 +1140,7 @@ impl RecoveryOps for GRecovery {
 
         // Implements CheckIfApplicationLimited from the BBR RFC.
         //
-        // had_flushable_stream_before_poll is used to check for `NoUnsentData()`
+        // had_flushable_data_before_poll is used to check for `NoUnsentData()`
         // and skips this check there is data on the connection's tx
         // buffer. Retransmisions are done with the help of stream send
         // buffers so the `NoUnsentData()` check also covers the
@@ -1162,7 +1162,7 @@ impl RecoveryOps for GRecovery {
         // exit the send loop earlier we should mark the connection in some way so
         // the next call to bbr_check_if_app_limited does not mark the
         // connection app-limited after yielding when C.pending_transmissions > 0.
-        if !had_flushable_stream_before_poll &&
+        if !had_flushable_data_before_poll &&
             self.cwnd() >
                 self.bytes_in_flight.get() + frame::MAX_STREAM_OVERHEAD &&
             !pacer_has_pending_transmissions(

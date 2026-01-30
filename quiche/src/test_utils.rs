@@ -341,8 +341,8 @@ pub fn recv_send<F: BufFactory>(
 }
 
 pub fn run_work_loop_round_start_hook(conn: &mut Connection) {
-    let has_flushable_stream = conn.has_flushable_stream();
-    conn.work_loop_round_start(has_flushable_stream, &Instant::now());
+    let has_flushable_data = conn.has_flushable_data();
+    conn.work_loop_round_start(has_flushable_data, &Instant::now());
 }
 
 pub fn process_flight(

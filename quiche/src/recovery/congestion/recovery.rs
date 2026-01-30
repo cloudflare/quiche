@@ -1035,7 +1035,7 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn bbr_check_if_app_limited(
-        &mut self, _had_flushable_stream_before_poll: bool, _now: &Instant,
+        &mut self, _had_flushable_data_before_poll: bool, _now: &Instant,
     ) {
         // Not implemented -- only used by the BBR implementation
         // which lives in the gcongestion directory.

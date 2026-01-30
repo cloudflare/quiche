@@ -2531,9 +2531,10 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
-    /// Returns true if at least 1 stream has headers or body data to write.
-    pub fn has_flushable_stream(&self) -> bool {
-        self.streams.has_flushable()
+    /// Returns true if at least 1 stream has headers or body data to
+    /// write, or there are items in the DATAGRAM send queue.
+    pub fn has_flushable_data(&self) -> bool {
+        self.streams.has_flushable() || !self.dgram_send_queue.is_empty()
     }
 
     /// Signal the start of an iteration of the event loop that will
@@ -2548,31 +2549,31 @@ impl<F: BufFactory> Connection<F> {
     /// processing ACKs/timeouts.
     ///
     /// The expected work loop order is:
-    /// 1. Call work_loop_round_start with the value of has_flushable_stream
+    /// 1. Call work_loop_round_start with the value of has_flushable_data
     ///    from the end of the previous loop, before polling for additional
     ///    application data.
     /// 2. Process timeouts by calling conn.on_timeout().
     /// 3. Call conn.recv() to process received packets which contain ACKs and
     ///    stream data.
     /// 4. Call conn.send_on_path() to generate new packets and send them.
-    /// 5. Save the value of conn.has_flushable_stream() for the next iteration.
+    /// 5. Save the value of conn.has_flushable_data() for the next iteration.
     /// 6. Poll for additional data from upstream or wait for the next send
     ///    timeout.
     ///
     /// In cases where the new packet generate + send loop yields early due to
     /// an interation limit or the sendmsg on the socket returning EAGAIN, we
-    /// should expect had_flushable_stream_before_poll to remain true since the
+    /// should expect had_flushable_data_before_poll to remain true since the
     /// connection wasn't able to send all the available data despite not
     /// consuming the full congestion window.  The call to
     /// bbr_check_if_app_limited() will not mark the connection app-limited
-    /// at the last-sent-packet-number because had_flushable_stream_before_poll
+    /// at the last-sent-packet-number because had_flushable_data_before_poll
     /// is true; this is correct and expected behavior.
     pub fn work_loop_round_start(
-        &mut self, had_flushable_stream_before_poll: bool, now: &Instant,
+        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
     ) {
         for (_, path) in self.paths.iter_mut() {
             path.recovery
-                .bbr_check_if_app_limited(had_flushable_stream_before_poll, now);
+                .bbr_check_if_app_limited(had_flushable_data_before_poll, now);
         }
     }
 
