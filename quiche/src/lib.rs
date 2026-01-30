@@ -2549,8 +2549,8 @@ impl<F: BufFactory> Connection<F> {
     /// processing ACKs/timeouts.
     ///
     /// The expected work loop order is:
-    /// 1. Call work_loop_round_start with the value of has_flushable_data
-    ///    from the end of the previous loop, before polling for additional
+    /// 1. Call work_loop_round_start with the value of has_flushable_data from
+    ///    the end of the previous loop, before polling for additional
     ///    application data.
     /// 2. Process timeouts by calling conn.on_timeout().
     /// 3. Call conn.recv() to process received packets which contain ACKs and
