@@ -213,7 +213,13 @@ where
                         return Ok(());
                     }
 
+                    let mut flush_operation_token =
+                        TrackMidHandshakeFlush::new(self.metrics.clone());
+
                     self.flush_buffer_to_socket(ctx.buffer()).await;
+
+                    flush_operation_token.mark_complete();
+
                     packets_sent += self.write_state.num_pkts;
 
                     if let ControlFlow::Break(reason) =
@@ -943,5 +949,33 @@ fn min_of_some<T: Ord>(v1: Option<T>, v2: Option<T>) -> Option<T> {
         (Some(a), Some(b)) => Some(a.min(b)),
         (Some(v), _) | (_, Some(v)) => Some(v),
         (None, None) => None,
+    }
+}
+
+/// A Token which increment the skipped_mid_handshake_flush_count metric on
+/// `Drop` unless it is marked complete.
+struct TrackMidHandshakeFlush<M: Metrics> {
+    complete: bool,
+    metrics: M,
+}
+
+impl<M: Metrics> TrackMidHandshakeFlush<M> {
+    fn new(metrics: M) -> Self {
+        Self {
+            complete: false,
+            metrics,
+        }
+    }
+
+    fn mark_complete(&mut self) {
+        self.complete = true;
+    }
+}
+
+impl<M: Metrics> Drop for TrackMidHandshakeFlush<M> {
+    fn drop(&mut self) {
+        if !self.complete {
+            self.metrics.skipped_mid_handshake_flush_count().inc();
+        }
     }
 }
