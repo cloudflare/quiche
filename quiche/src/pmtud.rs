@@ -87,7 +87,21 @@ impl Pmtud {
                         successful_probe_size: {successful_probe_size}",
                     );
 
-                    return self.restart_pmtud();
+                    self.restart_pmtud();
+
+                    // Record the failed probe again after restarting PMTUD to
+                    // ensure the next probe size is reduced (binary search down)
+                    // instead of resetting to the maximum MTU.
+                    //
+                    // NOTE: `failed_probe()` internally calls
+                    // `update_probe_size()`, so this is an intentional and
+                    // bounded recursive call. After `restart_pmtud()` the state
+                    // is reset, and re-recording the failed probe brings the
+                    // PMTUD state back into a consistent configuration for the
+                    // next probe without causing unbounded recursion.
+                    self.failed_probe(failed_probe_size);
+
+                    return;
                 }
 
                 // Found the PMTU
@@ -364,6 +378,30 @@ mod tests {
         pmtud.failed_probe(1350);
 
         // Run the PMTUD test runner with the reset state
+        pmtud_test_runner(&mut pmtud, 1250);
+    }
+
+    /// Test case for changing network conditions during PMTUD.
+    ///
+    /// This test simulates a scenario where network conditions change
+    /// during the PMTUD process, causing inconsistent probe results.
+    #[test]
+    fn test_pmtud_changing_network_conditions() {
+        let mut pmtud = Pmtud::new(1500);
+
+        // Simulate a successful probe
+        pmtud.successful_probe(1400);
+
+        // Simulate a failed probe that is less than the last successful probe
+        pmtud.failed_probe(1300);
+
+        // The largest successful probe should be reset after restarting PMTUD
+        assert_eq!(pmtud.largest_successful_probe_size, None);
+
+        // The smallest failed probe should be recorded again
+        assert_eq!(pmtud.smallest_failed_probe_size, Some(1300));
+
+        // Run the PMTUD test runner to verify handling of inconsistent results
         pmtud_test_runner(&mut pmtud, 1250);
     }
 
