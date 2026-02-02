@@ -38,6 +38,9 @@ use crate::Result;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
+#[cfg(feature = "qlog")]
+use serde_json;
+
 use smallvec::SmallVec;
 
 use self::congestion::recovery::LegacyRecovery;
@@ -477,7 +480,10 @@ struct QlogMetrics {
     cwnd: u64,
     bytes_in_flight: u64,
     ssthresh: Option<u64>,
-    pacing_rate: u64,
+    pacing_rate: Option<u64>,
+    delivery_rate: Option<u64>,
+    send_rate: Option<u64>,
+    ack_rate: Option<u64>,
 }
 
 #[cfg(feature = "qlog")]
@@ -550,13 +556,51 @@ impl QlogMetrics {
         let new_pacing_rate = if self.pacing_rate != latest.pacing_rate {
             self.pacing_rate = latest.pacing_rate;
             emit_event = true;
-            Some(latest.pacing_rate)
+            latest.pacing_rate
+        } else {
+            None
+        };
+
+        let new_delivery_rate = if self.delivery_rate != latest.delivery_rate {
+            self.delivery_rate = latest.delivery_rate;
+            emit_event = true;
+            latest.delivery_rate
+        } else {
+            None
+        };
+
+        let new_send_rate = if self.send_rate != latest.send_rate {
+            self.send_rate = latest.send_rate;
+            emit_event = true;
+            latest.send_rate
+        } else {
+            None
+        };
+
+        let new_ack_rate = if self.ack_rate != latest.ack_rate {
+            self.ack_rate = latest.ack_rate;
+            emit_event = true;
+            latest.ack_rate
         } else {
             None
         };
 
         if emit_event {
-            // QVis can't use all these fields and they can be large.
+            // Build ex_data for rate metrics
+            let mut ex_data = qlog::events::ExData::new();
+            if let Some(rate) = new_delivery_rate {
+                ex_data.insert(
+                    "delivery_rate".to_string(),
+                    serde_json::json!(rate),
+                );
+            }
+            if let Some(rate) = new_send_rate {
+                ex_data.insert("send_rate".to_string(), serde_json::json!(rate));
+            }
+            if let Some(rate) = new_ack_rate {
+                ex_data.insert("ack_rate".to_string(), serde_json::json!(rate));
+            }
+
             return Some(EventData::MetricsUpdated(
                 qlog::events::quic::MetricsUpdated {
                     min_rtt: new_min_rtt,
@@ -567,6 +611,7 @@ impl QlogMetrics {
                     bytes_in_flight: new_bytes_in_flight,
                     ssthresh: new_ssthresh,
                     pacing_rate: new_pacing_rate,
+                    ex_data,
                     ..Default::default()
                 },
             ));

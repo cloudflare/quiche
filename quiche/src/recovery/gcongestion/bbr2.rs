@@ -629,6 +629,14 @@ impl BBRv2 {
         let bdp = network_model.bdp1(network_model.bandwidth_estimate());
         bdp.min(self.get_congestion_window())
     }
+
+    pub(crate) fn send_rate(&self) -> Option<Bandwidth> {
+        self.mode.network_model().send_rate()
+    }
+
+    pub(crate) fn ack_rate(&self) -> Option<Bandwidth> {
+        self.mode.network_model().ack_rate()
+    }
 }
 
 impl CongestionControl for BBRv2 {

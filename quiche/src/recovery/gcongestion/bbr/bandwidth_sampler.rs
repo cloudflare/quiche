@@ -169,6 +169,9 @@ struct ExtraAckedEvent {
     round: usize,
 }
 
+
+// BandwidthSample holds per-packet rate measurements
+// This is the internal struct used by BandwidthSampler to track rates
 struct BandwidthSample {
     /// The bandwidth at that particular sample.
     bandwidth: Bandwidth,
@@ -178,6 +181,9 @@ struct BandwidthSample {
     /// `send_rate` is computed from the current packet being acked('P') and
     /// an earlier packet that is acked before P was sent.
     send_rate: Option<Bandwidth>,
+    // ack_rate tracks the acknowledgment rate for this sample
+    /// `ack_rate` is computed as bytes_acked_delta / time_delta between ack points.
+    ack_rate: Bandwidth,
     /// States captured when the packet was sent.
     state_at_send: SendTimeState,
 }
@@ -243,6 +249,8 @@ struct MaxAckHeightTracker {
     reduce_extra_acked_on_bandwidth_increase: bool,
 }
 
+// CongestionEventSample aggregates bandwidth samples from acked packets
+// This struct is returned by on_congestion_event() and contains metrics for qlog
 #[derive(Default)]
 pub(crate) struct CongestionEventSample {
     /// The maximum bandwidth sample from all acked packets.
@@ -263,6 +271,13 @@ pub(crate) struct CongestionEventSample {
     /// expected from the flow's bandwidth. Larger value means more ack
     /// aggregation.
     pub extra_acked: usize,
+
+    /// The maximum send rate observed across all acked packets in this event.
+    /// Computed as bytes_sent_delta / time_delta between packet send times.
+    pub sample_max_send_rate: Option<Bandwidth>,
+    /// The maximum ack rate observed across all acked packets in this event.
+    /// Computed as bytes_acked_delta / time_delta between ack times.
+    pub sample_max_ack_rate: Option<Bandwidth>,
 }
 
 impl MaxAckHeightTracker {
@@ -585,6 +600,7 @@ impl BandwidthSampler {
         let mut event_sample = CongestionEventSample::default();
 
         let mut max_send_rate = None;
+        let mut max_ack_rate = None;
         for packet in acked_packets {
             let sample =
                 match self.on_packet_acknowledged(ack_time, packet.pkt_num) {
@@ -607,6 +623,7 @@ impl BandwidthSampler {
                     sample.state_at_send.is_app_limited;
             }
             max_send_rate = max_send_rate.max(sample.send_rate);
+            max_ack_rate = max_ack_rate.max(Some(sample.ack_rate));
 
             let inflight_sample = self.total_bytes_acked -
                 last_acked_packet_send_state.total_bytes_acked;
@@ -651,6 +668,9 @@ impl BandwidthSampler {
             is_new_max_bandwidth,
             round_trip_count,
         );
+
+        event_sample.sample_max_send_rate = max_send_rate;
+        event_sample.sample_max_ack_rate = max_ack_rate;
 
         event_sample
     }
@@ -768,12 +788,14 @@ impl BandwidthSampler {
         if ack_time <= a0.ack_time {
             return None;
         }
+        
 
         let ack_rate = Bandwidth::from_bytes_and_time_delta(
             self.total_bytes_acked - a0.total_bytes_acked,
             ack_time.duration_since(a0.ack_time),
         );
 
+        // AV's Feedback to make things simpler
         let bandwidth = if let Some(send_rate) = send_rate {
             send_rate.min(ack_rate)
         } else {
@@ -785,10 +807,15 @@ impl BandwidthSampler {
         // high, especially on low bandwidth connections.
         let rtt = ack_time.duration_since(sent_packet.sent_time);
 
+        // AV's Feedback to make things simpler
+        // BandwidthSample for rate calculation
+        // Now includes ack_rate for qlog metrics
         Some(BandwidthSample {
             bandwidth,
             rtt,
             send_rate,
+            // Store ack_rate computed above for qlog exposure
+            ack_rate,
             state_at_send: SendTimeState {
                 is_valid: true,
                 ..sent_packet.send_time_state
@@ -947,6 +974,8 @@ mod bandwidth_sampler_tests {
                 bandwidth: sample_max_bandwidth,
                 rtt: sample.sample_rtt.unwrap(),
                 send_rate: None,
+                // Use zero for ack_rate in test helper
+                ack_rate: Bandwidth::zero(),
                 state_at_send: sample.last_packet_send_state,
             };
             assert!(bandwidth_sample.state_at_send.is_valid);
