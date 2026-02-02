@@ -850,8 +850,12 @@ mod tests {
     fn metrics_updated_with_ex_data() {
         // Test that ex_data fields are flattened into the same object
         let mut ex_data = ExData::new();
-        ex_data.insert("delivery_rate".to_string(), serde_json::json!(TEST_DELIVERY_RATE));
-        ex_data.insert("send_rate".to_string(), serde_json::json!(TEST_SEND_RATE));
+        ex_data.insert(
+            "delivery_rate".to_string(),
+            serde_json::json!(TEST_DELIVERY_RATE),
+        );
+        ex_data
+            .insert("send_rate".to_string(), serde_json::json!(TEST_SEND_RATE));
 
         let metrics = MetricsUpdated {
             min_rtt: Some(TEST_MIN_RTT),
@@ -880,9 +884,13 @@ mod tests {
         //
         // NOTE: This test documents serde's silent overwrite behavior.
         // serde does NOT error or panic on duplicate keys - it just overwrites.
-        // This test exists to warn users: avoid ex_data keys matching struct fields!
+        // This test exists to warn users: avoid ex_data keys matching struct
+        // fields!
         let mut ex_data = ExData::new();
-        ex_data.insert("min_rtt".to_string(), serde_json::json!(TEST_COLLISION_VALUE));
+        ex_data.insert(
+            "min_rtt".to_string(),
+            serde_json::json!(TEST_COLLISION_VALUE),
+        );
 
         let metrics = MetricsUpdated {
             min_rtt: Some(TEST_MIN_RTT), // struct field value
@@ -901,7 +909,10 @@ mod tests {
     fn metrics_updated_round_trip() {
         // Test serialization -> deserialization round-trip
         let mut ex_data = ExData::new();
-        ex_data.insert("delivery_rate".to_string(), serde_json::json!(TEST_DELIVERY_RATE));
+        ex_data.insert(
+            "delivery_rate".to_string(),
+            serde_json::json!(TEST_DELIVERY_RATE),
+        );
 
         let original = MetricsUpdated {
             min_rtt: Some(TEST_MIN_RTT),
@@ -945,6 +956,9 @@ mod tests {
         assert_eq!(json["congestion_window"], TEST_CONGESTION_WINDOW);
 
         // Verify ex_data is not present
-        assert!(json.get("ex_data").is_none(), "ex_data should not be present");
+        assert!(
+            json.get("ex_data").is_none(),
+            "ex_data should not be present"
+        );
     }
 }

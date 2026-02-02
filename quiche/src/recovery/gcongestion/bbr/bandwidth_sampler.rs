@@ -169,7 +169,6 @@ struct ExtraAckedEvent {
     round: usize,
 }
 
-
 // BandwidthSample holds per-packet rate measurements
 // This is the internal struct used by BandwidthSampler to track rates
 struct BandwidthSample {
@@ -183,8 +182,8 @@ struct BandwidthSample {
     /// https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-send-rate
     send_rate: Option<Bandwidth>,
     // ack_rate tracks the acknowledgment rate for this sample
-    /// `ack_rate` is computed as bytes_acked_delta / time_delta between ack points.
-    /// https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-ack-rate
+    /// `ack_rate` is computed as bytes_acked_delta / time_delta between ack
+    /// points. https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-ack-rate
     ack_rate: Bandwidth,
     /// States captured when the packet was sent.
     state_at_send: SendTimeState,
@@ -250,7 +249,6 @@ struct MaxAckHeightTracker {
     start_new_aggregation_epoch_after_full_round: bool,
     reduce_extra_acked_on_bandwidth_increase: bool,
 }
-
 
 /// This struct captures various measurements from a congestion event,
 /// including the maximum bandwidth observed and whether it came from an
@@ -795,7 +793,7 @@ impl BandwidthSampler {
         // otherwise division by zero or integer underflow can occur.
         if ack_time <= a0.ack_time {
             return None;
-        }        
+        }
 
         let ack_rate = Bandwidth::from_bytes_and_time_delta(
             self.total_bytes_acked - a0.total_bytes_acked,

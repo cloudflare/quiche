@@ -589,10 +589,8 @@ impl QlogMetrics {
             // Build ex_data for rate metrics
             let mut ex_data = qlog::events::ExData::new();
             if let Some(rate) = new_delivery_rate {
-                ex_data.insert(
-                    "delivery_rate".to_string(),
-                    serde_json::json!(rate),
-                );
+                ex_data
+                    .insert("delivery_rate".to_string(), serde_json::json!(rate));
             }
             if let Some(rate) = new_send_rate {
                 ex_data.insert("send_rate".to_string(), serde_json::json!(rate));

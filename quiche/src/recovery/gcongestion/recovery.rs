@@ -469,7 +469,6 @@ pub struct GRecovery {
 }
 
 impl GRecovery {
-
     fn send_rate(&self) -> Bandwidth {
         self.pacer.send_rate().unwrap_or(Bandwidth::zero())
     }
@@ -757,7 +756,7 @@ impl RecoveryOps for GRecovery {
             epoch.pkts_in_flight += 1;
             self.set_loss_detection_timer(handshake_status, time_sent);
         }
-        
+
         self.bytes_sent += sent_bytes;
 
         trace!("{trace_id} {self:?}");
@@ -1149,10 +1148,14 @@ impl RecoveryOps for GRecovery {
             bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: self.pacer.ssthresh(),
 
-            pacing_rate: Some(self.pacer.pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats).to_bytes_per_second()),
+            pacing_rate: Some(
+                self.pacer
+                    .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats)
+                    .to_bytes_per_second(),
+            ),
             delivery_rate: Some(self.delivery_rate().to_bytes_per_second()),
             send_rate: Some(self.send_rate().to_bytes_per_second()),
-            ack_rate: Some(self.ack_rate().to_bytes_per_second())
+            ack_rate: Some(self.ack_rate().to_bytes_per_second()),
         };
 
         // Supress redundant information if no change was seen
