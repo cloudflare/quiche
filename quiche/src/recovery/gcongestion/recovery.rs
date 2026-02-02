@@ -442,9 +442,12 @@ pub struct GRecovery {
 
     bytes_in_flight: BytesInFlight,
 
+    bytes_sent: usize,
+
     pub bytes_lost: u64,
 
     max_datagram_size: usize,
+    time_sent_set_to_now: bool,
 
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
@@ -470,7 +473,6 @@ impl GRecovery {
     fn send_rate(&self) -> Bandwidth {
         self.pacer.send_rate().unwrap_or(Bandwidth::zero())
     }
-
 
     fn ack_rate(&self) -> Bandwidth {
         self.pacer.ack_rate().unwrap_or(Bandwidth::zero())
@@ -503,9 +505,11 @@ impl GRecovery {
 
             loss_thresh: LossThreshold::new(recovery_config),
             bytes_in_flight: Default::default(),
+            bytes_sent: 0,
             bytes_lost: 0,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
+            time_sent_set_to_now: cc.time_sent_set_to_now(),
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
@@ -695,7 +699,11 @@ impl RecoveryOps for GRecovery {
         &mut self, pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
-        let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
+        let time_sent = if self.time_sent_set_to_now {
+            now
+        } else {
+            self.get_next_release_time().time(now).unwrap_or(now)
+        };
 
         let epoch = &mut self.epochs[epoch];
 
@@ -749,6 +757,8 @@ impl RecoveryOps for GRecovery {
             epoch.pkts_in_flight += 1;
             self.set_loss_detection_timer(handshake_status, time_sent);
         }
+        
+        self.bytes_sent += sent_bytes;
 
         trace!("{trace_id} {self:?}");
     }

@@ -180,9 +180,11 @@ struct BandwidthSample {
     rtt: Duration,
     /// `send_rate` is computed from the current packet being acked('P') and
     /// an earlier packet that is acked before P was sent.
+    /// https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-send-rate
     send_rate: Option<Bandwidth>,
     // ack_rate tracks the acknowledgment rate for this sample
     /// `ack_rate` is computed as bytes_acked_delta / time_delta between ack points.
+    /// https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-ack-rate
     ack_rate: Bandwidth,
     /// States captured when the packet was sent.
     state_at_send: SendTimeState,
@@ -249,8 +251,14 @@ struct MaxAckHeightTracker {
     reduce_extra_acked_on_bandwidth_increase: bool,
 }
 
-// CongestionEventSample aggregates bandwidth samples from acked packets
-// This struct is returned by on_congestion_event() and contains metrics for qlog
+
+/// This struct captures various measurements from a congestion event,
+/// including the maximum bandwidth observed and whether it came from an
+/// app-limited sample, the minimum RTT across all acknowledged packets,
+/// the maximum bytes in flight during the event, the send state of the
+/// largest acknowledged or lost packet, extra acknowledged bytes beyond
+/// expected bandwidth indicating ack aggregation, and the maximum send
+/// rate and ack rate used for BBRv2 bandwidth estimation.
 #[derive(Default)]
 pub(crate) struct CongestionEventSample {
     /// The maximum bandwidth sample from all acked packets.
@@ -787,15 +795,13 @@ impl BandwidthSampler {
         // otherwise division by zero or integer underflow can occur.
         if ack_time <= a0.ack_time {
             return None;
-        }
-        
+        }        
 
         let ack_rate = Bandwidth::from_bytes_and_time_delta(
             self.total_bytes_acked - a0.total_bytes_acked,
             ack_time.duration_since(a0.ack_time),
         );
 
-        // AV's Feedback to make things simpler
         let bandwidth = if let Some(send_rate) = send_rate {
             send_rate.min(ack_rate)
         } else {
@@ -807,14 +813,10 @@ impl BandwidthSampler {
         // high, especially on low bandwidth connections.
         let rtt = ack_time.duration_since(sent_packet.sent_time);
 
-        // AV's Feedback to make things simpler
-        // BandwidthSample for rate calculation
-        // Now includes ack_rate for qlog metrics
         Some(BandwidthSample {
             bandwidth,
             rtt,
             send_rate,
-            // Store ack_rate computed above for qlog exposure
             ack_rate,
             state_at_send: SendTimeState {
                 is_valid: true,
