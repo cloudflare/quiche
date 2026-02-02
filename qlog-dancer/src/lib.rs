@@ -409,6 +409,7 @@ pub mod plots;
 pub mod reports;
 pub mod request_stub;
 pub mod seriesstore;
+pub mod trackers;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 pub mod wirefilter;
