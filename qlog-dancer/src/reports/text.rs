@@ -145,7 +145,11 @@ fn print_sent_packet_stats(data_store: &Datastore) {
 
 fn print_rx_max_data_frames(data_store: &Datastore) {
     println!("### received MAX_DATA frames ###");
-    if data_store.received_stream_max_data.is_empty() {
+    if data_store
+        .received_stream_max_data_tracker
+        .per_stream
+        .is_empty()
+    {
         println!("    None")
     } else {
         println!(
@@ -168,10 +172,14 @@ fn print_tx_max_data_frames(data_store: &Datastore) {
 
 fn print_rx_max_stream_data_frames(data_store: &Datastore) {
     println!("### received MAX_STREAM_DATA frames ###");
-    if data_store.received_stream_max_data.is_empty() {
+    if data_store
+        .received_stream_max_data_tracker
+        .per_stream
+        .is_empty()
+    {
         println!("    None")
     } else {
-        for entry in &data_store.received_stream_max_data {
+        for entry in &data_store.received_stream_max_data_tracker.per_stream {
             println!(
                 "    stream={}, total_count={}, first={:?}, last={}",
                 entry.0,
@@ -185,10 +193,14 @@ fn print_rx_max_stream_data_frames(data_store: &Datastore) {
 
 fn print_tx_max_stream_data_frames(data_store: &Datastore) {
     println!("### sent MAX_STREAM_DATA frames ###");
-    if data_store.sent_stream_max_data.is_empty() {
+    if data_store
+        .sent_stream_max_data_tracker
+        .per_stream
+        .is_empty()
+    {
         println!("    None")
     } else {
-        for entry in &data_store.sent_stream_max_data {
+        for entry in &data_store.sent_stream_max_data_tracker.per_stream {
             println!(
                 "    stream={}, total_count={}, first={:?}, last={:?}",
                 entry.0,
@@ -236,10 +248,10 @@ fn print_rx_reset_stream_frames(data_store: &Datastore) {
 
 fn print_local_stream_buffer_reads(data_store: &Datastore) {
     println!("### local stream buffer reads ###");
-    if data_store.stream_buffer_reads.is_empty() {
+    if data_store.stream_buffer_reads_tracker.per_stream.is_empty() {
         println!("    None")
     } else {
-        for entry in &data_store.stream_buffer_reads {
+        for entry in &data_store.stream_buffer_reads_tracker.per_stream {
             println!(
                 "    stream={}, total_count={}, first=(offset={}, length={}), last=(offset={}, length={}), total_length={}",
                 entry.0,
@@ -256,10 +268,14 @@ fn print_local_stream_buffer_reads(data_store: &Datastore) {
 
 fn print_local_stream_buffer_writes(data_store: &Datastore) {
     println!("### local stream buffer writes ###");
-    if data_store.stream_buffer_writes.is_empty() {
+    if data_store
+        .stream_buffer_writes_tracker
+        .per_stream
+        .is_empty()
+    {
         println!("    None")
     } else {
-        for entry in &data_store.stream_buffer_writes {
+        for entry in &data_store.stream_buffer_writes_tracker.per_stream {
             println!(
                 "    stream={}, total_count={}, first=(offset={}, length={}), last=(offset={}, length={}), total_length={}",
                 entry.0,
@@ -276,10 +292,14 @@ fn print_local_stream_buffer_writes(data_store: &Datastore) {
 
 fn print_local_stream_buffer_dropped(data_store: &Datastore) {
     println!("### local stream buffer dropped ###");
-    if data_store.stream_buffer_writes.is_empty() {
+    if data_store
+        .stream_buffer_dropped_tracker
+        .per_stream
+        .is_empty()
+    {
         println!("    None")
     } else {
-        for entry in &data_store.stream_buffer_dropped {
+        for entry in &data_store.stream_buffer_dropped_tracker.per_stream {
             println!(
                 "    stream={}, total_count={}, first=(offset={}, length={}), last=(offset={}, length={}), total_length={}",
                 entry.0,
