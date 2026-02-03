@@ -38,8 +38,6 @@ use crate::Result;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-use serde_json;
-
 use smallvec::SmallVec;
 
 use self::congestion::recovery::LegacyRecovery;

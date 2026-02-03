@@ -630,10 +630,12 @@ impl BBRv2 {
         bdp.min(self.get_congestion_window())
     }
 
+    #[cfg(feature = "qlog")]
     pub(crate) fn send_rate(&self) -> Option<Bandwidth> {
         self.mode.network_model().send_rate()
     }
 
+    #[cfg(feature = "qlog")]
     pub(crate) fn ack_rate(&self) -> Option<Bandwidth> {
         self.mode.network_model().ack_rate()
     }
