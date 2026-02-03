@@ -34,6 +34,7 @@ use super::Bytes;
 use super::DataRecipient;
 use super::ExData;
 use super::RawInfo;
+use super::ExData;
 use super::Token;
 use crate::HexSlice;
 use crate::StatelessResetToken;
@@ -779,6 +780,10 @@ pub struct MetricsUpdated {
     pub packets_in_flight: Option<u64>,
 
     pub pacing_rate: Option<u64>,
+
+    /// Extension data for non-standard fields (flattened into data object)
+    #[serde(flatten)]
+    pub ex_data: ExData,
 }
 
 #[serde_with::skip_serializing_none]

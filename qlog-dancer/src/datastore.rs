@@ -1499,25 +1499,16 @@ impl Datastore {
             self.local_pacing_rate.push((ev_time, pacing_rate));
         }
 
-        // Extract rate metrics from ex_data (supports both cf_ prefixed and non-prefixed)
-        let delivery_rate = mu.ex_data.get("cf_delivery_rate")
-            .or_else(|| mu.ex_data.get("delivery_rate"))
-            .and_then(|v| v.as_u64());
-        if let Some(rate) = delivery_rate {
+        // Extract rate metrics from ex_data
+        if let Some(rate) = mu.ex_data.get("cf_delivery_rate").and_then(|v| v.as_u64()) {
             self.local_delivery_rate.push((ev_time, rate));
         }
 
-        let send_rate = mu.ex_data.get("cf_send_rate")
-            .or_else(|| mu.ex_data.get("send_rate"))
-            .and_then(|v| v.as_u64());
-        if let Some(rate) = send_rate {
+        if let Some(rate) = mu.ex_data.get("cf_send_rate").and_then(|v| v.as_u64()) {
             self.local_send_rate.push((ev_time, rate));
         }
 
-        let ack_rate = mu.ex_data.get("cf_ack_rate")
-            .or_else(|| mu.ex_data.get("ack_rate"))
-            .and_then(|v| v.as_u64());
-        if let Some(rate) = ack_rate {
+        if let Some(rate) = mu.ex_data.get("cf_ack_rate").and_then(|v| v.as_u64()) {
             self.local_ack_rate.push((ev_time, rate));
         }
     }
