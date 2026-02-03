@@ -38,7 +38,6 @@ use crate::Result;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-#[cfg(feature = "qlog")]
 use serde_json;
 
 use smallvec::SmallVec;
@@ -561,43 +560,32 @@ impl QlogMetrics {
             None
         };
 
-        let new_delivery_rate = if self.delivery_rate != latest.delivery_rate {
+        // Build ex_data for rate metrics
+        let mut ex_data = qlog::events::ExData::new();
+        if self.delivery_rate != latest.delivery_rate {
             self.delivery_rate = latest.delivery_rate;
             emit_event = true;
-            latest.delivery_rate
-        } else {
-            None
-        };
-
-        let new_send_rate = if self.send_rate != latest.send_rate {
-            self.send_rate = latest.send_rate;
-            emit_event = true;
-            latest.send_rate
-        } else {
-            None
-        };
-
-        let new_ack_rate = if self.ack_rate != latest.ack_rate {
-            self.ack_rate = latest.ack_rate;
-            emit_event = true;
-            latest.ack_rate
-        } else {
-            None
-        };
-
-        if emit_event {
-            // Build ex_data for rate metrics
-            let mut ex_data = qlog::events::ExData::new();
-            if let Some(rate) = new_delivery_rate {
+            if let Some(rate) = latest.delivery_rate {
                 ex_data
                     .insert("delivery_rate".to_string(), serde_json::json!(rate));
             }
-            if let Some(rate) = new_send_rate {
+        }
+        if self.send_rate != latest.send_rate {
+            self.send_rate = latest.send_rate;
+            emit_event = true;
+            if let Some(rate) = latest.send_rate {
                 ex_data.insert("send_rate".to_string(), serde_json::json!(rate));
             }
-            if let Some(rate) = new_ack_rate {
+        }
+        if self.ack_rate != latest.ack_rate {
+            self.ack_rate = latest.ack_rate;
+            emit_event = true;
+            if let Some(rate) = latest.ack_rate {
                 ex_data.insert("ack_rate".to_string(), serde_json::json!(rate));
             }
+        }
+
+        if emit_event {
 
             return Some(EventData::MetricsUpdated(
                 qlog::events::quic::MetricsUpdated {

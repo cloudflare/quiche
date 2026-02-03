@@ -250,13 +250,8 @@ struct MaxAckHeightTracker {
     reduce_extra_acked_on_bandwidth_increase: bool,
 }
 
-/// This struct captures various measurements from a congestion event,
-/// including the maximum bandwidth observed and whether it came from an
-/// app-limited sample, the minimum RTT across all acknowledged packets,
-/// the maximum bytes in flight during the event, the send state of the
-/// largest acknowledged or lost packet, extra acknowledged bytes beyond
-/// expected bandwidth indicating ack aggregation, and the maximum send
-/// rate and ack rate used for BBRv2 bandwidth estimation.
+/// Measurements collected from a congestion event, used for bandwidth
+/// estimation and congestion control in BBR.
 #[derive(Default)]
 pub(crate) struct CongestionEventSample {
     /// The maximum bandwidth sample from all acked packets.

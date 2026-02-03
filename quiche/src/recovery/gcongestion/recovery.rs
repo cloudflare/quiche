@@ -469,10 +469,12 @@ pub struct GRecovery {
 }
 
 impl GRecovery {
+    #[cfg(feature = "qlog")]
     fn send_rate(&self) -> Bandwidth {
         self.pacer.send_rate().unwrap_or(Bandwidth::zero())
     }
 
+    #[cfg(feature = "qlog")]
     fn ack_rate(&self) -> Bandwidth {
         self.pacer.ack_rate().unwrap_or(Bandwidth::zero())
     }
