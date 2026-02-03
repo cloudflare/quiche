@@ -51,6 +51,7 @@ pub struct AppConfig {
     pub plot_sparks: bool,
     pub plot_multiplex: bool,
     pub plot_pending: bool,
+    pub plot_pacing: bool,
     pub sparks_layout: SparkPlotsParams,
 
     pub report_text: bool,
@@ -107,6 +108,7 @@ impl AppConfig {
                     "multiplex",
                     "pending",
                     "conn-flow",
+                    "pacing",
                     "none",
                 ])
                 .default_value("none"),
@@ -255,22 +257,25 @@ impl AppConfig {
             plot_multiplex,
             plot_pending,
             plot_conn_flow_control,
+            plot_pacing,
         ) = match charts.as_str() {
-            "all" => (true, true, true, true, true, true, true),
+            "all" => (true, true, true, true, true, true, true, true),
 
-            "overview" => (true, true, false, false, false, false, false),
+            "overview" => (true, true, false, false, false, false, false, false),
 
-            "pkt-rx" => (false, false, true, false, false, false, false),
+            "pkt-rx" => (false, false, true, false, false, false, false, false),
 
-            "sparks" => (false, false, false, true, false, false, false),
+            "sparks" => (false, false, false, true, false, false, false, false),
 
-            "multiplex" => (false, false, false, false, true, false, false),
+            "multiplex" => (false, false, false, false, true, false, false, false),
 
-            "pending" => (false, false, false, false, false, true, false),
+            "pending" => (false, false, false, false, false, true, false, false),
 
-            "conn-flow" => (false, false, false, false, false, false, true),
+            "conn-flow" => (false, false, false, false, false, false, true, false),
 
-            "none" => (false, false, false, false, false, false, false),
+            "pacing" => (false, false, false, false, false, false, false, true),
+
+            "none" => (false, false, false, false, false, false, false, false),
 
             _ => unreachable!(),
         };
@@ -382,6 +387,7 @@ impl AppConfig {
             plot_sparks,
             plot_multiplex,
             plot_pending,
+            plot_pacing,
             sparks_layout,
             report_text,
             report_omit_upload,

@@ -109,7 +109,7 @@ support for interactive elements with the plots.
 For local development:
 
 1. Install [wasm-pack](https://github.com/rustwasm/wasm-pack).
-2. From the qlog-dancer directory, run `wasm-pack build --target=web`. This
+2. From the qlog-dancer directory, run `wasm-pack build target=web`. This
    generates files into a `pkg` subdirectory.
 3. Launch a webserver of any kind that can serve the checked in `index.html` and
    the generated file such `pkg/qlog_dancer.js`. For example, the following works just fine
