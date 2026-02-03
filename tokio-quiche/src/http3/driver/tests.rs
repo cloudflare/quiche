@@ -1366,4 +1366,166 @@ mod server_side_driver {
         assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Finished)));
         assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
     }
+
+    /// Test that calling `H3Controller::shutdown_stream` with
+    /// `StreamShutdown::Write` sends a RESET_STREAM frame to the peer.
+    #[test]
+    fn server_shutdown_stream_write_direction() {
+        use crate::http3::driver::StreamShutdown;
+        const CUSTOM_ERROR_CODE: u64 = 0x1234;
+
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // client sends a request
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), false)
+            .unwrap();
+
+        // server reads request
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        assert_eq!(req.stream_id, stream_id);
+        let audit_stats = req.h3_audit_stats.clone();
+
+        // Server calls shutdown_stream via the controller
+        helper
+            .controller
+            .shutdown_stream(stream_id, StreamShutdown::Write {
+                error_code: CUSTOM_ERROR_CODE,
+            });
+
+        helper.advance_and_run_loop().unwrap();
+
+        // Client should receive the RESET_STREAM
+        // Note: quiche::h3 reports RESET_STREAM via a TransportError when
+        // trying to read from the stream
+        assert_eq!(
+            helper.peer_client_poll(),
+            Ok((0, h3::Event::Reset(CUSTOM_ERROR_CODE)))
+        );
+
+        // Verify stats
+        assert_eq!(
+            audit_stats.sent_reset_stream_error_code(),
+            CUSTOM_ERROR_CODE as i64
+        );
+        assert_eq!(audit_stats.sent_stop_sending_error_code(), -1);
+    }
+
+    /// Test that calling `H3Controller::shutdown_stream` with
+    /// `StreamShutdown::Read` sends a STOP_SENDING frame to the peer.
+    #[test]
+    fn server_shutdown_stream_read_direction() {
+        use crate::http3::driver::StreamShutdown;
+        const CUSTOM_ERROR_CODE: u64 = 0x5678;
+
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // client sends a request without fin (expecting to send body)
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("POST"), false)
+            .unwrap();
+
+        // server reads request
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        assert_eq!(req.stream_id, stream_id);
+        let audit_stats = req.h3_audit_stats.clone();
+
+        // Server calls shutdown_stream with Read direction (STOP_SENDING)
+        helper
+            .controller
+            .shutdown_stream(stream_id, StreamShutdown::Read {
+                error_code: CUSTOM_ERROR_CODE,
+            });
+
+        helper.advance_and_run_loop().unwrap();
+
+        // Client tries to send body - should get StreamStopped error
+        assert_eq!(
+            helper.peer_client_send_body(0, &[1, 2, 3], false),
+            Err(h3::Error::TransportError(quiche::Error::StreamStopped(
+                CUSTOM_ERROR_CODE
+            )))
+        );
+
+        // Verify stats
+        assert_eq!(audit_stats.sent_reset_stream_error_code(), -1);
+        assert_eq!(
+            audit_stats.sent_stop_sending_error_code(),
+            CUSTOM_ERROR_CODE as i64
+        );
+    }
+
+    /// Test that calling `H3Controller::shutdown_stream` with
+    /// `StreamShutdown::Both` sends both RESET_STREAM and STOP_SENDING
+    /// frames to the peer.
+    #[test]
+    fn server_shutdown_stream_both_directions() {
+        use crate::http3::driver::StreamShutdown;
+        const READ_ERROR_CODE: u64 = 0xAAAA;
+        const WRITE_ERROR_CODE: u64 = 0xBBBB;
+
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // client sends a request without fin
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("POST"), false)
+            .unwrap();
+
+        // server reads request
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        assert_eq!(req.stream_id, stream_id);
+        let audit_stats = req.h3_audit_stats.clone();
+
+        // Server calls shutdown_stream with Both directions
+        helper
+            .controller
+            .shutdown_stream(stream_id, StreamShutdown::Both {
+                read_error_code: READ_ERROR_CODE,
+                write_error_code: WRITE_ERROR_CODE,
+            });
+
+        helper.advance_and_run_loop().unwrap();
+
+        // Client should see STOP_SENDING when trying to send
+        assert_eq!(
+            helper.peer_client_send_body(0, &[1, 2, 3], false),
+            Err(h3::Error::TransportError(quiche::Error::StreamStopped(
+                READ_ERROR_CODE
+            )))
+        );
+
+        // Client should see RESET_STREAM when trying to receive
+        assert_eq!(
+            helper.peer_client_poll(),
+            Ok((0, h3::Event::Reset(WRITE_ERROR_CODE)))
+        );
+
+        // Verify stats
+        assert_eq!(
+            audit_stats.sent_reset_stream_error_code(),
+            WRITE_ERROR_CODE as i64
+        );
+        assert_eq!(
+            audit_stats.sent_stop_sending_error_code(),
+            READ_ERROR_CODE as i64
+        );
+    }
 }
