@@ -48,6 +48,11 @@ use qlog::reader::QlogSeqReader;
 use qlog_dancer::datastore::Datastore;
 use qlog_dancer::poc_plots::config::PlotConfig;
 use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_png;
+use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_svg;
+#[cfg(feature = "cairo")]
+use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_pdf;
+#[cfg(feature = "cairo")]
+use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_eps;
 use qlog_dancer::poc_plots::modules::pacer::PacerPlotParams;
 use qlog_dancer::poc_plots::modules::pacer::PacerSeriesStore;
 use qlog_dancer::seriesstore::SeriesStore;
@@ -74,7 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arg::new("output")
                 .long("output")
                 .short('o')
-                .help("Output PNG path")
+                .help("Output file path (format detected from extension: .png, .svg, .pdf, .eps)")
                 .default_value("pacer_plot.png"),
         )
         .arg(
@@ -173,10 +178,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("\nRendering plot to: {}", output_path);
-    render_pacer_to_png(&config, &params, &store, output_path)?;
+    render_to_format(&config, &params, &store, output_path)?;
 
     println!("Done!");
     Ok(())
+}
+
+/// Render to the appropriate format based on file extension.
+fn render_to_format(
+    config: &PlotConfig, params: &PacerPlotParams, store: &PacerSeriesStore,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ext = Path::new(output_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+
+    match ext.as_str() {
+        "svg" => {
+            println!("Format: SVG (vector)");
+            render_pacer_to_svg(config, params, store, output_path)
+        }
+        #[cfg(feature = "cairo")]
+        "pdf" => {
+            println!("Format: PDF (vector, Cairo)");
+            render_pacer_to_pdf(config, params, store, output_path)
+        }
+        #[cfg(feature = "cairo")]
+        "eps" => {
+            println!("Format: EPS (vector, Cairo)");
+            render_pacer_to_eps(config, params, store, output_path)
+        }
+        #[cfg(not(feature = "cairo"))]
+        "pdf" | "eps" => {
+            eprintln!(
+                "Error: PDF/EPS output requires the 'cairo' feature.\n\
+                 Rebuild with: cargo build --features cairo\n\
+                 System dependencies:\n\
+                   - Linux: sudo apt install libcairo2-dev libpango1.0-dev\n\
+                   - macOS: brew install cairo pango"
+            );
+            std::process::exit(1);
+        }
+        _ => {
+            println!("Format: PNG (raster)");
+            render_pacer_to_png(config, params, store, output_path)
+        }
+    }
 }
 
 /// Generate demo data simulating pacing rate behavior.

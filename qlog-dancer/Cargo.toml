@@ -18,6 +18,8 @@ js-sys = "0.3"
 log = { workspace = true }
 netlog = { workspace = true }
 plotters = "0.3.4"
+plotters-cairo = { version = "0.7", optional = true }
+cairo-rs = { version = "0.20", optional = true, features = ["pdf", "ps"] }
 qlog = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
@@ -26,7 +28,13 @@ tabled = "0.15.0"
 table_to_html = "0.9.0"
 toml = "0.8"
 
-wirefilter-engine = { git = "https://github.com/cloudflare/wirefilter.git", rev="f3116d9f244d10a2d9a37d036cfa7129c5e50d3b" }
+[features]
+default = []
+cairo = ["dep:plotters-cairo", "dep:cairo-rs"]
+
+[dependencies.wirefilter-engine]
+git = "https://github.com/cloudflare/wirefilter.git"
+rev = "f3116d9f244d10a2d9a37d036cfa7129c5e50d3b"
 
 # By default, getrandom doesn't have any source of randomness on wasm32-unknown.
 # This optional dependency allows us to build with `--features getrandom/wasm_js`.

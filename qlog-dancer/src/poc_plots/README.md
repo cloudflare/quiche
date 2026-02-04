@@ -35,7 +35,7 @@ cargo run -p qlog-dancer --bin poc_plotter -- --demo -o /tmp/demo.png
 |--------|-------------|
 | `-i, --input <PATH>` | Path to sqlog file (required unless `--demo`) |
 | `-c, --config <PATH>` | Path to custom config.toml |
-| `-o, --output <PATH>` | Output PNG path (default: `pacer_plot.png`) |
+| `-o, --output <PATH>` | Output file path - format detected from extension (default: `pacer_plot.png`) |
 | `-p, --palette <NAME>` | Override palette: `qvis`, `matplotlib`, `palette99`, or `palette9999` |
 | `--extend` | Extend lines to full plot width |
 | `--demo` | Generate demo data instead of reading sqlog |
@@ -91,6 +91,57 @@ colors = [
 
 [lines]
 palette = "my_custom"
+```
+
+## Output Formats
+
+The output format is auto-detected from the file extension:
+
+| Format | Extension | Backend | Requirements |
+|--------|-----------|---------|--------------|
+| PNG | `.png` | `BitMapBackend` | None (default) |
+| SVG | `.svg` | `SVGBackend` | None |
+| PDF | `.pdf` | `CairoBackend` | `cairo` feature + system libs |
+| EPS | `.eps` | `CairoBackend` | `cairo` feature + system libs |
+
+### Examples
+
+```bash
+# PNG (default)
+cargo run -p qlog-dancer --bin poc_plotter -- --demo -o plot.png
+
+# SVG (vector, no extra dependencies)
+cargo run -p qlog-dancer --bin poc_plotter -- --demo -o plot.svg
+
+# PDF (requires cairo feature)
+cargo run -p qlog-dancer --bin poc_plotter --features cairo -- --demo -o plot.pdf
+
+# EPS (requires cairo feature)
+cargo run -p qlog-dancer --bin poc_plotter --features cairo -- --demo -o plot.eps
+```
+
+### Cairo Setup (for PDF/EPS)
+
+PDF and EPS output require the `cairo` feature and system Cairo libraries.
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt install libcairo2-dev libpango1.0-dev
+```
+
+**Linux (Fedora/RHEL):**
+```bash
+sudo dnf install cairo-devel pango-devel
+```
+
+**macOS:**
+```bash
+brew install cairo pango
+```
+
+Then build with the cairo feature:
+```bash
+cargo build -p qlog-dancer --features cairo
 ```
 
 ## Architecture

@@ -150,7 +150,7 @@ edgecolor = "white"
 
 [output]
 formats = ["png"]
-dpi = 150
+dpi = 600
 transparent = false
 bbox = "tight"
 pad_inches = 0.1
