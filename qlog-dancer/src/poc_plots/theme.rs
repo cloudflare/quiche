@@ -33,6 +33,7 @@ use plotters::prelude::SeriesLabelPosition;
 use plotters::style::Color;
 use plotters::style::Palette;
 use plotters::style::Palette99;
+use plotters::style::Palette9999;
 use plotters::style::RGBColor;
 use plotters::style::ShapeStyle;
 use plotters::style::BLACK;
@@ -69,6 +70,7 @@ impl ColorCycle {
     ///
     /// Supports:
     /// - `"palette99"`: Uses plotters' built-in Palette99 (99% color vision accessible)
+    /// - `"palette9999"`: Uses plotters' built-in Palette9999 (99.99% color vision accessible)
     /// - Any other name: Looks up `[palettes.NAME]` in config.toml
     pub fn from_config(config: &PlotConfig) -> Self {
         let colors = if config.lines.palette == "palette99" {
@@ -76,6 +78,14 @@ impl ColorCycle {
             (0..8)
                 .map(|i| {
                     let c = Palette99::pick(i).to_rgba();
+                    RGBColor(c.0, c.1, c.2)
+                })
+                .collect()
+        } else if config.lines.palette == "palette9999" {
+            // Use plotters' built-in Palette9999 for maximum accessibility
+            (0..8)
+                .map(|i| {
+                    let c = Palette9999::pick(i).to_rgba();
                     RGBColor(c.0, c.1, c.2)
                 })
                 .collect()
@@ -252,6 +262,21 @@ mod tests {
         assert_ne!(c0, RGBColor(15, 122, 27));
         // Palette99 first color is a specific value from plotters
         let expected = Palette99::pick(0).to_rgba();
+        assert_eq!(c0, RGBColor(expected.0, expected.1, expected.2));
+    }
+
+    #[test]
+    fn test_palette9999() {
+        let mut config = PlotConfig::default();
+        config.lines.palette = "palette9999".to_string();
+
+        let mut cycle = ColorCycle::from_config(&config);
+        // Palette9999 uses plotters' built-in maximum accessibility palette
+        // First color should NOT be qvis forest_green
+        let c0 = cycle.next();
+        assert_ne!(c0, RGBColor(15, 122, 27));
+        // Palette9999 first color is a specific value from plotters
+        let expected = Palette9999::pick(0).to_rgba();
         assert_eq!(c0, RGBColor(expected.0, expected.1, expected.2));
     }
 }
