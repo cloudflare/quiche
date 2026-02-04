@@ -86,3 +86,8 @@ pub fn make_trace_seq() -> TraceSeq {
         None,
     )
 }
+
+#[cfg(test)]
+mod event_tests;
+#[cfg(test)]
+mod trace_tests;
