@@ -561,30 +561,29 @@ impl QlogMetrics {
         // Build ex_data for rate metrics
         let mut ex_data = qlog::events::ExData::new();
         if self.delivery_rate != latest.delivery_rate {
-            self.delivery_rate = latest.delivery_rate;
-            emit_event = true;
             if let Some(rate) = latest.delivery_rate {
+                self.delivery_rate = latest.delivery_rate;
+                emit_event = true;
                 ex_data
                     .insert("delivery_rate".to_string(), serde_json::json!(rate));
             }
         }
         if self.send_rate != latest.send_rate {
-            self.send_rate = latest.send_rate;
-            emit_event = true;
             if let Some(rate) = latest.send_rate {
+                self.send_rate = latest.send_rate;
+                emit_event = true;
                 ex_data.insert("send_rate".to_string(), serde_json::json!(rate));
             }
         }
         if self.ack_rate != latest.ack_rate {
-            self.ack_rate = latest.ack_rate;
-            emit_event = true;
             if let Some(rate) = latest.ack_rate {
+                self.ack_rate = latest.ack_rate;
+                emit_event = true;
                 ex_data.insert("ack_rate".to_string(), serde_json::json!(rate));
             }
         }
 
         if emit_event {
-
             return Some(EventData::MetricsUpdated(
                 qlog::events::quic::MetricsUpdated {
                     min_rtt: new_min_rtt,
