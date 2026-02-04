@@ -38,7 +38,7 @@ colors = [
 linewidth = 1
 style = "-"
 alpha = 0.75
-palette = "qvis"  # "qvis" (default), "matplotlib"
+palette = "qvis"  # "qvis" (default), "matplotlib", "palette99"
 
 [lines.markers]
 style = "none"
