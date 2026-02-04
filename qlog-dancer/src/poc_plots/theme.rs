@@ -30,6 +30,9 @@
 //! This module only provides convenience methods for plotters integration.
 
 use plotters::prelude::SeriesLabelPosition;
+use plotters::style::Color;
+use plotters::style::Palette;
+use plotters::style::Palette99;
 use plotters::style::RGBColor;
 use plotters::style::ShapeStyle;
 use plotters::style::BLACK;
@@ -63,12 +66,26 @@ pub struct ColorCycle {
 
 impl ColorCycle {
     /// Create a new color cycle from a config's active palette.
+    ///
+    /// Supports:
+    /// - `"palette99"`: Uses plotters' built-in Palette99 (99% color vision accessible)
+    /// - Any other name: Looks up `[palettes.NAME]` in config.toml
     pub fn from_config(config: &PlotConfig) -> Self {
-        let colors = config
-            .active_palette()
-            .iter()
-            .map(|rgb| RGBColor(rgb[0], rgb[1], rgb[2]))
-            .collect();
+        let colors = if config.lines.palette == "palette99" {
+            // Use plotters' built-in Palette99 for accessibility
+            (0..8)
+                .map(|i| {
+                    let c = Palette99::pick(i).to_rgba();
+                    RGBColor(c.0, c.1, c.2)
+                })
+                .collect()
+        } else {
+            config
+                .active_palette()
+                .iter()
+                .map(|rgb| RGBColor(rgb[0], rgb[1], rgb[2]))
+                .collect()
+        };
 
         Self { colors, index: 0 }
     }
@@ -221,5 +238,20 @@ mod tests {
         let mut cycle = ColorCycle::from_config(&config);
         // matplotlib C0 blue
         assert_eq!(cycle.next(), RGBColor(31, 119, 180));
+    }
+
+    #[test]
+    fn test_palette99() {
+        let mut config = PlotConfig::default();
+        config.lines.palette = "palette99".to_string();
+
+        let mut cycle = ColorCycle::from_config(&config);
+        // Palette99 uses plotters' built-in accessibility palette
+        // First color should NOT be qvis forest_green
+        let c0 = cycle.next();
+        assert_ne!(c0, RGBColor(15, 122, 27));
+        // Palette99 first color is a specific value from plotters
+        let expected = Palette99::pick(0).to_rgba();
+        assert_eq!(c0, RGBColor(expected.0, expected.1, expected.2));
     }
 }

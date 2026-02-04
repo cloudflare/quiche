@@ -7,7 +7,7 @@ A proof-of-concept for matplotlib-style config-driven plotting of QLOG data.
 - **Single source of truth**: All styling comes from `config.toml` - no recompilation needed
 - **Real sqlog support**: Parses Cloudflare extension fields (`cf_send_rate`, `cf_ack_rate`, `cf_delivery_rate`)
 - **Auto-statistics**: Series data tracks min/max automatically via `SeriesData<T>`
-- **Color palettes**: Supports `qvis` (default) and `matplotlib` palettes
+- **Color palettes**: Supports `qvis` (default), `matplotlib`, and `palette99` (accessibility)
 
 ## Usage
 
@@ -36,7 +36,7 @@ cargo run -p qlog-dancer --bin poc_plotter -- --demo -o /tmp/demo.png
 | `-i, --input <PATH>` | Path to sqlog file (required unless `--demo`) |
 | `-c, --config <PATH>` | Path to custom config.toml |
 | `-o, --output <PATH>` | Output PNG path (default: `pacer_plot.png`) |
-| `-p, --palette <NAME>` | Override palette: `qvis` or `matplotlib` |
+| `-p, --palette <NAME>` | Override palette: `qvis`, `matplotlib`, or `palette99` |
 | `--extend` | Extend lines to full plot width |
 | `--demo` | Generate demo data instead of reading sqlog |
 
@@ -52,6 +52,45 @@ Edit `config.toml` to customize:
 - **Legend**: Position, font size, frame
 - **Title**: Display, font size
 - **Figure**: Size, DPI, background
+
+## Color Palettes
+
+Three built-in palettes are available:
+
+| Palette | Description |
+|---------|-------------|
+| `qvis` | Default qvis colors (forest green, purple, taupe, etc.) |
+| `matplotlib` | Matplotlib's default color cycle (C0-C9) |
+| `palette99` | Plotters' Palette99 (99% color vision accessible) |
+
+### Using a Palette
+
+Via CLI:
+```bash
+cargo run -p qlog-dancer --bin poc_plotter -- --demo --palette palette99
+```
+
+Or in `config.toml`:
+```toml
+[lines]
+palette = "matplotlib"
+```
+
+### Custom Palettes
+
+Define custom palettes in `config.toml`:
+
+```toml
+[palettes.my_custom]
+colors = [
+    [255, 0, 0],    # red
+    [0, 255, 0],    # green
+    [0, 0, 255],    # blue
+]
+
+[lines]
+palette = "my_custom"
+```
 
 ## Architecture
 
