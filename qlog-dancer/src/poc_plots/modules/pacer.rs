@@ -124,19 +124,45 @@ impl PacerSeriesStore {
     }
 
     /// Get the global max across all rate series (for y-axis scaling).
-    /// This replaces the manual tracking of max_pacing_rate, max_delivery_rate, etc.
+    /// Computes directly from pre-tracked y_max values without cloning data.
     pub fn global_y_max(&self) -> Option<u64> {
-        self.as_group().global_y_max()
+        [
+            self.pacing_rate.y_max(),
+            self.delivery_rate.y_max(),
+            self.send_rate.y_max(),
+            self.ack_rate.y_max(),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
     }
 
     /// Get the global x_max across all series.
+    /// Computes directly from pre-tracked x_max values without cloning data.
     pub fn global_x_max(&self) -> Option<f32> {
-        self.as_group().global_x_max()
+        [
+            self.pacing_rate.x_max(),
+            self.delivery_rate.x_max(),
+            self.send_rate.x_max(),
+            self.ack_rate.x_max(),
+        ]
+        .into_iter()
+        .flatten()
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
     }
 
     /// Get the global x_min across all series.
+    /// Computes directly from pre-tracked x_min values without cloning data.
     pub fn global_x_min(&self) -> Option<f32> {
-        self.as_group().global_x_min()
+        [
+            self.pacing_rate.x_min(),
+            self.delivery_rate.x_min(),
+            self.send_rate.x_min(),
+            self.ack_rate.x_min(),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
     }
 
     /// Populate from raw qlog data points (all four rate series).
