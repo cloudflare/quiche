@@ -69,8 +69,10 @@ impl ColorCycle {
     /// Create a new color cycle from a config's active palette.
     ///
     /// Supports:
-    /// - `"palette99"`: Uses plotters' built-in Palette99 (99% color vision accessible)
-    /// - `"palette9999"`: Uses plotters' built-in Palette9999 (99.99% color vision accessible)
+    /// - `"palette99"`: Uses plotters' built-in Palette99 (99% color vision
+    ///   accessible)
+    /// - `"palette9999"`: Uses plotters' built-in Palette9999 (99.99% color
+    ///   vision accessible)
     /// - Any other name: Looks up `[palettes.NAME]` in config.toml
     pub fn from_config(config: &PlotConfig) -> Self {
         let colors = if config.lines.palette == "palette99" {
@@ -101,7 +103,7 @@ impl ColorCycle {
     }
 
     /// Get the next color in the cycle.
-    pub fn next(&mut self) -> RGBColor {
+    pub fn next_color(&mut self) -> RGBColor {
         let color = self.colors[self.index];
         self.index = (self.index + 1) % self.colors.len();
         color
@@ -151,8 +153,10 @@ impl PlotTheme {
         let caption = if fill == WHITE { BLACK } else { WHITE };
 
         // Use colors from config for fallbacks
-        let bold_line_fallback = parse_color(&config.colors.bold_line).unwrap_or(WHITE);
-        let light_line_fallback = parse_color(&config.colors.light_line).unwrap_or(WHITE);
+        let bold_line_fallback =
+            parse_color(&config.colors.bold_line).unwrap_or(WHITE);
+        let light_line_fallback =
+            parse_color(&config.colors.light_line).unwrap_or(WHITE);
 
         Self {
             fill,
@@ -200,7 +204,7 @@ pub fn parse_color(s: &str) -> Option<RGBColor> {
             let g = u8::from_str_radix(&s[3..5], 16).ok()?;
             let b = u8::from_str_radix(&s[5..7], 16).ok()?;
             Some(RGBColor(r, g, b))
-        }
+        },
         _ => None,
     }
 }
@@ -215,11 +219,11 @@ mod tests {
         let mut cycle = ColorCycle::from_config(&config);
 
         // Default is qvis palette, first color is forest_green
-        let c0 = cycle.next();
+        let c0 = cycle.next_color();
         assert_eq!(c0, RGBColor(15, 122, 27));
 
         cycle.reset();
-        assert_eq!(cycle.next(), c0);
+        assert_eq!(cycle.next_color(), c0);
     }
 
     #[test]
@@ -247,7 +251,7 @@ mod tests {
 
         let mut cycle = ColorCycle::from_config(&config);
         // matplotlib C0 blue
-        assert_eq!(cycle.next(), RGBColor(31, 119, 180));
+        assert_eq!(cycle.next_color(), RGBColor(31, 119, 180));
     }
 
     #[test]
@@ -258,7 +262,7 @@ mod tests {
         let mut cycle = ColorCycle::from_config(&config);
         // Palette99 uses plotters' built-in accessibility palette
         // First color should NOT be qvis forest_green
-        let c0 = cycle.next();
+        let c0 = cycle.next_color();
         assert_ne!(c0, RGBColor(15, 122, 27));
         // Palette99 first color is a specific value from plotters
         let expected = Palette99::pick(0).to_rgba();
@@ -273,7 +277,7 @@ mod tests {
         let mut cycle = ColorCycle::from_config(&config);
         // Palette9999 uses plotters' built-in maximum accessibility palette
         // First color should NOT be qvis forest_green
-        let c0 = cycle.next();
+        let c0 = cycle.next_color();
         assert_ne!(c0, RGBColor(15, 122, 27));
         // Palette9999 first color is a specific value from plotters
         let expected = Palette9999::pick(0).to_rgba();

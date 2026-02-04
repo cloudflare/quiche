@@ -26,8 +26,9 @@
 
 //! TOML-based configuration with matplotlib-style options.
 //!
-//! This module provides a configuration system inspired by matplotlib's rcParams,
-//! allowing users to customize plot appearance through a config.toml file.
+//! This module provides a configuration system inspired by matplotlib's
+//! rcParams, allowing users to customize plot appearance through a config.toml
+//! file.
 //!
 //! The default configuration is embedded from config.toml - all styling changes
 //! can be made by editing that file without recompilation.
@@ -42,9 +43,10 @@ use std::path::Path;
 const DEFAULT_CONFIG_TOML: &str = include_str!("config.toml");
 
 /// Root configuration structure matching the TOML schema from FLPROTO-5244.
-/// 
+///
 /// Use `PlotConfig::default()` to get the embedded config.toml values.
-/// Use `PlotConfig::from_file()` to load a custom config (missing fields use defaults).
+/// Use `PlotConfig::from_file()` to load a custom config (missing fields use
+/// defaults).
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlotConfig {
     #[serde(default)]
@@ -80,7 +82,7 @@ pub struct PlotConfig {
 impl Default for PlotConfig {
     fn default() -> Self {
         // Parse from embedded TOML - this is the single source of truth
-        Self::from_str(DEFAULT_CONFIG_TOML)
+        Self::parse_toml(DEFAULT_CONFIG_TOML)
             .expect("Embedded config.toml must be valid")
     }
 }
@@ -90,23 +92,26 @@ impl PlotConfig {
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let content = std::fs::read_to_string(path.as_ref())
             .map_err(|e| ConfigError::IoError(e.to_string()))?;
-        Self::from_str(&content)
+        Self::parse_toml(&content)
     }
 
     /// Parse configuration from a TOML string.
-    pub fn from_str(toml_str: &str) -> Result<Self, ConfigError> {
-        toml::from_str(toml_str).map_err(|e| ConfigError::ParseError(e.to_string()))
+    pub fn parse_toml(toml_str: &str) -> Result<Self, ConfigError> {
+        toml::from_str(toml_str)
+            .map_err(|e| ConfigError::ParseError(e.to_string()))
     }
 
     /// Get the active palette based on lines.palette setting.
     /// Supports any palette defined in config.toml under [palettes.NAME].
     pub fn active_palette(&self) -> &[[u8; 3]] {
-        self.palettes.palettes
+        self.palettes
+            .palettes
             .get(&self.lines.palette)
             .map(|p| p.colors.as_slice())
             .unwrap_or_else(|| {
                 // Fallback to qvis if specified palette not found
-                self.palettes.palettes
+                self.palettes
+                    .palettes
                     .get("qvis")
                     .map(|p| p.colors.as_slice())
                     .unwrap_or(&[])
@@ -387,7 +392,7 @@ mod tests {
             palette = "matplotlib"
         "#;
 
-        let config = PlotConfig::from_str(toml).unwrap();
+        let config = PlotConfig::parse_toml(toml).unwrap();
         assert_eq!(config.lines.linewidth, 3.0);
         assert_eq!(config.lines.palette, "matplotlib");
         // Missing fields get Rust Default (0), not config.toml values
