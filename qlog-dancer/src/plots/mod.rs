@@ -313,6 +313,5 @@ pub mod packet_received;
 pub mod packet_sent;
 pub mod pending;
 pub mod rtt;
-pub mod pacing;
 pub mod stream_multiplex;
 pub mod stream_sparks;

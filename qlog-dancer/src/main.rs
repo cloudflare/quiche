@@ -44,7 +44,6 @@ use qlog_dancer::plots::pending::PendingPlotParams;
 use qlog_dancer::plots::stream_multiplex;
 use qlog_dancer::plots::stream_multiplex::MultiplexPlotsParams;
 use qlog_dancer::plots::stream_sparks;
-use qlog_dancer::plots::pacing;
 use qlog_dancer::plots::AreaMargin;
 use qlog_dancer::plots::ChartMargin;
 use qlog_dancer::plots::ChartOutputType;
@@ -114,8 +113,7 @@ fn run() -> i32 {
         config.plot_pkt_received ||
         config.plot_sparks ||
         config.plot_multiplex ||
-        config.plot_pending ||
-        config.plot_pacing
+        config.plot_pending
     {
         if log_file.data.is_empty() {
             error!("File exists but trace information was empty or invalid. If you used a netlog-filter, check it exactly matched session host in the file.");
@@ -300,19 +298,6 @@ fn run() -> i32 {
                     &chart_config,
                 );
 
-                debug!("\tcomplete in {:?}", std::time::Instant::now() - mark);
-            }
-
-            if config.plot_pacing {
-                let mark = std::time::Instant::now();
-                info!("drawing pacing chart for {}...", label);
-                pacing::plot_pacing(
-                    &plot_params,
-                    &config.filename,
-                    ss,
-                    &data.datastore,
-                    &chart_config,
-                );
                 debug!("\tcomplete in {:?}", std::time::Instant::now() - mark);
             }
         }
