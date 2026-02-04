@@ -429,6 +429,78 @@ pub fn render_pacer_to_png(
     Ok(())
 }
 
+/// Convenience function to render pacer plot to an SVG file.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn render_pacer_to_svg(
+    config: &PlotConfig, params: &PacerPlotParams, store: &PacerSeriesStore,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let width = (config.figure.figsize[0] * config.figure.dpi as f32) as u32;
+    let height = (config.figure.figsize[1] * config.figure.dpi as f32) as u32;
+
+    let root = SVGBackend::new(output_path, (width, height)).into_drawing_area();
+    let theme = PlotTheme::from_config(config);
+    root.fill(&theme.fill)?;
+
+    draw_pacer_plot(config, params, store, &root)?;
+
+    root.present()?;
+    Ok(())
+}
+
+/// Convenience function to render pacer plot to a PDF file.
+/// Requires the `cairo` feature and system Cairo libraries.
+#[cfg(all(not(target_arch = "wasm32"), feature = "cairo"))]
+pub fn render_pacer_to_pdf(
+    config: &PlotConfig, params: &PacerPlotParams, store: &PacerSeriesStore,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use cairo::{Context, PdfSurface};
+    use plotters_cairo::CairoBackend;
+
+    let width = (config.figure.figsize[0] * config.figure.dpi as f32) as u32;
+    let height = (config.figure.figsize[1] * config.figure.dpi as f32) as u32;
+
+    let surface = PdfSurface::new(width as f64, height as f64, output_path)?;
+    let cr = Context::new(&surface)?;
+    let root = CairoBackend::new(&cr, (width, height))?.into_drawing_area();
+    let theme = PlotTheme::from_config(config);
+    root.fill(&theme.fill)?;
+
+    draw_pacer_plot(config, params, store, &root)?;
+
+    root.present()?;
+    surface.finish();
+    Ok(())
+}
+
+/// Convenience function to render pacer plot to an EPS file.
+/// Requires the `cairo` feature and system Cairo libraries.
+#[cfg(all(not(target_arch = "wasm32"), feature = "cairo"))]
+pub fn render_pacer_to_eps(
+    config: &PlotConfig, params: &PacerPlotParams, store: &PacerSeriesStore,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use cairo::{Context, PsSurface};
+    use plotters_cairo::CairoBackend;
+
+    let width = (config.figure.figsize[0] * config.figure.dpi as f32) as u32;
+    let height = (config.figure.figsize[1] * config.figure.dpi as f32) as u32;
+
+    let surface = PsSurface::new(width as f64, height as f64, output_path)?;
+    surface.set_eps(true);
+    let cr = Context::new(&surface)?;
+    let root = CairoBackend::new(&cr, (width, height))?.into_drawing_area();
+    let theme = PlotTheme::from_config(config);
+    root.fill(&theme.fill)?;
+
+    draw_pacer_plot(config, params, store, &root)?;
+
+    root.present()?;
+    surface.finish();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
