@@ -56,4 +56,4 @@ smallvec = { workspace = true }
 crate-type = ["lib", "cdylib"]
 
 [package.metadata.cargo-machete]
-ignored = ["wirefilter-engine"]
+ignored = ["wirefilter-engine", "cairo-rs"]
