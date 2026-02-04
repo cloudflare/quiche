@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("palette")
                 .short('p')
                 .help("Override color palette")
-                .value_parser(["qvis", "matplotlib", "palette99"]),
+                .value_parser(["qvis", "matplotlib", "palette99", "palette9999"]),
         )
         .arg(
             Arg::new("demo")
