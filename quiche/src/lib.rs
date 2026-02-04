@@ -578,6 +578,7 @@ pub struct Config {
     enable_relaxed_loss_threshold: bool,
 
     pmtud: bool,
+    pmtud_max_probes: u8,
 
     hystart: bool,
 
@@ -656,6 +657,7 @@ impl Config {
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
             enable_relaxed_loss_threshold: false,
             pmtud: false,
+            pmtud_max_probes: pmtud::MAX_PROBES_DEFAULT,
             hystart: true,
             pacing: true,
             max_pacing_rate: None,
@@ -771,6 +773,15 @@ impl Config {
     /// The default value is `false`.
     pub fn discover_pmtu(&mut self, discover: bool) {
         self.pmtud = discover;
+    }
+
+    /// Configures the maximum number of PMTUD probe attempts before treating
+    /// a probe size as failed.
+    ///
+    /// Defaults to 3 per [RFC 8899 Section 5.1.2](https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2).
+    /// If 0 is passed, the default value is used.
+    pub fn set_pmtud_max_probes(&mut self, max_probes: u8) {
+        self.pmtud_max_probes = max_probes;
     }
 
     /// Configures whether to send GREASE values.
@@ -2408,11 +2419,11 @@ impl<F: BufFactory> Connection<F> {
     #[cfg(feature = "boringssl-boring-crate")]
     #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
     pub fn set_discover_pmtu_in_handshake(
-        ssl: &mut boring::ssl::SslRef, discover: bool,
+        ssl: &mut boring::ssl::SslRef, discover: bool, max_probes: u8,
     ) -> Result<()> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
 
-        ex_data.pmtud = Some(discover);
+        ex_data.pmtud = Some((discover, max_probes));
 
         Ok(())
     }
@@ -7455,10 +7466,11 @@ impl<F: BufFactory> Connection<F> {
                         self.tx_cap_factor = ex_data.tx_cap_factor;
                     }
 
-                    if let Some(discover) = ex_data.pmtud {
+                    if let Some((discover, max_probes)) = ex_data.pmtud {
                         self.paths.set_discover_pmtu_on_existing_paths(
                             discover,
                             self.recovery_config.max_send_udp_payload_size,
+                            max_probes,
                         );
                     }
 

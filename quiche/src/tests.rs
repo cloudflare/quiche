@@ -10635,7 +10635,7 @@ fn pmtud_no_duplicate_probes(
 }
 
 #[rstest]
-/// Test that PMTUD retries with smaller probe size after loss
+/// Test that PMTUD retries with smaller probe size after loss.
 fn pmtud_probe_retry_after_loss(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
@@ -10651,6 +10651,7 @@ fn pmtud_probe_retry_after_loss(
     config.verify_peer(false);
     config.set_max_send_udp_payload_size(1400);
     config.discover_pmtu(true);
+    config.set_pmtud_max_probes(2);
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -10679,13 +10680,16 @@ fn pmtud_probe_retry_after_loss(
         .unwrap();
     assert!(!pmtud.should_probe());
 
-    // Simulate probe loss
+    // Simulate probe loss - need 2 failures (configured via set_pmtud_max_probes)
+    // before size changes. First failure - should retry at same size
     pmtud.failed_probe(initial_probe_size);
-
-    // Verify MTU is not updated
     assert_eq!(pmtud.get_current_mtu(), 1200);
+    assert!(pmtud.should_probe());
+    assert_eq!(pmtud.get_probe_size(), 1400); // Still trying 1400
 
-    // Verify probe flag is re-enabled and size is reduced
+    // Second failure (max_probes reached) - now size should change
+    pmtud.failed_probe(initial_probe_size);
+    assert_eq!(pmtud.get_current_mtu(), 1200);
     assert!(pmtud.should_probe());
     assert_eq!(pmtud.get_probe_size(), 1300);
 
@@ -10706,7 +10710,8 @@ fn pmtud_probe_retry_after_loss(
         .unwrap();
     assert!(!pmtud.should_probe());
 
-    // Simulate second probe loss
+    // Simulate second probe loss (2 failures needed)
+    pmtud.failed_probe(1300);
     pmtud.failed_probe(1300);
 
     // Verify MTU is not updated
@@ -10761,7 +10766,7 @@ fn enable_pmtud_mid_handshake(
         .set_private_key_file("examples/cert.key", boring::ssl::SslFiletype::PEM)
         .unwrap();
     server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
-        <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), true)
+        <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), true, 1)
             .unwrap();
 
         Ok(())
@@ -10850,7 +10855,7 @@ fn disable_pmtud_mid_handshake(
         .set_private_key_file("examples/cert.key", boring::ssl::SslFiletype::PEM)
         .unwrap();
     server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
-        <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), false)
+        <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), false, 0)
             .unwrap();
 
         Ok(())
