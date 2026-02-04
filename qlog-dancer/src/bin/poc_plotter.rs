@@ -47,12 +47,12 @@ use clap::Command;
 use qlog::reader::QlogSeqReader;
 use qlog_dancer::datastore::Datastore;
 use qlog_dancer::poc_plots::config::PlotConfig;
-use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_png;
-use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_svg;
-#[cfg(feature = "cairo")]
-use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_pdf;
 #[cfg(feature = "cairo")]
 use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_eps;
+#[cfg(feature = "cairo")]
+use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_pdf;
+use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_png;
+use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_svg;
 use qlog_dancer::poc_plots::modules::pacer::PacerPlotParams;
 use qlog_dancer::poc_plots::modules::pacer::PacerSeriesStore;
 use qlog_dancer::seriesstore::SeriesStore;
@@ -199,17 +199,17 @@ fn render_to_format(
         "svg" => {
             println!("Format: SVG (vector)");
             render_pacer_to_svg(config, params, store, output_path)
-        }
+        },
         #[cfg(feature = "cairo")]
         "pdf" => {
             println!("Format: PDF (vector, Cairo)");
             render_pacer_to_pdf(config, params, store, output_path)
-        }
+        },
         #[cfg(feature = "cairo")]
         "eps" => {
             println!("Format: EPS (vector, Cairo)");
             render_pacer_to_eps(config, params, store, output_path)
-        }
+        },
         #[cfg(not(feature = "cairo"))]
         "pdf" | "eps" => {
             eprintln!(
@@ -220,11 +220,11 @@ fn render_to_format(
                    - macOS: brew install cairo pango"
             );
             std::process::exit(1);
-        }
+        },
         _ => {
             println!("Format: PNG (raster)");
             render_pacer_to_png(config, params, store, output_path)
-        }
+        },
     }
 }
 

@@ -455,7 +455,8 @@ pub fn render_pacer_to_pdf(
     config: &PlotConfig, params: &PacerPlotParams, store: &PacerSeriesStore,
     output_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use cairo::{Context, PdfSurface};
+    use cairo::Context;
+    use cairo::PdfSurface;
     use plotters_cairo::CairoBackend;
 
     let width = (config.figure.figsize[0] * config.figure.dpi as f32) as u32;
@@ -481,7 +482,8 @@ pub fn render_pacer_to_eps(
     config: &PlotConfig, params: &PacerPlotParams, store: &PacerSeriesStore,
     output_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use cairo::{Context, PsSurface};
+    use cairo::Context;
+    use cairo::PsSurface;
     use plotters_cairo::CairoBackend;
 
     let width = (config.figure.figsize[0] * config.figure.dpi as f32) as u32;
