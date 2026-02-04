@@ -29,9 +29,8 @@
 //! This module shows how to:
 //! 1. Use SeriesData for automatic stat tracking (replaces manual
 //!    max_pacing_rate, etc.)
-//! 2. Use SeriesGroup for related series with shared axis bounds
-//! 3. Apply PlotTheme from config.toml
-//! 4. Extend lines to full plot width (FLPROTO-5244 requirement)
+//! 2. Apply PlotTheme from config.toml
+//! 3. Extend lines to full plot width (FLPROTO-5244 requirement)
 //!
 //! Based on the pacing.rs from quiche esteban/qlog branch which plots:
 //! - pacing_rate, delivery_rate (cf_delivery_rate), send_rate (cf_send_rate),
@@ -45,7 +44,6 @@ use plotters::prelude::*;
 use crate::poc_plots::config::PlotConfig;
 use crate::poc_plots::series_data::SeriesData;
 use crate::poc_plots::series_data::SeriesDataU64;
-use crate::poc_plots::series_data::SeriesGroup;
 use crate::poc_plots::theme::parse_legend_position;
 use crate::poc_plots::theme::PlotTheme;
 use crate::seriesstore::SeriesStore;
@@ -106,26 +104,6 @@ impl PacerSeriesStore {
             send_rate: SeriesData::new("Send Rate"),
             ack_rate: SeriesData::new("Ack Rate"),
         }
-    }
-
-    /// Create a SeriesGroup from the non-empty series for unified axis scaling.
-    pub fn as_group(&self) -> SeriesGroup<u64> {
-        let mut group = SeriesGroup::new("Rates");
-
-        if !self.pacing_rate.is_empty() {
-            group.add_series(self.pacing_rate.clone());
-        }
-        if !self.delivery_rate.is_empty() {
-            group.add_series(self.delivery_rate.clone());
-        }
-        if !self.send_rate.is_empty() {
-            group.add_series(self.send_rate.clone());
-        }
-        if !self.ack_rate.is_empty() {
-            group.add_series(self.ack_rate.clone());
-        }
-
-        group
     }
 
     /// Get the global max across all rate series (for y-axis scaling).

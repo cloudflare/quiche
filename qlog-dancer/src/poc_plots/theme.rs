@@ -110,16 +110,19 @@ impl ColorCycle {
     }
 
     /// Peek at the next color without advancing.
+    #[allow(dead_code)]
     pub fn peek(&self) -> RGBColor {
         self.colors[self.index]
     }
 
     /// Reset the cycle to the beginning.
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.index = 0;
     }
 
     /// Get a color by index (wraps around).
+    #[allow(dead_code)]
     pub fn get(&self, index: usize) -> RGBColor {
         self.colors[index % self.colors.len()]
     }
@@ -179,6 +182,7 @@ impl PlotTheme {
     }
 
     /// Get a ShapeStyle for a line with the given color.
+    #[allow(dead_code)]
     pub fn line_style(&self, color: RGBColor) -> ShapeStyle {
         ShapeStyle::from(color).stroke_width(self.line_width)
     }

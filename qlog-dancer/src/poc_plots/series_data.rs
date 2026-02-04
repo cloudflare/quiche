@@ -185,9 +185,8 @@ where
     }
 }
 
-/// Convenience type aliases for common series types
+/// Convenience type alias for u64 series (rates, bytes, etc.)
 pub type SeriesDataU64 = SeriesData<u64>;
-pub type SeriesDataF32 = SeriesData<f32>;
 
 /// A collection of related series that share axis bounds.
 ///
