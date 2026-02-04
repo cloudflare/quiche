@@ -34,7 +34,6 @@ use super::Bytes;
 use super::DataRecipient;
 use super::ExData;
 use super::RawInfo;
-use super::ExData;
 use super::Token;
 use crate::HexSlice;
 use crate::StatelessResetToken;
