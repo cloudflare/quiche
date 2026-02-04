@@ -243,7 +243,9 @@ fn generate_demo_data(store: &mut PacerSeriesStore) {
 }
 
 /// Load pacing data from an sqlog file.
-fn load_from_sqlog(path: &Path) -> Result<PacerSeriesStore, Box<dyn std::error::Error>> {
+fn load_from_sqlog(
+    path: &Path,
+) -> Result<PacerSeriesStore, Box<dyn std::error::Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
@@ -253,7 +255,8 @@ fn load_from_sqlog(path: &Path) -> Result<PacerSeriesStore, Box<dyn std::error::
 
     // Collect events and build datastore
     let events: Vec<qlog::reader::Event> = sqlog_reader.into_iter().collect();
-    let datastore = Datastore::with_sqlog_reader_events(&events, &vantage_point, true);
+    let datastore =
+        Datastore::with_sqlog_reader_events(&events, &vantage_point, true);
 
     // Build SeriesStore from Datastore (existing infrastructure)
     let series_store = SeriesStore::from_datastore(&datastore);

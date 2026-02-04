@@ -27,13 +27,15 @@
 //! Pacer plot module - demonstrates the new config-driven plotting pattern.
 //!
 //! This module shows how to:
-//! 1. Use SeriesData for automatic stat tracking (replaces manual max_pacing_rate, etc.)
+//! 1. Use SeriesData for automatic stat tracking (replaces manual
+//!    max_pacing_rate, etc.)
 //! 2. Use SeriesGroup for related series with shared axis bounds
 //! 3. Apply PlotTheme from config.toml
 //! 4. Extend lines to full plot width (FLPROTO-5244 requirement)
 //!
 //! Based on the pacing.rs from quiche esteban/qlog branch which plots:
-//! - pacing_rate, delivery_rate (cf_delivery_rate), send_rate (cf_send_rate), ack_rate (cf_ack_rate)
+//! - pacing_rate, delivery_rate (cf_delivery_rate), send_rate (cf_send_rate),
+//!   ack_rate (cf_ack_rate)
 
 use plotters::coord::types::RangedCoordf32;
 use plotters::coord::types::RangedCoordu64;
@@ -41,8 +43,11 @@ use plotters::coord::Shift;
 use plotters::prelude::*;
 
 use crate::poc_plots::config::PlotConfig;
-use crate::poc_plots::series_data::{SeriesData, SeriesDataU64, SeriesGroup};
-use crate::poc_plots::theme::{parse_legend_position, PlotTheme};
+use crate::poc_plots::series_data::SeriesData;
+use crate::poc_plots::series_data::SeriesDataU64;
+use crate::poc_plots::series_data::SeriesGroup;
+use crate::poc_plots::theme::parse_legend_position;
+use crate::poc_plots::theme::PlotTheme;
 use crate::seriesstore::SeriesStore;
 
 /// Parameters for the pacer plot.
@@ -167,11 +172,8 @@ impl PacerSeriesStore {
 
     /// Populate from raw qlog data points (all four rate series).
     pub fn populate_from_raw(
-        &mut self,
-        pacing_rate: &[(f32, u64)],
-        delivery_rate: &[(f32, u64)],
-        send_rate: &[(f32, u64)],
-        ack_rate: &[(f32, u64)],
+        &mut self, pacing_rate: &[(f32, u64)], delivery_rate: &[(f32, u64)],
+        send_rate: &[(f32, u64)], ack_rate: &[(f32, u64)],
     ) {
         for &(x, y) in pacing_rate {
             self.pacing_rate.push_interp(x, y);
@@ -187,7 +189,8 @@ impl PacerSeriesStore {
         }
     }
 
-    /// Extend all series to the global x_max (requirement: "line should cover full width").
+    /// Extend all series to the global x_max (requirement: "line should cover
+    /// full width").
     pub fn extend_to_full_width(&mut self) {
         if let Some(x_max) = self.global_x_max() {
             self.pacing_rate.extend_to_x(x_max);
@@ -229,18 +232,23 @@ impl PacerSeriesStore {
 }
 
 /// Draw the pacer plot using the new config-driven approach.
+#[allow(clippy::type_complexity)]
 pub fn draw_pacer_plot<'a, DB: DrawingBackend + 'a>(
-    config: &PlotConfig,
-    params: &PacerPlotParams,
-    store: &PacerSeriesStore,
+    config: &PlotConfig, params: &PacerPlotParams, store: &PacerSeriesStore,
     plot: &DrawingArea<DB, Shift>,
-) -> Result<ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>, DrawingAreaErrorKind<DB::ErrorType>>
-{
+) -> Result<
+    ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    DrawingAreaErrorKind<DB::ErrorType>,
+> {
     let theme = PlotTheme::from_config(config);
 
     // Determine axis ranges with right padding
-    let x_min = params.x_start.unwrap_or_else(|| store.global_x_min().unwrap_or(0.0));
-    let x_max_raw = params.x_end.unwrap_or_else(|| store.global_x_max().unwrap_or(1.0));
+    let x_min = params
+        .x_start
+        .unwrap_or_else(|| store.global_x_min().unwrap_or(0.0));
+    let x_max_raw = params
+        .x_end
+        .unwrap_or_else(|| store.global_x_max().unwrap_or(1.0));
     // Add 5% right padding so plot doesn't end abruptly
     let x_max = x_max_raw + (x_max_raw - x_min) * 0.05;
 
@@ -260,12 +268,13 @@ pub fn draw_pacer_plot<'a, DB: DrawingBackend + 'a>(
     if theme.display_title {
         builder.caption(
             "Pacing Rate",
-            ("sans-serif", theme.title_fontsize).into_font().color(&theme.caption),
+            ("sans-serif", theme.title_fontsize)
+                .into_font()
+                .color(&theme.caption),
         );
     }
 
-    let mut chart = builder
-        .build_cartesian_2d(x_min..x_max, 0u64..y_max)?;
+    let mut chart = builder.build_cartesian_2d(x_min..x_max, 0u64..y_max)?;
 
     // Configure mesh/grid with frame
     chart
@@ -278,8 +287,16 @@ pub fn draw_pacer_plot<'a, DB: DrawingBackend + 'a>(
         .y_label_formatter(&|y| format!("{:.1}", *y as f64 / 1_000_000.0))
         .bold_line_style(theme.bold_line.mix(0.5))
         .light_line_style(theme.light_line.mix(0.2))
-        .axis_desc_style(("sans-serif", config.xlabel.fontsize).into_font().color(&theme.caption))
-        .label_style(("sans-serif", config.xticks.labels.fontsize).into_font().color(&theme.caption))
+        .axis_desc_style(
+            ("sans-serif", config.xlabel.fontsize)
+                .into_font()
+                .color(&theme.caption),
+        )
+        .label_style(
+            ("sans-serif", config.xticks.labels.fontsize)
+                .into_font()
+                .color(&theme.caption),
+        )
         .draw()?;
 
     // Draw frame/border around plot area based on axes.spines config
@@ -312,53 +329,77 @@ pub fn draw_pacer_plot<'a, DB: DrawingBackend + 'a>(
 
     // Draw pacing rate
     if !store.pacing_rate.is_empty() {
-        let color = color_cycle.next();
+        let color = color_cycle.next_color();
         let series_data: Vec<(f32, u64)> = store.pacing_rate.data().to_vec();
 
         chart
-            .draw_series(LineSeries::new(series_data, color.stroke_width(theme.line_width)))?
+            .draw_series(LineSeries::new(
+                series_data,
+                color.stroke_width(theme.line_width),
+            ))?
             .label(store.pacing_rate.label())
-            .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color));
+            .legend(move |(x, y)| {
+                PathElement::new(vec![(x, y), (x + 20, y)], color)
+            });
     }
 
     // Draw delivery rate if present
     if !store.delivery_rate.is_empty() {
-        let color = color_cycle.next();
+        let color = color_cycle.next_color();
         let series_data: Vec<(f32, u64)> = store.delivery_rate.data().to_vec();
 
         chart
-            .draw_series(LineSeries::new(series_data, color.stroke_width(theme.line_width)))?
+            .draw_series(LineSeries::new(
+                series_data,
+                color.stroke_width(theme.line_width),
+            ))?
             .label(store.delivery_rate.label())
-            .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color));
+            .legend(move |(x, y)| {
+                PathElement::new(vec![(x, y), (x + 20, y)], color)
+            });
     }
 
     // Draw send rate if present
     if !store.send_rate.is_empty() {
-        let color = color_cycle.next();
+        let color = color_cycle.next_color();
         let series_data: Vec<(f32, u64)> = store.send_rate.data().to_vec();
 
         chart
-            .draw_series(LineSeries::new(series_data, color.stroke_width(theme.line_width)))?
+            .draw_series(LineSeries::new(
+                series_data,
+                color.stroke_width(theme.line_width),
+            ))?
             .label(store.send_rate.label())
-            .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color));
+            .legend(move |(x, y)| {
+                PathElement::new(vec![(x, y), (x + 20, y)], color)
+            });
     }
 
     // Draw ack rate if present
     if !store.ack_rate.is_empty() {
-        let color = color_cycle.next();
+        let color = color_cycle.next_color();
         let series_data: Vec<(f32, u64)> = store.ack_rate.data().to_vec();
 
         chart
-            .draw_series(LineSeries::new(series_data, color.stroke_width(theme.line_width)))?
+            .draw_series(LineSeries::new(
+                series_data,
+                color.stroke_width(theme.line_width),
+            ))?
             .label(store.ack_rate.label())
-            .legend(move |(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], color));
+            .legend(move |(x, y)| {
+                PathElement::new(vec![(x, y), (x + 20, y)], color)
+            });
     }
 
     // Draw legend if enabled
     if theme.display_legend {
         chart
             .configure_series_labels()
-            .label_font(("sans-serif", theme.label_fontsize).into_font().color(&theme.caption))
+            .label_font(
+                ("sans-serif", theme.label_fontsize)
+                    .into_font()
+                    .color(&theme.caption),
+            )
             .background_style(theme.fill.mix(0.8))
             .border_style(theme.axis)
             .position(parse_legend_position(&config.legend.position))
@@ -371,15 +412,14 @@ pub fn draw_pacer_plot<'a, DB: DrawingBackend + 'a>(
 /// Convenience function to render pacer plot to a PNG file.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn render_pacer_to_png(
-    config: &PlotConfig,
-    params: &PacerPlotParams,
-    store: &PacerSeriesStore,
+    config: &PlotConfig, params: &PacerPlotParams, store: &PacerSeriesStore,
     output_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let width = (config.figure.figsize[0] * config.figure.dpi as f32) as u32;
     let height = (config.figure.figsize[1] * config.figure.dpi as f32) as u32;
 
-    let root = BitMapBackend::new(output_path, (width, height)).into_drawing_area();
+    let root =
+        BitMapBackend::new(output_path, (width, height)).into_drawing_area();
     let theme = PlotTheme::from_config(config);
     root.fill(&theme.fill)?;
 

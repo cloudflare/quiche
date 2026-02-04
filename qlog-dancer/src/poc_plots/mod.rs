@@ -28,7 +28,8 @@
 //!
 //! This module demonstrates a refactored approach to qlog visualization:
 //! - `config.rs`: TOML-based configuration with matplotlib-style options
-//! - `series_data.rs`: Smart series container with auto-computed stats (max, min, etc.)
+//! - `series_data.rs`: Smart series container with auto-computed stats (max,
+//!   min, etc.)
 //! - `theme.rs`: Theming support (palettes, line styles, etc.)
 //! - `modules/pacer.rs`: Example plot module using the new pattern
 
