@@ -146,13 +146,13 @@ fn packet_sent_event_some_frames() {
 }
 
 // Test constants for MetricsUpdated tests
-const TEST_MIN_RTT: f32 = 10.0;
-const TEST_SMOOTHED_RTT: f32 = 15.0;
-const TEST_CONGESTION_WINDOW: u64 = 12000;
-const TEST_PACING_RATE: u64 = 500000;
-const TEST_DELIVERY_RATE: u64 = 1000000;
-const TEST_SEND_RATE: u64 = 500000;
-const TEST_COLLISION_VALUE: f32 = 999.0;
+const MIN_RTT: f32 = 10.0;
+const SMOOTHED_RTT: f32 = 15.0;
+const CONGESTION_WINDOW: u64 = 12000;
+const PACING_RATE: u64 = 500000;
+const DELIVERY_RATE: u64 = 1000000;
+const SEND_RATE: u64 = 500000;
+const COLLISION_VALUE: f32 = 999.0;
 
 #[test]
 fn packet_header() {
@@ -177,13 +177,13 @@ fn metrics_updated_with_ex_data() {
     let mut ex_data = ExData::new();
     ex_data.insert(
         "delivery_rate".to_string(),
-        serde_json::json!(TEST_DELIVERY_RATE),
+        serde_json::json!(DELIVERY_RATE),
     );
-    ex_data.insert("send_rate".to_string(), serde_json::json!(TEST_SEND_RATE));
+    ex_data.insert("send_rate".to_string(), serde_json::json!(SEND_RATE));
 
     let metrics = MetricsUpdated {
-        min_rtt: Some(TEST_MIN_RTT),
-        congestion_window: Some(TEST_CONGESTION_WINDOW),
+        min_rtt: Some(MIN_RTT),
+        congestion_window: Some(CONGESTION_WINDOW),
         ex_data,
         ..Default::default()
     };
@@ -191,12 +191,12 @@ fn metrics_updated_with_ex_data() {
     let json = serde_json::to_value(&metrics).unwrap();
 
     // Verify standard fields are present
-    assert_eq!(json["min_rtt"], TEST_MIN_RTT);
-    assert_eq!(json["congestion_window"], TEST_CONGESTION_WINDOW);
+    assert_eq!(json["min_rtt"], MIN_RTT);
+    assert_eq!(json["congestion_window"], CONGESTION_WINDOW);
 
     // Verify ex_data fields are flattened (not nested under "ex_data")
-    assert_eq!(json["delivery_rate"], TEST_DELIVERY_RATE);
-    assert_eq!(json["send_rate"], TEST_SEND_RATE);
+    assert_eq!(json["delivery_rate"], DELIVERY_RATE);
+    assert_eq!(json["send_rate"], SEND_RATE);
     assert!(json.get("ex_data").is_none(), "ex_data should be flattened");
 }
 
@@ -213,11 +213,11 @@ fn metrics_updated_ex_data_collision() {
     let mut ex_data = ExData::new();
     ex_data.insert(
         "min_rtt".to_string(),
-        serde_json::json!(TEST_COLLISION_VALUE),
+        serde_json::json!(COLLISION_VALUE),
     );
 
     let metrics = MetricsUpdated {
-        min_rtt: Some(TEST_MIN_RTT), // struct field value
+        min_rtt: Some(MIN_RTT), // struct field value
         ex_data,                     // ex_data also has min_rtt
         ..Default::default()
     };
@@ -226,7 +226,7 @@ fn metrics_updated_ex_data_collision() {
 
     // WARNING: ex_data wins in collision - avoid using ex_data keys
     // that match existing struct field names!
-    assert_eq!(json["min_rtt"], TEST_COLLISION_VALUE);
+    assert_eq!(json["min_rtt"], COLLISION_VALUE);
 }
 
 #[test]
@@ -235,14 +235,14 @@ fn metrics_updated_round_trip() {
     let mut ex_data = ExData::new();
     ex_data.insert(
         "delivery_rate".to_string(),
-        serde_json::json!(TEST_DELIVERY_RATE),
+        serde_json::json!(DELIVERY_RATE),
     );
 
     let original = MetricsUpdated {
-        min_rtt: Some(TEST_MIN_RTT),
-        smoothed_rtt: Some(TEST_SMOOTHED_RTT),
-        congestion_window: Some(TEST_CONGESTION_WINDOW),
-        pacing_rate: Some(TEST_PACING_RATE),
+        min_rtt: Some(MIN_RTT),
+        smoothed_rtt: Some(SMOOTHED_RTT),
+        congestion_window: Some(CONGESTION_WINDOW),
+        pacing_rate: Some(PACING_RATE),
         ex_data,
         ..Default::default()
     };
@@ -259,7 +259,7 @@ fn metrics_updated_round_trip() {
     // ex_data fields round-trip correctly
     assert_eq!(
         deserialized.ex_data.get("delivery_rate"),
-        Some(&serde_json::json!(TEST_DELIVERY_RATE))
+        Some(&serde_json::json!(DELIVERY_RATE))
     );
 }
 
@@ -267,16 +267,16 @@ fn metrics_updated_round_trip() {
 fn metrics_updated_no_ex_data() {
     // Test that ex_data is not present when not used
     let metrics = MetricsUpdated {
-        min_rtt: Some(TEST_MIN_RTT),
-        congestion_window: Some(TEST_CONGESTION_WINDOW),
+        min_rtt: Some(MIN_RTT),
+        congestion_window: Some(CONGESTION_WINDOW),
         ..Default::default()
     };
 
     let json = serde_json::to_value(&metrics).unwrap();
 
     // Verify standard fields are present
-    assert_eq!(json["min_rtt"], TEST_MIN_RTT);
-    assert_eq!(json["congestion_window"], TEST_CONGESTION_WINDOW);
+    assert_eq!(json["min_rtt"], MIN_RTT);
+    assert_eq!(json["congestion_window"], CONGESTION_WINDOW);
 
     // Verify ex_data is not present
     assert!(
