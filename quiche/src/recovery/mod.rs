@@ -685,14 +685,17 @@ impl StartupExit {
 /// The reason a CCA exited the startup phase.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StartupExitReason {
-    /// Exit startup due to excessive loss
+    /// Exit slow start or BBR startup due to excessive loss
     Loss,
 
-    /// Exit startup due to bandwidth plateau.
+    /// Exit BBR startup due to bandwidth plateau.
     BandwidthPlateau,
 
-    /// Exit startup due to persistent queue.
+    /// Exit BBR startup due to persistent queue.
     PersistentQueue,
+
+    /// Exit HyStart++ conservative slow start after the max rounds allowed.
+    ConservativeSlowStartRounds,
 }
 
 #[cfg(test)]
