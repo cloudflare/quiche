@@ -211,14 +211,11 @@ fn metrics_updated_ex_data_collision() {
     // This test exists to warn users: avoid ex_data keys matching struct
     // fields!
     let mut ex_data = ExData::new();
-    ex_data.insert(
-        "min_rtt".to_string(),
-        serde_json::json!(COLLISION_VALUE),
-    );
+    ex_data.insert("min_rtt".to_string(), serde_json::json!(COLLISION_VALUE));
 
     let metrics = MetricsUpdated {
         min_rtt: Some(MIN_RTT), // struct field value
-        ex_data,                     // ex_data also has min_rtt
+        ex_data,                // ex_data also has min_rtt
         ..Default::default()
     };
 
