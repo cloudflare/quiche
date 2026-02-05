@@ -757,6 +757,12 @@ pub struct RecoveryParametersSet {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct MetricsUpdated {
+    /// Extension data for non-standard fields. `flatten` causes these fields to
+    /// be serialized into the `data` field of a qlog event. On deserialize,
+    /// unknown fields are collected into `ex_data`.
+    #[serde(flatten)]
+    pub ex_data: ExData,
+
     pub min_rtt: Option<f32>,
     pub smoothed_rtt: Option<f32>,
     pub latest_rtt: Option<f32>,
@@ -773,12 +779,6 @@ pub struct MetricsUpdated {
     pub packets_in_flight: Option<u64>,
 
     pub pacing_rate: Option<u64>,
-
-    /// Extension data for non-standard fields. `flatten` causes these fields to
-    /// be serialized into the `data` field of a qlog event. On deserialize,
-    /// unknown fields are collected into `ex_data`.
-    #[serde(flatten)]
-    pub ex_data: ExData,
 }
 
 #[serde_with::skip_serializing_none]

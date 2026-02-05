@@ -202,9 +202,9 @@ fn metrics_updated_with_ex_data() {
 
 #[test]
 fn metrics_updated_ex_data_collision() {
-    // Test collision: same field set via struct AND ex_data
-    // serde(flatten) behavior: ex_data (flattened map) takes precedence
-    // over struct fields that serialize later in the output.
+    // Test collision: same field set via struct AND ex_data.
+    // With serde's preserve_order feature and ex_data at the top of the
+    // struct, standard fields are serialized last and take precedence.
     //
     // NOTE: This test documents serde's silent overwrite behavior.
     // serde does NOT error or panic on duplicate keys - it just overwrites.
@@ -221,9 +221,9 @@ fn metrics_updated_ex_data_collision() {
 
     let json = serde_json::to_value(&metrics).unwrap();
 
-    // WARNING: ex_data wins in collision - avoid using ex_data keys
-    // that match existing struct field names!
-    assert_eq!(json["min_rtt"], COLLISION_VALUE);
+    // Standard field wins in collision - ex_data cannot overwrite standard
+    // fields, which prevents accidental data corruption.
+    assert_eq!(json["min_rtt"], MIN_RTT);
 }
 
 #[test]
