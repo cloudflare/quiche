@@ -151,7 +151,6 @@ const SMOOTHED_RTT: f32 = 15.0;
 const CONGESTION_WINDOW: u64 = 12000;
 const PACING_RATE: u64 = 500000;
 const DELIVERY_RATE: u64 = 1000000;
-const SEND_RATE: u64 = 500000;
 const COLLISION_VALUE: f32 = 999.0;
 
 #[test]
@@ -179,7 +178,6 @@ fn metrics_updated_with_ex_data() {
         "delivery_rate".to_string(),
         serde_json::json!(DELIVERY_RATE),
     );
-    ex_data.insert("send_rate".to_string(), serde_json::json!(SEND_RATE));
 
     let metrics = MetricsUpdated {
         min_rtt: Some(MIN_RTT),
@@ -194,9 +192,8 @@ fn metrics_updated_with_ex_data() {
     assert_eq!(json["min_rtt"], MIN_RTT);
     assert_eq!(json["congestion_window"], CONGESTION_WINDOW);
 
-    // Verify ex_data fields are flattened (not nested under "ex_data")
+    // Verify ex_data field is flattened (not nested under "ex_data")
     assert_eq!(json["delivery_rate"], DELIVERY_RATE);
-    assert_eq!(json["send_rate"], SEND_RATE);
     assert!(json.get("ex_data").is_none(), "ex_data should be flattened");
 }
 
@@ -205,11 +202,6 @@ fn metrics_updated_ex_data_collision() {
     // Test collision: same field set via struct AND ex_data.
     // With serde's preserve_order feature and ex_data at the top of the
     // struct, standard fields are serialized last and take precedence.
-    //
-    // NOTE: This test documents serde's silent overwrite behavior.
-    // serde does NOT error or panic on duplicate keys - it just overwrites.
-    // This test exists to warn users: avoid ex_data keys matching struct
-    // fields!
     let mut ex_data = ExData::new();
     ex_data.insert("min_rtt".to_string(), serde_json::json!(COLLISION_VALUE));
 
