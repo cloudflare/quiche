@@ -173,7 +173,7 @@ fn packet_header() {
 #[test]
 fn metrics_updated_with_ex_data() {
     // Test that ex_data fields are flattened into the same object
-    let mut ex_data = ExData::from([(
+    let ex_data = ExData::from([(
         "delivery_rate".to_string(),
         serde_json::json!(DELIVERY_RATE),
     )]);
@@ -202,7 +202,7 @@ fn metrics_updated_ex_data_collision() {
     // With serde's preserve_order feature and ex_data at the top of the
     // struct, standard fields are serialized last and take precedence.
 
-    let mut ex_data = ExData::from([(
+    let ex_data = ExData::from([(
         "min_rtt".to_string(),
         serde_json::json!(COLLISION_VALUE),
     )]);
