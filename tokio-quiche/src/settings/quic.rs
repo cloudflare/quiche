@@ -177,6 +177,14 @@ pub struct QuicSettings {
     /// Defaults to `false`.
     pub discover_path_mtu: bool,
 
+    /// Configures the maximum number of PMTUD probe attempts before treating
+    /// a size as failed.
+    ///
+    /// Defaults to 3 per [RFC 8899 Section 5.1.2](https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2).
+    /// If 0 is passed, the default value is used.
+    #[serde(default = "QuicSettings::default_pmtud_max_probes")]
+    pub pmtud_max_probes: u8,
+
     /// Whether to use HyStart++ (only with `cubic` and `reno` CC).
     ///
     /// Defaults to `true`.
@@ -437,6 +445,11 @@ impl QuicSettings {
 
     #[inline]
     fn default_max_path_challenge_recv_queue_len() -> usize {
+        3
+    }
+
+    #[inline]
+    fn default_pmtud_max_probes() -> u8 {
         3
     }
 }

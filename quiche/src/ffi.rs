@@ -216,6 +216,13 @@ pub extern "C" fn quiche_config_discover_pmtu(config: &mut Config, v: bool) {
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_pmtud_max_probes(
+    config: &mut Config, max_probes: u8,
+) {
+    config.set_pmtud_max_probes(max_probes);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_log_keys(config: &mut Config) {
     config.log_keys();
 }
