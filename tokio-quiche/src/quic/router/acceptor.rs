@@ -34,6 +34,7 @@ use datagram_socket::DatagramSocketSendExt;
 use datagram_socket::MAX_DATAGRAM_SIZE;
 use quiche::ConnectionId;
 use quiche::Header;
+use quiche::RetryConnectionIds;
 use quiche::Type as PacketType;
 use task_killswitch::spawn_with_killswitch;
 
@@ -88,31 +89,29 @@ where
     }
 
     fn accept_conn(
-        &mut self, incoming: Incoming, scid: ConnectionId<'static>,
-        original_dcid: Option<&ConnectionId>,
-        pending_cid: Option<ConnectionId<'static>>,
-        quiche_config: &mut quiche::Config,
+        &mut self, incoming: Incoming, retry_cids: Option<RetryConnectionIds>,
+        pending_cid: ConnectionId<'static>, quiche_config: &mut quiche::Config,
     ) -> io::Result<Option<NewConnection>> {
         let handshake_start_time = Instant::now();
+        let scid = self.new_connection_id();
 
-        #[cfg(feature = "zero-copy")]
-        let mut conn = quiche::accept_with_buf_factory(
-            &scid,
-            original_dcid,
-            incoming.local_addr,
-            incoming.peer_addr,
-            quiche_config,
-        )
-        .into_io()?;
-
-        #[cfg(not(feature = "zero-copy"))]
-        let mut conn = quiche::accept(
-            &scid,
-            original_dcid,
-            incoming.local_addr,
-            incoming.peer_addr,
-            quiche_config,
-        )
+        let mut conn = if let Some(retry_cids) = retry_cids {
+            quiche::accept_with_retry(
+                &scid,
+                retry_cids,
+                incoming.local_addr,
+                incoming.peer_addr,
+                quiche_config,
+            )
+        } else {
+            quiche::accept_with_buf_factory(
+                &scid,
+                None,
+                incoming.local_addr,
+                incoming.peer_addr,
+                quiche_config,
+            )
+        }
         .into_io()?;
 
         if let Some(qlog_dir) = &self.config.qlog_dir {
@@ -135,7 +134,7 @@ where
         Ok(Some(NewConnection {
             conn,
             handshake_start_time,
-            pending_cid,
+            pending_cid: Some(pending_cid),
             initial_pkt: Some(incoming),
         }))
     }
@@ -236,38 +235,28 @@ where
             });
         }
 
-        let (scid, original_dcid, pending_cid) = if self
-            .config
-            .disable_client_ip_validation
-        {
-            (self.new_connection_id(), None, Some(hdr.dcid))
-        } else {
-            // NOTE: token is always present in Initial packets
-            let token = hdr.token.as_ref().unwrap();
+        if self.config.disable_client_ip_validation {
+            return self.accept_conn(incoming, None, hdr.dcid, quiche_config);
+        }
 
-            if token.is_empty() {
-                return self.stateless_retry(incoming, hdr);
-            }
+        // NOTE: token is always present in Initial packets
+        let token = hdr.token.as_ref().unwrap();
+        if token.is_empty() {
+            return self.stateless_retry(incoming, hdr);
+        }
 
-            (
-                hdr.dcid,
-                Some(
-                    self.token_manager
-                        .validate_and_extract_original_dcid(token, incoming.peer_addr)
-                        .or(Err(
-                            labels::QuicInvalidInitialPacketError::TokenValidationFail,
-                        ))?,
-                ),
-                None,
-            )
-        };
+        let original_dcid = self
+            .token_manager
+            .validate_and_extract_original_dcid(token, incoming.peer_addr)
+            .or(Err(
+                labels::QuicInvalidInitialPacketError::TokenValidationFail,
+            ))?;
 
-        self.accept_conn(
-            incoming,
-            scid,
-            original_dcid.as_ref(),
-            pending_cid,
-            quiche_config,
-        )
+        let retry_cids = Some(RetryConnectionIds {
+            original_destination_cid: &original_dcid,
+            retry_source_cid: &hdr.dcid,
+        });
+
+        self.accept_conn(incoming, retry_cids, hdr.dcid.clone(), quiche_config)
     }
 }
