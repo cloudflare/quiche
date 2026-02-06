@@ -68,8 +68,8 @@ impl SsThresh {
         if self.startup_exit.is_none() {
             let reason = if in_css {
                 // Exit happened in conservative slow start, attribute
-                // the exit to persistent queues.
-                StartupExitReason::PersistentQueue
+                // the exit to CSS.
+                StartupExitReason::ConservativeSlowStartRounds
             } else {
                 // In normal slow start, attribute the exit to loss.
                 StartupExitReason::Loss
@@ -305,8 +305,11 @@ mod tests {
 
     #[test]
     fn ssthresh_in_css() {
-        let expected_startup_exit =
-            StartupExit::new(1000, None, StartupExitReason::PersistentQueue);
+        let expected_startup_exit = StartupExit::new(
+            1000,
+            None,
+            StartupExitReason::ConservativeSlowStartRounds,
+        );
         let mut ssthresh: SsThresh = Default::default();
         ssthresh.update(1000, true);
         assert_eq!(ssthresh.get(), 1000);
