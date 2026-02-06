@@ -406,6 +406,7 @@ pub fn category_and_type_from_event<T: Serialize>(ev: &T) -> (String, String) {
 pub mod config;
 pub mod datastore;
 pub mod plots;
+pub mod poc_plots;
 pub mod reports;
 pub mod request_stub;
 pub mod seriesstore;
