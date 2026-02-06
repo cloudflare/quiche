@@ -38,6 +38,7 @@ pub const SOFT_PINK: RGBColor = RGBColor(158, 82, 94);
 pub const BROWN: RGBColor = RGBColor(74, 38, 2);
 pub const BLUEY_BLACK: RGBColor = RGBColor(23, 32, 42);
 pub const BLUEY_GREY: RGBColor = RGBColor(128, 139, 150);
+pub const TEAL: RGBColor = RGBColor(0, 128, 128);
 
 /// Cycle through a set of colors
 ///

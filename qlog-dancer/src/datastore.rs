@@ -275,6 +275,9 @@ pub struct Datastore {
     pub local_bytes_in_flight: Vec<QlogPointu64>,
     pub local_ssthresh: Vec<QlogPointu64>,
     pub local_pacing_rate: Vec<QlogPointu64>,
+    pub local_delivery_rate: Vec<QlogPointu64>,
+    pub local_send_rate: Vec<QlogPointu64>,
+    pub local_ack_rate: Vec<QlogPointu64>,
 
     pub local_min_rtt: Vec<QlogPointf32>,
     pub local_latest_rtt: Vec<QlogPointf32>,
@@ -1494,6 +1497,24 @@ impl Datastore {
 
         if let Some(pacing_rate) = mu.pacing_rate {
             self.local_pacing_rate.push((ev_time, pacing_rate));
+        }
+
+        // Extract rate metrics from ex_data
+        if let Some(rate) =
+            mu.ex_data.get("cf_delivery_rate").and_then(|v| v.as_u64())
+        {
+            self.local_delivery_rate.push((ev_time, rate));
+        }
+
+        if let Some(rate) =
+            mu.ex_data.get("cf_send_rate").and_then(|v| v.as_u64())
+        {
+            self.local_send_rate.push((ev_time, rate));
+        }
+
+        if let Some(rate) = mu.ex_data.get("cf_ack_rate").and_then(|v| v.as_u64())
+        {
+            self.local_ack_rate.push((ev_time, rate));
         }
     }
 
