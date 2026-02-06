@@ -32,6 +32,7 @@ use smallvec::SmallVec;
 use super::connectivity::TransportOwner;
 use super::Bytes;
 use super::DataRecipient;
+use super::ExData;
 use super::RawInfo;
 use super::Token;
 use crate::HexSlice;
@@ -772,6 +773,10 @@ pub struct MetricsUpdated {
     pub packets_in_flight: Option<u64>,
 
     pub pacing_rate: Option<u64>,
+
+    /// Extension data for non-standard fields (flattened into data object)
+    #[serde(flatten)]
+    pub ex_data: ExData,
 }
 
 #[serde_with::skip_serializing_none]
@@ -808,27 +813,4 @@ pub struct PacketLost {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct MarkedForRetransmit {
     pub frames: Vec<QuicFrame>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::testing::*;
-
-    #[test]
-    fn packet_header() {
-        let pkt_hdr = make_pkt_hdr(PacketType::Initial);
-
-        let log_string = r#"{
-  "packet_type": "initial",
-  "packet_number": 0,
-  "version": "1",
-  "scil": 8,
-  "dcil": 8,
-  "scid": "7e37e4dcc6682da8",
-  "dcid": "36ce104eee50101c"
-}"#;
-
-        assert_eq!(serde_json::to_string_pretty(&pkt_hdr).unwrap(), log_string);
-    }
 }

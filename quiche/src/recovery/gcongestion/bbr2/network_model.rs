@@ -186,6 +186,11 @@ pub(super) struct BBRv2NetworkModel {
     /// Determines whether app limited rounds with no bandwidth growth count
     /// towards the rounds threshold to exit startup.
     ignore_app_limited_for_no_bandwidth_growth: bool,
+
+    /// The most recent send rate from the BandwidthSampler.
+    latest_send_rate: Option<Bandwidth>,
+    /// The most recent ack rate from the BandwidthSampler.
+    latest_ack_rate: Option<Bandwidth>,
 }
 
 impl BBRv2NetworkModel {
@@ -230,7 +235,20 @@ impl BBRv2NetworkModel {
 
             ignore_app_limited_for_no_bandwidth_growth: params
                 .ignore_app_limited_for_no_bandwidth_growth,
+
+            latest_send_rate: None,
+            latest_ack_rate: None,
         }
+    }
+
+    #[cfg(feature = "qlog")]
+    pub(super) fn send_rate(&self) -> Option<Bandwidth> {
+        self.latest_send_rate
+    }
+
+    #[cfg(feature = "qlog")]
+    pub(super) fn ack_rate(&self) -> Option<Bandwidth> {
+        self.latest_ack_rate
     }
 
     pub(super) fn max_ack_height(&self) -> usize {
@@ -347,6 +365,9 @@ impl BBRv2NetworkModel {
             congestion_event.sample_min_rtt = Some(rtt_sample);
             self.min_rtt_filter.update(rtt_sample, event_time);
         }
+
+        self.latest_send_rate = sample.sample_max_send_rate;
+        self.latest_ack_rate = sample.sample_max_ack_rate;
 
         congestion_event.bytes_acked =
             self.total_bytes_acked() - prior_bytes_acked;

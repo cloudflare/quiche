@@ -1001,7 +1001,10 @@ impl RecoveryOps for LegacyRecovery {
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: Some(self.congestion.ssthresh.get() as u64),
-            pacing_rate: 0,
+            pacing_rate: None,
+            delivery_rate: None,
+            send_rate: None,
+            ack_rate: None,
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
