@@ -5314,9 +5314,11 @@ fn stream_data_blocked_unblocked_flow_control(
 fn app_limited_true(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
+    #[values(false, true)] enable_bbr_app_limited_fix: bool,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config.set_enable_bbr_app_limited_fix(enable_bbr_app_limited_fix);
     config
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
@@ -5356,9 +5358,11 @@ fn app_limited_true(
 fn app_limited_false(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
+    #[values(false, true)] enable_bbr_app_limited_fix: bool,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config.set_enable_bbr_app_limited_fix(enable_bbr_app_limited_fix);
     config
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
@@ -6150,9 +6154,11 @@ fn prevent_optimistic_ack(
 fn app_limited_false_no_frame(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
+    #[values(false, true)] enable_bbr_app_limited_fix: bool,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config.set_enable_bbr_app_limited_fix(enable_bbr_app_limited_fix);
     config
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
@@ -6194,9 +6200,11 @@ fn app_limited_false_no_frame(
 fn app_limited_false_no_header(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
+    #[values(false, true)] enable_bbr_app_limited_fix: bool,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config.set_enable_bbr_app_limited_fix(enable_bbr_app_limited_fix);
     config
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
@@ -6238,9 +6246,11 @@ fn app_limited_false_no_header(
 fn app_limited_not_changed_on_no_new_frames(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
+    #[values(false, true)] enable_bbr_app_limited_fix: bool,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config.set_enable_bbr_app_limited_fix(enable_bbr_app_limited_fix);
     config
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
@@ -6263,25 +6273,52 @@ fn app_limited_not_changed_on_no_new_frames(
 
     // Client's app_limited is true because its bytes-in-flight
     // is much smaller than the current cwnd.
-    assert!(pipe
-        .client
-        .paths
-        .get_active()
-        .expect("no active")
-        .recovery
-        .app_limited());
+    if cc_algorithm_name == "cubic" || enable_bbr_app_limited_fix {
+        assert!(pipe
+            .client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
+    } else {
+        // For BBR, the test-only app_limited() function used to be computed by
+        // looking at bytes in flight instead of looking at the app-limited state
+        // tracked by the bandwidth_sampler.  The state tracked in the
+        // bandwidth_sampler is incorrect.
+        assert!(!pipe
+            .client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
+    }
 
     // Client has no new frames to send - returns Done.
     assert_eq!(test_utils::emit_flight(&mut pipe.client), Err(Error::Done));
+    test_utils::run_work_loop_round_start_hook(&mut pipe.client);
 
     // Client's app_limited should remain the same.
-    assert!(pipe
-        .client
-        .paths
-        .get_active()
-        .expect("no active")
-        .recovery
-        .app_limited());
+    if cc_algorithm_name == "cubic" || enable_bbr_app_limited_fix {
+        assert!(pipe
+            .client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
+    } else {
+        // See comments further up about BBR.  The app-limited computed by the
+        // bandwidth_sampler is incorrect in this case.
+        assert!(!pipe
+            .client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .app_limited());
+    }
 }
 
 #[rstest]
@@ -7126,12 +7163,14 @@ fn dgram_send_fails_invalidstate(
 #[rstest]
 fn dgram_send_app_limited(
     #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] enable_bbr_app_limited_fix: bool,
 ) {
     let mut buf = [0; 65535];
     let send_buf = [0xcf; 1000];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config.set_enable_bbr_app_limited_fix(enable_bbr_app_limited_fix);
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
         .unwrap();
@@ -7208,7 +7247,7 @@ fn dgram_send_app_limited(
             .expect("no active")
             .recovery
             .app_limited(),
-        should_be_app_limited
+        should_be_app_limited || enable_bbr_app_limited_fix
     );
 }
 

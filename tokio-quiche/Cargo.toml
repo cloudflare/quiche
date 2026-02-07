@@ -81,7 +81,9 @@ h3i = { workspace = true }
 http = "1"
 http-body = "1"
 http-body-util = "0.1"
+parking_lot = { workspace = true }
 regex = { workspace = true }
+rstest = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["time", "test-util", "rt-multi-thread"] }
 

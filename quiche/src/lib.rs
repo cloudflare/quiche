@@ -573,6 +573,7 @@ pub struct Config {
     grease: bool,
 
     cc_algorithm: CongestionControlAlgorithm,
+    enable_bbr_app_limited_fix: bool,
     custom_bbr_params: Option<BbrParams>,
     initial_congestion_window_packets: usize,
     enable_relaxed_loss_threshold: bool,
@@ -652,6 +653,7 @@ impl Config {
             application_protos: Vec::new(),
             grease: true,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
+            enable_bbr_app_limited_fix: false,
             custom_bbr_params: None,
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
@@ -1074,6 +1076,15 @@ impl Config {
     /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
+    /// Enable a rework of how the BBR congestion control implementation
+    /// computes app-limited.  This config parameter will be removed after we
+    /// build confidence on the new implementation or decide to roll it back.
+    ///
+    /// Defaults to `false`.
+    pub fn set_enable_bbr_app_limited_fix(&mut self, value: bool) {
+        self.enable_bbr_app_limited_fix = value;
     }
 
     /// Sets custom BBR settings.
@@ -2242,6 +2253,32 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
+    /// Enable a rework of how the BBR congestion control implementation
+    /// computes app-limited.  This config parameter will be removed after we
+    /// build confidence on the new implementation or decide to roll it back.
+    ///
+    /// Currently this only applies if cc_algorithm is
+    /// `CongestionControlAlgorithm::Bbr2Gcongestion`.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_enable_bbr_app_limited_fix()`].
+    ///
+    /// [`Config::set_enable_bbr_app_limited_fix()`]: struct.Config.html#method.set_enable_bbr_app_limited_fix
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_enable_bbr_app_limited_fix_in_handshake(
+        ssl: &mut boring::ssl::SslRef, value: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.enable_bbr_app_limited_fix = value;
+
+        Ok(())
+    }
+
     /// Sets the congestion control algorithm used by string.
     ///
     /// This function can only be called inside one of BoringSSL's handshake
@@ -2501,6 +2538,52 @@ impl<F: BufFactory> Connection<F> {
         std::mem::forget(handshake);
 
         Ok(())
+    }
+
+    /// Returns true if at least 1 stream has headers or body data to
+    /// write, or there are items in the DATAGRAM send queue.
+    pub fn has_flushable_data(&self) -> bool {
+        self.streams.has_flushable() || !self.dgram_send_queue.is_empty()
+    }
+
+    /// Signal the start of an iteration of the event loop that will
+    /// receive packets and then attempt to send packets.
+    ///
+    /// This hook is used to implement the "Detecting application-limited
+    /// phases" logic described in the BBR RFC draft which is described at:
+    /// https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-detecting-application-limit
+    ///
+    /// This function must be invoked at the beginning of each iteration of the
+    /// connection work loop, before receiving packets from the network and
+    /// processing ACKs/timeouts.
+    ///
+    /// The expected work loop order is:
+    /// 1. Call work_loop_round_start with the value of has_flushable_data from
+    ///    the end of the previous loop, before polling for additional
+    ///    application data.
+    /// 2. Process timeouts by calling conn.on_timeout().
+    /// 3. Call conn.recv() to process received packets which contain ACKs and
+    ///    stream data.
+    /// 4. Call conn.send_on_path() to generate new packets and send them.
+    /// 5. Save the value of conn.has_flushable_data() for the next iteration.
+    /// 6. Poll for additional data from upstream or wait for the next send
+    ///    timeout.
+    ///
+    /// In cases where the new packet generate + send loop yields early due to
+    /// an interation limit or the sendmsg on the socket returning EAGAIN, we
+    /// should expect had_flushable_data_before_poll to remain true since the
+    /// connection wasn't able to send all the available data despite not
+    /// consuming the full congestion window.  The call to
+    /// bbr_check_if_app_limited() will not mark the connection app-limited
+    /// at the last-sent-packet-number because had_flushable_data_before_poll
+    /// is true; this is correct and expected behavior.
+    pub fn work_loop_round_start(
+        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
+    ) {
+        for (_, path) in self.paths.iter_mut() {
+            path.recovery
+                .bbr_check_if_app_limited(had_flushable_data_before_poll, now);
+        }
     }
 
     /// Processes QUIC packets received from the peer.
