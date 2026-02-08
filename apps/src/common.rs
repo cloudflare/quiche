@@ -334,6 +334,8 @@ pub trait HttpConn {
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
     );
 
+    fn retry_partial_headers(&mut self, conn: &mut quiche::Connection);
+
     fn handle_responses(
         &mut self, conn: &mut quiche::Connection, buf: &mut [u8],
         req_start: &std::time::Instant,
@@ -369,12 +371,19 @@ pub struct Http09Request {
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
 }
 
+enum HeadersSendStatus {
+    NotStarted,
+    InProgess,
+    Completed,
+}
+
 /// Represents an HTTP/3 formatted request.
 struct Http3Request {
     url: url::Url,
     cardinal: u64,
     stream_id: Option<u64>,
     hdrs: Vec<quiche::h3::Header>,
+    hdrs_send_status: HeadersSendStatus,
     priority: Option<Priority>,
     response_hdrs: Vec<quiche::h3::Header>,
     response_body: Vec<u8>,
@@ -476,6 +485,8 @@ impl HttpConn for Http09Conn {
 
         self.reqs_sent += reqs_done;
     }
+
+    fn retry_partial_headers(&mut self, _conn: &mut quiche::Connection) {}
 
     fn handle_responses(
         &mut self, conn: &mut quiche::Connection, buf: &mut [u8],
@@ -831,6 +842,7 @@ impl Http3Conn {
                     url: url.clone(),
                     cardinal: i,
                     hdrs,
+                    hdrs_send_status: HeadersSendStatus::NotStarted,
                     priority,
                     response_hdrs: Vec::new(),
                     response_body: Vec::new(),
@@ -1122,19 +1134,80 @@ impl Http3Conn {
 }
 
 impl HttpConn for Http3Conn {
+    fn retry_partial_headers(&mut self, conn: &mut quiche::Connection) {
+        for req in self.reqs.iter_mut().filter(|r| {
+            matches!(r.hdrs_send_status, HeadersSendStatus::InProgess)
+        }) {
+            let stream_id = req
+                .stream_id
+                .expect("partial header resend but no stream ID");
+
+            debug!("retrying stream id={}", stream_id);
+            match self.h3_conn.continue_partial_headers(conn, stream_id) {
+                Ok(_) => {
+                    req.hdrs_send_status = HeadersSendStatus::Completed;
+                    debug!("Completed HTTP request {:?}", &req.hdrs);
+                    self.reqs_hdrs_sent += 1;
+                },
+
+                Err(e) => {
+                    error!("retry failed to send request {:?}", e);
+                    break;
+                },
+            }
+        }
+    }
+
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
     ) {
-        let mut reqs_done = 0;
+        // First retry partial headers
+        self.retry_partial_headers(conn);
 
-        // First send headers.
-        for req in self.reqs.iter_mut().skip(self.reqs_hdrs_sent) {
-            let s = match self.h3_conn.send_request(
+        // Then send new headers.
+        for req in self.reqs.iter_mut().filter(|r| {
+            matches!(r.hdrs_send_status, HeadersSendStatus::NotStarted)
+        }) {
+            let stream_id = match self.h3_conn.reserve_request_stream(conn) {
+                Ok(v) => v,
+
+                Err(quiche::h3::Error::TransportError(
+                    quiche::Error::StreamLimit,
+                )) => {
+                    debug!("not enough stream credits, retry later...");
+                    break;
+                },
+
+                Err(quiche::h3::Error::StreamBlocked) => {
+                    debug!("stream is blocked, retry later...");
+                    break;
+                },
+
+                Err(e) => {
+                    error!("failed to reserve stream {e:?}");
+                    break;
+                },
+            };
+
+            match self.h3_conn.stream_headers(
                 conn,
+                stream_id,
                 &req.hdrs,
+                false,
                 self.body.is_none(),
             ) {
-                Ok(v) => v,
+                Ok(()) => {
+                    req.hdrs_send_status = HeadersSendStatus::Completed;
+                    debug!("Completed HTTP request {:?}", &req.hdrs);
+                    self.reqs_hdrs_sent += 1;
+                },
+
+                Err(quiche::h3::Error::PartialHeader) => {
+                    debug!(
+                        "sent partial headers, marking for later continuation"
+                    );
+                    req.hdrs_send_status = HeadersSendStatus::InProgess;
+                },
 
                 Err(quiche::h3::Error::TransportError(
                     quiche::Error::StreamLimit,
@@ -1154,23 +1227,18 @@ impl HttpConn for Http3Conn {
                 },
             };
 
-            debug!("Sent HTTP request {:?}", &req.hdrs);
-
             if let Some(priority) = &req.priority {
                 // If sending the priority fails, don't try again.
                 self.h3_conn
-                    .send_priority_update_for_request(conn, s, priority)
+                    .send_priority_update_for_request(conn, stream_id, priority)
                     .ok();
             }
 
-            req.stream_id = Some(s);
+            req.stream_id = Some(stream_id);
             req.response_writer =
                 make_resource_writer(&req.url, target_path, req.cardinal);
-            self.sent_body_bytes.insert(s, 0);
-
-            reqs_done += 1;
+            self.sent_body_bytes.insert(stream_id, 0);
         }
-        self.reqs_hdrs_sent += reqs_done;
 
         // Then send any remaining body.
         if let Some(body) = &self.body {
