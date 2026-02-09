@@ -55,6 +55,9 @@ ffi = ["dep:cdylib-link-lines"]
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
 
+# Enable qlog support with serde_json for extension data
+qlog = ["dep:qlog", "dep:serde_json"]
+
 [package.metadata.release]
 tag-prefix = ""
 
@@ -78,6 +81,7 @@ libm = "0.2"
 log = { workspace = true, features = ["std"] }
 octets = { workspace = true, features = ["huffman_hpack"] }
 qlog = { workspace = true, optional = true }
+serde_json = { version = "1.0", optional = true }
 sfv = { version = "0.9", optional = true }
 slab = "0.4"
 smallvec = { workspace = true, features = ["union"] }
