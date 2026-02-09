@@ -7453,8 +7453,21 @@ impl<F: BufFactory> Connection<F> {
 
             Err(Error::Done) => {
                 // Apply in-handshake configuration from callbacks before any
-                // packet has been sent.
-                if self.sent_count == 0 {
+                // packet with inflight data have been sent. The congestion
+                // controller doesn't track anything interesting until inflight
+                // data is sent. Handshake ACKs may be sent prior to arrival of
+                // the full client hello, but the send of ACK only packets
+                // shouldn't prevent the reinit of the recovery module.
+                if self
+                    .paths
+                    .get_active()
+                    .map(|p| {
+                        p.recovery.bytes_in_flight() == 0 &&
+                            p.recovery.bytes_in_flight_duration() ==
+                                Duration::ZERO
+                    })
+                    .unwrap_or(false)
+                {
                     if ex_data.recovery_config != self.recovery_config {
                         if let Ok(path) = self.paths.get_active_mut() {
                             self.recovery_config = ex_data.recovery_config;
