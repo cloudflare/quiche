@@ -469,6 +469,16 @@ pub struct GRecovery {
 }
 
 impl GRecovery {
+    #[cfg(feature = "qlog")]
+    fn send_rate(&self) -> Bandwidth {
+        self.pacer.send_rate().unwrap_or(Bandwidth::zero())
+    }
+
+    #[cfg(feature = "qlog")]
+    fn ack_rate(&self) -> Bandwidth {
+        self.pacer.ack_rate().unwrap_or(Bandwidth::zero())
+    }
+
     pub fn new(recovery_config: &RecoveryConfig) -> Option<Self> {
         let cc = match recovery_config.cc_algorithm {
             CongestionControlAlgorithm::Bbr2Gcongestion => BBRv2::new(
@@ -1139,7 +1149,15 @@ impl RecoveryOps for GRecovery {
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: self.pacer.ssthresh(),
-            pacing_rate: self.delivery_rate().to_bytes_per_second(),
+
+            pacing_rate: Some(
+                self.pacer
+                    .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats)
+                    .to_bytes_per_second(),
+            ),
+            delivery_rate: Some(self.delivery_rate().to_bytes_per_second()),
+            send_rate: Some(self.send_rate().to_bytes_per_second()),
+            ack_rate: Some(self.ack_rate().to_bytes_per_second()),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
