@@ -222,7 +222,7 @@ impl SeriesStore {
     }
 
     fn sum_sent_stream_max_data(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_sent_stream_max_data {
+        for point in &data_store.sent_stream_max_data_tracker.sum_series {
             self.update_sent_x_axis_max(point.0);
             self.update_stream_recv_y_axis_max(point.1);
 
@@ -333,7 +333,9 @@ impl SeriesStore {
     }
 
     fn sent_stream_max_data(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.sent_stream_max_data {
+        for (stream, points) in
+            &data_store.sent_stream_max_data_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -348,7 +350,9 @@ impl SeriesStore {
     }
 
     fn received_stream_max_data(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.received_stream_max_data {
+        for (stream, points) in
+            &data_store.received_stream_max_data_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -363,7 +367,8 @@ impl SeriesStore {
     }
 
     fn stream_buffer_reads(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.stream_buffer_reads {
+        for (stream, points) in &data_store.stream_buffer_reads_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -380,13 +385,15 @@ impl SeriesStore {
     }
 
     fn sum_stream_buffer_reads(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_stream_buffer_reads {
+        for point in &data_store.stream_buffer_reads_tracker.sum_series {
             push_interp(&mut self.sum_stream_buffer_reads, *point);
         }
     }
 
     fn stream_buffer_writes(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.stream_buffer_writes {
+        for (stream, points) in
+            &data_store.stream_buffer_writes_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -403,17 +410,21 @@ impl SeriesStore {
     }
 
     fn sum_stream_buffer_writes(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_stream_buffer_writes {
+        for point in &data_store.stream_buffer_writes_tracker.sum_series {
             push_interp(&mut self.sum_stream_buffer_writes, *point);
         }
 
-        if let Some((_, y)) = data_store.sum_stream_buffer_writes.last() {
+        if let Some((_, y)) =
+            data_store.stream_buffer_writes_tracker.sum_series.last()
+        {
             self.update_stream_send_y_axis_max(*y);
         }
     }
 
     fn stream_buffer_dropped(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.stream_buffer_dropped {
+        for (stream, points) in
+            &data_store.stream_buffer_dropped_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -430,11 +441,13 @@ impl SeriesStore {
     }
 
     fn sum_stream_buffer_dropped(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_stream_buffer_dropped {
+        for point in &data_store.stream_buffer_dropped_tracker.sum_series {
             push_interp(&mut self.sum_stream_buffer_dropped, *point);
         }
 
-        if let Some((_, y)) = data_store.sum_stream_buffer_dropped.last() {
+        if let Some((_, y)) =
+            data_store.stream_buffer_dropped_tracker.sum_series.last()
+        {
             self.update_stream_send_y_axis_max(*y);
         }
     }
@@ -667,7 +680,7 @@ impl SeriesStore {
     }
 
     fn sum_received_stream_max_data(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_received_stream_max_data {
+        for point in &data_store.received_stream_max_data_tracker.sum_series {
             push_interp(&mut self.sum_received_stream_max_data, *point);
         }
     }

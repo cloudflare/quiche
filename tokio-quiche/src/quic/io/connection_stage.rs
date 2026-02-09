@@ -36,7 +36,6 @@ use crate::quic::connection::HandshakeInfo;
 use crate::quic::connection::Incoming;
 use crate::quic::connection::QuicConnectionStatsShared;
 use crate::quic::QuicheConnection;
-use crate::result::to_box_error;
 use crate::QuicResult;
 
 /// Represents the current lifecycle stage of a [quiche::Connection].
@@ -156,20 +155,11 @@ impl ConnectionStage for RunningApplication {
     ) -> QuicResult<()> {
         if ctx.application.should_act() {
             if received_packets {
-                ctx.application.process_reads(qconn).map_err(|err| {
-                    to_box_error(format!(
-                        "app_err={} while processing data with RunningApplication::process_reads",
-                        err
-                    ))
-                })?;
+                ctx.application.process_reads(qconn)?;
             }
 
             if qconn.is_established() {
-                ctx.application.process_writes(qconn).map_err(|err| {
-                    to_box_error(
-                        format!("app_err={} while processing data via RunningApplication::process_writes", err),
-                    )
-                })?;
+                ctx.application.process_writes(qconn)?;
             }
         }
 
@@ -179,21 +169,7 @@ impl ConnectionStage for RunningApplication {
 
 #[derive(Debug)]
 pub struct Close {
-    work_loop_result: QuicResult<()>,
-}
-
-impl Close {
-    pub fn new(work_loop_result: QuicResult<()>) -> Self {
-        Close { work_loop_result }
-    }
-
-    pub fn work_loop_result(&self) -> &QuicResult<()> {
-        &self.work_loop_result
-    }
-
-    pub fn into_work_loop_result(self) -> QuicResult<()> {
-        self.work_loop_result
-    }
+    pub work_loop_result: QuicResult<()>,
 }
 
 impl ConnectionStage for Close {}

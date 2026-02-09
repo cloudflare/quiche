@@ -82,6 +82,14 @@ impl RecvBufResetReturn {
     }
 }
 
+/// Action to perform when reading from a stream's receive buffer.
+pub enum RecvAction<'a> {
+    /// Emit data by copying it into the provided buffer.
+    Emit { out: &'a mut [u8] },
+    /// Discard up to the specified number of bytes without copying.
+    Discard { len: usize },
+}
+
 impl std::hash::Hasher for StreamIdHasher {
     #[inline]
     fn finish(&self) -> u64 {

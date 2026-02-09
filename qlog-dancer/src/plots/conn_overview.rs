@@ -325,10 +325,7 @@ fn draw_main_plot<'a, DB: DrawingBackend + 'a>(
     draw_cumulative_buffer_dropped(ss, &mut chart);
     draw_sent_stream_data(ss, &mut chart);
     draw_received_max_data(ss, &mut chart);
-    draw_cumulative_received_stream_max_data(
-        &ss.sum_received_stream_max_data,
-        &mut chart,
-    );
+    draw_cumulative_received_stream_max_data(ss, &mut chart);
 
     if params.display_legend {
         chart
@@ -528,7 +525,7 @@ pub fn plot_main_plot<'a>(
     let stream_y_max = if let Some(y_max) = params.clamp.stream_y_max {
         y_max
     } else {
-        ss.y_max_stream_plot
+        ss.y_max_stream_send_plot.max(ss.y_max_stream_recv_plot)
     };
 
     let stream_axis = XYMinMax::init(params, ss, stream_y_max);

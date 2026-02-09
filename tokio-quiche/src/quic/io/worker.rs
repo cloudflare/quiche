@@ -49,7 +49,6 @@ use crate::quic::connection::Incoming;
 use crate::quic::connection::QuicConnectionStats;
 use crate::quic::router::ConnectionMapCommand;
 use crate::quic::QuicheConnection;
-use crate::result::to_box_error;
 use crate::QuicResult;
 
 use boring::ssl::SslRef;
@@ -214,7 +213,13 @@ where
                         return Ok(());
                     }
 
+                    let mut flush_operation_token =
+                        TrackMidHandshakeFlush::new(self.metrics.clone());
+
                     self.flush_buffer_to_socket(ctx.buffer()).await;
+
+                    flush_operation_token.mark_complete();
+
                     packets_sent += self.write_state.num_pkts;
 
                     if let ControlFlow::Break(reason) =
@@ -558,11 +563,6 @@ where
                     .set_sent_conn_close_transport_error_code(error_code as i64);
 
                 Err(Box::new(e))
-                .map_err(|err| {
-                    to_box_error(
-                        format!("quiche_err={} while sending on path with quiche::send_on_path", err),
-                    )
-                })
             },
         }
     }
@@ -625,19 +625,10 @@ where
 
         if let Some(gro) = pkt.gro {
             for dgram in pkt.buf.chunks_mut(gro as usize) {
-                qconn.recv(dgram, recv_info).map_err(|err| {
-                    to_box_error(
-                        format!("quiche_err={} while reading gro'd packet with quiche:recv", err),
-                    )
-                })?;
+                qconn.recv(dgram, recv_info)?;
             }
         } else {
-            qconn.recv(&mut pkt.buf, recv_info).map_err(|err| {
-                to_box_error(format!(
-                    "quiche_err={} while reading packet with quiche:recv",
-                    err
-                ))
-            })?;
+            qconn.recv(&mut pkt.buf, recv_info)?;
         }
 
         Ok(())
@@ -659,12 +650,7 @@ where
             // still in progress but we have 0-RTT keys to process early data.
             // This means TLS callbacks might only be polled on the next timeout
             // or when a packet is received from the peer.
-            quic_application.wait_for_data(qconn).await.map_err(|err| {
-                to_box_error(format!(
-                    "app_err={} while waiting for H3 data with AOQ::wait_for_data",
-                    err
-                ))
-            })
+            quic_application.wait_for_data(qconn).await
         } else {
             // Poll quiche to make progress on handshake callbacks.
             self.wait_for_quiche(qconn, quic_application).await
@@ -887,7 +873,7 @@ where
         mut self, qconn: &mut QuicheConnection,
         ctx: &mut ConnectionStageContext<A>,
     ) {
-        if self.conn_stage.work_loop_result().is_ok() &&
+        if self.conn_stage.work_loop_result.is_ok() &&
             self.bw_estimator.max_bandwidth > 0
         {
             let metrics = &self.metrics;
@@ -905,7 +891,7 @@ where
             ctx.application.on_conn_close(
                 qconn,
                 &self.metrics,
-                self.conn_stage.work_loop_result(),
+                &self.conn_stage.work_loop_result,
             );
         }
 
@@ -934,7 +920,7 @@ where
 
         self.close_connection(qconn);
 
-        if let Err(work_loop_error) = self.conn_stage.into_work_loop_result() {
+        if let Err(work_loop_error) = self.conn_stage.work_loop_result {
             self.audit_log_stats
                 .set_connection_close_reason(work_loop_error);
         }
@@ -963,5 +949,33 @@ fn min_of_some<T: Ord>(v1: Option<T>, v2: Option<T>) -> Option<T> {
         (Some(a), Some(b)) => Some(a.min(b)),
         (Some(v), _) | (_, Some(v)) => Some(v),
         (None, None) => None,
+    }
+}
+
+/// A Token which increment the skipped_mid_handshake_flush_count metric on
+/// `Drop` unless it is marked complete.
+struct TrackMidHandshakeFlush<M: Metrics> {
+    complete: bool,
+    metrics: M,
+}
+
+impl<M: Metrics> TrackMidHandshakeFlush<M> {
+    fn new(metrics: M) -> Self {
+        Self {
+            complete: false,
+            metrics,
+        }
+    }
+
+    fn mark_complete(&mut self) {
+        self.complete = true;
+    }
+}
+
+impl<M: Metrics> Drop for TrackMidHandshakeFlush<M> {
+    fn drop(&mut self) {
+        if !self.complete {
+            self.metrics.skipped_mid_handshake_flush_count().inc();
+        }
     }
 }
