@@ -43,7 +43,7 @@ jobs:
       - name: Install qlog-dancer dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
+          sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev libcairo2-dev libpango1.0-dev libglib2.0-dev
 
       - name: Unused dependency check
         if: ${{ matrix.tls-feature == '' }}

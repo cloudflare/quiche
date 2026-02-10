@@ -1,0 +1,156 @@
+# QLOG Dancer Plot Configuration
+# Matplotlib-style configuration for qlog visualizations
+
+[colors]
+# Fallback colors used when parsing fails
+bold_line = "lightgrey"
+light_line = "lightgrey"
+
+[palettes.qvis]
+colors = [
+    [15, 122, 27],    # forest_green
+    [54, 2, 89],      # purple
+    [133, 104, 3],    # taupe
+    [172, 172, 172],  # mid_grey
+    [201, 93, 4],     # orange
+    [158, 150, 2],    # mustard
+    [158, 82, 94],    # soft_pink
+    [74, 38, 2],      # brown
+    [23, 32, 42],     # bluey_black
+    [128, 139, 150],  # bluey_grey
+]
+
+[palettes.matplotlib]
+colors = [
+    [31, 119, 180],   # C0 blue
+    [255, 127, 14],   # C1 orange
+    [44, 160, 44],    # C2 green
+    [214, 39, 40],    # C3 red
+    [148, 103, 189],  # C4 purple
+    [140, 86, 75],    # C5 brown
+    [227, 119, 194],  # C6 pink
+    [127, 127, 127],  # C7 gray
+    [188, 189, 34],   # C8 olive
+    [23, 190, 207],   # C9 cyan
+]
+
+[lines]
+linewidth = 1
+style = "-"
+alpha = 0.75
+palette = "qvis"  # "qvis" (default), "matplotlib", "palette99", "palette9999"
+
+[lines.markers]
+style = "none"
+size = 6
+edgewidth = 1.0
+facecolor = "auto"
+edgecolor = "auto"
+
+[lines.line_style]
+antialiased = true
+dash_joinstyle = "round"
+dash_capstyle = "butt"
+solid_joinstyle = "round"
+solid_capstyle = "projecting"
+
+[axes]
+facecolor = "white"
+edgecolor = "black"
+linewidth = 0.8
+axisbelow = true  # grid behind data
+
+[axes.spines]
+top = true
+bottom = true
+left = true
+right = true
+
+[xticks]
+direction = "out"  # "in", "out", "inout"
+length = 3.5
+width = 0.8
+color = "black"
+pad = 3.5
+
+[xticks.labels]
+display = true
+fontsize = 12
+color = "black"
+
+[xticks.major]
+grid = true
+style = "--"
+color = "lightgrey"
+
+[xticks.minor]
+grid = true
+style = ":"
+color = "lightgrey"
+
+[yticks]
+direction = "out"
+length = 3.5
+width = 0.8
+color = "black"
+pad = 3.5
+
+[yticks.labels]
+display = true
+fontsize = 12
+color = "black"
+
+[yticks.major]
+grid = true
+style = "--"
+color = "lightgrey"
+
+[yticks.minor]
+grid = true
+style = ":"
+color = "lightgrey"
+
+[xlabel]
+display = true
+fontsize = 14
+
+[ylabel]
+display = true
+fontsize = 14
+
+[grid]
+linewidth = 0.8
+alpha = 0.7
+
+[legend]
+position = "upper left"
+fontsize = 12
+frameon = true
+framealpha = 0.8
+facecolor = "inherit"
+edgecolor = "0.8"
+numpoints = 1
+scatterpoints = 1
+markerscale = 1.0
+
+[title]
+display = true
+fontsize = 16
+
+[font]
+family = "sans-serif"
+size = 10
+weight = "normal"
+
+[figure]
+figsize = [6.4, 4.8]
+dpi = 100
+facecolor = "white"
+edgecolor = "white"
+
+[output]
+formats = ["png"]
+dpi = 600
+transparent = false
+bbox = "tight"
+pad_inches = 0.1
