@@ -7452,9 +7452,14 @@ impl<F: BufFactory> Connection<F> {
             Ok(_) => (),
 
             Err(Error::Done) => {
-                // Apply in-handshake configuration from callbacks before any
-                // packet has been sent.
-                if self.sent_count == 0 {
+                // Apply in-handshake configuration from callbacks if the path's
+                // Recovery module can still be reinitilized.
+                if self
+                    .paths
+                    .get_active()
+                    .map(|p| p.can_reinit_recovery())
+                    .unwrap_or(false)
+                {
                     if ex_data.recovery_config != self.recovery_config {
                         if let Ok(path) = self.paths.get_active_mut() {
                             self.recovery_config = ex_data.recovery_config;
