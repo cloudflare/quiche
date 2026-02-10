@@ -164,6 +164,7 @@ impl<F: Future, M: Metrics> Future for Instrumented<F, M> {
 ///
 /// Depending on whether the `tokio-task-metrics` feature is enabled, this may
 /// instrument the task and collect metrics for it.
+#[track_caller]
 pub fn spawn<M, T>(name: &str, metrics: M, future: T) -> JoinHandle<T::Output>
 where
     T: Future + Send + 'static,
@@ -184,6 +185,7 @@ where
 ///
 /// Depending on whether the `tokio-task-metrics` feature is enabled, this may
 /// instrument the task and collect metrics for it.
+#[track_caller]
 pub fn spawn_with_killswitch<M, T>(name: &str, metrics: M, future: T)
 where
     T: Future<Output = ()> + Send + 'static,

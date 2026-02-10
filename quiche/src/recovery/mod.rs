@@ -477,7 +477,10 @@ struct QlogMetrics {
     cwnd: u64,
     bytes_in_flight: u64,
     ssthresh: Option<u64>,
-    pacing_rate: u64,
+    pacing_rate: Option<u64>,
+    delivery_rate: Option<u64>,
+    send_rate: Option<u64>,
+    ack_rate: Option<u64>,
 }
 
 #[cfg(feature = "qlog")]
@@ -550,13 +553,41 @@ impl QlogMetrics {
         let new_pacing_rate = if self.pacing_rate != latest.pacing_rate {
             self.pacing_rate = latest.pacing_rate;
             emit_event = true;
-            Some(latest.pacing_rate)
+            latest.pacing_rate
         } else {
             None
         };
 
+        // Build ex_data for rate metrics
+        let mut ex_data = qlog::events::ExData::new();
+        if self.delivery_rate != latest.delivery_rate {
+            if let Some(rate) = latest.delivery_rate {
+                self.delivery_rate = latest.delivery_rate;
+                emit_event = true;
+                ex_data.insert(
+                    "cf_delivery_rate".to_string(),
+                    serde_json::json!(rate),
+                );
+            }
+        }
+        if self.send_rate != latest.send_rate {
+            if let Some(rate) = latest.send_rate {
+                self.send_rate = latest.send_rate;
+                emit_event = true;
+                ex_data
+                    .insert("cf_send_rate".to_string(), serde_json::json!(rate));
+            }
+        }
+        if self.ack_rate != latest.ack_rate {
+            if let Some(rate) = latest.ack_rate {
+                self.ack_rate = latest.ack_rate;
+                emit_event = true;
+                ex_data
+                    .insert("cf_ack_rate".to_string(), serde_json::json!(rate));
+            }
+        }
+
         if emit_event {
-            // QVis can't use all these fields and they can be large.
             return Some(EventData::MetricsUpdated(
                 qlog::events::quic::MetricsUpdated {
                     min_rtt: new_min_rtt,
@@ -567,6 +598,7 @@ impl QlogMetrics {
                     bytes_in_flight: new_bytes_in_flight,
                     ssthresh: new_ssthresh,
                     pacing_rate: new_pacing_rate,
+                    ex_data,
                     ..Default::default()
                 },
             ));
@@ -685,14 +717,17 @@ impl StartupExit {
 /// The reason a CCA exited the startup phase.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StartupExitReason {
-    /// Exit startup due to excessive loss
+    /// Exit slow start or BBR startup due to excessive loss
     Loss,
 
-    /// Exit startup due to bandwidth plateau.
+    /// Exit BBR startup due to bandwidth plateau.
     BandwidthPlateau,
 
-    /// Exit startup due to persistent queue.
+    /// Exit BBR startup due to persistent queue.
     PersistentQueue,
+
+    /// Exit HyStart++ conservative slow start after the max rounds allowed.
+    ConservativeSlowStartRounds,
 }
 
 #[cfg(test)]

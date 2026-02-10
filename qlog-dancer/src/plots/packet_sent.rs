@@ -295,10 +295,15 @@ fn draw_delta_plot<'a, DB: DrawingBackend + 'a>(
 }
 
 fn draw_pacing_rate_plot<'a, DB: DrawingBackend + 'a>(
-    params: &PlotParameters, ss: &SeriesStore, ds: &Datastore,
+    params: &PlotParameters, ss: &SeriesStore, _ds: &Datastore,
     plot: &plotters::drawing::DrawingArea<DB, Shift>,
 ) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>> {
-    let y_max = (ss.max_pacing_rate as f32 * Y_WIGGLE) as u64;
+    let y_max = ss
+        .max_pacing_rate
+        .max(ss.max_delivery_rate)
+        .max(ss.max_send_rate)
+        .max(ss.max_ack_rate);
+    let y_max = (y_max as f32 * Y_WIGGLE) as u64;
     let axis = XYMinMax::init(params, ss, y_max);
     let mut builder = ChartBuilder::on(plot);
 
@@ -307,8 +312,10 @@ fn draw_pacing_rate_plot<'a, DB: DrawingBackend + 'a>(
         .y_label_area_size(params.area_margin.y);
 
     if params.display_chart_title {
-        builder
-            .caption("Pacing rate", chart_subtitle_style(&params.colors.caption));
+        builder.caption(
+            "Pacing Rate vs Delivery Rate",
+            chart_subtitle_style(&params.colors.caption),
+        );
     }
 
     let mut chart = builder
@@ -318,17 +325,35 @@ fn draw_pacing_rate_plot<'a, DB: DrawingBackend + 'a>(
     draw_mesh(
         &params.colors,
         "Relative time (ms)",
-        "Pacing Rate",
+        "Rate (bytes/sec)",
         params.display_minor_lines,
         &mut chart,
     );
 
-    // Draw the series
+    // Draw all 4 rate series
     chart
-        .draw_series(LineSeries::new(ds.local_pacing_rate.clone(), RED))
+        .draw_series(LineSeries::new(ss.local_pacing_rate.clone(), PURPLE))
         .unwrap()
         .label("pacing rate")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], RED));
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], PURPLE));
+
+    chart
+        .draw_series(LineSeries::new(ss.local_delivery_rate.clone(), TEAL))
+        .unwrap()
+        .label("delivery rate")
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], TEAL));
+
+    chart
+        .draw_series(LineSeries::new(ss.local_send_rate.clone(), ORANGE))
+        .unwrap()
+        .label("send rate")
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], ORANGE));
+
+    chart
+        .draw_series(LineSeries::new(ss.local_ack_rate.clone(), BLUE))
+        .unwrap()
+        .label("ack rate")
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE));
 
     if params.display_legend {
         chart

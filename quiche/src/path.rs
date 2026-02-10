@@ -520,6 +520,20 @@ impl Path {
         outcome
     }
 
+    /// Returns true if the path's recovery module hasn't processed any non-ACK
+    /// packets, and it is still OK to fully reinitialize the recovery module to
+    /// pickup changes to congestion control config.
+    pub fn can_reinit_recovery(&self) -> bool {
+        // The recovery module can be reinitialized until the connection attempts
+        // to send a packet with inflight data. The congestion
+        // controller doesn't track anything interesting until inflight
+        // data is sent. Handshake ACKs may be sent prior to arrival of
+        // the full ClientHello, but the send of ACK only packets
+        // shouldn't prevent the reinit of the recovery module.
+        self.recovery.bytes_in_flight() == 0 &&
+            self.recovery.bytes_in_flight_duration() == Duration::ZERO
+    }
+
     pub fn reinit_recovery(
         &mut self, recovery_config: &recovery::RecoveryConfig,
     ) {

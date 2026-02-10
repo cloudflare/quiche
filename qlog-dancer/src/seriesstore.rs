@@ -40,6 +40,9 @@ pub struct SeriesStore {
     pub local_bytes_in_flight: Vec<QlogPointu64>,
     pub local_ssthresh: Vec<QlogPointu64>,
     pub local_pacing_rate: Vec<QlogPointu64>,
+    pub local_delivery_rate: Vec<QlogPointu64>,
+    pub local_send_rate: Vec<QlogPointu64>,
+    pub local_ack_rate: Vec<QlogPointu64>,
 
     pub local_min_rtt: Vec<QlogPointf32>,
     pub local_latest_rtt: Vec<QlogPointf32>,
@@ -114,6 +117,9 @@ pub struct SeriesStore {
     pub y_max_onertt_pkt_received_plot: u64,
 
     pub max_pacing_rate: u64,
+    pub max_delivery_rate: u64,
+    pub max_send_rate: u64,
+    pub max_ack_rate: u64,
 }
 
 impl SeriesStore {
@@ -191,6 +197,33 @@ impl SeriesStore {
             self.max_pacing_rate = self.max_pacing_rate.max(point.1);
 
             push_interp(&mut self.local_pacing_rate, *point);
+        }
+    }
+
+    fn delivery_rate(&mut self, data_store: &Datastore) {
+        for point in &data_store.local_delivery_rate {
+            self.update_sent_x_axis_max(point.0);
+            self.max_delivery_rate = self.max_delivery_rate.max(point.1);
+
+            push_interp(&mut self.local_delivery_rate, *point);
+        }
+    }
+
+    fn send_rate(&mut self, data_store: &Datastore) {
+        for point in &data_store.local_send_rate {
+            self.update_sent_x_axis_max(point.0);
+            self.max_send_rate = self.max_send_rate.max(point.1);
+
+            push_interp(&mut self.local_send_rate, *point);
+        }
+    }
+
+    fn ack_rate(&mut self, data_store: &Datastore) {
+        for point in &data_store.local_ack_rate {
+            self.update_sent_x_axis_max(point.0);
+            self.max_ack_rate = self.max_ack_rate.max(point.1);
+
+            push_interp(&mut self.local_ack_rate, *point);
         }
     }
 
@@ -691,6 +724,9 @@ impl SeriesStore {
         self.min_rtt(data_store);
         self.latest_rtt(data_store);
         self.pacing_rate(data_store);
+        self.delivery_rate(data_store);
+        self.send_rate(data_store);
+        self.ack_rate(data_store);
         self.ssthresh(data_store);
         self.smoothed_rtt(data_store);
 
