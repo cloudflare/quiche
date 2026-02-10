@@ -103,6 +103,8 @@ impl QuicConnectionStats {
                 datagram_socket::StartupExitReason::BandwidthPlateau,
             quiche::StartupExitReason::PersistentQueue =>
                 datagram_socket::StartupExitReason::PersistentQueue,
+            quiche::StartupExitReason::ConservativeSlowStartRounds =>
+                datagram_socket::StartupExitReason::ConservativeSlowStartRounds,
         };
 
         datagram_socket::StartupExit {
