@@ -207,8 +207,8 @@ pub enum StreamState {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorSpace {
-    TransportError,
-    ApplicationError,
+    Transport,
+    Application,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]

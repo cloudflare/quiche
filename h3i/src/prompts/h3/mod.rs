@@ -460,7 +460,7 @@ pub fn prompt_connection_close() -> InquireResult<Action> {
 
     Ok(Action::ConnectionClose {
         error: ConnectionError {
-            is_app: matches!(error_space, ErrorSpace::ApplicationError),
+            is_app: matches!(error_space, ErrorSpace::Application),
             error_code,
             reason: reason.as_bytes().to_vec(),
         },
