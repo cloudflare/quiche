@@ -38,7 +38,7 @@ boring = { version = "4.3" }
 buffer-pool = { version = "0.2.1", path = "./buffer-pool" }
 crossbeam = { version = "0.8.1", default-features = false }
 dashmap = { version = "6" }
-datagram-socket = { version = "0.6.0", path = "./datagram-socket" }
+datagram-socket = { version = "0.7.0", path = "./datagram-socket" }
 env_logger = "0.11"
 foundations = { version = ">=4,<6", default-features = false }
 futures = { version = "0.3" }
