@@ -481,6 +481,8 @@ struct QlogMetrics {
     delivery_rate: Option<u64>,
     send_rate: Option<u64>,
     ack_rate: Option<u64>,
+    lost_packets: Option<u64>,
+    lost_bytes: Option<u64>,
 }
 
 #[cfg(feature = "qlog")]
@@ -584,6 +586,35 @@ impl QlogMetrics {
                 emit_event = true;
                 ex_data
                     .insert("cf_ack_rate".to_string(), serde_json::json!(rate));
+            }
+        }
+
+        if self.lost_packets != latest.lost_packets {
+            if let Some(val) = latest.lost_packets {
+                let delta = val - self.lost_packets.unwrap_or(0);
+                self.lost_packets = latest.lost_packets;
+                emit_event = true;
+                ex_data.insert(
+                    "cf_lost_packets".to_string(),
+                    serde_json::json!(val),
+                );
+                ex_data.insert(
+                    "cf_lost_packets_delta".to_string(),
+                    serde_json::json!(delta),
+                );
+            }
+        }
+        if self.lost_bytes != latest.lost_bytes {
+            if let Some(val) = latest.lost_bytes {
+                let delta = val - self.lost_bytes.unwrap_or(0);
+                self.lost_bytes = latest.lost_bytes;
+                emit_event = true;
+                ex_data
+                    .insert("cf_lost_bytes".to_string(), serde_json::json!(val));
+                ex_data.insert(
+                    "cf_lost_bytes_delta".to_string(),
+                    serde_json::json!(delta),
+                );
             }
         }
 

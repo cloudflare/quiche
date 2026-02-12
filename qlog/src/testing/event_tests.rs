@@ -274,3 +274,114 @@ fn metrics_updated_no_ex_data() {
         "ex_data should not be present"
     );
 }
+
+// Test constants for loss metrics
+const LOST_PACKETS: u64 = 42;
+const LOST_BYTES: u64 = 52500;
+const LOST_PACKETS_DELTA: u64 = 3;
+const LOST_BYTES_DELTA: u64 = 3750;
+
+#[test]
+fn metrics_updated_with_loss_ex_data() {
+    // Test that cf_lost_* fields serialize as flattened top-level fields
+    // and round-trip correctly through deserialization.
+    let ex_data = ExData::from([
+        (
+            "cf_lost_packets".to_string(),
+            serde_json::json!(LOST_PACKETS),
+        ),
+        ("cf_lost_bytes".to_string(), serde_json::json!(LOST_BYTES)),
+        (
+            "cf_lost_packets_delta".to_string(),
+            serde_json::json!(LOST_PACKETS_DELTA),
+        ),
+        (
+            "cf_lost_bytes_delta".to_string(),
+            serde_json::json!(LOST_BYTES_DELTA),
+        ),
+    ]);
+
+    let metrics = MetricsUpdated {
+        min_rtt: Some(MIN_RTT),
+        congestion_window: Some(CONGESTION_WINDOW),
+        ex_data,
+        ..Default::default()
+    };
+
+    let json = serde_json::to_value(&metrics).unwrap();
+
+    // Verify standard fields
+    assert_eq!(json["min_rtt"], MIN_RTT);
+    assert_eq!(json["congestion_window"], CONGESTION_WINDOW);
+
+    // Verify loss fields are flattened
+    assert_eq!(json["cf_lost_packets"], LOST_PACKETS);
+    assert_eq!(json["cf_lost_bytes"], LOST_BYTES);
+    assert_eq!(json["cf_lost_packets_delta"], LOST_PACKETS_DELTA);
+    assert_eq!(json["cf_lost_bytes_delta"], LOST_BYTES_DELTA);
+    assert!(json.get("ex_data").is_none(), "ex_data should be flattened");
+
+    // Round-trip
+    let json_str = serde_json::to_string(&metrics).unwrap();
+    let deserialized: MetricsUpdated = serde_json::from_str(&json_str).unwrap();
+
+    assert_eq!(
+        deserialized.ex_data.get("cf_lost_packets"),
+        Some(&serde_json::json!(LOST_PACKETS))
+    );
+    assert_eq!(
+        deserialized.ex_data.get("cf_lost_bytes"),
+        Some(&serde_json::json!(LOST_BYTES))
+    );
+    assert_eq!(
+        deserialized.ex_data.get("cf_lost_packets_delta"),
+        Some(&serde_json::json!(LOST_PACKETS_DELTA))
+    );
+    assert_eq!(
+        deserialized.ex_data.get("cf_lost_bytes_delta"),
+        Some(&serde_json::json!(LOST_BYTES_DELTA))
+    );
+}
+
+#[test]
+fn metrics_updated_with_rates_and_losses() {
+    // Test that rate and loss cf_* fields coexist correctly in ex_data.
+    let ex_data = ExData::from([
+        (
+            "cf_delivery_rate".to_string(),
+            serde_json::json!(DELIVERY_RATE),
+        ),
+        ("cf_send_rate".to_string(), serde_json::json!(500000u64)),
+        (
+            "cf_lost_packets".to_string(),
+            serde_json::json!(LOST_PACKETS),
+        ),
+        ("cf_lost_bytes".to_string(), serde_json::json!(LOST_BYTES)),
+        (
+            "cf_lost_packets_delta".to_string(),
+            serde_json::json!(LOST_PACKETS_DELTA),
+        ),
+    ]);
+
+    let metrics = MetricsUpdated {
+        min_rtt: Some(MIN_RTT),
+        pacing_rate: Some(PACING_RATE),
+        ex_data,
+        ..Default::default()
+    };
+
+    let json = serde_json::to_value(&metrics).unwrap();
+
+    // Standard fields
+    assert_eq!(json["min_rtt"], MIN_RTT);
+    assert_eq!(json["pacing_rate"], PACING_RATE);
+
+    // Rate fields
+    assert_eq!(json["cf_delivery_rate"], DELIVERY_RATE);
+    assert_eq!(json["cf_send_rate"], 500000u64);
+
+    // Loss fields
+    assert_eq!(json["cf_lost_packets"], LOST_PACKETS);
+    assert_eq!(json["cf_lost_bytes"], LOST_BYTES);
+    assert_eq!(json["cf_lost_packets_delta"], LOST_PACKETS_DELTA);
+}
