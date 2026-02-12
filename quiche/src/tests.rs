@@ -8473,9 +8473,12 @@ fn last_tx_data_larger_than_tx_data(
     test_utils::emit_flight(&mut pipe.server).unwrap();
 
     // Server buffers some data, until send capacity limit reached.
+    // Buffer stream 8 first with 1200 bytes, then stream 4 gets remaining 800.
+    // This proves the first PTO packet sends NEW data from whichever stream
+    // is picked first (stream 8, due to lower sequence number).
     let mut buf = [0; 1200];
-    assert_eq!(pipe.server.stream_send(4, &buf, false), Ok(1200));
-    assert_eq!(pipe.server.stream_send(8, &buf, false), Ok(800));
+    assert_eq!(pipe.server.stream_send(8, &buf, false), Ok(1200));
+    assert_eq!(pipe.server.stream_send(4, &buf, false), Ok(800));
     assert_eq!(pipe.server.stream_send(4, &buf, false), Err(Error::Done));
 
     // Wait for PTO to expire.
@@ -8484,8 +8487,10 @@ fn last_tx_data_larger_than_tx_data(
 
     pipe.server.on_timeout();
 
-    // Server sends PTO probe (not limited to cwnd),
-    // to update last_tx_data.
+    // Server sends PTO probe (not limited to cwnd), to update last_tx_data.
+    //
+    // Stream 8 (1200 bytes) is picked first because it has a lower sequence
+    // number than stream 4 (which was cycled many times during emit_flight).
     let (len, _) = pipe.server.send(&mut buf).unwrap();
     assert_eq!(len, 1200);
 
@@ -11104,4 +11109,84 @@ fn configuration_values_are_limited_to_max_varint() {
     // It's fine that this will fail with an error. We just want to ensure we
     // do not panic because of too large values that we try to encode via varint.
     assert_eq!(pipe.handshake(), Err(Error::InvalidTransportParam));
+}
+
+/// Tests that incremental streams are scheduled round-robin when sending.
+///
+/// When multiple incremental streams have data queued, each call to send()
+/// should emit data from the next stream in rotation, not always from the
+/// same stream.
+#[test]
+fn incremental_stream_round_robin() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    // Set high limits so we can send data on multiple streams
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(10000);
+    config.set_initial_max_stream_data_bidi_remote(10000);
+    config.set_initial_max_streams_bidi(10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Queue data on three streams. All streams are incremental by default.
+    // Use 2500 bytes so each stream needs ~2 packets to send all data.
+    let data = vec![0u8; 2500];
+    assert_eq!(pipe.client.stream_send(4, &data, false), Ok(2500));
+    assert_eq!(pipe.client.stream_send(8, &data, false), Ok(2500));
+    assert_eq!(pipe.client.stream_send(12, &data, false), Ok(2500));
+
+    // Track which streams get data sent in each packet
+    let mut send_order = Vec::new();
+
+    // Send packets one at a time
+    let mut buf = [0; 1350];
+    let mut recv_buf = [0; 1350];
+
+    // Send multiple packets and track which stream's data is sent
+    for _ in 0..10 {
+        let result = pipe.client.send(&mut buf);
+        if result.is_err() {
+            break;
+        }
+        let (len, _) = result.unwrap();
+        if len == 0 {
+            break;
+        }
+
+        // Process packet on server
+        let info = RecvInfo {
+            to: test_utils::Pipe::server_addr(),
+            from: test_utils::Pipe::client_addr(),
+        };
+        pipe.server.recv(&mut buf[..len], info).unwrap();
+
+        // Check which streams received data in THIS packet by consuming data.
+        // This ensures readable() only shows streams with new data next time.
+        for stream_id in pipe.server.readable() {
+            send_order.push(stream_id);
+            // Drain the data so the stream is no longer readable
+            while pipe.server.stream_recv(stream_id, &mut recv_buf).is_ok() {}
+        }
+    }
+
+    // With round-robin, streams are cycled after sending:
+    // - Stream 4 sends (lowest sequence), cycled to back -> queue: [8, 12, 4]
+    // - Stream 8 sends, cycled to back -> queue: [12, 4, 8]
+    // - Stream 12 sends, cycled to back -> queue: [4, 8, 12]
+    // Pattern repeats until all data is sent (3 rounds for 2500 bytes each).
+    assert_eq!(
+        send_order,
+        vec![4, 8, 12, 4, 8, 12, 4, 8, 12],
+        "Expected round-robin ordering: streams interleave across packets"
+    );
 }
