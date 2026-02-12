@@ -53,7 +53,7 @@ netlog = { version = "0.1", path="./netlog" }
 octets = { version = "0.3.4", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
-qlog = { version = "0.15.2", path = "./qlog" }
+qlog = { version = "0.16.0", path = "./qlog" }
 quiche = { version = "0.24.9", path = "./quiche" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
