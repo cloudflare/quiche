@@ -26,7 +26,10 @@ async fn main() -> tokio_quiche::QuicResult<()> {
     };
     let bind_to: String = bind_addr.parse().unwrap();
     let socket = tokio::net::UdpSocket::bind(bind_to).await?;
-    let file = &args.urls[0].path().to_string();
+    let file = &mut args.urls[0].path().to_string();
+    if file.len() > 0 {
+        file.remove(0); // removes leading /
+    }
     println!("Connect url: {:}", peer_addr);
     println!("Args method: {}", &args.method);
     println!("Args method: {:?}", &args.dump_response_path);
@@ -35,63 +38,69 @@ async fn main() -> tokio_quiche::QuicResult<()> {
     let (_, mut controller) = tokio_quiche::quic::connect(socket, None).await?;
 
     println!("Path is: {:?}", file);
+    for _i in 0..args.reqs_cardinal {
+        let request = tokio_quiche::http3::driver::NewClientRequest {
+            request_id: 0,
+            headers: vec![
+                h3::Header::new(b":method", b"GET"),
+                h3::Header::new(b":path", file.as_bytes()),
+            ],
+            body_writer: None,
+        };
+        controller.request_sender().send(request).unwrap();
 
-    let request = tokio_quiche::http3::driver::NewClientRequest {
-        request_id: 0,
-        headers: vec![
-            h3::Header::new(b":method", b"GET"),
-            h3::Header::new(b":path", b"README.md"),
-        ],
-        body_writer: None,
-    };
-    controller.request_sender().send(request).unwrap();
+        while let Some(event) = controller.event_receiver_mut().recv().await {
+            match event {
+                ClientH3Event::Core(H3Event::IncomingHeaders(
+                    IncomingH3Headers {
+                        stream_id,
+                        headers,
+                        mut recv,
+                        ..
+                    },
+                )) => {
+                    log::info!("incomming headers"; "stream_id" => stream_id, "headers" => ?headers);
+                    'body: while let Some(frame) = recv.recv().await {
+                        match frame {
+                            InboundFrame::Body(pooled, fin) => {
+                                log::info!("inbound body: {:?}", std::str::from_utf8(&pooled);
+                                    "fin" => fin,
+                                    "len" => pooled.len()
+                                );
+                                println!(
+                                    "{}",
+                                    std::str::from_utf8(&pooled).unwrap()
+                                );
 
-    while let Some(event) = controller.event_receiver_mut().recv().await {
-        match event {
-            ClientH3Event::Core(H3Event::IncomingHeaders(
-                IncomingH3Headers {
-                    stream_id,
-                    headers,
-                    mut recv,
-                    ..
-                },
-            )) => {
-                log::info!("incomming headers"; "stream_id" => stream_id, "headers" => ?headers);
-                'body: while let Some(frame) = recv.recv().await {
-                    match frame {
-                        InboundFrame::Body(pooled, fin) => {
-                            log::info!("inbound body: {:?}", std::str::from_utf8(&pooled);
-                                "fin" => fin,
-                                "len" => pooled.len()
-                            );
-                            println!("{}", std::str::from_utf8(&pooled).unwrap());
-
-                            if fin {
-                                println!("received full body, exiting");
-                                break 'body;
-                            }
-                        },
-                        InboundFrame::Datagram(pooled) => {
-                            log::info!("inbound datagram"; "len" => pooled.len());
-                        },
+                                if fin {
+                                    println!("received full body, exiting");
+                                    break 'body;
+                                }
+                            },
+                            InboundFrame::Datagram(pooled) => {
+                                log::info!("inbound datagram"; "len" => pooled.len());
+                            },
+                        }
                     }
-                }
-            },
-            ClientH3Event::Core(H3Event::BodyBytesReceived {
-                fin: true, ..
-            }) => {
-                println!("fin received");
-                break;
-            },
-            ClientH3Event::Core(event) => println!("received event: {event:?}"),
-            ClientH3Event::NewOutboundRequest {
-                stream_id,
-                request_id,
-            } => log::info!(
-                "sending outbound request";
-                "stream_id" => stream_id,
-                "request_id" => request_id
-            ),
+                },
+                ClientH3Event::Core(H3Event::BodyBytesReceived {
+                    fin: true,
+                    ..
+                }) => {
+                    println!("fin received");
+                    break;
+                },
+                ClientH3Event::Core(event) =>
+                    println!("received event: {event:?}"),
+                ClientH3Event::NewOutboundRequest {
+                    stream_id,
+                    request_id,
+                } => log::info!(
+                    "sending outbound request";
+                    "stream_id" => stream_id,
+                    "request_id" => request_id
+                ),
+            }
         }
     }
     Ok(())
