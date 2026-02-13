@@ -1158,6 +1158,8 @@ impl RecoveryOps for GRecovery {
             delivery_rate: Some(self.delivery_rate().to_bytes_per_second()),
             send_rate: Some(self.send_rate().to_bytes_per_second()),
             ack_rate: Some(self.ack_rate().to_bytes_per_second()),
+            lost_packets: Some(self.lost_count as u64),
+            lost_bytes: Some(self.bytes_lost),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
