@@ -27,7 +27,7 @@ async fn main() -> tokio_quiche::QuicResult<()> {
     let bind_to: String = bind_addr.parse().unwrap();
     let socket = tokio::net::UdpSocket::bind(bind_to).await?;
     let file = &mut args.urls[0].path().to_string();
-    if file.len() > 0 {
+    if file.chars().next().unwrap()=='/'{
         file.remove(0); // removes leading /
     }
     println!("Connect url: {:}", peer_addr);

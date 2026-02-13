@@ -54,77 +54,69 @@ async fn main() -> tokio_quiche::QuicResult<()> {
 
 async fn handle_connection(mut controller: ServerH3Controller) {
     loop {
-        match controller.event_receiver_mut().recv().await {
-            Some(event) => {
-                match event {
-                    tokio_quiche::http3::driver::ServerH3Event::Core(
-                        H3Event::IncomingHeaders(IncomingH3Headers { .. }),
-                    ) => {},
-                    tokio_quiche::http3::driver::ServerH3Event::Headers {
-                        mut incoming_headers,
-                        ..
-                    } => {
-                        incoming_headers
-                            .send
-                            .send(OutboundFrame::Headers(
-                                vec![h3::Header::new(b":status", b"200")],
-                                Some(Priority::new(0, true)),
-                            ))
-                            .await
-                            .unwrap();
-                        let request = &incoming_headers.headers;
-                        for hdr in request {
-                            match hdr.name() {
-                                b":path" => {
-                                    let path =
-                                        Some(from_utf8(hdr.value()).unwrap());
-                                    println!("Path is: {:?}", path);
-                                    let body = std::fs::read(path.unwrap())
-                                        .unwrap_or_else(|_| {
-                                            b"Not Found!\r\n".to_vec()
-                                        });
-                                    incoming_headers
-                                        .send
-                                        .send(OutboundFrame::body(
-                                            BufFactory::buf_from_slice(&body),
-                                            true,
-                                        ))
-                                        .await
-                                        .unwrap();
-                                },
-                                b":method" => {
-                                    assert_eq!(
-                                        from_utf8(hdr.value()).unwrap(),
-                                        "GET"
-                                    )
-                                },
-                                b":scheme" => {
-                                    assert_eq!(
-                                        from_utf8(hdr.value()).unwrap(),
-                                        "http"
-                                    )
-                                },
-                                b":authority" => {
-                                    // TODO
-                                },
-                                b"user-agent" => {
-                                    // ignore
-                                },
-                                b => {
-                                    println!(
-                                        "{} header not supported",
-                                        from_utf8(b).unwrap()
-                                    );
-                                },
-                            }
+        if let Some(event) = controller.event_receiver_mut().recv().await {
+            match event {
+                tokio_quiche::http3::driver::ServerH3Event::Core(
+                    H3Event::IncomingHeaders(IncomingH3Headers { .. }),
+                ) => {},
+                tokio_quiche::http3::driver::ServerH3Event::Headers {
+                    mut incoming_headers,
+                    ..
+                } => {
+                    incoming_headers
+                        .send
+                        .send(OutboundFrame::Headers(
+                            vec![h3::Header::new(b":status", b"200")],
+                            Some(Priority::new(0, true)),
+                        ))
+                        .await
+                        .unwrap();
+                    let request = &incoming_headers.headers;
+                    for hdr in request {
+                        match hdr.name() {
+                            b":path" => {
+                                let path = from_utf8(hdr.value());
+                                let body = std::fs::read(path.unwrap())
+                                    .unwrap_or_else(|_| {
+                                        b"Not Found!\r\n".to_vec()
+                                    });
+                                incoming_headers
+                                    .send
+                                    .send(OutboundFrame::body(
+                                        BufFactory::buf_from_slice(&body),
+                                        true,
+                                    ))
+                                    .await
+                                    .unwrap();
+                            },
+                            b":method" => {
+                                assert_eq!(from_utf8(hdr.value()).unwrap(), "GET")
+                            },
+                            b":scheme" => {
+                                assert_eq!(
+                                    from_utf8(hdr.value()).unwrap(),
+                                    "http"
+                                )
+                            },
+                            b":authority" => {
+                                // TODO
+                            },
+                            b"user-agent" => {
+                                // ignore
+                            },
+                            b => {
+                                println!(
+                                    "{} header not supported",
+                                    from_utf8(b).unwrap()
+                                );
+                            },
                         }
-                    },
-                    event => {
-                        println!("event: {event:?}");
-                    },
-                }
-            },
-            None => (),
+                    }
+                },
+                event => {
+                    println!("event: {event:?}");
+                },
+            }
         }
     }
 }
