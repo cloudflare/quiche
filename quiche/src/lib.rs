@@ -1543,8 +1543,7 @@ pub fn accept_with_buf_factory<F: BufFactory>(
         original_destination_cid: odcid,
         retry_source_cid: scid,
     });
-
-    Connection::new(scid, retry_cids, local, peer, config, true)
+    Connection::new(scid, retry_cids, None, local, peer, config, true)
 }
 
 /// A wrapper for connection IDs used in [`accept_with_retry`].
@@ -1578,7 +1577,7 @@ pub fn accept_with_retry<F: BufFactory>(
     scid: &ConnectionId, retry_cids: RetryConnectionIds, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    Connection::new(scid, Some(retry_cids), local, peer, config, true)
+    Connection::new(scid, Some(retry_cids), None, local, peer, config, true)
 }
 
 /// Creates a new client-side connection.
@@ -1604,7 +1603,34 @@ pub fn connect(
     server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection> {
-    let mut conn = Connection::new(scid, None, local, peer, config, false)?;
+    let mut conn = Connection::new(scid, None, None, local, peer, config, false)?;
+
+    if let Some(server_name) = server_name {
+        conn.handshake.set_host_name(server_name)?;
+    }
+
+    Ok(conn)
+}
+
+/// Creates a new client-side connection using the given DCID initially.
+///
+/// Be aware that [RFC 9000] places requirements for unpredictability and length
+/// on the client DCID field. This function is dangerous if these  requirements
+/// are not satisfied.
+///
+/// The `scid` parameter is used as the connection's source connection ID, while
+/// the optional `server_name` parameter is used to verify the peer's
+/// certificate.
+///
+/// [RFC 9000]: <https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3>
+#[cfg(feature = "custom-client-dcid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "custom-client-dcid")))]
+pub fn connect_with_dcid(
+    server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
+    local: SocketAddr, peer: SocketAddr, config: &mut Config,
+) -> Result<Connection> {
+    let mut conn =
+        Connection::new(scid, None, Some(dcid), local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -1623,7 +1649,31 @@ pub fn connect_with_buffer_factory<F: BufFactory>(
     server_name: Option<&str>, scid: &ConnectionId, local: SocketAddr,
     peer: SocketAddr, config: &mut Config,
 ) -> Result<Connection<F>> {
-    let mut conn = Connection::new(scid, None, local, peer, config, false)?;
+    let mut conn = Connection::new(scid, None, None, local, peer, config, false)?;
+
+    if let Some(server_name) = server_name {
+        conn.handshake.set_host_name(server_name)?;
+    }
+
+    Ok(conn)
+}
+
+/// Creates a new client-side connection, with a custom buffer generation
+/// method using the given dcid initially.
+/// Be aware the RFC places requirements for unpredictability and length
+/// on the client DCID field.
+/// [`RFC9000`]:  https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
+///
+/// The buffers generated can be anything that can be drereferenced as a byte
+/// slice. See [`connect`] and [`BufFactory`] for more info.
+#[cfg(feature = "custom-client-dcid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "custom-client-dcid")))]
+pub fn connect_with_dcid_and_buffer_factory<F: BufFactory>(
+    server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
+    local: SocketAddr, peer: SocketAddr, config: &mut Config,
+) -> Result<Connection<F>> {
+    let mut conn =
+        Connection::new(scid, None, Some(dcid), local, peer, config, false)?;
 
     if let Some(server_name) = server_name {
         conn.handshake.set_host_name(server_name)?;
@@ -1817,20 +1867,46 @@ impl Default for QlogInfo {
 impl<F: BufFactory> Connection<F> {
     fn new(
         scid: &ConnectionId, retry_cids: Option<RetryConnectionIds>,
-        local: SocketAddr, peer: SocketAddr, config: &mut Config,
-        is_server: bool,
+        client_dcid: Option<&ConnectionId>, local: SocketAddr, peer: SocketAddr,
+        config: &mut Config, is_server: bool,
     ) -> Result<Connection<F>> {
         let tls = config.tls_ctx.new_handshake()?;
         Connection::with_tls(
-            scid, retry_cids, local, peer, config, tls, is_server,
+            scid,
+            retry_cids,
+            client_dcid,
+            local,
+            peer,
+            config,
+            tls,
+            is_server,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn with_tls(
         scid: &ConnectionId, retry_cids: Option<RetryConnectionIds>,
-        local: SocketAddr, peer: SocketAddr, config: &Config,
-        tls: tls::Handshake, is_server: bool,
+        client_dcid: Option<&ConnectionId>, local: SocketAddr, peer: SocketAddr,
+        config: &Config, tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection<F>> {
+        if retry_cids.is_some() && client_dcid.is_some() {
+            // These are exclusive, the caller should only specify one or the
+            // other.
+            return Err(Error::InvalidDcidInitialization);
+        }
+        #[cfg(feature = "custom-client-dcid")]
+        if let Some(client_dcid) = client_dcid {
+            // The Minimum length is 8.
+            // See https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
+            if client_dcid.to_vec().len() < 8 {
+                return Err(Error::InvalidDcidInitialization);
+            }
+        }
+        #[cfg(not(feature = "custom-client-dcid"))]
+        if client_dcid.is_some() {
+            return Err(Error::InvalidDcidInitialization);
+        }
+
         let max_rx_data = config.local_transport_params.initial_max_data;
 
         let scid_as_hex: Vec<String> =
@@ -2058,11 +2134,18 @@ impl<F: BufFactory> Connection<F> {
 
         conn.encode_transport_params()?;
 
-        // Derive initial secrets for the client. We can do this here because
-        // we already generated the random destination connection ID.
         if !is_server {
-            let mut dcid = [0; 16];
-            rand::rand_bytes(&mut dcid[..]);
+            let dcid = if let Some(client_dcid) = client_dcid {
+                // We already had an dcid generated for us, use it.
+                client_dcid.to_vec()
+            } else {
+                // Derive initial secrets for the client. We can do this here
+                // because we already generated the random
+                // destination connection ID.
+                let mut dcid = [0; 16];
+                rand::rand_bytes(&mut dcid[..]);
+                dcid.to_vec()
+            };
 
             let (aead_open, aead_seal) = crypto::derive_initial_key_material(
                 &dcid,
