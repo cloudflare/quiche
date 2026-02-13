@@ -37,6 +37,8 @@ use crate::Result;
 
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
+#[cfg(feature = "qlog")]
+use serde::Serialize;
 
 use smallvec::SmallVec;
 
@@ -486,6 +488,44 @@ struct QlogMetrics {
 }
 
 #[cfg(feature = "qlog")]
+trait CustomCfQlogField {
+    fn name(&self) -> &'static str;
+    fn as_json_value(&self) -> serde_json::Value;
+}
+
+#[cfg(feature = "qlog")]
+#[serde_with::skip_serializing_none]
+#[derive(Serialize)]
+struct TotalAndDelta {
+    total: Option<u64>,
+    delta: Option<u64>,
+}
+
+#[cfg(feature = "qlog")]
+struct CustomQlogField<T> {
+    name: &'static str,
+    value: T,
+}
+
+#[cfg(feature = "qlog")]
+impl<T> CustomQlogField<T> {
+    fn new(name: &'static str, value: T) -> Self {
+        Self { name, value }
+    }
+}
+
+#[cfg(feature = "qlog")]
+impl<T: Serialize> CustomCfQlogField for CustomQlogField<T> {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn as_json_value(&self) -> serde_json::Value {
+        serde_json::json!(&self.value)
+    }
+}
+
+#[cfg(feature = "qlog")]
 impl QlogMetrics {
     // Make a qlog event if the latest instance of QlogMetrics is different.
     //
@@ -591,29 +631,32 @@ impl QlogMetrics {
 
         if self.lost_packets != latest.lost_packets {
             if let Some(val) = latest.lost_packets {
-                let delta = val - self.lost_packets.unwrap_or(0);
+                let lost_packets =
+                    CustomQlogField::new("cf_lost_packets", TotalAndDelta {
+                        total: latest.lost_packets,
+                        delta: Some(val - self.lost_packets.unwrap_or(0)),
+                    });
                 self.lost_packets = latest.lost_packets;
                 emit_event = true;
+
                 ex_data.insert(
-                    "cf_lost_packets".to_string(),
-                    serde_json::json!(val),
-                );
-                ex_data.insert(
-                    "cf_lost_packets_delta".to_string(),
-                    serde_json::json!(delta),
+                    lost_packets.name().to_string(),
+                    lost_packets.as_json_value(),
                 );
             }
         }
         if self.lost_bytes != latest.lost_bytes {
             if let Some(val) = latest.lost_bytes {
-                let delta = val - self.lost_bytes.unwrap_or(0);
-                self.lost_bytes = latest.lost_bytes;
+                let lost_bytes =
+                    CustomQlogField::new("cf_lost_bytes", TotalAndDelta {
+                        total: latest.lost_bytes,
+                        delta: Some(val - self.lost_bytes.unwrap_or(0)),
+                    });
+
                 emit_event = true;
-                ex_data
-                    .insert("cf_lost_bytes".to_string(), serde_json::json!(val));
                 ex_data.insert(
-                    "cf_lost_bytes_delta".to_string(),
-                    serde_json::json!(delta),
+                    lost_bytes.name().to_string(),
+                    lost_bytes.as_json_value(),
                 );
             }
         }
