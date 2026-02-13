@@ -1889,6 +1889,11 @@ impl<F: BufFactory> Connection<F> {
         client_dcid: Option<&ConnectionId>, local: SocketAddr, peer: SocketAddr,
         config: &Config, tls: tls::Handshake, is_server: bool,
     ) -> Result<Connection<F>> {
+        if retry_cids.is_some() && client_dcid.is_some() {
+            // These are exclusive, the caller should only specify one or the
+            // other.
+            return Err(Error::InvalidDcidInitialization);
+        }
         #[cfg(feature = "custom-client-dcid")]
         if let Some(client_dcid) = client_dcid {
             // The Minimum length is 8.
