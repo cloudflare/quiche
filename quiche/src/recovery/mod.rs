@@ -652,7 +652,7 @@ impl QlogMetrics {
                         total: latest.lost_bytes,
                         delta: Some(val - self.lost_bytes.unwrap_or(0)),
                     });
-
+                self.lost_bytes = latest.lost_bytes;
                 emit_event = true;
                 ex_data.insert(
                     lost_bytes.name().to_string(),
