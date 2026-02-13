@@ -39,6 +39,7 @@ tokio-task-metrics = []
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(capture_keylogs)'] }
 
 [dependencies]
+docopt = "1"
 anyhow = { workspace = true }
 boring = { workspace = true }
 buffer-pool = { workspace = true }

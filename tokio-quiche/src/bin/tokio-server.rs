@@ -3,6 +3,7 @@ use futures::StreamExt as _;
 use quiche::h3::NameValue;
 use quiche::h3::Priority;
 use std::str::from_utf8;
+use tokio_quiche::args::*;
 use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
@@ -17,6 +18,12 @@ use tokio_quiche::ServerH3Driver;
 
 #[tokio::main]
 async fn main() -> tokio_quiche::QuicResult<()> {
+    let docopt = docopt::Docopt::new(SERVER_USAGE).unwrap();
+    let conn_args = CommonArgs::with_docopt(&docopt);
+    let args = ServerArgs::with_docopt(&docopt);
+
+    let bind_to: String = args.listen.parse().unwrap();
+
     let socket = tokio::net::UdpSocket::bind("0.0.0.0:4433").await?;
 
     let mut listeners = listen(
