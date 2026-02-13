@@ -623,7 +623,6 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         self.epochs[epoch].sent_packets.push_back(pkt);
-
         trace!("{trace_id} {self:?}");
     }
 
@@ -1042,6 +1041,10 @@ impl RecoveryOps for LegacyRecovery {
     fn bytes_lost(&self) -> u64 {
         self.bytes_lost
     }
+
+    fn sent_packets_empty(&self) -> bool {  
+        self.epochs.iter().all(|epoch| epoch.sent_packets.is_empty())  
+    }
 }
 
 impl std::fmt::Debug for LegacyRecovery {
@@ -1091,3 +1094,4 @@ pub struct Acked {
 
     pub is_app_limited: bool,
 }
+
