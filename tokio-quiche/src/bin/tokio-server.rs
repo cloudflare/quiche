@@ -12,27 +12,28 @@ use tokio_quiche::http3::settings::Http3Settings;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
 use tokio_quiche::quiche::h3;
+use tokio_quiche::settings::QuicSettings;
 use tokio_quiche::ConnectionParams;
 use tokio_quiche::ServerH3Controller;
 use tokio_quiche::ServerH3Driver;
 
 #[tokio::main]
 async fn main() -> tokio_quiche::QuicResult<()> {
-    let docopt = docopt::Docopt::new(SERVER_USAGE).unwrap();
-    let conn_args = CommonArgs::with_docopt(&docopt);
+    let docopt: docopt::Docopt = docopt::Docopt::new(SERVER_USAGE).unwrap();
     let args = ServerArgs::with_docopt(&docopt);
 
     let bind_to: String = args.listen.parse().unwrap();
 
-    let socket = tokio::net::UdpSocket::bind("0.0.0.0:4433").await?;
+    let socket = tokio::net::UdpSocket::bind(bind_to).await?;
+    let settings = QuicSettings::default();
 
     let mut listeners = listen(
         [socket],
         ConnectionParams::new_server(
-            Default::default(),
+            settings,
             tokio_quiche::settings::TlsCertificatePaths {
-                cert: "tokio-quiche/src/bin/cert.crt",
-                private_key: "tokio-quiche/src/bin/cert.key",
+                cert: &args.cert,
+                private_key: &args.key,
                 kind: tokio_quiche::settings::CertificateKind::X509,
             },
             Default::default(),

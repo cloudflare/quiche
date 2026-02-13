@@ -1,37 +1,47 @@
 use foundations::telemetry::log;
+use tokio_quiche::args::*;
 use tokio_quiche::http3::driver::ClientH3Event;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::InboundFrame;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::quiche::h3;
-use tokio_quiche::args::*;
-/// Makes a buffered writer for a qlog.
-pub fn make_qlog_writer(
-    dir: &std::ffi::OsStr, role: &str, id: &str,
-) -> std::io::BufWriter<std::fs::File> {
-    let mut path = std::path::PathBuf::from(dir);
-    let filename = format!("{role}-{id}.sqlog");
-    path.push(filename);
-
-    match std::fs::File::create(&path) {
-        Ok(f) => std::io::BufWriter::new(f),
-
-        Err(e) =>
-            panic!("Error creating qlog file attempted path was {path:?}: {e}"),
-    }
-}
 
 #[tokio::main]
 async fn main() -> tokio_quiche::QuicResult<()> {
-    let socket = tokio::net::UdpSocket::bind("0.0.0.0:49852").await?;
-    socket.connect("127.0.0.1:4433").await?;
+    let docopt = docopt::Docopt::new(CLIENT_USAGE).unwrap();
+    let args = ClientArgs::with_docopt(&docopt);
+    // We'll only connect to the first server provided in URL list.
+    let connect_url = &args.urls[0];
+
+    // Resolve server address.
+    let peer_addr = if let Some(addr) = &args.connect_to {
+        addr.parse().expect("--connect-to is expected to be a string containing an IPv4 or IPv6 address with a port. E.g. 192.0.2.0:443")
+    } else {
+        *connect_url.socket_addrs(|| None).unwrap().first().unwrap()
+    };
+
+    let bind_addr = match peer_addr {
+        std::net::SocketAddr::V4(_) => format!("0.0.0.0:{}", args.source_port),
+        std::net::SocketAddr::V6(_) => format!("[::]:{}", args.source_port),
+    };
+    let bind_to: String = bind_addr.parse().unwrap();
+    let socket = tokio::net::UdpSocket::bind(bind_to).await?;
+    let file = &args.urls[0].path().to_string();
+    println!("Connect url: {:}", peer_addr);
+    println!("Args method: {}", &args.method);
+    println!("Args method: {:?}", &args.dump_response_path);
+    socket.connect(peer_addr).await?;
 
     let (_, mut controller) = tokio_quiche::quic::connect(socket, None).await?;
 
+    println!("Path is: {:?}", file);
+
     let request = tokio_quiche::http3::driver::NewClientRequest {
         request_id: 0,
-        headers: vec![h3::Header::new(b":method", b"GET"),
-        h3::Header::new(b":path", b"README.md"),],
+        headers: vec![
+            h3::Header::new(b":method", b"GET"),
+            h3::Header::new(b":path", b"README.md"),
+        ],
         body_writer: None,
     };
     controller.request_sender().send(request).unwrap();

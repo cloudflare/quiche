@@ -9,7 +9,8 @@ or using the ready-made <code>[H3Driver]</code> for HTTP/3 clients and servers.
 
 # Examples
 
-An example client and server implementation can be found in `src/bin`. 
+An example client and server implementation can be found in `src/bin`. To run the server execute `cargo run --bin tokio-server -- --cert <path/to/cert.crt> --key <path/to/cert.key>  --root .`,
+the client can be executed using `cargo run --bin tokio-client -- http://127.0.0.1:4433/README.md`. 
 
 # Feature Flags
 
