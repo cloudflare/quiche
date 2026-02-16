@@ -11538,6 +11538,108 @@ fn reset_stream_retransmit_after_stream_collected(
     );
 }
 
+#[rstest]
+/// Tests that STOP_SENDING is retransmitted when the packet containing it is
+/// lost.
+fn stop_sending_retransmit(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends some data on stream 4 (no fin).
+    assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server receives the data.
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), Some(4));
+
+    // Server shuts down the read side, triggering STOP_SENDING.
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+
+    // Server sends STOP_SENDING, but we don't deliver it (simulating loss).
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+    let has_stop_sending = frames.iter().any(|f| {
+        matches!(f, frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        })
+    });
+    assert!(has_stop_sending, "Expected STOP_SENDING in packet");
+
+    // Trigger loss detection.
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    // Server should retransmit STOP_SENDING.
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+    let has_stop_sending = frames.iter().any(|f| {
+        matches!(f, frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        })
+    });
+
+    assert!(has_stop_sending, "STOP_SENDING should be retransmitted");
+}
+
+#[rstest]
+/// Tests that STOP_SENDING is not retransmitted after the stream receives FIN,
+/// since there's no point asking the peer to stop sending when they already
+/// finished.
+fn stop_sending_no_retransmit_after_fin(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends some data on stream 4 (no fin yet).
+    assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server receives the data.
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), Some(4));
+
+    // Server shuts down the read side, triggering STOP_SENDING.
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+
+    // Server sends STOP_SENDING, but we don't deliver it (simulating loss).
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    // Verify STOP_SENDING is in the packet.
+    let has_stop_sending = frames.iter().any(|f| {
+        matches!(f, frame::Frame::StopSending {
+            stream_id: 4,
+            error_code: 42,
+        })
+    });
+    assert!(has_stop_sending, "Expected STOP_SENDING in packet");
+
+    // Now client sends FIN with **no data** on the stream. This forces the
+    // server into knowing the streams final size without needing to read any
+    // data.
+    assert_eq!(pipe.client.stream_send(4, b"", true), Ok(0));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Trigger loss detection for the STOP_SENDING packet.
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    // Server should have nothing to send since STOP_SENDING should not be
+    // retransmitted after FIN.
+    assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+}
+
 #[cfg(feature = "custom-client-dcid")]
 #[rstest]
 fn connect_custom_client_dcid_too_short() {
