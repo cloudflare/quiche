@@ -4066,6 +4066,21 @@ impl<F: BufFactory> Connection<F> {
                             .insert_reset(stream_id, error_code, final_size);
                     },
 
+                    frame::Frame::StopSending {
+                        stream_id,
+                        error_code,
+                    } =>
+                    // We only need to retransmit the STOP_SENDING frame if
+                    // the stream is still active and not FIN'd. Even if the
+                    // packet was lost, if the application has the final
+                    // size at this point there is no need to retransmit.
+                        if let Some(stream) = self.streams.get(stream_id) {
+                            if !stream.recv.is_fin() {
+                                self.streams
+                                    .insert_stopped(stream_id, error_code);
+                            }
+                        },
+
                     // Retransmit HANDSHAKE_DONE only if it hasn't been acked at
                     // least once already.
                     frame::Frame::HandshakeDone if !self.handshake_done_acked => {
