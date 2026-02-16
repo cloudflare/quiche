@@ -4529,6 +4529,234 @@ fn stream_limit_update_uni(
 }
 
 #[rstest]
+/// Tests that MAX_STREAMS is correctly sent only when available capacity
+/// reaches the threshold (50% of initial).
+fn max_streams_sent_only_when_at_threshold(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(1000);
+    config.set_initial_max_stream_data_bidi_local(100);
+    config.set_initial_max_stream_data_bidi_remote(100);
+    config.set_initial_max_streams_bidi(6);
+    config.set_initial_max_streams_uni(0);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let mut buf = [0; 100];
+
+    // Test aged connection behavior: initial max_streams_bidi = 6, threshold = 3
+    // Complete 10 batches of 6 streams (60 total) to simulate aged connection
+    // This will increase next to 66
+    for batch in 0..=9 {
+        // Client side: send 6 streams with fin
+        for i in 0..6 {
+            let stream_id = (batch * 6 + i) * 4;
+            pipe.client.stream_send(stream_id, b"a", true).ok();
+        }
+        pipe.advance().ok();
+
+        // Server side: receive and send back with fin
+        for i in 0..6 {
+            let stream_id = (batch * 6 + i) * 4;
+            pipe.server.stream_recv(stream_id, &mut buf).ok();
+            pipe.server.stream_send(stream_id, b"a", true).ok();
+        }
+        pipe.advance().ok();
+
+        // Client side: receive to complete
+        for i in 0..6 {
+            let stream_id = (batch * 6 + i) * 4;
+            pipe.client.stream_recv(stream_id, &mut buf).ok();
+        }
+        pipe.advance().ok();
+    }
+
+    // At this point: next = 66, completed = 60, available = 6
+    // Complete 2 more streams → available = 4 (> 3)
+    // MAX_STREAMS should NOT be sent
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), 66);
+    assert_eq!(pipe.client.streams.peer_streams_left_bidi(), 6);
+    pipe.client.stream_send(240, b"a", true).ok();
+    pipe.client.stream_send(244, b"a", true).ok();
+    pipe.advance().ok();
+
+    pipe.server.stream_recv(240, &mut buf).ok();
+    pipe.server.stream_recv(244, &mut buf).ok();
+    pipe.server.stream_send(240, b"a", true).ok();
+    pipe.server.stream_send(244, b"a", true).ok();
+    pipe.advance().ok();
+
+    pipe.client.stream_recv(240, &mut buf).ok();
+    pipe.client.stream_recv(244, &mut buf).ok();
+    pipe.advance().ok();
+
+    // Verify MAX_STREAMS was NOT sent (4 > 3 threshold)
+    assert_eq!(pipe.client.streams.peer_streams_left_bidi(), 4);
+
+    // Complete 1 more stream → available = 3 (== 3)
+    // MAX_STREAMS should be sent (new limit: 72)
+    pipe.client.stream_send(248, b"a", true).ok();
+    pipe.advance().ok();
+
+    pipe.server.stream_recv(248, &mut buf).ok();
+    pipe.server.stream_send(248, b"a", true).ok();
+    pipe.advance().ok();
+
+    pipe.client.stream_recv(248, &mut buf).ok();
+    pipe.advance().ok();
+
+    // Verify MAX_STREAMS was sent (limit increased from 66)
+    let left_after = pipe.client.streams.peer_streams_left_bidi();
+    assert!(
+        left_after > 4,
+        "MAX_STREAMS should have been sent, expected > 4 streams left, got {}",
+        left_after
+    );
+}
+
+#[rstest]
+/// Tests that applications maintaining high concurrent stream usage
+/// can reliably recreate streams after aging the connection.
+///
+/// This exercises the feedback scenario: an app that maintains 9 concurrent
+/// streams with a limit of 10. After aging the connection, when streams
+/// complete, the app should be able to recreate them without starvation.
+fn high_utilization_maintains_streams_in_aged_connection(
+    #[values("cubic", "bbr2", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(10000);
+    config.set_initial_max_stream_data_bidi_remote(10000);
+    config.set_initial_max_streams_bidi(10);
+    config.set_initial_max_streams_uni(0);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let mut buf = [0; 100];
+
+    // Age the connection by completing batches of streams
+    // Complete 5 batches of 10 streams = 50 total streams
+    for batch in 0..5 {
+        for i in 0..10 {
+            let stream_id = (batch * 10 + i) * 4;
+
+            // Client opens stream and sends data with FIN
+            assert_eq!(
+                pipe.client.stream_send(stream_id, b"request", true),
+                Ok(7)
+            );
+        }
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Server receives and responds with FIN
+        for i in 0..10 {
+            let stream_id = (batch * 10 + i) * 4;
+            pipe.server.stream_recv(stream_id, &mut buf).ok();
+            assert_eq!(
+                pipe.server.stream_send(stream_id, b"response", true),
+                Ok(8)
+            );
+        }
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Client receives responses to complete bidirectional exchange
+        for i in 0..10 {
+            let stream_id = (batch * 10 + i) * 4;
+            pipe.client.stream_recv(stream_id, &mut buf).ok();
+        }
+        assert_eq!(pipe.advance(), Ok(()));
+    }
+
+    // Verify connection is aged: server's max should have grown from 10 to 60
+    assert_eq!(pipe.server.streams.max_streams_bidi(), 60);
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), 60);
+
+    // Now open 9 concurrent streams (high utilization)
+    for i in 0..9 {
+        let stream_id = (50 + i) * 4; // Continue from stream 50
+        assert_eq!(pipe.client.stream_send(stream_id, b"data", false), Ok(4));
+    }
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server receives the 9 streams
+    for i in 0..9 {
+        let stream_id = (50 + i) * 4;
+        pipe.server.stream_recv(stream_id, &mut buf).ok();
+    }
+
+    // Check available capacity from client perspective
+    let available_before = pipe.client.streams.peer_streams_left_bidi();
+    assert_eq!(available_before, 1, "Should have 1 stream slot available");
+
+    // Now complete 2 of the 9 active streams (bidirectionally)
+    let stream_1 = 50 * 4;
+    let stream_2 = 51 * 4;
+
+    // Client sends FIN
+    assert_eq!(pipe.client.stream_send(stream_1, b"", true), Ok(0));
+    assert_eq!(pipe.client.stream_send(stream_2, b"", true), Ok(0));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server receives FIN and responds with FIN
+    pipe.server.stream_recv(stream_1, &mut buf).ok();
+    pipe.server.stream_recv(stream_2, &mut buf).ok();
+    assert_eq!(pipe.server.stream_send(stream_1, b"resp", true), Ok(4));
+    assert_eq!(pipe.server.stream_send(stream_2, b"resp", true), Ok(4));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Client receives responses to complete the streams
+    pipe.client.stream_recv(stream_1, &mut buf).ok();
+    pipe.client.stream_recv(stream_2, &mut buf).ok();
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Verify streams were collected on server side
+    assert_eq!(
+        pipe.server.streams.max_streams_bidi_next(),
+        62,
+        "Server should have incremented next by 2"
+    );
+
+    // Check the threshold logic with current fix (initial/2 = 5)
+    // available = max - peer_opened = 60 - 59 = 1
+    // Check: (62 != 60) AND (1 <= 5) → TRUE, should send MAX_STREAMS
+
+    // Verify MAX_STREAMS was sent by checking if client's available increased
+    let available_after = pipe.client.streams.peer_streams_left_bidi();
+    assert!(
+        available_after == 3,
+        "After completing 2 streams, client should have capacity for at 3 streams \
+         (1 original + 2 reclaimed). Got {} available. This indicates MAX_STREAMS was sent.",
+        available_after
+    );
+}
+
+#[rstest]
 /// Tests that the stream's fin flag is properly flushed even if there's no
 /// data in the buffer, and that the buffer becomes readable on the other
 /// side.
