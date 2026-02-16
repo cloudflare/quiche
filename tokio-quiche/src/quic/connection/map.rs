@@ -32,7 +32,6 @@ use datagram_socket::DatagramSocketSend;
 use quiche::ConnectionId;
 use quiche::MAX_CONN_ID_LEN;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 const U64_SZ: usize = std::mem::size_of::<u64>();
@@ -96,9 +95,6 @@ impl From<&ConnectionId<'_>> for CidOwned {
     }
 }
 
-/// A unique identifier quiche assigns to a connection.
-type QuicheId = u64;
-
 /// A map for QUIC connections.
 ///
 /// Due to the fact that QUIC connections can be identified by multiple QUIC
@@ -106,41 +102,25 @@ type QuicheId = u64;
 /// connection.
 #[derive(Default)]
 pub(crate) struct ConnectionMap {
-    quic_id_map: BTreeMap<CidOwned, (QuicheId, mpsc::Sender<Incoming>)>,
-    conn_map: HashMap<QuicheId, mpsc::Sender<Incoming>>,
+    quic_id_map: BTreeMap<CidOwned, mpsc::Sender<Incoming>>,
 }
 
 impl ConnectionMap {
     pub(crate) fn insert<Tx, M>(
-        &mut self, cid: ConnectionId<'_>, conn: &InitialQuicConnection<Tx, M>,
+        &mut self, cid: &ConnectionId<'_>, conn: &InitialQuicConnection<Tx, M>,
     ) where
         Tx: DatagramSocketSend + Send + 'static,
         M: Metrics,
     {
-        let id = conn.id;
         let ev_sender = conn.incoming_ev_sender.clone();
-
-        self.conn_map.insert(id, ev_sender.clone());
-        self.quic_id_map.insert((&cid).into(), (id, ev_sender));
+        self.quic_id_map.insert(cid.into(), ev_sender);
     }
 
-    pub(crate) fn remove(&mut self, cid: &ConnectionId<'_>) {
-        if let Some((id, _)) = self.quic_id_map.remove(&cid.into()) {
-            self.conn_map.remove(&id);
-        }
-    }
-
-    pub(crate) fn map_cid<Tx, M>(
-        &mut self, cid: ConnectionId<'_>, conn: &InitialQuicConnection<Tx, M>,
-    ) where
-        Tx: DatagramSocketSend + Send + 'static,
-        M: Metrics,
-    {
-        let id = conn.id;
-
-        if let Some(ev_sender) = self.conn_map.get(&id) {
-            self.quic_id_map
-                .insert((&cid).into(), (id, ev_sender.clone()));
+    pub(crate) fn map_cid(
+        &mut self, existing_cid: &ConnectionId<'_>, new_cid: &ConnectionId<'_>,
+    ) {
+        if let Some(ev_sender) = self.quic_id_map.get(&existing_cid.into()) {
+            self.quic_id_map.insert(new_cid.into(), ev_sender.clone());
         }
     }
 
@@ -155,9 +135,9 @@ impl ConnectionMap {
             // Although both branches run the same code, the one here will
             // generate an optimized version for the length we are
             // using, as opposed to temporary cids sent by clients.
-            self.quic_id_map.get(&id.into()).map(|(_id, sender)| sender)
+            self.quic_id_map.get(&id.into())
         } else {
-            self.quic_id_map.get(&id.into()).map(|(_id, sender)| sender)
+            self.quic_id_map.get(&id.into())
         }
     }
 }

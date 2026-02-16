@@ -613,10 +613,13 @@ impl ProbeBW {
             self.cycle.probe_up_acked += congestion_event.bytes_acked;
         }
 
-        if let Some(probe_up_bytes) = self.cycle.probe_up_bytes.as_mut() {
-            if self.cycle.probe_up_acked >= *probe_up_bytes {
-                let delta = self.cycle.probe_up_acked / *probe_up_bytes;
-                self.cycle.probe_up_acked -= *probe_up_bytes;
+        if let Some(probe_up_bytes) = self.cycle.probe_up_bytes {
+            if self.cycle.probe_up_acked >= probe_up_bytes {
+                let delta = self.cycle.probe_up_acked / probe_up_bytes;
+                // probe_up_acked is set to the remainder mod probe_up_bytes;
+                // probe_up_acked >= delta * probe_up_bytes so this
+                // can't underflow.
+                self.cycle.probe_up_acked -= delta * probe_up_bytes;
                 let new_inflight_hi =
                     self.model.inflight_hi() + delta * DEFAULT_MSS;
                 if new_inflight_hi > self.model.inflight_hi() {
@@ -638,5 +641,89 @@ impl ProbeBW {
         let mut next_mode = Mode::probe_rtt(self.model, self.cycle);
         next_mode.enter(now, congestion_event, params);
         next_mode
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::recovery::gcongestion::bbr2::SendTimeState;
+    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
+
+    #[rstest]
+    fn probe_upward(#[values(100, 10_000, 65_536, 300_000)] step: usize) {
+        let test_event =
+            |probe_bw: &ProbeBW, bytes_acked: usize, end_of_round_trip: bool| {
+                BBRv2CongestionEvent {
+                    event_time: probe_bw.cycle.start_time,
+                    prior_cwnd: probe_bw.model.inflight_hi(),
+                    prior_bytes_in_flight: probe_bw.model.inflight_hi(),
+                    bytes_in_flight: 0,
+                    bytes_acked,
+                    bytes_lost: 0,
+                    end_of_round_trip,
+                    is_probing_for_bandwidth: true,
+                    sample_max_bandwidth: None,
+                    sample_min_rtt: None,
+                    last_packet_send_state: SendTimeState::default(),
+                }
+            };
+
+        let do_probe_up = |probe_bw: &mut ProbeBW,
+                           params: &Params,
+                           total_bytes: usize| {
+            let mut remaining = total_bytes;
+            loop {
+                let congestion_event =
+                    test_event(probe_bw, step.min(remaining), false);
+
+                probe_bw.probe_inflight_high_upward(&congestion_event, params);
+
+                if remaining > step {
+                    remaining -= step;
+                } else {
+                    break;
+                }
+            }
+        };
+
+        let params = &DEFAULT_PARAMS;
+        let model = BBRv2NetworkModel::new(params, Duration::from_millis(333));
+        let cycle = Cycle::default();
+        let mut probe_bw = ProbeBW { model, cycle };
+        probe_bw.model.set_inflight_hi(100_000);
+        probe_bw.raise_inflight_high_slope(100_000);
+        assert_eq!(probe_bw.cycle.probe_up_rounds, 1);
+        assert_eq!(probe_bw.cycle.probe_up_bytes, Some(100_000));
+
+        assert_eq!(probe_bw.model.inflight_hi(), 100_000);
+        do_probe_up(&mut probe_bw, params, 1_000_000);
+        // End inflight_hi should be independent of step size.
+        assert_eq!(probe_bw.model.inflight_hi(), 113_000);
+
+        // Slope is increased at the end of round by decreasing probe_up_bytes.
+        probe_bw.probe_inflight_high_upward(
+            &test_event(&probe_bw, 10_000, true),
+            params,
+        );
+        assert_eq!(probe_bw.cycle.probe_up_rounds, 2);
+        assert_eq!(probe_bw.cycle.probe_up_bytes, Some(56500));
+
+        do_probe_up(&mut probe_bw, params, 1_000_000);
+        // End inflight_hi should be independent of step size.
+        assert_eq!(probe_bw.model.inflight_hi(), 135_100);
+
+        probe_bw.probe_inflight_high_upward(
+            &test_event(&probe_bw, 10_000, true),
+            params,
+        );
+        assert_eq!(probe_bw.cycle.probe_up_rounds, 3);
+        assert_eq!(probe_bw.cycle.probe_up_bytes, Some(33775));
+
+        do_probe_up(&mut probe_bw, params, 1_000_000);
+        // End inflight_hi should be independent of step size.
+        assert_eq!(probe_bw.model.inflight_hi(), 174_100);
     }
 }

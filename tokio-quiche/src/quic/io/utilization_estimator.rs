@@ -147,9 +147,8 @@ impl PartialEq for Estimate {
 impl Eq for Estimate {}
 
 impl PartialOrd for Estimate {
-    #[allow(clippy::non_canonical_partial_ord_impl)]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.bandwidth.partial_cmp(&other.bandwidth)
+        Some(self.cmp(other))
     }
 }
 

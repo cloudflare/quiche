@@ -513,7 +513,7 @@ pub fn create_cid_and_reset_token(
 ) -> (ConnectionId<'static>, u128) {
     let mut cid = vec![0; cid_len];
     rand::rand_bytes(&mut cid[..]);
-    let cid = ConnectionId::from_ref(&cid).into_owned();
+    let cid = ConnectionId::from(cid);
 
     let mut reset_token = [0; 16];
     rand::rand_bytes(&mut reset_token);
@@ -540,5 +540,17 @@ pub fn helper_packet_sent(pkt_num: u64, now: Instant, size: usize) -> Sent {
         lost: 0,
         has_data: true,
         is_pmtud_probe: false,
+    }
+}
+
+// Helper function for testing either stream receive or discard.
+pub fn stream_recv_discard(
+    conn: &mut Connection, discard: bool, stream_id: u64,
+) -> Result<(usize, bool)> {
+    let mut buf = [0; 65535];
+    if discard {
+        conn.stream_discard(stream_id, 65535)
+    } else {
+        conn.stream_recv(stream_id, &mut buf)
     }
 }

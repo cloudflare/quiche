@@ -39,6 +39,7 @@ use crate::buf_factory::PooledBuf;
 use crate::metrics::labels;
 use crate::metrics::quic_expensive_metrics_ip_reduce;
 use crate::metrics::Metrics;
+use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::settings::Config;
 use datagram_socket::DatagramSocketRecv;
 use datagram_socket::DatagramSocketSend;
@@ -114,8 +115,11 @@ struct PollRecvData {
 /// A message to the listener notifiying a mapping for a connection should be
 /// removed.
 pub enum ConnectionMapCommand {
+    MapCid {
+        existing_cid: ConnectionId<'static>,
+        new_cid: ConnectionId<'static>,
+    },
     UnmapCid(ConnectionId<'static>),
-    RemoveScid(ConnectionId<'static>),
 }
 
 /// An `InboundPacketRouter` maintains a map of quic connections and routes
@@ -293,6 +297,7 @@ where
         let NewConnection {
             conn,
             pending_cid,
+            cid_generator,
             handshake_start_time,
             initial_pkt,
         } = new_connection;
@@ -333,6 +338,7 @@ where
             shutdown_tx: shutdown_tx.clone(),
             conn_map_cmd_tx: self.conn_map_cmd_tx.clone(),
             scid: scid.clone(),
+            cid_generator,
             metrics: self.metrics.clone(),
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time,
@@ -348,15 +354,13 @@ where
                 handshake_start_time,
             ));
 
-        self.conns.insert(scid, &conn);
+        self.conns.insert(&scid, &conn);
 
         // Add the client-generated "pending" connection ID to the map as well.
-        //
-        // This is only required when client address validation is disabled.
-        // When validation is enabled, the client is already using the
-        // server-generated connection ID by the time we get here.
+        // This is only required for QUIC servers, because clients can send
+        // Initial packets with arbitrary DCIDs to servers.
         if let Some(pending_cid) = pending_cid {
-            self.conns.map_cid(pending_cid, &conn);
+            self.conns.map_cid(&scid, &pending_cid);
         }
 
         self.metrics.accepted_initial_packet_count().inc();
@@ -605,9 +609,11 @@ where
     fn handle_conn_map_commands(&mut self) {
         while let Ok(req) = self.conn_map_cmd_rx.try_recv() {
             match req {
+                ConnectionMapCommand::MapCid {
+                    existing_cid,
+                    new_cid,
+                } => self.conns.map_cid(&existing_cid, &new_cid),
                 ConnectionMapCommand::UnmapCid(cid) => self.conns.unmap_cid(&cid),
-                ConnectionMapCommand::RemoveScid(scid) =>
-                    self.conns.remove(&scid),
             }
         }
     }
@@ -808,6 +814,7 @@ pub struct NewConnection {
     conn: QuicheConnection,
     pending_cid: Option<ConnectionId<'static>>,
     initial_pkt: Option<Incoming>,
+    cid_generator: Option<SharedConnectionIdGenerator>,
     /// When the handshake started. Should be called before [`quiche::accept`]
     /// or [`quiche::connect`].
     handshake_start_time: Instant,
@@ -911,9 +918,8 @@ mod tests {
                 with_pktinfo: false,
             },
             Arc::clone(&socket_tx),
-            0,
             Default::default(),
-            Box::new(SimpleConnectionIdGenerator),
+            Arc::new(SimpleConnectionIdGenerator),
             DefaultMetrics,
         );
 

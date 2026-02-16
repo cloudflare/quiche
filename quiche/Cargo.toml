@@ -1,6 +1,6 @@
 [package]
 name = "quiche"
-version = "0.24.6"
+version = "0.25.0"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 repository = { workspace = true }
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
@@ -30,6 +30,12 @@ rust-version = "1.85"
 [features]
 default = ["boringssl-vendored"]
 
+# Allow client connections to provide a custom DCID when initiating a
+# connection. Be aware that RFC 9000 places requirements for unpredictability and
+# length on the client DCID field. Enabling this feature can be dangerous if these
+# requirements are not satisfied.
+custom-client-dcid = []
+
 # Build the vendored BoringSSL library.
 boringssl-vendored = []
 
@@ -55,12 +61,15 @@ ffi = ["dep:cdylib-link-lines"]
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
 
+# Enable qlog support with serde_json for extension data
+qlog = ["dep:qlog", "dep:serde_json"]
+
 [package.metadata.release]
 tag-prefix = ""
 
 [package.metadata.docs.rs]
 no-default-features = true
-features = ["boringssl-boring-crate", "qlog"]
+features = ["boringssl-boring-crate", "qlog", "custom-client-dcid"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [build-dependencies]
@@ -70,7 +79,6 @@ cdylib-link-lines = { version = "0.1", optional = true }
 
 [dependencies]
 boring = { workspace = true, optional = true }
-debug_panic = { version = "0.2.1" }
 either = { version = "1.8", default-features = false }
 foreign-types-shared = { version = "0.3.0", optional = true }
 intrusive-collections = "0.9.5"
@@ -79,6 +87,7 @@ libm = "0.2"
 log = { workspace = true, features = ["std"] }
 octets = { workspace = true, features = ["huffman_hpack"] }
 qlog = { workspace = true, optional = true }
+serde_json = { version = "1.0", optional = true }
 sfv = { version = "0.9", optional = true }
 slab = "0.4"
 smallvec = { workspace = true, features = ["union"] }

@@ -47,6 +47,8 @@ use tabled::Tabled;
 use crate::request_stub::find_header_value;
 use crate::request_stub::HttpRequestStub;
 use crate::request_stub::NaOption;
+use crate::trackers::StreamBufferTracker;
+use crate::trackers::StreamMaxTracker;
 use crate::LogFileData;
 use crate::PacketType;
 use crate::QlogPointf32;
@@ -273,6 +275,9 @@ pub struct Datastore {
     pub local_bytes_in_flight: Vec<QlogPointu64>,
     pub local_ssthresh: Vec<QlogPointu64>,
     pub local_pacing_rate: Vec<QlogPointu64>,
+    pub local_delivery_rate: Vec<QlogPointu64>,
+    pub local_send_rate: Vec<QlogPointu64>,
+    pub local_ack_rate: Vec<QlogPointu64>,
 
     pub local_min_rtt: Vec<QlogPointf32>,
     pub local_latest_rtt: Vec<QlogPointf32>,
@@ -282,37 +287,27 @@ pub struct Datastore {
 
     pub received_max_data: Vec<QlogPointu64>,
 
-    pub received_stream_max_data: BTreeMap<u64, Vec<QlogPointu64>>,
-    // This stores just the last max, not every entry. This lets us easily
-    // calculate the cumulative value.
-    pub received_stream_max_data_flat: BTreeMap<u64, u64>,
-    pub sum_received_stream_max_data: Vec<QlogPointu64>,
+    /// Tracks per-stream max data: full history, current max, and cumulative
+    /// sum.
+    pub received_stream_max_data_tracker: StreamMaxTracker,
 
     pub sent_max_data: Vec<QlogPointu64>,
 
-    pub sent_stream_max_data: BTreeMap<u64, Vec<QlogPointu64>>,
-    // This stores just the last max, not every entry. This lets us easily
-    // calculate the cumulative value.
-    pub sent_stream_max_data_flat: BTreeMap<u64, u64>,
-    pub sum_sent_stream_max_data: Vec<QlogPointu64>,
+    /// Tracks per-stream max data: full history, current max, and cumulative
+    /// sum.
+    pub sent_stream_max_data_tracker: StreamMaxTracker,
 
-    pub stream_buffer_reads: BTreeMap<u64, Vec<(f32, StreamAccess)>>,
-    // This stores just the last max, not every entry. This lets us easily
-    // calculate the cumulative value.
-    pub stream_buffer_reads_flat: BTreeMap<u64, u64>,
-    pub sum_stream_buffer_reads: Vec<QlogPointu64>,
+    /// Tracks stream buffer reads: per-stream history, current max, and running
+    /// sum.
+    pub stream_buffer_reads_tracker: StreamBufferTracker,
 
-    pub stream_buffer_writes: BTreeMap<u64, Vec<(f32, StreamAccess)>>,
-    // This stores just the last max, not every entry. This lets us easily
-    // calculate the cumulative value.
-    pub stream_buffer_writes_flat: BTreeMap<u64, u64>,
-    pub sum_stream_buffer_writes: Vec<QlogPointu64>,
+    /// Tracks stream buffer writes: per-stream history, current max, and
+    /// running sum.
+    pub stream_buffer_writes_tracker: StreamBufferTracker,
 
-    pub stream_buffer_dropped: BTreeMap<u64, Vec<(f32, StreamAccess)>>,
-    // This stores just the last max, not every entry. This lets us easily
-    // calculate the cumulative value.
-    pub stream_buffer_dropped_flat: BTreeMap<u64, u64>,
-    pub sum_stream_buffer_dropped: Vec<QlogPointu64>,
+    /// Tracks stream buffer dropped: per-stream history, current max, and
+    /// running sum.
+    pub stream_buffer_dropped_tracker: StreamBufferTracker,
 
     pub received_reset_stream: BTreeMap<u64, Vec<QuicFrame>>,
     pub sent_reset_stream: BTreeMap<u64, Vec<QuicFrame>>,
@@ -343,8 +338,10 @@ pub struct Datastore {
     pub largest_data_frame_tx_length_global: u64,
 
     pub local_init_max_stream_data_bidi_local: u64,
+    pub local_init_max_stream_data_uni: u64,
     pub peer_init_max_stream_data_bidi_local: u64,
     pub peer_init_max_stream_data_bidi_remote: u64,
+    pub peer_init_max_stream_data_uni: u64,
 
     pub h2_recv_window_updates: BTreeMap<u32, Vec<(f32, i32)>>,
 
@@ -375,6 +372,10 @@ pub struct Datastore {
     pub h2_session_close: Option<H2SessionClose>,
 
     pub h2_concurrent_requests: u64,
+}
+
+fn is_bidi(stream_id: u64) -> bool {
+    (stream_id & 0x2) == 0
 }
 
 impl Datastore {
@@ -806,12 +807,13 @@ impl Datastore {
         let rel_event_time = (ev_hdr.time_num - session_start_time) as f32;
 
         match ev {
-            Http2SessionSendSettings(e) =>
+            Http2SessionSendSettings(e) => {
                 match Http2Settings::try_from(e.params.settings.as_slice()) {
                     Ok(v) => self.h2_client_settings = v,
 
                     Err(e) => error!("{}", e),
-                },
+                }
+            },
 
             Http2SessionRecvSetting(e) => {
                 let re = Regex::new(H2_RECV_SETTING_PATTERN).unwrap();
@@ -1186,6 +1188,10 @@ impl Datastore {
                 {
                     self.local_init_max_stream_data_bidi_local = max_stream_data;
                 }
+
+                if let Some(max_stream_data) = tp.initial_max_stream_data_uni {
+                    self.local_init_max_stream_data_uni = max_stream_data;
+                }
             },
 
             Some(TransportOwner::Remote) => {
@@ -1203,6 +1209,10 @@ impl Datastore {
                     tp.initial_max_stream_data_bidi_remote
                 {
                     self.peer_init_max_stream_data_bidi_remote = max_stream_data;
+                }
+
+                if let Some(max_stream_data) = tp.initial_max_stream_data_uni {
+                    self.peer_init_max_stream_data_uni = max_stream_data;
                 }
             },
 
@@ -1281,21 +1291,13 @@ impl Datastore {
                     },
 
                     QuicFrame::MaxStreamData { stream_id, maximum } => {
-                        let init_val = self.peer_init_max_stream_data_bidi_remote;
-                        let s: &mut Vec<(f32, u64)> = self
-                            .received_stream_max_data
-                            .entry(*stream_id)
-                            .or_insert_with(|| vec![(0.0, init_val)]);
-
-                        s.push((ev_time, *maximum));
-
-                        self.received_stream_max_data_flat
-                            .insert(*stream_id, *maximum);
-
-                        let sum =
-                            self.received_stream_max_data_flat.values().sum();
-
-                        self.sum_received_stream_max_data.push((ev_time, sum));
+                        let init_val = if is_bidi(*stream_id) {
+                            self.peer_init_max_stream_data_bidi_remote
+                        } else {
+                            self.peer_init_max_stream_data_uni
+                        };
+                        self.received_stream_max_data_tracker
+                            .update(*stream_id, *maximum, ev_time, init_val);
                     },
 
                     QuicFrame::ResetStream { stream_id, .. } => {
@@ -1381,20 +1383,13 @@ impl Datastore {
                     },
 
                     QuicFrame::MaxStreamData { stream_id, maximum } => {
-                        let init_val = self.local_init_max_stream_data_bidi_local;
-                        let s = self
-                            .sent_stream_max_data
-                            .entry(*stream_id)
-                            .or_insert_with(|| vec![(0.0, init_val)]);
-
-                        s.push((ev_time, *maximum));
-
-                        self.sent_stream_max_data_flat
-                            .insert(*stream_id, *maximum);
-
-                        let sum = self.sent_stream_max_data_flat.values().sum();
-
-                        self.sum_sent_stream_max_data.push((event_time, sum));
+                        let init_val = if is_bidi(*stream_id) {
+                            self.local_init_max_stream_data_bidi_local
+                        } else {
+                            self.local_init_max_stream_data_uni
+                        };
+                        self.sent_stream_max_data_tracker
+                            .update(*stream_id, *maximum, ev_time, init_val);
                     },
 
                     QuicFrame::ResetStream { stream_id, .. } => {
@@ -1451,41 +1446,23 @@ impl Datastore {
         &mut self, dm: &qlog::events::quic::DataMoved, ev_time: f32,
     ) {
         if let Some(recipient) = &dm.to {
-            let (data, data_flat, sum_data) = match recipient {
-                // stream read
-                qlog::events::DataRecipient::Application => (
-                    &mut self.stream_buffer_reads,
-                    &mut self.stream_buffer_reads_flat,
-                    &mut self.sum_stream_buffer_reads,
-                ),
-
-                // stream write
-                qlog::events::DataRecipient::Transport => (
-                    &mut self.stream_buffer_writes,
-                    &mut self.stream_buffer_writes_flat,
-                    &mut self.sum_stream_buffer_writes,
-                ),
-
-                // stream data dropped
-                qlog::events::DataRecipient::Dropped => (
-                    &mut self.stream_buffer_dropped,
-                    &mut self.stream_buffer_dropped_flat,
-                    &mut self.sum_stream_buffer_dropped,
-                ),
-
+            let tracker = match recipient {
+                qlog::events::DataRecipient::Application =>
+                    &mut self.stream_buffer_reads_tracker,
+                qlog::events::DataRecipient::Transport =>
+                    &mut self.stream_buffer_writes_tracker,
+                qlog::events::DataRecipient::Dropped =>
+                    &mut self.stream_buffer_dropped_tracker,
                 _ => todo!(),
             };
 
             if let Some(stream_id) = dm.stream_id {
-                let s = data.entry(stream_id).or_default();
-
                 if let (Some(offset), Some(length)) = (dm.offset, dm.length) {
-                    s.push((ev_time, StreamAccess { offset, length }));
-
-                    data_flat.insert(stream_id, offset + length);
-
-                    let sum = data_flat.values().sum();
-                    sum_data.push((ev_time, sum));
+                    tracker.update(
+                        stream_id,
+                        StreamAccess { offset, length },
+                        ev_time,
+                    );
                 }
             }
         }
@@ -1520,6 +1497,24 @@ impl Datastore {
 
         if let Some(pacing_rate) = mu.pacing_rate {
             self.local_pacing_rate.push((ev_time, pacing_rate));
+        }
+
+        // Extract rate metrics from ex_data
+        if let Some(rate) =
+            mu.ex_data.get("cf_delivery_rate").and_then(|v| v.as_u64())
+        {
+            self.local_delivery_rate.push((ev_time, rate));
+        }
+
+        if let Some(rate) =
+            mu.ex_data.get("cf_send_rate").and_then(|v| v.as_u64())
+        {
+            self.local_send_rate.push((ev_time, rate));
+        }
+
+        if let Some(rate) = mu.ex_data.get("cf_ack_rate").and_then(|v| v.as_u64())
+        {
+            self.local_ack_rate.push((ev_time, rate));
         }
     }
 

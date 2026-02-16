@@ -32,6 +32,7 @@ use smallvec::SmallVec;
 use super::connectivity::TransportOwner;
 use super::Bytes;
 use super::DataRecipient;
+use super::ExData;
 use super::RawInfo;
 use super::Token;
 use crate::HexSlice;
@@ -756,6 +757,12 @@ pub struct RecoveryParametersSet {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct MetricsUpdated {
+    /// Extension data for non-standard fields. `flatten` causes these fields to
+    /// be serialized into the `data` field of a qlog event. On deserialize,
+    /// unknown fields are collected into `ex_data`.
+    #[serde(flatten)]
+    pub ex_data: ExData,
+
     pub min_rtt: Option<f32>,
     pub smoothed_rtt: Option<f32>,
     pub latest_rtt: Option<f32>,
@@ -808,27 +815,4 @@ pub struct PacketLost {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct MarkedForRetransmit {
     pub frames: Vec<QuicFrame>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::testing::*;
-
-    #[test]
-    fn packet_header() {
-        let pkt_hdr = make_pkt_hdr(PacketType::Initial);
-
-        let log_string = r#"{
-  "packet_type": "initial",
-  "packet_number": 0,
-  "version": "1",
-  "scil": 8,
-  "dcil": 8,
-  "scid": "7e37e4dcc6682da8",
-  "dcid": "36ce104eee50101c"
-}"#;
-
-        assert_eq!(serde_json::to_string_pretty(&pkt_hdr).unwrap(), log_string);
-    }
 }

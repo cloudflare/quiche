@@ -47,6 +47,7 @@ use crate::quic::connection::ApplicationOverQuic;
 use crate::quic::connection::HandshakeError;
 use crate::quic::connection::Incoming;
 use crate::quic::connection::QuicConnectionStats;
+use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::quic::router::ConnectionMapCommand;
 use crate::quic::QuicheConnection;
 use crate::QuicResult;
@@ -110,6 +111,7 @@ pub(crate) struct IoWorkerParams<Tx, M> {
     pub(crate) audit_log_stats: Arc<QuicAuditStats>,
     pub(crate) write_state: WriteState,
     pub(crate) conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>,
+    pub(crate) cid_generator: Option<SharedConnectionIdGenerator>,
     #[cfg(feature = "perf-quic-listener-metrics")]
     pub(crate) init_rx_time: Option<SystemTime>,
     pub(crate) metrics: M,
@@ -125,6 +127,7 @@ pub(crate) struct IoWorker<Tx, M, S> {
     audit_log_stats: Arc<QuicAuditStats>,
     write_state: WriteState,
     conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>,
+    cid_generator: Option<SharedConnectionIdGenerator>,
     #[cfg(feature = "perf-quic-listener-metrics")]
     init_rx_time: Option<SystemTime>,
     metrics: M,
@@ -151,11 +154,62 @@ where
             audit_log_stats: params.audit_log_stats,
             write_state: params.write_state,
             conn_map_cmd_tx: params.conn_map_cmd_tx,
+            cid_generator: params.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: params.init_rx_time,
             metrics: params.metrics,
             conn_stage,
             bw_estimator,
+        }
+    }
+
+    fn fill_available_scids(&self, qconn: &mut QuicheConnection) {
+        if qconn.scids_left() == 0 {
+            return;
+        }
+        let Some(cid_generator) = self.cid_generator.as_deref() else {
+            return;
+        };
+
+        let current_cid = qconn.source_id().into_owned();
+        for _ in 0..qconn.scids_left() {
+            // We don't emit stateless resets, so any unguessable value is fine
+            let reset_token = random_u128();
+            let new_cid = cid_generator.new_connection_id();
+
+            if self
+                .conn_map_cmd_tx
+                .send(ConnectionMapCommand::MapCid {
+                    existing_cid: current_cid.clone(),
+                    new_cid: new_cid.clone(),
+                })
+                .is_err()
+            {
+                // Can't do anything if the connection map is gone
+                return;
+            }
+
+            if qconn.new_scid(&new_cid, reset_token, false).is_err() {
+                // This only fails if we have reached the CID limit already
+                return;
+            }
+        }
+    }
+
+    fn unmap_cid(&self, cid: ConnectionId<'static>) {
+        // If the connection map is gone, the ID is already "unmapped"
+        let _ = self
+            .conn_map_cmd_tx
+            .send(ConnectionMapCommand::UnmapCid(cid));
+    }
+
+    fn refresh_connection_ids(&self, qconn: &mut QuicheConnection) {
+        // Top up the connection's active CIDs
+        self.fill_available_scids(qconn);
+
+        // Remove retired CIDs from the ingress router
+        while let Some(retired_cid) = qconn.retired_scid_next() {
+            self.unmap_cid(retired_cid);
         }
     }
 
@@ -191,6 +245,7 @@ where
                 }
 
                 self.conn_stage.on_read(did_recv, qconn, ctx)?;
+                self.refresh_connection_ids(qconn);
 
                 let can_release = match self.write_state.next_release_time {
                     None => true,
@@ -213,7 +268,13 @@ where
                         return Ok(());
                     }
 
+                    let mut flush_operation_token =
+                        TrackMidHandshakeFlush::new(self.metrics.clone());
+
                     self.flush_buffer_to_socket(ctx.buffer()).await;
+
+                    flush_operation_token.mark_complete();
+
                     packets_sent += self.write_state.num_pkts;
 
                     if let ControlFlow::Break(reason) =
@@ -635,8 +696,18 @@ where
         &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
     ) -> QuicResult<()> {
         if quic_application.should_act() {
+            // Poll the application to make progress.
+            //
+            // Once the connection has been established (i.e. the handshake is
+            // complete), we only poll the application.
+            //
+            // The exception is 0-RTT in TLS 1.3, where the full handshake is
+            // still in progress but we have 0-RTT keys to process early data.
+            // This means TLS callbacks might only be polled on the next timeout
+            // or when a packet is received from the peer.
             quic_application.wait_for_data(qconn).await
         } else {
+            // Poll quiche to make progress on handshake callbacks.
             self.wait_for_quiche(qconn, quic_application).await
         }
     }
@@ -719,8 +790,8 @@ where
         A: ApplicationOverQuic,
     {
         // This makes an assumption that the waker being set in ex_data is stable
-        // accross the active task's lifetime. Moving a future that encompasses an
-        // async callback from this task accross a channel, for example, will
+        // across the active task's lifetime. Moving a future that encompasses an
+        // async callback from this task across a channel, for example, will
         // cause issues as this waker will then be stale and attempt to
         // wake the wrong task.
         std::future::poll_fn(|cx| {
@@ -791,9 +862,7 @@ where
         }
 
         if let Some(cid) = self.cfg.pending_cid.take() {
-            let _ = self
-                .conn_map_cmd_tx
-                .send(ConnectionMapCommand::UnmapCid(cid));
+            self.unmap_cid(cid);
         }
 
         Ok(())
@@ -809,6 +878,7 @@ impl<Tx, M, S> From<IoWorker<Tx, M, S>> for IoWorkerParams<Tx, M> {
             audit_log_stats: value.audit_log_stats,
             write_state: value.write_state,
             conn_map_cmd_tx: value.conn_map_cmd_tx,
+            cid_generator: value.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: value.init_rx_time,
             metrics: value.metrics,
@@ -910,18 +980,16 @@ where
         }
     }
 
-    fn close_connection(&mut self, qconn: &QuicheConnection) {
-        let scid = qconn.source_id().into_owned();
-
+    fn close_connection(&mut self, qconn: &mut QuicheConnection) {
         if let Some(cid) = self.cfg.pending_cid.take() {
-            let _ = self
-                .conn_map_cmd_tx
-                .send(ConnectionMapCommand::UnmapCid(cid));
+            self.unmap_cid(cid);
         }
-
-        let _ = self
-            .conn_map_cmd_tx
-            .send(ConnectionMapCommand::RemoveScid(scid));
+        while let Some(retired_cid) = qconn.retired_scid_next() {
+            self.unmap_cid(retired_cid);
+        }
+        for cid in qconn.source_ids().cloned() {
+            self.unmap_cid(cid.into_owned());
+        }
 
         self.metrics.connections_in_memory().dec();
     }
@@ -934,4 +1002,38 @@ fn min_of_some<T: Ord>(v1: Option<T>, v2: Option<T>) -> Option<T> {
         (Some(v), _) | (_, Some(v)) => Some(v),
         (None, None) => None,
     }
+}
+
+/// A Token which increment the skipped_mid_handshake_flush_count metric on
+/// `Drop` unless it is marked complete.
+struct TrackMidHandshakeFlush<M: Metrics> {
+    complete: bool,
+    metrics: M,
+}
+
+impl<M: Metrics> TrackMidHandshakeFlush<M> {
+    fn new(metrics: M) -> Self {
+        Self {
+            complete: false,
+            metrics,
+        }
+    }
+
+    fn mark_complete(&mut self) {
+        self.complete = true;
+    }
+}
+
+impl<M: Metrics> Drop for TrackMidHandshakeFlush<M> {
+    fn drop(&mut self) {
+        if !self.complete {
+            self.metrics.skipped_mid_handshake_flush_count().inc();
+        }
+    }
+}
+
+fn random_u128() -> u128 {
+    let mut buf = [0; 16];
+    boring::rand::rand_bytes(&mut buf).expect("boring's RAND_bytes never fails");
+    u128::from_ne_bytes(buf)
 }

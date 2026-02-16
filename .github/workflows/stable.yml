@@ -41,7 +41,9 @@ jobs:
           components: clippy
 
       - name: Install qlog-dancer dependencies
-        run: sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
 
       - name: Unused dependency check
         if: ${{ matrix.tls-feature == '' }}
@@ -108,7 +110,7 @@ jobs:
     strategy:
       matrix:
         target:
-          - "macos-13"     # Intel (x86_64)
+          - "macos-15-intel"     # Intel (x86_64)
           - "macos-latest" # Apple Silicon (M1)
     runs-on: ${{ matrix.target }}
     # Only run on "pull_request" event for external PRs. This is to avoid
@@ -167,6 +169,13 @@ jobs:
     strategy:
       matrix:
         target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc", "x86_64-pc-windows-gnu", "i686-pc-windows-gnu"]
+        include:
+          - target: "i686-pc-windows-gnu"
+            cflags: "-mlong-double-64" # bindgen detects that Rust doesn't support 80-bit long double
+    env:
+      CFLAGS: ${{ matrix.cflags }}
+      CXXFLAGS: ${{ matrix.cflags }}
+      BINDGEN_EXTRA_CLANG_ARGS: ${{ matrix.cflags }}
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository

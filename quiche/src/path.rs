@@ -248,7 +248,7 @@ impl Path {
                         .unwrap_or(c.max_send_udp_payload_size),
                     c.max_send_udp_payload_size,
                 );
-                Some(pmtud::Pmtud::new(maximum_supported_mtu))
+                Some(pmtud::Pmtud::new(maximum_supported_mtu, c.pmtud_max_probes))
             } else {
                 None
             }
@@ -518,6 +518,20 @@ impl Path {
         self.total_pto_count += 1;
 
         outcome
+    }
+
+    /// Returns true if the path's recovery module hasn't processed any non-ACK
+    /// packets, and it is still OK to fully reinitialize the recovery module to
+    /// pickup changes to congestion control config.
+    pub fn can_reinit_recovery(&self) -> bool {
+        // The recovery module can be reinitialized until the connection attempts
+        // to send a packet with inflight data. The congestion
+        // controller doesn't track anything interesting until inflight
+        // data is sent. Handshake ACKs may be sent prior to arrival of
+        // the full ClientHello, but the send of ACK only packets
+        // shouldn't prevent the reinit of the recovery module.
+        self.recovery.bytes_in_flight() == 0 &&
+            self.recovery.bytes_in_flight_duration() == Duration::ZERO
     }
 
     pub fn reinit_recovery(
@@ -889,10 +903,14 @@ impl PathMap {
     /// Configures path MTU discovery on all existing paths.
     pub fn set_discover_pmtu_on_existing_paths(
         &mut self, discover: bool, max_send_udp_payload_size: usize,
+        pmtud_max_probes: u8,
     ) {
         for (_, path) in self.paths.iter_mut() {
             path.pmtud = if discover {
-                Some(pmtud::Pmtud::new(max_send_udp_payload_size))
+                Some(pmtud::Pmtud::new(
+                    max_send_udp_payload_size,
+                    pmtud_max_probes,
+                ))
             } else {
                 None
             };

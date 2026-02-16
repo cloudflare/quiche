@@ -82,6 +82,14 @@ impl RecvBufResetReturn {
     }
 }
 
+/// Action to perform when reading from a stream's receive buffer.
+pub enum RecvAction<'a> {
+    /// Emit data by copying it into the provided buffer.
+    Emit { out: &'a mut [u8] },
+    /// Discard up to the specified number of bytes without copying.
+    Discard { len: usize },
+}
+
 impl std::hash::Hasher for StreamIdHasher {
     #[inline]
     fn finish(&self) -> u64 {
@@ -834,44 +842,41 @@ impl PartialEq for StreamPriorityKey {
 impl Eq for StreamPriorityKey {}
 
 impl PartialOrd for StreamPriorityKey {
-    // Priority ordering is complex, disable Clippy warning.
-    #[allow(clippy::non_canonical_partial_ord_impl)]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        // Ignore priority if ID matches.
-        if self.id == other.id {
-            return Some(cmp::Ordering::Equal);
-        }
-
-        // First, order by urgency...
-        if self.urgency != other.urgency {
-            return self.urgency.partial_cmp(&other.urgency);
-        }
-
-        // ...when the urgency is the same, and both are not incremental, order
-        // by stream ID...
-        if !self.incremental && !other.incremental {
-            return self.id.partial_cmp(&other.id);
-        }
-
-        // ...non-incremental takes priority over incremental...
-        if self.incremental && !other.incremental {
-            return Some(cmp::Ordering::Greater);
-        }
-        if !self.incremental && other.incremental {
-            return Some(cmp::Ordering::Less);
-        }
-
-        // ...finally, when both are incremental, `other` takes precedence (so
-        // `self` is always sorted after other same-urgency incremental
-        // entries).
-        Some(cmp::Ordering::Greater)
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for StreamPriorityKey {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        // `partial_cmp()` never returns `None`, so this should be safe.
-        self.partial_cmp(other).unwrap()
+        // Ignore priority if ID matches.
+        if self.id == other.id {
+            return cmp::Ordering::Equal;
+        }
+
+        // First, order by urgency...
+        if self.urgency != other.urgency {
+            return self.urgency.cmp(&other.urgency);
+        }
+
+        // ...when the urgency is the same, and both are not incremental, order
+        // by stream ID...
+        if !self.incremental && !other.incremental {
+            return self.id.cmp(&other.id);
+        }
+
+        // ...non-incremental takes priority over incremental...
+        if self.incremental && !other.incremental {
+            return cmp::Ordering::Greater;
+        }
+        if !self.incremental && other.incremental {
+            return cmp::Ordering::Less;
+        }
+
+        // ...finally, when both are incremental, `other` takes precedence (so
+        // `self` is always sorted after other same-urgency incremental
+        // entries).
+        cmp::Ordering::Greater
     }
 }
 

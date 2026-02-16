@@ -179,6 +179,7 @@ where
                 conn,
                 pending_cid: None,
                 initial_pkt: None,
+                cid_generator: None,
                 handshake_start_time,
             }))
         } else if conn.is_closed() {

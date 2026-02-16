@@ -491,9 +491,8 @@ fn main() {
                     client.conn.max_send_udp_payload_size();
             }
 
-            if client.http_conn.is_some() {
+            if let Some(http_conn) = client.http_conn.as_mut() {
                 let conn = &mut client.conn;
-                let http_conn = client.http_conn.as_mut().unwrap();
                 let partial_responses = &mut client.partial_responses;
 
                 // Visit all writable response streams to send any remaining HTTP

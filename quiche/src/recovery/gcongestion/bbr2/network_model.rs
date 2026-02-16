@@ -36,7 +36,6 @@ use crate::recovery::gcongestion::bbr::BandwidthSampler;
 use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::gcongestion::Lost;
-use crate::recovery::rtt::RttStats;
 
 use super::Acked;
 use super::BBRv2CongestionEvent;
@@ -187,6 +186,11 @@ pub(super) struct BBRv2NetworkModel {
     /// Determines whether app limited rounds with no bandwidth growth count
     /// towards the rounds threshold to exit startup.
     ignore_app_limited_for_no_bandwidth_growth: bool,
+
+    /// The most recent send rate from the BandwidthSampler.
+    latest_send_rate: Option<Bandwidth>,
+    /// The most recent ack rate from the BandwidthSampler.
+    latest_ack_rate: Option<Bandwidth>,
 }
 
 impl BBRv2NetworkModel {
@@ -231,7 +235,20 @@ impl BBRv2NetworkModel {
 
             ignore_app_limited_for_no_bandwidth_growth: params
                 .ignore_app_limited_for_no_bandwidth_growth,
+
+            latest_send_rate: None,
+            latest_ack_rate: None,
         }
+    }
+
+    #[cfg(feature = "qlog")]
+    pub(super) fn send_rate(&self) -> Option<Bandwidth> {
+        self.latest_send_rate
+    }
+
+    #[cfg(feature = "qlog")]
+    pub(super) fn ack_rate(&self) -> Option<Bandwidth> {
+        self.latest_ack_rate
     }
 
     pub(super) fn max_ack_height(&self) -> usize {
@@ -272,7 +289,6 @@ impl BBRv2NetworkModel {
     pub(super) fn on_packet_sent(
         &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
-        _rtt_stats: &RttStats,
     ) {
         // Updating the min here ensures a more realistic (0) value when flows
         // exit quiescence.
@@ -349,6 +365,9 @@ impl BBRv2NetworkModel {
             congestion_event.sample_min_rtt = Some(rtt_sample);
             self.min_rtt_filter.update(rtt_sample, event_time);
         }
+
+        self.latest_send_rate = sample.sample_max_send_rate;
+        self.latest_ack_rate = sample.sample_max_ack_rate;
 
         congestion_event.bytes_acked =
             self.total_bytes_acked() - prior_bytes_acked;
@@ -500,10 +519,11 @@ impl BBRv2NetworkModel {
         // sample_max_bandwidth will be None if the loss is triggered by a timer
         // expiring. Ideally we'd use the most recent bandwidth sample,
         // but bandwidth_latest is safer than None.
-        if congestion_event.sample_max_bandwidth.is_some() {
+        if let Some(sample_max_bandwidth) = congestion_event.sample_max_bandwidth
+        {
             // bandwidth_latest is the max bandwidth for the round, but to allow
             // fast, conservation style response to loss, use the last sample.
-            last_bandwidth = congestion_event.sample_max_bandwidth.unwrap();
+            last_bandwidth = sample_max_bandwidth;
         }
         if self.pacing_gain > params.full_bw_threshold {
             // In STARTUP, `pacing_gain` is applied to `bandwidth_lo` in

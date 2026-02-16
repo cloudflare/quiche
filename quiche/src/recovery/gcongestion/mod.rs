@@ -78,7 +78,6 @@ pub(super) trait CongestionControl: Debug {
     fn on_packet_sent(
         &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
-        rtt_stats: &RttStats,
     );
 
     /// Inform that `packet_number` has been neutered.
@@ -228,6 +227,12 @@ pub struct BbrParams {
     /// Disable `has_stayed_long_enough_in_probe_down` which can cause ProbeDown
     /// to exit early.
     pub disable_probe_down_early_exit: Option<bool>,
+
+    /// Set the expected send time for packets when using BBR to `now`
+    /// instead of `get_next_release_time()`.  Setting the time based
+    /// on `get_next_release_time()` can result in artificially low
+    /// minRTT measurements which will make BBR misbehave.
+    pub time_sent_set_to_now: Option<bool>,
 }
 
 /// Controls BBR's bandwidth reduction strategy on congestion event.

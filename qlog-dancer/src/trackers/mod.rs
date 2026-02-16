@@ -1,4 +1,4 @@
-// Copyright (C) 2022, Cloudflare, Inc.
+// Copyright (C) 2026, Cloudflare, Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -24,37 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use super::*;
+pub mod stream_buffer_tracker;
+pub mod stream_max_tracker;
 
-// BBR2 Transmit Packet Pacing Functions
-//
-
-// 4.6.2.  Pacing Rate: BBR.pacing_rate
-pub fn bbr2_init_pacing_rate(r: &mut Congestion) {
-    let bbr = &mut r.bbr2_state;
-
-    let srtt = r.initial_rtt.as_secs_f64();
-
-    // At init, cwnd is initcwnd.
-    let nominal_bandwidth = r.congestion_window as f64 / srtt;
-
-    bbr.pacing_rate = (STARTUP_PACING_GAIN * nominal_bandwidth) as u64;
-    bbr.init_pacing_rate = (STARTUP_PACING_GAIN * nominal_bandwidth) as u64;
-}
-
-pub fn bbr2_set_pacing_rate_with_gain(r: &mut Congestion, pacing_gain: f64) {
-    let rate = (pacing_gain *
-        r.bbr2_state.bw as f64 *
-        (1.0 - PACING_MARGIN_PERCENT)) as u64;
-
-    if r.bbr2_state.filled_pipe ||
-        rate > r.bbr2_state.pacing_rate ||
-        r.bbr2_state.pacing_rate == r.bbr2_state.init_pacing_rate
-    {
-        r.bbr2_state.pacing_rate = rate;
-    }
-}
-
-pub fn bbr2_set_pacing_rate(r: &mut Congestion) {
-    bbr2_set_pacing_rate_with_gain(r, r.bbr2_state.pacing_gain);
-}
+pub use stream_buffer_tracker::StreamBufferTracker;
+pub use stream_max_tracker::StreamMaxTracker;
