@@ -4061,11 +4061,10 @@ impl<F: BufFactory> Connection<F> {
                         stream_id,
                         error_code,
                         final_size,
-                    } =>
-                        if self.streams.get(stream_id).is_some() {
-                            self.streams
-                                .insert_reset(stream_id, error_code, final_size);
-                        },
+                    } => {
+                        self.streams
+                            .insert_reset(stream_id, error_code, final_size);
+                    },
 
                     // Retransmit HANDSHAKE_DONE only if it hasn't been acked at
                     // least once already.

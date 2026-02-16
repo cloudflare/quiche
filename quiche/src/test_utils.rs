@@ -554,3 +554,47 @@ pub fn stream_recv_discard(
         conn.stream_recv(stream_id, &mut buf)
     }
 }
+
+/// Triggers ACK-based loss detection for packets sent by `sender` before this
+/// call.
+///
+/// This works by sending multiple PING packets from the sender and having the
+/// receiver ACK them. Since loss detection uses a packet threshold, this
+/// function sends as many packets as needed to ensure any previously
+/// unacknowledged packets from the sender are detected as lost.
+#[cfg(test)]
+pub fn trigger_ack_based_loss(
+    sender: &mut Connection, receiver: &mut Connection,
+) {
+    let mut buf = [0; 65535];
+
+    // Use the active path's packet loss threshold.
+    let pkt_thresh = sender
+        .paths
+        .get_active()
+        .unwrap()
+        .recovery
+        .pkt_thresh()
+        .unwrap();
+
+    for _ in 0..pkt_thresh {
+        sender.send_ack_eliciting().unwrap();
+        let (len, _) = sender.send(&mut buf).unwrap();
+
+        let info = RecvInfo {
+            to: receiver.paths.get_active().unwrap().local_addr(),
+            from: receiver.paths.get_active().unwrap().peer_addr(),
+        };
+        receiver.recv(&mut buf[..len], info).unwrap();
+    }
+
+    // Receiver sends ACK for the new packets.
+    let (ack_len, _) = receiver.send(&mut buf).unwrap();
+
+    // Sender receives ACK, triggering loss detection.
+    let info = RecvInfo {
+        to: sender.paths.get_active().unwrap().local_addr(),
+        from: sender.paths.get_active().unwrap().peer_addr(),
+    };
+    sender.recv(&mut buf[..ack_len], info).unwrap();
+}

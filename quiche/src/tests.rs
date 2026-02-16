@@ -11454,6 +11454,90 @@ fn connect_custom_client_dcid() {
     assert!(pipe.server.handshake_confirmed);
 }
 
+#[rstest]
+/// Tests that RESET_STREAM is retransmitted when the packet containing it is
+/// lost, even if the stream has been collected.
+fn reset_stream_retransmit_after_stream_collected(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client sends some data on stream 0.
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server receives and reads the data.
+    assert_eq!(
+        stream_recv_discard(&mut pipe.server, false, 0),
+        Ok((5, true))
+    );
+    assert!(pipe.server.stream_finished(0));
+
+    // Server sends data back on stream 0, until blocked by flow control.
+    while pipe.server.stream_send(0, b"world", false) != Err(Error::Done) {
+        assert_eq!(pipe.advance(), Ok(()));
+    }
+
+    // Client sends STOP_SENDING to trigger RESET_STREAM from server.
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let pkt_type = Type::Short;
+
+    // send_pkt_to_server() causes the server to receive a STOP_SENDING and
+    // respond with a RESET_STREAM. However, we won't deliver the packet back to
+    // the client and instead just check its contents with decode_pkt()
+    let len = pipe
+        .send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+    let has_reset_stream = frames.iter().any(|f| {
+        matches!(f, frame::Frame::ResetStream {
+            stream_id: 0,
+            error_code: 42,
+            final_size: 15,
+        })
+    });
+    assert!(has_reset_stream, "Expected RESET_STREAM in response");
+
+    // Now the application tries to write to the stream, which will return
+    // StreamStopped error and cause the stream to be collected.
+    assert_eq!(
+        pipe.server.stream_writable(0, 1),
+        Err(Error::StreamStopped(42))
+    );
+
+    // Stream 0 should now be collected.
+    assert_eq!(pipe.server.streams.len(), 0);
+
+    // Trigger loss detection for the first RESET_STREAM packet and subsequent
+    // retransmission. Confirm the new packet contains RESET_STREAM.
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+    let has_reset_stream = frames.iter().any(|f| {
+        matches!(f, frame::Frame::ResetStream {
+            stream_id: 0,
+            error_code: 42,
+            final_size: 15,
+        })
+    });
+
+    assert!(
+        has_reset_stream,
+        "RESET_STREAM should be retransmitted even after stream is collected"
+    );
+}
+
 #[cfg(feature = "custom-client-dcid")]
 #[rstest]
 fn connect_custom_client_dcid_too_short() {
