@@ -9000,6 +9000,7 @@ impl std::fmt::Debug for Stats {
 }
 
 #[doc(hidden)]
+#[cfg(any(test, feature = "internal"))]
 pub mod test_utils;
 
 #[cfg(test)]
