@@ -646,22 +646,22 @@ impl QlogMetrics {
 
         if self.lost_packets != latest.lost_packets {
             if let Some(val) = latest.lost_packets {
-                self.lost_packets = latest.lost_packets;
                 emit_event = true;
                 ex_data.insert("cf_lost_packets", TotalAndDelta {
                     total: latest.lost_packets,
                     delta: Some(val - self.lost_packets.unwrap_or(0)),
                 });
+                self.lost_packets = latest.lost_packets;
             }
         }
         if self.lost_bytes != latest.lost_bytes {
             if let Some(val) = latest.lost_bytes {
-                self.lost_bytes = latest.lost_bytes;
                 emit_event = true;
                 ex_data.insert("cf_lost_bytes", TotalAndDelta {
                     total: latest.lost_bytes,
                     delta: Some(val - self.lost_bytes.unwrap_or(0)),
                 });
+                self.lost_bytes = latest.lost_bytes;
             }
         }
 
