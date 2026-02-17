@@ -536,7 +536,8 @@ impl CfExData {
 
     fn insert<T: Serialize>(&mut self, name: &'static str, value: T) {
         let field = CustomQlogField::new(name, value);
-        self.0.insert(field.name().to_string(), field.as_json_value());
+        self.0
+            .insert(field.name().to_string(), field.as_json_value());
     }
 
     fn into_inner(self) -> qlog::events::ExData {
