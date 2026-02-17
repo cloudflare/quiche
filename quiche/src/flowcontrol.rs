@@ -127,7 +127,8 @@ impl FlowControl {
     /// the current window.
     pub fn ensure_window_lower_bound(&mut self, min_window: u64) {
         if min_window > self.window {
-            self.window = min_window;
+            // ... we still need to clamp to `max_window`
+            self.window = std::cmp::min(min_window, self.max_window);
         }
     }
 }

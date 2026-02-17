@@ -3697,7 +3697,7 @@ fn stream_shutdown_write_unsent_tx_cap(
     assert_eq!(pipe.server.tx_data, 15);
 
     // Client shouldn't update flow control.
-    assert!(!pipe.client.should_update_max_data());
+    assert!(!pipe.client.flow_control.should_update_max_data());
 
     // Server shuts down stream.
     assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
@@ -7232,6 +7232,100 @@ fn early_retransmit(
         })
     );
     assert_eq!(pipe.client.stats().retrans, 1);
+}
+
+#[rstest]
+/// Tests that MAX_DATA, STREAM_MAX_DATA frames are retransmitted if lost
+fn max_data_frames_retransmit(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_initial_max_stream_data_bidi_local(30);
+    config.set_initial_max_stream_data_bidi_remote(30);
+    config.set_initial_max_data(30);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.client.max_tx_data, 30);
+    assert_eq!(pipe.server.max_rx_data(), 30);
+
+    // Client sends stream data.
+    assert_eq!(pipe.client.stream_send(0, &[42u8; 30], false), Ok(30));
+    // out of flow-control
+    assert_eq!(
+        pipe.client.stream_send(0, &[42u8; 30], false),
+        Err(Error::Done)
+    );
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((30, false)));
+    // Client's max_tx_data is still the same.
+    assert_eq!(pipe.client.max_tx_data, 30);
+    // So is the servers's max_rx_data, since it hasn't sent a MAX_DATA frame yet
+    assert_eq!(pipe.server.max_rx_data(), 30);
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    // Make sure the server actually tried to send MAX_DATA and STREAM_MAX_DATA
+    // frames
+    let mut max_data_seen = false;
+    let mut max_stream_data_seen = false;
+    for frame in frames {
+        match frame {
+            frame::Frame::MaxData { max } => {
+                assert_eq!(max, 75);
+                max_data_seen = true
+            },
+            frame::Frame::MaxStreamData { stream_id, max } => {
+                assert_eq!(stream_id, 0);
+                assert_eq!(max, 60);
+                max_stream_data_seen = true;
+            },
+            _ => (),
+        }
+    }
+    assert!(max_data_seen);
+    assert!(max_stream_data_seen);
+
+    // flow control on client is unchanged
+    assert_eq!(pipe.client.max_tx_data, 30);
+    assert_eq!(pipe.client.stream_capacity(0), Ok(0));
+    // the server sent MAX_DATA (even though it got lost, so it has updated
+    // its max_rx_data
+    assert_eq!(pipe.server.max_rx_data(), 75);
+
+    // Trigger loss detection
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    // Make sure the server retransmitted MAX_DATA and STREAM_MAX_DATA
+    // frames
+    let mut max_data_seen = false;
+    let mut max_stream_data_seen = false;
+    for frame in frames {
+        match frame {
+            frame::Frame::MaxData { max } => {
+                assert_eq!(max, 75);
+                max_data_seen = true
+            },
+            frame::Frame::MaxStreamData { stream_id, max } => {
+                assert_eq!(stream_id, 0);
+                assert_eq!(max, 60);
+                max_stream_data_seen = true;
+            },
+            _ => (),
+        }
+    }
+    assert!(max_data_seen);
+    assert!(max_stream_data_seen);
+    // only stream_data and crypto frames increment retrans
+    assert_eq!(pipe.client.stats().retrans, 0);
 }
 
 #[rstest]
