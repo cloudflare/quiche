@@ -480,9 +480,6 @@ const MAX_UNDECRYPTABLE_PACKETS: usize = 10;
 
 const RESERVED_VERSION_MASK: u32 = 0xfafafafa;
 
-// The default size of the receiver connection flow control window.
-const DEFAULT_CONNECTION_WINDOW: u64 = 48 * 1024;
-
 // The maximum size of the receiver connection flow control window.
 const MAX_CONNECTION_WINDOW: u64 = 24 * 1024 * 1024;
 
@@ -2008,7 +2005,7 @@ impl<F: BufFactory> Connection<F> {
             rx_data: 0,
             flow_control: flowcontrol::FlowControl::new(
                 max_rx_data,
-                cmp::min(max_rx_data / 2 * 3, DEFAULT_CONNECTION_WINDOW),
+                max_rx_data,
                 config.max_connection_window,
             ),
             should_send_max_data: false,

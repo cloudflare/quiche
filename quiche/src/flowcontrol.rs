@@ -59,7 +59,7 @@ impl FlowControl {
         Self {
             max_data,
 
-            window,
+            window: std::cmp::min(window, max_window),
 
             max_window,
 
@@ -136,6 +136,13 @@ impl FlowControl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn max_window_in_new() {
+        let fc = FlowControl::new(100, 100, 50);
+        assert_eq!(fc.max_data(), 100);
+        assert_eq!(fc.window, 50);
+    }
 
     #[test]
     fn max_data() {
@@ -223,5 +230,9 @@ mod tests {
         // Window changed to the new value.
         fc.ensure_window_lower_bound(w * 2);
         assert_eq!(fc.window(), 40);
+
+        // Window clamped to max_window
+        fc.ensure_window_lower_bound(101);
+        assert_eq!(fc.window(), 100);
     }
 }
