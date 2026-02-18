@@ -1324,7 +1324,7 @@ where
     flow_control: flowcontrol::FlowControl,
 
     /// Whether we send MAX_DATA frame.
-    almost_full: bool,
+    should_send_max_data: bool,
 
     /// Number of stream data bytes that can be buffered.
     tx_cap: usize,
@@ -2011,7 +2011,7 @@ impl<F: BufFactory> Connection<F> {
                 cmp::min(max_rx_data / 2 * 3, DEFAULT_CONNECTION_WINDOW),
                 config.max_connection_window,
             ),
-            almost_full: false,
+            should_send_max_data: false,
 
             tx_cap: 0,
             tx_cap_factor: config.tx_cap_factor,
@@ -4094,7 +4094,7 @@ impl<F: BufFactory> Connection<F> {
                     },
 
                     frame::Frame::MaxData { .. } => {
-                        self.almost_full = true;
+                        self.should_send_max_data = true;
                     },
 
                     frame::Frame::NewConnectionId { seq_num, .. } => {
@@ -4525,8 +4525,13 @@ impl<F: BufFactory> Connection<F> {
                     },
                 };
 
-                // Autotune the stream window size.
-                stream.recv.autotune_window(now, path.recovery.rtt());
+                // Autotune the stream window size, but only if this is not a
+                // retransmission (on a retransmit the stream will be in
+                // `self.streams.almost_full()` but it's `almost_full()`
+                // method returns false.
+                if stream.recv.almost_full() {
+                    stream.recv.autotune_window(now, path.recovery.rtt());
+                }
 
                 let frame = frame::Frame::MaxStreamData {
                     stream_id,
@@ -4548,26 +4553,26 @@ impl<F: BufFactory> Connection<F> {
                     flow_control.ensure_window_lower_bound(
                         (recv_win as f64 * CONNECTION_WINDOW_FACTOR) as u64,
                     );
-
-                    // Also send MAX_DATA when MAX_STREAM_DATA is sent, to avoid a
-                    // potential race condition.
-                    self.almost_full = true;
                 }
             }
 
             // Create MAX_DATA frame as needed.
-            if self.almost_full &&
+            if flow_control.should_update_max_data() &&
                 flow_control.max_data() < flow_control.max_data_next()
             {
-                // Autotune the connection window size.
+                // Autotune the connection window size. We only tune the window
+                // if we are sending an "organic" update, not on retransmits.
                 flow_control.autotune_window(now, path.recovery.rtt());
+                self.should_send_max_data = true;
+            }
 
+            if self.should_send_max_data {
                 let frame = frame::Frame::MaxData {
                     max: flow_control.max_data_next(),
                 };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
-                    self.almost_full = false;
+                    self.should_send_max_data = false;
 
                     // Commits the new max_rx_data limit.
                     flow_control.update_max_data(now);
@@ -5479,10 +5484,6 @@ impl<F: BufFactory> Connection<F> {
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
-        if self.should_update_max_data() {
-            self.almost_full = true;
-        }
-
         if priority_key.incremental && readable {
             // Shuffle the incremental stream to the back of the queue.
             self.streams.remove_readable(&priority_key);
@@ -5849,9 +5850,6 @@ impl<F: BufFactory> Connection<F> {
             Shutdown::Read => {
                 let consumed = stream.recv.shutdown()?;
                 self.flow_control.add_consumed(consumed);
-                if self.flow_control.should_update_max_data() {
-                    self.almost_full = true;
-                }
 
                 if !stream.recv.is_fin() {
                     self.streams.insert_stopped(stream_id, err);
@@ -7770,7 +7768,8 @@ impl<F: BufFactory> Connection<F> {
         let send_path = self.paths.get(send_pid)?;
         if (self.is_established() || self.is_in_early_data()) &&
             (self.should_send_handshake_done() ||
-                self.almost_full ||
+                self.flow_control.should_update_max_data() ||
+                self.should_send_max_data ||
                 self.blocked_limit.is_some() ||
                 self.dgram_send_queue.has_pending() ||
                 self.local_error
@@ -7958,11 +7957,6 @@ impl<F: BufFactory> Connection<F> {
                 // flow-control
                 self.flow_control.add_consumed(consumed_flowcontrol);
 
-                // ... and check if need to send an updated MAX_DATA frame
-                if self.should_update_max_data() {
-                    self.almost_full = true;
-                }
-
                 self.reset_stream_remote_count =
                     self.reset_stream_remote_count.saturating_add(1);
             },
@@ -8133,10 +8127,6 @@ impl<F: BufFactory> Connection<F> {
                     // the received data as consumed, which might trigger a flow
                     // control update.
                     self.flow_control.add_consumed(max_off_delta);
-
-                    if self.should_update_max_data() {
-                        self.almost_full = true;
-                    }
                 }
             },
 
@@ -8397,14 +8387,6 @@ impl<F: BufFactory> Connection<F> {
         }
 
         trace!("{} dropped epoch {} state", self.trace_id, epoch);
-    }
-
-    /// Returns true if the connection-level flow control needs to be updated.
-    ///
-    /// This happens when the new max data limit is at least double the amount
-    /// of data that can be received before blocking.
-    fn should_update_max_data(&self) -> bool {
-        self.flow_control.should_update_max_data()
     }
 
     /// Returns the connection level flow control limit.

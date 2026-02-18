@@ -36,7 +36,7 @@ pub struct Pipe {
 }
 
 impl Pipe {
-    pub fn new(cc_algorithm_name: &str) -> Result<Pipe> {
+    pub fn default_config(cc_algorithm_name: &str) -> Result<Config> {
         let mut config = Config::new(PROTOCOL_VERSION)?;
         assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
         config.load_cert_chain_from_pem_file("examples/cert.crt")?;
@@ -51,7 +51,11 @@ impl Pipe {
         config.set_max_idle_timeout(180_000);
         config.verify_peer(false);
         config.set_ack_delay_exponent(8);
+        Ok(config)
+    }
 
+    pub fn new(cc_algorithm_name: &str) -> Result<Pipe> {
+        let mut config = Self::default_config(cc_algorithm_name)?;
         Pipe::with_config(&mut config)
     }
 
