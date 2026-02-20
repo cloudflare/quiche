@@ -39,6 +39,7 @@ tokio-task-metrics = []
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(capture_keylogs)'] }
 
 [dependencies]
+docopt = "1"
 anyhow = { workspace = true }
 boring = { workspace = true }
 buffer-pool = { workspace = true }
@@ -61,7 +62,7 @@ slog-stdlog = { workspace = true }
 smallvec = { workspace = true }
 task-killswitch = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt","rt-multi-thread"] }
 tokio-stream = { workspace = true, features = ["net", "io-util"] }
 tokio-util = { workspace = true, features = [
   "compat",
