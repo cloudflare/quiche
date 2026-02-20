@@ -3975,6 +3975,8 @@ impl<F: BufFactory> Connection<F> {
         let pkt_space = &mut self.pkt_num_spaces[epoch];
         let crypto_ctx = &mut self.crypto_ctx[epoch];
 
+        let mut should_retransmit_max_streams = false;
+
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
             while let Some(lost) = p.recovery.next_lost_frame(epoch) {
@@ -4095,6 +4097,14 @@ impl<F: BufFactory> Connection<F> {
 
                     frame::Frame::MaxData { .. } => {
                         self.should_send_max_data = true;
+                    },
+
+                    frame::Frame::MaxStreamsUni { .. } => {
+                        should_retransmit_max_streams = true;
+                    },
+
+                    frame::Frame::MaxStreamsBidi { .. } => {
+                        should_retransmit_max_streams = true;
                     },
 
                     frame::Frame::NewConnectionId { seq_num, .. } => {
@@ -4471,7 +4481,9 @@ impl<F: BufFactory> Connection<F> {
             }
 
             // Create MAX_STREAMS_BIDI frame.
-            if self.streams.should_update_max_streams_bidi() {
+            if self.streams.should_update_max_streams_bidi() ||
+                should_retransmit_max_streams
+            {
                 let frame = frame::Frame::MaxStreamsBidi {
                     max: self.streams.max_streams_bidi_next(),
                 };
@@ -4485,7 +4497,9 @@ impl<F: BufFactory> Connection<F> {
             }
 
             // Create MAX_STREAMS_UNI frame.
-            if self.streams.should_update_max_streams_uni() {
+            if self.streams.should_update_max_streams_uni() ||
+                should_retransmit_max_streams
+            {
                 let frame = frame::Frame::MaxStreamsUni {
                     max: self.streams.max_streams_uni_next(),
                 };
