@@ -1422,6 +1422,9 @@ fn flow_control_update(
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
+    // Make sure the pipe is configured as we expect
+    assert_eq!(pipe.server.max_rx_data(), 30);
+
     let frames = [
         frame::Frame::Stream {
             stream_id: 0,
@@ -1465,7 +1468,9 @@ fn flow_control_update(
             max: 30
         })
     );
-    assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 61 }));
+    // Initial max_data/window was 30, we consumed/read 16 bytes, which is more
+    // than 1/2 the window ==> new max data is 30 + 16
+    assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 46 }));
 }
 
 #[rstest]
@@ -3293,7 +3298,7 @@ fn stream_shutdown_read_after_fin(
     assert_eq!(pipe.handshake(), Ok(()));
 
     // Client sends some data and a FIN.
-    assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
+    assert_eq!(pipe.client.stream_send(4, b"hello, world123", true), Ok(15));
     assert_eq!(pipe.advance(), Ok(()));
 
     let mut r = pipe.server.readable();
@@ -3309,17 +3314,9 @@ fn stream_shutdown_read_after_fin(
     let mut r = pipe.server.readable();
     assert_eq!(r.next(), None);
 
-    // Server sends a flow control update, but it does NOT send
-    // STOP_SENDING frame, since it has already received a FIN from
-    // the client.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
-    let mut dummy = buf[..len].to_vec();
-    let frames =
-        test_utils::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
-    for f in frames {
-        assert!(!matches!(f, frame::Frame::StopSending { .. }));
-    }
-    assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
+    // Server does NOT send STOP_SENDING frame, since it has already received a
+    // FIN from the client.
+    assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
 
     assert_eq!(pipe.advance(), Ok(()));
 
@@ -3424,14 +3421,14 @@ fn stream_shutdown_read_update_max_data(
 
     // The client has dropped the 9 unset bytes in its buffer
     assert_eq!(pipe.client.tx_data, 21);
+    // The 21 consumed bytes have been added on the client
+    assert_eq!(pipe.client.max_tx_data, 30 + 21);
+    // ... and the client can send again
+    assert_eq!(pipe.client.stream_send(4, &[0], false), Ok(1));
+
+    // Server side is unchanged
     assert_eq!(pipe.server.rx_data, 21);
     assert_eq!(pipe.server.flow_control.consumed(), 21);
-    // default window is 1.5 * initial_max_data, so 45
-    assert_eq!(
-        pipe.client.tx_cap,
-        pipe.server.flow_control.window() as usize
-    );
-    assert_eq!(pipe.client.tx_cap, 45);
 
     assert_eq!(
         pipe.client.stream_send(0, b"hello, world", false),
@@ -3440,8 +3437,8 @@ fn stream_shutdown_read_update_max_data(
 
     // fully advance pipe
     assert_eq!(pipe.advance(), Ok(()));
-    assert_eq!(pipe.client.tx_data, 21);
-    assert_eq!(pipe.server.rx_data, 21);
+    assert_eq!(pipe.client.tx_data, 22);
+    assert_eq!(pipe.server.rx_data, 22);
     assert!(!pipe.server.stream_readable(0)); // nothing can be consumed
 
     // Server sends fin to fully close the stream.
@@ -3513,8 +3510,8 @@ fn stream_shutdown_write_update_max_data(
     assert_eq!(pipe.server.rx_data, 30);
     assert_eq!(pipe.server.flow_control.consumed(), 30);
     assert_eq!(pipe.client.tx_data, 30);
-    // default window is 1.5 * initial_max_data, so 45
-    assert_eq!(pipe.client.tx_cap, 45);
+    // new max_tx_data is old_max_tx_data + consumed == 30 + 30
+    assert_eq!(pipe.client.max_tx_data, 60);
 
     // client can send again on a different stream
     assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
