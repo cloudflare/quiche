@@ -1194,6 +1194,9 @@ impl RecoveryOps for GRecovery {
             .min(64 * 1024)
             .max(floor as u64) as usize
     }
+    fn sent_packets_empty(&self) -> bool {  
+        self.epochs.iter().all(|epoch| epoch.sent_packets.is_empty())  
+    }
 }
 
 impl std::fmt::Debug for GRecovery {
