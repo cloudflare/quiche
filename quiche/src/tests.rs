@@ -11734,6 +11734,142 @@ fn stop_sending_no_retransmit_after_fin(
     assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
 }
 
+#[rstest]
+/// Tests that MAX_STREAMS_BIDI frames are retransmitted if lost
+fn max_streams_bidi_frame_retransmit(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const NUM_STREAMS: u64 = 4;
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_initial_max_streams_bidi(NUM_STREAMS);
+    config.set_initial_max_streams_uni(0);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens all streams with FIN
+    for i in 0..NUM_STREAMS {
+        let stream_id = i * NUM_STREAMS;
+        pipe.client.stream_send(stream_id, b"a", true).unwrap();
+    }
+    pipe.advance().unwrap();
+
+    // Server reads all streams
+    for i in 0..NUM_STREAMS {
+        let stream_id = i * NUM_STREAMS;
+        pipe.server.stream_recv(stream_id, &mut buf).unwrap();
+    }
+
+    // Respond with stream FIN. However, stream is not collected until client
+    // ACKs the FIN.
+    pipe.server.stream_send(0, b"a", true).unwrap();
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), NUM_STREAMS);
+    assert_eq!(pipe.client.streams.peer_streams_left_bidi(), 0);
+
+    pipe.client_recv(&mut buf[..len]).unwrap();
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    pipe.server_recv(&mut buf[..len]).unwrap();
+
+    // Stream 0 is now complete. Server should send MAX_STREAMS_BIDI.
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), NUM_STREAMS + 1);
+
+    // Capture MAX_STREAMS_BIDI packet (don't deliver to simulate loss)
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    // Verify MAX_STREAMS is in the packet.
+    let has_max_streams = frames
+        .iter()
+        .any(|f| matches!(f, frame::Frame::MaxStreamsBidi { max: 5 }));
+    assert!(has_max_streams, "Expected MAX_STREAMS in packet");
+    assert_eq!(pipe.client.streams.peer_streams_left_bidi(), 0);
+
+    // Trigger loss detection for retransmission
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    // Server should retransmit MAX_STREAMS_BIDI
+    let (len, _) = pipe
+        .server
+        .send(&mut buf)
+        .expect("Expected a packet to carry MAX_STREAMS");
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    // Verify MAX_STREAMS is in the packet.
+    let has_max_streams = frames
+        .iter()
+        .any(|f| matches!(f, frame::Frame::MaxStreamsBidi { max: 5 }));
+    assert!(has_max_streams, "Expected MAX_STREAMS in packet");
+}
+
+#[rstest]
+/// Tests that MAX_STREAMS_UNI frames are retransmitted if lost
+fn max_streams_uni_frame_retransmit(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const NUM_STREAMS: u64 = 4;
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_initial_max_streams_bidi(0);
+    config.set_initial_max_streams_uni(4);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens all unidirectional streams with FIN
+    for i in 0..NUM_STREAMS {
+        let stream_id = i * NUM_STREAMS + 2;
+        assert_eq!(pipe.client.stream_send(stream_id, b"data", true), Ok(4));
+    }
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Prior to reading, streams are not collected.
+    assert_eq!(pipe.server.streams.max_streams_uni_next(), NUM_STREAMS);
+
+    // Server receives all streams and triggers collection.
+    for i in 0..NUM_STREAMS {
+        let stream_id = i * NUM_STREAMS + 2;
+        pipe.server.stream_recv(stream_id, &mut buf).ok();
+    }
+
+    assert_eq!(pipe.server.streams.max_streams_uni_next(), NUM_STREAMS + 4);
+    assert_eq!(pipe.client.streams.peer_streams_left_uni(), 0);
+
+    // Server should want to send MAX_STREAMS_UNI.
+    // Capture the packet (don't deliver to client to simulate loss).
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    // Verify MAX_STREAMS is in the packet.
+    let has_max_streams = frames
+        .iter()
+        .any(|f| matches!(f, frame::Frame::MaxStreamsUni { max: 8 }));
+    assert!(has_max_streams, "Expected MAX_STREAMS in packet");
+
+    // Client's view is unchanged (packet was "lost")
+    assert_eq!(pipe.client.streams.peer_streams_left_uni(), 0);
+
+    // Trigger loss detection on server
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    // Server should retransmit MAX_STREAMS_UNI
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    // Verify MAX_STREAMS is in the packet.
+    let has_max_streams = frames
+        .iter()
+        .any(|f| matches!(f, frame::Frame::MaxStreamsUni { max: 8 }));
+    assert!(has_max_streams, "Expected MAX_STREAMS in packet");
+}
+
 #[cfg(feature = "custom-client-dcid")]
 #[rstest]
 fn connect_custom_client_dcid_too_short() {
