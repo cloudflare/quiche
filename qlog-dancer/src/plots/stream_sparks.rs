@@ -305,7 +305,7 @@ impl SparkCaption {
 
     fn from_data_store(ds: &Datastore, stream_id: u64) -> Option<Self> {
         let is_request = match ds.application_proto {
-            ApplicationProto::Http3 => stream_id.is_multiple_of(4),
+            ApplicationProto::Http3 => stream_id % 4 == 0,
             ApplicationProto::Http2 => true,
         };
 

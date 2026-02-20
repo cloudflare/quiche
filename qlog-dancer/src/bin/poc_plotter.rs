@@ -55,6 +55,20 @@ use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_png;
 use qlog_dancer::poc_plots::modules::pacer::render_pacer_to_svg;
 use qlog_dancer::poc_plots::modules::pacer::PacerPlotParams;
 use qlog_dancer::poc_plots::modules::pacer::PacerSeriesStore;
+
+#[cfg(feature = "cairo")]
+use qlog_dancer::poc_plots::modules::loss::render_loss_to_eps;
+#[cfg(feature = "cairo")]
+use qlog_dancer::poc_plots::modules::loss::render_loss_to_pdf;
+use qlog_dancer::poc_plots::modules::loss::render_loss_to_png;
+use qlog_dancer::poc_plots::modules::loss::render_loss_to_svg;
+use qlog_dancer::poc_plots::modules::loss::LossPlotParams;
+use qlog_dancer::poc_plots::modules::loss::LossSeriesStore;
+
+use qlog_dancer::poc_plots::modules::conn_overview::render_overview_to_png;
+use qlog_dancer::poc_plots::modules::conn_overview::render_overview_to_svg;
+use qlog_dancer::poc_plots::modules::conn_overview::OverviewPlotParams;
+use qlog_dancer::poc_plots::modules::conn_overview::OverviewSeriesStore;
 use qlog_dancer::seriesstore::SeriesStore;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -90,6 +104,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .value_parser(["qvis", "matplotlib", "palette99", "palette9999"]),
         )
         .arg(
+            Arg::new("plot")
+                .long("plot")
+                .help("Plot type to render")
+                .value_parser(["pacer", "loss", "overview"])
+                .default_value("pacer"),
+        )
+        .arg(
             Arg::new("demo")
                 .long("demo")
                 .help("Generate demo data")
@@ -123,28 +144,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let extend_lines = matches.get_flag("extend");
     let input_path = matches.get_one::<PathBuf>("input");
     let use_demo = matches.get_flag("demo");
+    let plot_type = matches.get_one::<String>("plot").unwrap();
 
-    // Create series store and populate with data
+    match plot_type.as_str() {
+        "loss" => {
+            run_loss_plot(
+                &config, input_path, use_demo, output_path,
+            )?;
+        },
+        "overview" => {
+            run_overview_plot(
+                &config, input_path, use_demo, output_path,
+            )?;
+        },
+        _ => {
+            run_pacer_plot(
+                &config, input_path, use_demo, extend_lines, output_path,
+            )?;
+        },
+    }
+
+    println!("Done!");
+    Ok(())
+}
+
+fn run_pacer_plot(
+    config: &PlotConfig, input_path: Option<&PathBuf>, use_demo: bool,
+    extend_lines: bool, output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut store = if let Some(sqlog_path) = input_path {
         println!("Loading sqlog from: {}", sqlog_path.display());
-        load_from_sqlog(sqlog_path)?
+        load_pacer_from_sqlog(sqlog_path)?
     } else if use_demo {
         println!("Generating demo data...");
         let mut s = PacerSeriesStore::new();
-        generate_demo_data(&mut s);
+        generate_pacer_demo_data(&mut s);
         s
     } else {
         eprintln!("Error: Must specify --input <sqlog_file> or --demo");
         std::process::exit(1);
     };
 
-    // Extend lines to full width if requested
     if extend_lines {
         println!("Extending lines to full plot width...");
         store.extend_to_full_width();
     }
 
-    // Print stats (demonstrating the auto-tracked statistics)
     println!("\n=== Series Statistics (auto-tracked) ===");
     println!(
         "Pacing Rate: {} points, max={:?}, min={:?}",
@@ -171,21 +216,121 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         store.global_x_max()
     );
 
-    // Render the plot
     let params = PacerPlotParams {
         extend_to_full_width: extend_lines,
         ..Default::default()
     };
 
-    println!("\nRendering plot to: {}", output_path);
-    render_to_format(&config, &params, &store, output_path)?;
-
-    println!("Done!");
+    println!("\nRendering pacer plot to: {}", output_path);
+    render_pacer_to_format(config, &params, &store, output_path)?;
     Ok(())
 }
 
-/// Render to the appropriate format based on file extension.
-fn render_to_format(
+fn run_loss_plot(
+    config: &PlotConfig, input_path: Option<&PathBuf>, use_demo: bool,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (store, last_event_time) = if let Some(sqlog_path) = input_path {
+        println!("Loading sqlog from: {}", sqlog_path.display());
+        load_loss_from_sqlog(sqlog_path)?
+    } else if use_demo {
+        println!("Generating loss demo data...");
+        let mut s = LossSeriesStore::new();
+        generate_loss_demo_data(&mut s);
+        (s, None)
+    } else {
+        eprintln!("Error: Must specify --input <sqlog_file> or --demo");
+        std::process::exit(1);
+    };
+
+    println!("\n=== Loss Statistics (auto-tracked) ===");
+    println!(
+        "Loss Spikes: {} events, max={:?}",
+        store.lost_packets_delta.len(),
+        store.lost_packets_delta.y_max()
+    );
+    println!(
+        "Cumulative Lost: {} points, total={:?}",
+        store.lost_packets.len(),
+        store.cumulative_y_max()
+    );
+    println!(
+        "X Range: {:?} - {:?}",
+        store.global_x_min(),
+        last_event_time.or(store.global_x_max())
+    );
+
+    let params = LossPlotParams {
+        x_end: last_event_time,
+        ..Default::default()
+    };
+
+    println!("\nRendering loss plot to: {}", output_path);
+    render_loss_to_format(config, &params, &store, output_path)?;
+    Ok(())
+}
+
+fn run_overview_plot(
+    config: &PlotConfig, input_path: Option<&PathBuf>, use_demo: bool,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let store = if let Some(sqlog_path) = input_path {
+        println!("Loading sqlog from: {}", sqlog_path.display());
+        load_overview_from_sqlog(sqlog_path)?
+    } else if use_demo {
+        println!("Generating overview demo data...");
+        generate_overview_demo_data()
+    } else {
+        eprintln!("Error: Must specify --input <sqlog_file> or --demo");
+        std::process::exit(1);
+    };
+
+    println!("\n=== Overview Statistics ===");
+    println!(
+        "stream sends: {} points, loss spikes: {}, cwnd: {} points, RTT: {} points",
+        store.stream_sends.cumulative_buffer_writes.len(),
+        store.loss.lost_packets_delta.len(),
+        store.congestion.cwnd.len(),
+        store.rtt.smoothed_rtt.len(),
+    );
+    println!(
+        "X Range: {:.0} - {:.0}",
+        store.global_x_min(),
+        store.global_x_max()
+    );
+
+    let params = OverviewPlotParams::default();
+
+    println!("\nRendering overview plot to: {}", output_path);
+    render_overview_to_format(config, &params, &store, output_path)?;
+    Ok(())
+}
+
+/// Render overview to the appropriate format based on file extension.
+fn render_overview_to_format(
+    config: &PlotConfig, params: &OverviewPlotParams,
+    store: &OverviewSeriesStore, output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ext = Path::new(output_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+
+    match ext.as_str() {
+        "svg" => {
+            println!("Format: SVG (vector)");
+            render_overview_to_svg(config, params, store, output_path)
+        },
+        _ => {
+            println!("Format: PNG (raster)");
+            render_overview_to_png(config, params, store, output_path)
+        },
+    }
+}
+
+/// Render pacer plot to the appropriate format based on file extension.
+fn render_pacer_to_format(
     config: &PlotConfig, params: &PacerPlotParams, store: &PacerSeriesStore,
     output_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -228,8 +373,52 @@ fn render_to_format(
     }
 }
 
+/// Render loss plot to the appropriate format based on file extension.
+fn render_loss_to_format(
+    config: &PlotConfig, params: &LossPlotParams, store: &LossSeriesStore,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ext = Path::new(output_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+
+    match ext.as_str() {
+        "svg" => {
+            println!("Format: SVG (vector)");
+            render_loss_to_svg(config, params, store, output_path)
+        },
+        #[cfg(feature = "cairo")]
+        "pdf" => {
+            println!("Format: PDF (vector, Cairo)");
+            render_loss_to_pdf(config, params, store, output_path)
+        },
+        #[cfg(feature = "cairo")]
+        "eps" => {
+            println!("Format: EPS (vector, Cairo)");
+            render_loss_to_eps(config, params, store, output_path)
+        },
+        #[cfg(not(feature = "cairo"))]
+        "pdf" | "eps" => {
+            eprintln!(
+                "Error: PDF/EPS output requires the 'cairo' feature.\n\
+                 Rebuild with: cargo build --features cairo\n\
+                 System dependencies:\n\
+                   - Linux: sudo apt install libcairo2-dev libpango1.0-dev\n\
+                   - macOS: brew install cairo pango"
+            );
+            std::process::exit(1);
+        },
+        _ => {
+            println!("Format: PNG (raster)");
+            render_loss_to_png(config, params, store, output_path)
+        },
+    }
+}
+
 /// Generate demo data simulating pacing rate behavior.
-fn generate_demo_data(store: &mut PacerSeriesStore) {
+fn generate_pacer_demo_data(store: &mut PacerSeriesStore) {
     // Simulate a connection with varying pacing rate
     // Starts slow (slow start), ramps up, then stabilizes
 
@@ -291,26 +480,49 @@ fn generate_demo_data(store: &mut PacerSeriesStore) {
     }
 }
 
+/// Generate demo data simulating packet loss events.
+fn generate_loss_demo_data(store: &mut LossSeriesStore) {
+    // Simulate a connection with sporadic loss events
+    // Early phase: no loss
+    // Mid phase: some loss bursts (congestion)
+    // Late phase: occasional single losses
+
+    let loss_events: Vec<(f32, u64, u64)> = vec![
+        // (time_ms, packets_delta, cumulative)
+        (150.0, 2, 2),
+        (300.0, 5, 7),    // burst
+        (310.0, 3, 10),   // burst continues
+        (500.0, 1, 11),
+        (650.0, 8, 19),   // large burst
+        (660.0, 4, 23),
+        (800.0, 1, 24),
+        (950.0, 2, 26),
+    ];
+
+    for (time, delta, cumulative) in loss_events {
+        store.lost_packets_delta.push(time, delta);
+        store.lost_packets.push(time, cumulative);
+        store.lost_bytes_delta.push(time, delta * 1250);
+        store.lost_bytes.push(time, cumulative * 1250);
+    }
+}
+
 /// Load pacing data from an sqlog file.
-fn load_from_sqlog(
+fn load_pacer_from_sqlog(
     path: &Path,
 ) -> Result<PacerSeriesStore, Box<dyn std::error::Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
-    // Parse the sqlog - need Box for QlogSeqReader
     let sqlog_reader = QlogSeqReader::new(Box::new(reader))?;
     let vantage_point = sqlog_reader.qlog.trace.vantage_point.ty.clone();
 
-    // Collect events and build datastore
     let events: Vec<qlog::reader::Event> = sqlog_reader.into_iter().collect();
     let datastore =
         Datastore::with_sqlog_reader_events(&events, &vantage_point, true);
 
-    // Build SeriesStore from Datastore (existing infrastructure)
     let series_store = SeriesStore::from_datastore(&datastore);
 
-    // Bridge to PacerSeriesStore (new POC infrastructure)
     let pacer_store = PacerSeriesStore::from_series_store(&series_store);
 
     println!(
@@ -319,4 +531,175 @@ fn load_from_sqlog(
     );
 
     Ok(pacer_store)
+}
+
+/// Load loss data from an sqlog file.
+fn load_loss_from_sqlog(
+    path: &Path,
+) -> Result<(LossSeriesStore, Option<f32>), Box<dyn std::error::Error>> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+
+    let sqlog_reader = QlogSeqReader::new(Box::new(reader))?;
+    let vantage_point = sqlog_reader.qlog.trace.vantage_point.ty.clone();
+
+    let events: Vec<qlog::reader::Event> = sqlog_reader.into_iter().collect();
+    let datastore =
+        Datastore::with_sqlog_reader_events(&events, &vantage_point, true);
+
+    let last_event_time = datastore.last_event_time;
+    let loss_store = LossSeriesStore::from_datastore(&datastore);
+
+    println!(
+        "  Loaded {} loss spike events from sqlog (trace duration: {:.0}ms)",
+        loss_store.lost_packets_delta.len(),
+        last_event_time
+    );
+
+    Ok((loss_store, Some(last_event_time)))
+}
+
+/// Generate demo data for the combined overview plot.
+fn generate_overview_demo_data() -> OverviewSeriesStore {
+    let mut store = OverviewSeriesStore::new();
+
+    // Stream sends: cumulative buffer writes ramping up
+    let write_points: Vec<(f32, u64)> = vec![
+        (0.0, 0),
+        (50.0, 15_000),
+        (100.0, 60_000),
+        (200.0, 180_000),
+        (300.0, 250_000),
+        (400.0, 350_000),
+        (500.0, 500_000),
+        (600.0, 650_000),
+        (700.0, 750_000),
+        (800.0, 900_000),
+        (900.0, 1_000_000),
+        (1000.0, 1_100_000),
+    ];
+    for (x, y) in &write_points {
+        store.stream_sends.cumulative_buffer_writes.push(*x, *y);
+    }
+
+    // Received MAX_DATA: flow control window
+    let max_data_points: Vec<(f32, u64)> = vec![
+        (0.0, 100_000),
+        (200.0, 300_000),
+        (400.0, 600_000),
+        (600.0, 900_000),
+        (800.0, 1_200_000),
+    ];
+    for (x, y) in max_data_points {
+        store.stream_sends.received_max_data.push(x, y);
+    }
+
+    // Loss events at 300ms and 650ms (matching cwnd drops)
+    let loss_events: Vec<(f32, u64, u64)> = vec![
+        (300.0, 5, 5),
+        (310.0, 3, 8),
+        (650.0, 8, 16),
+        (660.0, 4, 20),
+        (800.0, 1, 21),
+    ];
+    for (time, delta, cumulative) in loss_events {
+        store.loss.lost_packets_delta.push(time, delta);
+        store.loss.lost_packets.push(time, cumulative);
+    }
+
+    // Congestion: cwnd ramps up, drops on loss, recovers
+    let cwnd_points: Vec<(f32, u64)> = vec![
+        (0.0, 14_720),
+        (50.0, 29_440),
+        (100.0, 58_880),
+        (150.0, 117_760),
+        (200.0, 200_000),
+        (250.0, 280_000),
+        (300.0, 140_000),
+        (350.0, 160_000),
+        (400.0, 200_000),
+        (500.0, 280_000),
+        (600.0, 320_000),
+        (650.0, 160_000),
+        (700.0, 180_000),
+        (800.0, 240_000),
+        (900.0, 300_000),
+        (1000.0, 340_000),
+    ];
+    for (x, y) in cwnd_points {
+        store.congestion.cwnd.push(x, y);
+    }
+
+    // bytes_in_flight
+    let bif_points: Vec<(f32, u64)> = vec![
+        (0.0, 10_000),
+        (100.0, 50_000),
+        (200.0, 180_000),
+        (300.0, 130_000),
+        (400.0, 170_000),
+        (500.0, 250_000),
+        (600.0, 300_000),
+        (650.0, 150_000),
+        (700.0, 160_000),
+        (800.0, 220_000),
+        (900.0, 270_000),
+        (1000.0, 310_000),
+    ];
+    for (x, y) in bif_points {
+        store.congestion.bytes_in_flight.push(x, y);
+    }
+
+    // RTT: relatively stable with spikes during loss
+    let rtt_points: Vec<(f32, f32)> = vec![
+        (0.0, 15.0),
+        (50.0, 14.5),
+        (100.0, 15.2),
+        (150.0, 16.0),
+        (200.0, 18.0),
+        (250.0, 22.0),
+        (300.0, 45.0),
+        (350.0, 20.0),
+        (400.0, 16.0),
+        (500.0, 15.5),
+        (600.0, 17.0),
+        (650.0, 38.0),
+        (700.0, 18.0),
+        (800.0, 15.5),
+        (900.0, 15.0),
+        (1000.0, 15.2),
+    ];
+    for (x, y) in &rtt_points {
+        store.rtt.smoothed_rtt.push(*x, *y);
+        store.rtt.latest_rtt.push(*x, y * 1.1);
+        store.rtt.min_rtt.push(*x, 14.0f32.min(*y));
+    }
+
+    store
+}
+
+/// Load overview data from an sqlog file.
+fn load_overview_from_sqlog(
+    path: &Path,
+) -> Result<OverviewSeriesStore, Box<dyn std::error::Error>> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+
+    let sqlog_reader = QlogSeqReader::new(Box::new(reader))?;
+    let vantage_point = sqlog_reader.qlog.trace.vantage_point.ty.clone();
+
+    let events: Vec<qlog::reader::Event> = sqlog_reader.into_iter().collect();
+    let datastore =
+        Datastore::with_sqlog_reader_events(&events, &vantage_point, true);
+
+    let store = OverviewSeriesStore::from_datastore(&datastore);
+
+    println!(
+        "  Loaded overview: stream_sends={}, loss={}, cwnd={}, rtt={}",
+        store.stream_sends.cumulative_buffer_writes.len(),
+        store.loss.lost_packets_delta.len(),
+        store.congestion.cwnd.len(),
+        store.rtt.smoothed_rtt.len(),
+    );
+
+    Ok(store)
 }

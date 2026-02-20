@@ -28,4 +28,6 @@
 //!
 //! This follows the pattern: config.toml + main.rs + modules/pacer.rs
 
+pub mod conn_overview;
+pub mod loss;
 pub mod pacer;
