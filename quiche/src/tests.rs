@@ -11791,6 +11791,10 @@ fn max_streams_bidi_frame_retransmit(
     // Trigger loss detection for retransmission
     test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
 
+    // Provide a buffer that is too small to generate the MAX_STREAMS
+    // frame. Make sure the frame is not lost.
+    assert_eq!(pipe.server.send(&mut buf[0..1]), Err(Error::Done));
+
     // Server should retransmit MAX_STREAMS_BIDI
     let (len, _) = pipe
         .server
@@ -11857,6 +11861,10 @@ fn max_streams_uni_frame_retransmit(
 
     // Trigger loss detection on server
     test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    // Provide a buffer that is too small to generate the MAX_STREAMS
+    // frame. Make sure the frame is not lost.
+    assert_eq!(pipe.server.send(&mut buf[0..1]), Err(Error::Done));
 
     // Server should retransmit MAX_STREAMS_UNI
     let (len, _) = pipe.server.send(&mut buf).unwrap();
