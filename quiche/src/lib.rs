@@ -4811,7 +4811,8 @@ impl<F: BufFactory> Connection<F> {
             do_dgram
         {
             if let Some(max_dgram_payload) = max_dgram_len {
-                while let Some(len) = self.dgram_send_queue.peek_front_len() {
+                while let Some(dgram) = self.dgram_send_queue.peek() {
+                    let len = dgram.len();
                     let hdr_off = b.off();
                     let hdr_len = 1 + // frame type
                         2; // length, always encode as 2-byte varint
@@ -6361,27 +6362,15 @@ impl<F: BufFactory> Connection<F> {
     }
 
     /// Reads the first received DATAGRAM without removing it from the queue.
-    ///
-    /// On success the DATAGRAM's data is returned along with the actual number
-    /// of bytes peeked. The requested length cannot exceed the DATAGRAM's
-    /// actual length.
-    ///
-    /// [`Done`] is returned if there is no data to read.
-    ///
-    /// [`BufferTooShort`] is returned if the provided buffer is smaller the
-    /// number of bytes to peek.
-    ///
-    /// [`Done`]: enum.Error.html#variant.Done
-    /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
     #[inline]
-    pub fn dgram_recv_peek(&self, buf: &mut [u8], len: usize) -> Result<usize> {
-        self.dgram_recv_queue.peek_front_bytes(buf, len)
+    pub fn dgram_recv_peek(&self) -> Option<&[u8]> {
+        self.dgram_recv_queue.peek()
     }
 
     /// Returns the length of the first stored DATAGRAM.
     #[inline]
     pub fn dgram_recv_front_len(&self) -> Option<usize> {
-        self.dgram_recv_queue.peek_front_len()
+        self.dgram_recv_queue.peek().map(|v| v.len())
     }
 
     /// Returns the number of items in the DATAGRAM receive queue.
