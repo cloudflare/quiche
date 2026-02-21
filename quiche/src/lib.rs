@@ -8330,7 +8330,13 @@ impl<F: BufFactory> Connection<F> {
                 });
 
                 let path = self.paths.get_active()?;
-                self.draining_timer = Some(now + (path.recovery.pto() * 3));
+
+                if self.is_established() {
+                    self.draining_timer = Some(now + (path.recovery.pto() * 3));
+                } else {
+                    // May as well tidy things up immediately.
+                    self.draining_timer = Some(now);
+                }
             },
 
             frame::Frame::ApplicationClose { error_code, reason } => {
