@@ -27,6 +27,7 @@
 use crate::Bytes;
 use crate::Token;
 use h3::*;
+use moqt::MOQTEventType;
 use qpack::*;
 use quic::*;
 
@@ -55,6 +56,8 @@ pub enum EventType {
     QpackEventType(QpackEventType),
 
     GenericEventType(GenericEventType),
+
+    MOQTEventType(MOQTEventType),
 
     #[default]
     None,
@@ -302,6 +305,8 @@ impl From<EventType> for EventImportance {
             EventType::QpackEventType(QpackEventType::InstructionParsed) =>
                 EventImportance::Base,
 
+            EventType::MOQTEventType(_) => EventImportance::Core,
+
             _ => unimplemented!(),
         }
     }
@@ -396,12 +401,10 @@ impl From<&EventData> for EventType {
             EventData::MtuUpdated { .. } => EventType::ConnectivityEventType(
                 ConnectivityEventType::MtuUpdated,
             ),
-
             EventData::KeyUpdated { .. } =>
                 EventType::SecurityEventType(SecurityEventType::KeyUpdated),
             EventData::KeyDiscarded { .. } =>
                 EventType::SecurityEventType(SecurityEventType::KeyDiscarded),
-
             EventData::VersionInformation { .. } =>
                 EventType::TransportEventType(
                     TransportEventType::VersionInformation,
@@ -439,7 +442,6 @@ impl From<&EventData> for EventType {
                 EventType::TransportEventType(TransportEventType::FramesProcessed),
             EventData::DataMoved { .. } =>
                 EventType::TransportEventType(TransportEventType::DataMoved),
-
             EventData::RecoveryParametersSet { .. } =>
                 EventType::RecoveryEventType(RecoveryEventType::ParametersSet),
             EventData::MetricsUpdated { .. } =>
@@ -456,7 +458,6 @@ impl From<&EventData> for EventType {
                 EventType::RecoveryEventType(
                     RecoveryEventType::MarkedForRetransmit,
                 ),
-
             EventData::H3ParametersSet { .. } =>
                 EventType::Http3EventType(Http3EventType::ParametersSet),
             EventData::H3ParametersRestored { .. } =>
@@ -469,7 +470,6 @@ impl From<&EventData> for EventType {
                 EventType::Http3EventType(Http3EventType::FrameParsed),
             EventData::H3PushResolved { .. } =>
                 EventType::Http3EventType(Http3EventType::PushResolved),
-
             EventData::QpackStateUpdated { .. } =>
                 EventType::QpackEventType(QpackEventType::StateUpdated),
             EventData::QpackStreamStateUpdated { .. } =>
@@ -484,7 +484,6 @@ impl From<&EventData> for EventType {
                 EventType::QpackEventType(QpackEventType::InstructionCreated),
             EventData::QpackInstructionParsed { .. } =>
                 EventType::QpackEventType(QpackEventType::InstructionParsed),
-
             EventData::ConnectionError { .. } =>
                 EventType::GenericEventType(GenericEventType::ConnectionError),
             EventData::ApplicationError { .. } =>
@@ -497,6 +496,41 @@ impl From<&EventData> for EventType {
                 EventType::GenericEventType(GenericEventType::Message),
             EventData::Marker { .. } =>
                 EventType::GenericEventType(GenericEventType::Marker),
+
+            EventData::MOQTControlMessageCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::ControlMessageCreated),
+            EventData::MOQTControlMessageParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::ControlMessageParsed),
+            EventData::MOQTStreamTypeSet { .. } =>
+                EventType::MOQTEventType(MOQTEventType::StreamTypeSet),
+            EventData::MOQTObjectDatagramCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::ObjectDatagramCreated),
+            EventData::MOQTObjectDatagramParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::ObjectDatagramParsed),
+            EventData::MOQTObjectDatagramStatusCreated { .. } =>
+                EventType::MOQTEventType(
+                    MOQTEventType::ObjectDatagramStatusCreated,
+                ),
+            EventData::MOQTObjectDatagramStatusParsed { .. } =>
+                EventType::MOQTEventType(
+                    MOQTEventType::ObjectDatagramStatusParsed,
+                ),
+            EventData::MOQTSubgroupHeaderCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::SubgroupHeaderCreated),
+            EventData::MOQTSubgroupHeaderParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::SubgroupHeaderParsed),
+            EventData::MOQTSubgroupObjectCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::SubgroupObjectCreated),
+            EventData::MOQTSubgroupObjectParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::SubgroupObjectParsed),
+            EventData::MOQTFetchHeaderCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::FetchHeaderCreated),
+            EventData::MOQTFetchHeaderParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::FetchHeaderParsed),
+            EventData::MOQTFetchObjectCreated { .. } =>
+                EventType::MOQTEventType(MOQTEventType::FetchObjectCreated),
+            EventData::MOQTFetchObjectParsed { .. } =>
+                EventType::MOQTEventType(MOQTEventType::FetchObjectParsed),
         }
     }
 }
@@ -693,6 +727,52 @@ pub enum EventData {
         marker_type: String,
         message: Option<String>,
     },
+
+    // MOQT
+    #[serde(rename = "moqt:control_message_created")]
+    MOQTControlMessageCreated(moqt::MOQTControlMessageCreated),
+
+    #[serde(rename = "moqt:control_message_parsed")]
+    MOQTControlMessageParsed(moqt::MOQTControlMessageParsed),
+
+    #[serde(rename = "moqt:stream_type_set")]
+    MOQTStreamTypeSet(moqt::MOQTStreamTypeSet),
+
+    #[serde(rename = "moqt:object_datagram_created")]
+    MOQTObjectDatagramCreated(moqt::MOQTObjectDatagramCreated),
+
+    #[serde(rename = "moqt:object_datagram_parsed")]
+    MOQTObjectDatagramParsed(moqt::MOQTObjectDatagramParsed),
+
+    #[serde(rename = "moqt:object_datagram_status_created")]
+    MOQTObjectDatagramStatusCreated(moqt::MOQTObjectDatagramStatusCreated),
+
+    #[serde(rename = "moqt:object_datagram_status_parsed")]
+    MOQTObjectDatagramStatusParsed(moqt::MOQTObjectDatagramStatusParsed),
+
+    #[serde(rename = "moqt:subgroup_header_created")]
+    MOQTSubgroupHeaderCreated(moqt::MOQTSubgroupHeaderCreated),
+
+    #[serde(rename = "moqt:subgroup_header_parsed")]
+    MOQTSubgroupHeaderParsed(moqt::MOQTSubgroupHeaderParsed),
+
+    #[serde(rename = "moqt:subgroup_object_created")]
+    MOQTSubgroupObjectCreated(moqt::MOQTSubgroupObjectCreated),
+
+    #[serde(rename = "moqt:subgroup_object_parsed")]
+    MOQTSubgroupObjectParsed(moqt::MOQTSubgroupObjectParsed),
+
+    #[serde(rename = "moqt:fetch_header_created")]
+    MOQTFetchHeaderCreated(moqt::MOQTFetchHeaderCreated),
+
+    #[serde(rename = "moqt:fetch_header_parsed")]
+    MOQTFetchHeaderParsed(moqt::MOQTFetchHeaderParsed),
+
+    #[serde(rename = "moqt:fetch_object_created")]
+    MOQTFetchObjectCreated(moqt::MOQTFetchObjectCreated),
+
+    #[serde(rename = "moqt:fetch_object_parsed")]
+    MOQTFetchObjectParsed(moqt::MOQTFetchObjectParsed),
 }
 
 impl EventData {
@@ -754,5 +834,6 @@ pub mod quic;
 
 pub mod connectivity;
 pub mod h3;
+pub mod moqt;
 pub mod qpack;
 pub mod security;
