@@ -1326,6 +1326,12 @@ where
     /// Whether we send MAX_DATA frame.
     should_send_max_data: bool,
 
+    /// True if there is a pending MAX_STREAMS_BIDI frame to send.
+    should_send_max_streams_bidi: bool,
+
+    /// True if there is a pending MAX_STREAMS_UNI frame to send.
+    should_send_max_streams_uni: bool,
+
     /// Number of stream data bytes that can be buffered.
     tx_cap: usize,
 
@@ -2012,6 +2018,8 @@ impl<F: BufFactory> Connection<F> {
                 config.max_connection_window,
             ),
             should_send_max_data: false,
+            should_send_max_streams_bidi: false,
+            should_send_max_streams_uni: false,
 
             tx_cap: 0,
             tx_cap_factor: config.tx_cap_factor,
@@ -3975,8 +3983,6 @@ impl<F: BufFactory> Connection<F> {
         let pkt_space = &mut self.pkt_num_spaces[epoch];
         let crypto_ctx = &mut self.crypto_ctx[epoch];
 
-        let mut should_retransmit_max_streams = false;
-
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
             while let Some(lost) = p.recovery.next_lost_frame(epoch) {
@@ -4100,11 +4106,11 @@ impl<F: BufFactory> Connection<F> {
                     },
 
                     frame::Frame::MaxStreamsUni { .. } => {
-                        should_retransmit_max_streams = true;
+                        self.should_send_max_streams_uni = true;
                     },
 
                     frame::Frame::MaxStreamsBidi { .. } => {
-                        should_retransmit_max_streams = true;
+                        self.should_send_max_streams_bidi = true;
                     },
 
                     frame::Frame::NewConnectionId { seq_num, .. } => {
@@ -4482,7 +4488,7 @@ impl<F: BufFactory> Connection<F> {
 
             // Create MAX_STREAMS_BIDI frame.
             if self.streams.should_update_max_streams_bidi() ||
-                should_retransmit_max_streams
+                self.should_send_max_streams_bidi
             {
                 let frame = frame::Frame::MaxStreamsBidi {
                     max: self.streams.max_streams_bidi_next(),
@@ -4490,6 +4496,7 @@ impl<F: BufFactory> Connection<F> {
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.streams.update_max_streams_bidi();
+                    self.should_send_max_streams_bidi = false;
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -4498,7 +4505,7 @@ impl<F: BufFactory> Connection<F> {
 
             // Create MAX_STREAMS_UNI frame.
             if self.streams.should_update_max_streams_uni() ||
-                should_retransmit_max_streams
+                self.should_send_max_streams_uni
             {
                 let frame = frame::Frame::MaxStreamsUni {
                     max: self.streams.max_streams_uni_next(),
@@ -4506,6 +4513,7 @@ impl<F: BufFactory> Connection<F> {
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     self.streams.update_max_streams_uni();
+                    self.should_send_max_streams_uni = false;
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -7789,7 +7797,9 @@ impl<F: BufFactory> Connection<F> {
                 self.local_error
                     .as_ref()
                     .is_some_and(|conn_err| conn_err.is_app) ||
+                self.should_send_max_streams_bidi ||
                 self.streams.should_update_max_streams_bidi() ||
+                self.should_send_max_streams_uni ||
                 self.streams.should_update_max_streams_uni() ||
                 self.streams.has_flushable() ||
                 self.streams.has_almost_full() ||
