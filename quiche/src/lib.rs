@@ -6642,6 +6642,15 @@ impl<F: BufFactory> Connection<F> {
     /// Processes a timeout event.
     ///
     /// If no timeout has occurred it does nothing.
+    ///
+    /// Note that while this method handles the _detection_ of timeouts, it
+    /// does not prevent them. When a `max_idle_timeout` is configured in the
+    /// transport parameters, the application must make sure to not be idle for
+    /// that long, either by sending data, or by calling [`send_ack_eliciting`]
+    /// if there is no data to send. See also the [Deferring Idle Timeout
+    /// section of RFC 9000][idle].
+    ///
+    /// [idle]: https://www.rfc-editor.org/rfc/rfc9000.html#name-deferring-idle-timeout
     pub fn on_timeout(&mut self) {
         let now = Instant::now();
 
