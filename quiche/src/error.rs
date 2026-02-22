@@ -115,6 +115,14 @@ pub enum Error {
 
     /// An invalid DCID was used when connecting to a remote peer.
     InvalidDcidInitialization,
+
+    /// The operation cannot be completed because the connection has an invalid
+    /// path state.
+    InvalidPathState,
+
+    /// The operation cannot be completed because the connection has an invalid
+    /// CID state.
+    InvalidCidState,
 }
 
 /// QUIC error codes sent on the wire.
@@ -227,6 +235,8 @@ impl Error {
             Error::InvalidAckRange => -21,
             Error::OptimisticAckDetected => -22,
             Error::InvalidDcidInitialization => -23,
+            Error::InvalidPathState => -24,
+            Error::InvalidCidState => -25,
         }
     }
 }

@@ -3844,7 +3844,7 @@ impl<F: BufFactory> Connection<F> {
             (Some(f), Some(t)) => self
                 .paths
                 .path_id_from_addrs(&(f, t))
-                .ok_or(Error::InvalidState)?,
+                .ok_or(Error::InvalidPathState)?,
 
             _ => self.get_send_path_id(from, to)?,
         };
@@ -4167,7 +4167,7 @@ impl<F: BufFactory> Connection<F> {
         } else if pkt_type == Type::Short {
             ConnectionId::default()
         } else {
-            return Err(Error::InvalidState);
+            return Err(Error::InvalidCidState);
         };
 
         let hdr = Header {
@@ -4663,7 +4663,8 @@ impl<F: BufFactory> Connection<F> {
                 // The sequence number specified in a RETIRE_CONNECTION_ID frame
                 // MUST NOT refer to the Destination Connection ID field of the
                 // packet in which the frame is contained.
-                let dcid_seq = path.active_dcid_seq.ok_or(Error::InvalidState)?;
+                let dcid_seq =
+                    path.active_dcid_seq.ok_or(Error::InvalidCidState)?;
 
                 if seq_num == dcid_seq {
                     continue;
@@ -6296,7 +6297,7 @@ impl<F: BufFactory> Connection<F> {
         let path_id = self
             .paths
             .path_id_from_addrs(&(local, peer))
-            .ok_or(Error::InvalidState)?;
+            .ok_or(Error::InvalidPathState)?;
         self.paths.get_mut(path_id)?.needs_ack_eliciting = true;
         Ok(())
     }
@@ -6771,7 +6772,7 @@ impl<F: BufFactory> Connection<F> {
         let path = self.paths.get_mut(pid)?;
         path.request_validation();
 
-        path.active_dcid_seq.ok_or(Error::InvalidState)
+        path.active_dcid_seq.ok_or(Error::InvalidCidState)
     }
 
     /// Migrates the connection to a new local address `local_addr`.
@@ -6852,7 +6853,7 @@ impl<F: BufFactory> Connection<F> {
                 .paths
                 .get(pid)?
                 .active_dcid_seq
-                .ok_or(Error::InvalidState)?;
+                .ok_or(Error::InvalidCidState)?;
 
             (pid, dcid_seq)
         };
@@ -6955,14 +6956,14 @@ impl<F: BufFactory> Connection<F> {
     /// [`OutOfIdentifiers`]: enum.Error.html#OutOfIdentifiers
     pub fn retire_dcid(&mut self, dcid_seq: u64) -> Result<()> {
         if self.ids.zero_length_dcid() {
-            return Err(Error::InvalidState);
+            return Err(Error::InvalidCidState);
         }
 
         let active_path_dcid_seq = self
             .paths
             .get_active()?
             .active_dcid_seq
-            .ok_or(Error::InvalidState)?;
+            .ok_or(Error::InvalidCidState)?;
 
         let active_path_id = self.paths.get_active_path_id()?;
 
@@ -7319,16 +7320,16 @@ impl<F: BufFactory> Connection<F> {
     /// address `peer` has been validated.
     ///
     /// If the 4-tuple does not exist over the connection, returns an
-    /// [`InvalidState`].
+    /// [`InvalidPathState`].
     ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [`InvalidPathState`]: enum.Error.html#variant.InvalidPathState
     pub fn is_path_validated(
         &self, from: SocketAddr, to: SocketAddr,
     ) -> Result<bool> {
         let pid = self
             .paths
             .path_id_from_addrs(&(from, to))
-            .ok_or(Error::InvalidState)?;
+            .ok_or(Error::InvalidPathState)?;
 
         Ok(self.paths.get(pid)?.validated())
     }
@@ -8241,7 +8242,7 @@ impl<F: BufFactory> Connection<F> {
                 reset_token,
             } => {
                 if self.ids.zero_length_dcid() {
-                    return Err(Error::InvalidState);
+                    return Err(Error::InvalidCidState);
                 }
 
                 let mut retired_path_ids = SmallVec::new();
@@ -8292,7 +8293,7 @@ impl<F: BufFactory> Connection<F> {
 
             frame::Frame::RetireConnectionId { seq_num } => {
                 if self.ids.zero_length_scid() {
-                    return Err(Error::InvalidState);
+                    return Err(Error::InvalidCidState);
                 }
 
                 if let Some(pid) = self.ids.retire_scid(seq_num, &hdr.dcid)? {
@@ -8542,7 +8543,7 @@ impl<F: BufFactory> Connection<F> {
         let ids = &mut self.ids;
 
         let (in_scid_seq, mut in_scid_pid) =
-            ids.find_scid_seq(dcid).ok_or(Error::InvalidState)?;
+            ids.find_scid_seq(dcid).ok_or(Error::InvalidCidState)?;
 
         if let Some(recv_pid) = recv_pid {
             // If the path observes a change of SCID used, note it.
@@ -8677,7 +8678,7 @@ impl<F: BufFactory> Connection<F> {
             return Ok(pid);
         };
 
-        Err(Error::InvalidState)
+        Err(Error::InvalidPathState)
     }
 
     /// Sets the path with identifier 'path_id' to be active.

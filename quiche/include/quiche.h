@@ -928,7 +928,7 @@ bool quiche_socket_addr_iter_next(quiche_socket_addr_iter *iter, struct sockaddr
 void quiche_socket_addr_iter_free(quiche_socket_addr_iter *iter);
 
 // Returns whether the network path with local address "from and remote address "to" has been validated.
-// If the 4-tuple does not exist over the connection, returns an InvalidState.
+// If the 4-tuple does not exist over the connection, returns an InvalidPathState.
 int quiche_conn_is_path_validated(const quiche_conn *conn, const struct sockaddr *from, size_t from_len, const struct sockaddr *to, size_t to_len);
 
 // Frees the connection object.

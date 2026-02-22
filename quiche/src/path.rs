@@ -657,22 +657,22 @@ impl PathMap {
 
     /// Gets an immutable reference to the path identified by `path_id`. If the
     /// provided `path_id` does not identify any current `Path`, returns an
-    /// [`InvalidState`].
+    /// [`InvalidPathState`].
     ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [`InvalidPathState`]: enum.Error.html#variant.InvalidPathState
     #[inline]
     pub fn get(&self, path_id: usize) -> Result<&Path> {
-        self.paths.get(path_id).ok_or(Error::InvalidState)
+        self.paths.get(path_id).ok_or(Error::InvalidPathState)
     }
 
     /// Gets a mutable reference to the path identified by `path_id`. If the
     /// provided `path_id` does not identify any current `Path`, returns an
-    /// [`InvalidState`].
+    /// [`InvalidPathState`].
     ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [`InvalidPathState`]: enum.Error.html#variant.InvalidPathState
     #[inline]
     pub fn get_mut(&mut self, path_id: usize) -> Result<&mut Path> {
-        self.paths.get_mut(path_id).ok_or(Error::InvalidState)
+        self.paths.get_mut(path_id).ok_or(Error::InvalidPathState)
     }
 
     #[inline]
@@ -683,38 +683,38 @@ impl PathMap {
     }
 
     /// Gets an immutable reference to the active path with the lowest
-    /// identifier. If there is no active path, returns an [`InvalidState`].
+    /// identifier. If there is no active path, returns an [`InvalidPathState`].
     ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [`InvalidPathState`]: enum.Error.html#variant.InvalidPathState
     #[inline]
     pub fn get_active(&self) -> Result<&Path> {
         self.get_active_with_pid()
             .map(|(_, p)| p)
-            .ok_or(Error::InvalidState)
+            .ok_or(Error::InvalidPathState)
     }
 
     /// Gets the lowest active path identifier. If there is no active path,
-    /// returns an [`InvalidState`].
+    /// returns an [`InvalidPathState`].
     ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [`InvalidPathState`]: enum.Error.html#variant.InvalidPathState
     #[inline]
     pub fn get_active_path_id(&self) -> Result<usize> {
         self.get_active_with_pid()
             .map(|(pid, _)| pid)
-            .ok_or(Error::InvalidState)
+            .ok_or(Error::InvalidPathState)
     }
 
     /// Gets an mutable reference to the active path with the lowest identifier.
-    /// If there is no active path, returns an [`InvalidState`].
+    /// If there is no active path, returns an [`InvalidPathState`].
     ///
-    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [`InvalidPathState`]: enum.Error.html#variant.InvalidPathState
     #[inline]
     pub fn get_active_mut(&mut self) -> Result<&mut Path> {
         self.paths
             .iter_mut()
             .map(|(_, p)| p)
             .find(|p| p.active())
-            .ok_or(Error::InvalidState)
+            .ok_or(Error::InvalidPathState)
     }
 
     /// Returns an iterator over all existing paths.

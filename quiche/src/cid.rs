@@ -318,14 +318,14 @@ impl ConnectionIdentifiers {
     /// number.
     #[inline]
     pub fn get_dcid(&self, seq_num: u64) -> Result<&ConnectionIdEntry> {
-        self.dcids.get(seq_num).ok_or(Error::InvalidState)
+        self.dcids.get(seq_num).ok_or(Error::InvalidCidState)
     }
 
     /// Gets the source Connection ID associated with the provided sequence
     /// number.
     #[inline]
     pub fn get_scid(&self, seq_num: u64) -> Result<&ConnectionIdEntry> {
-        self.scids.get(seq_num).ok_or(Error::InvalidState)
+        self.scids.get(seq_num).ok_or(Error::InvalidCidState)
     }
 
     /// Adds a new source identifier, and indicates whether it should be
@@ -345,23 +345,23 @@ impl ConnectionIdentifiers {
     /// When setting the initial Source Connection ID, the `reset_token` may be
     /// `None`. However, other Source CIDs must have an associated
     /// `reset_token`. Providing `None` as the `reset_token` for non-initial
-    /// SCIDs raises an [`InvalidState`].
+    /// SCIDs raises an [`InvalidCidState`].
     ///
     /// In the case the provided `cid` is already present, it does not add it.
     /// If the provided `reset_token` differs from the one already registered,
-    /// returns an `InvalidState`.
+    /// returns an `InvalidCidState`.
     ///
     /// Returns the sequence number associated to that new source identifier.
     ///
     /// [`active_source_cids()`]:  struct.ConnectionIdentifiers.html#method.active_source_cids
-    /// [`InvalidState`]: enum.Error.html#InvalidState
+    /// [`InvalidCidState`]: enum.Error.html#InvalidCidState
     /// [`IdLimit`]: enum.Error.html#IdLimit
     pub fn new_scid(
         &mut self, cid: ConnectionId<'static>, reset_token: Option<u128>,
         advertise: bool, path_id: Option<usize>, retire_if_needed: bool,
     ) -> Result<u64> {
         if self.zero_length_scid {
-            return Err(Error::InvalidState);
+            return Err(Error::InvalidCidState);
         }
 
         // Check whether the number of source Connection IDs does not exceed the
@@ -380,13 +380,13 @@ impl ConnectionIdentifiers {
         let seq = self.next_scid_seq;
 
         if reset_token.is_none() && seq != 0 {
-            return Err(Error::InvalidState);
+            return Err(Error::InvalidCidState);
         }
 
         // Check first that the SCID has not been inserted before.
         if let Some(e) = self.scids.iter().find(|e| e.cid == cid) {
             if e.reset_token != reset_token {
-                return Err(Error::InvalidState);
+                return Err(Error::InvalidCidState);
             }
             return Ok(e.seq);
         }
@@ -433,7 +433,7 @@ impl ConnectionIdentifiers {
         retire_prior_to: u64, retired_path_ids: &mut SmallVec<[(u64, usize); 1]>,
     ) -> Result<()> {
         if self.zero_length_dcid {
-            return Err(Error::InvalidState);
+            return Err(Error::InvalidCidState);
         }
 
         // If an endpoint receives a NEW_CONNECTION_ID frame that repeats a
@@ -542,21 +542,21 @@ impl ConnectionIdentifiers {
     /// In case the retired Connection ID is the same as the one used by the
     /// packet requesting the retiring, or if the retired sequence number is
     /// greater than any previously advertised sequence numbers, it returns an
-    /// [`InvalidState`].
+    /// [`InvalidCidState`].
     ///
     /// Returns the path ID that was associated to the retired CID, if any.
     ///
-    /// [`InvalidState`]: enum.Error.html#InvalidState
+    /// [`InvalidCidState`]: enum.Error.html#InvalidCidState
     pub fn retire_scid(
         &mut self, seq: u64, pkt_dcid: &ConnectionId,
     ) -> Result<Option<usize>> {
         if seq >= self.next_scid_seq {
-            return Err(Error::InvalidState);
+            return Err(Error::InvalidCidState);
         }
 
         let pid = if let Some(e) = self.scids.remove(seq)? {
             if e.cid == *pkt_dcid {
-                return Err(Error::InvalidState);
+                return Err(Error::InvalidCidState);
             }
 
             // Notifies the application.
@@ -581,18 +581,18 @@ impl ConnectionIdentifiers {
     /// method triggers an [`OutOfIdentifiers`].
     ///
     /// If the caller tries to retire a non-existing Destination Connection
-    /// ID sequence number, this method returns an [`InvalidState`].
+    /// ID sequence number, this method returns an [`InvalidCidState`].
     ///
     /// Returns the path ID that was associated to the retired CID, if any.
     ///
     /// [`OutOfIdentifiers`]: enum.Error.html#OutOfIdentifiers
-    /// [`InvalidState`]: enum.Error.html#InvalidState
+    /// [`InvalidCidState`]: enum.Error.html#InvalidCidState
     pub fn retire_dcid(&mut self, seq: u64) -> Result<Option<usize>> {
         if self.zero_length_dcid {
-            return Err(Error::InvalidState);
+            return Err(Error::InvalidCidState);
         }
 
-        let e = self.dcids.remove(seq)?.ok_or(Error::InvalidState)?;
+        let e = self.dcids.remove(seq)?.ok_or(Error::InvalidCidState)?;
 
         self.mark_retire_dcid_seq(seq, true)?;
 
@@ -609,7 +609,7 @@ impl ConnectionIdentifiers {
     pub fn link_scid_to_path_id(
         &mut self, dcid_seq: u64, path_id: usize,
     ) -> Result<()> {
-        let e = self.scids.get_mut(dcid_seq).ok_or(Error::InvalidState)?;
+        let e = self.scids.get_mut(dcid_seq).ok_or(Error::InvalidCidState)?;
         e.path_id = Some(path_id);
         Ok(())
     }
@@ -619,7 +619,7 @@ impl ConnectionIdentifiers {
     pub fn link_dcid_to_path_id(
         &mut self, dcid_seq: u64, path_id: usize,
     ) -> Result<()> {
-        let e = self.dcids.get_mut(dcid_seq).ok_or(Error::InvalidState)?;
+        let e = self.dcids.get_mut(dcid_seq).ok_or(Error::InvalidCidState)?;
         e.path_id = Some(path_id);
         Ok(())
     }
@@ -638,7 +638,7 @@ impl ConnectionIdentifiers {
                 }
             })
             .min()
-            .ok_or(Error::InvalidState)
+            .ok_or(Error::InvalidCidState)
     }
 
     /// Gets the lowest Destination Connection ID sequence number that is not
@@ -797,12 +797,15 @@ impl ConnectionIdentifiers {
     pub fn get_new_connection_id_frame_for(
         &self, seq_num: u64,
     ) -> Result<frame::Frame> {
-        let e = self.scids.get(seq_num).ok_or(Error::InvalidState)?;
+        let e = self.scids.get(seq_num).ok_or(Error::InvalidCidState)?;
         Ok(frame::Frame::NewConnectionId {
             seq_num,
             retire_prior_to: self.retire_prior_to,
             conn_id: e.cid.to_vec(),
-            reset_token: e.reset_token.ok_or(Error::InvalidState)?.to_be_bytes(),
+            reset_token: e
+                .reset_token
+                .ok_or(Error::InvalidCidState)?
+                .to_be_bytes(),
         })
     }
 
@@ -936,8 +939,8 @@ mod tests {
 
         // Now tries to experience CID retirement. If the server tries to remove
         // non-existing DCIDs, it fails.
-        assert_eq!(ids.retire_dcid(0), Err(Error::InvalidState));
-        assert_eq!(ids.retire_dcid(3), Err(Error::InvalidState));
+        assert_eq!(ids.retire_dcid(0), Err(Error::InvalidCidState));
+        assert_eq!(ids.retire_dcid(3), Err(Error::InvalidCidState));
         assert!(!ids.has_retire_dcids());
         assert_eq!(ids.dcids.len(), 2);
 

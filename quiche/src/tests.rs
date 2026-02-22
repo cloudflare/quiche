@@ -9104,8 +9104,8 @@ fn connection_id_handling(
 
     // Now tries to experience CID retirement. If the server tries to remove
     // non-existing DCIDs, it fails.
-    assert_eq!(pipe.server.retire_dcid(0), Err(Error::InvalidState));
-    assert_eq!(pipe.server.retire_dcid(3), Err(Error::InvalidState));
+    assert_eq!(pipe.server.retire_dcid(0), Err(Error::InvalidCidState));
+    assert_eq!(pipe.server.retire_dcid(3), Err(Error::InvalidCidState));
 
     // Now it removes DCID with sequence 1.
     assert_eq!(pipe.server.retire_dcid(1), Ok(()));
@@ -9210,11 +9210,11 @@ fn sending_duplicate_scids(
     assert_eq!(pipe.advance(), Ok(()));
 
     // Trying to send the same CID with a different reset token raises an
-    // InvalidState error.
+    // InvalidCidState error.
     let reset_token_2 = reset_token_1.wrapping_add(1);
     assert_eq!(
         pipe.client.new_scid(&scid_1, reset_token_2, false),
-        Err(Error::InvalidState),
+        Err(Error::InvalidCidState),
     );
 
     // Retrying to send the exact same CID with the same token returns the
@@ -9926,7 +9926,7 @@ fn send_on_path_test(
     let stats = pipe.server.stats();
     assert_eq!(stats.path_challenge_rx_count, 1);
 
-    // A non-existing 4-tuple raises an InvalidState.
+    // A non-existing 4-tuple raises an InvalidPathState.
     let client_addr_3 = "127.0.0.1:9012".parse().unwrap();
     let server_addr_2 = "127.0.0.1:9876".parse().unwrap();
     assert_eq!(
@@ -9935,7 +9935,7 @@ fn send_on_path_test(
             Some(client_addr_3),
             Some(server_addr)
         ),
-        Err(Error::InvalidState)
+        Err(Error::InvalidPathState)
     );
     assert_eq!(
         pipe.client.send_on_path(
@@ -9943,7 +9943,7 @@ fn send_on_path_test(
             Some(client_addr),
             Some(server_addr_2)
         ),
-        Err(Error::InvalidState)
+        Err(Error::InvalidPathState)
     );
 
     // Let's introduce some additional path challenges and data exchange.
