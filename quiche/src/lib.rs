@@ -4333,8 +4333,6 @@ impl<F: BufFactory> Connection<F> {
 
         let mut challenge_data = None;
 
-        let active_path = self.paths.get_active_mut()?;
-
         if pkt_type == Type::Short {
             // Create PMTUD probe.
             //
@@ -4347,64 +4345,68 @@ impl<F: BufFactory> Connection<F> {
             // In addition, the PMTUD probe is only generated when the handshake
             // is confirmed, to avoid interfering with the handshake
             // (e.g. due to the anti-amplification limits).
-            let should_probe_pmtu = active_path.should_send_pmtu_probe(
-                self.handshake_confirmed,
-                self.handshake_completed,
-                out_len,
-                is_closing,
-                frames.is_empty(),
-            );
+            if let Ok(active_path) = self.paths.get_active_mut() {
+                let should_probe_pmtu = active_path.should_send_pmtu_probe(
+                    self.handshake_confirmed,
+                    self.handshake_completed,
+                    out_len,
+                    is_closing,
+                    frames.is_empty(),
+                );
 
-            if should_probe_pmtu {
-                if let Some(pmtud) = active_path.pmtud.as_mut() {
-                    let probe_size = pmtud.get_probe_size();
-                    trace!(
+                if should_probe_pmtu {
+                    if let Some(pmtud) = active_path.pmtud.as_mut() {
+                        let probe_size = pmtud.get_probe_size();
+                        trace!(
                         "{} sending pmtud probe pmtu_probe={} estimated_pmtu={}",
                         self.trace_id,
                         probe_size,
                         pmtud.get_current_mtu(),
                     );
 
-                    left = probe_size;
+                        left = probe_size;
 
-                    match left.checked_sub(overhead) {
-                        Some(v) => left = v,
+                        match left.checked_sub(overhead) {
+                            Some(v) => left = v,
 
-                        None => {
-                            // We can't send more because there isn't enough space
-                            // available in the output buffer.
-                            //
-                            // This usually happens when we try to send a new
-                            // packet but failed
-                            // because cwnd is almost full.
-                            //
-                            // In such case app_limited is set to false here to
-                            // make cwnd grow when ACK
-                            // is received.
-                            active_path.recovery.update_app_limited(false);
-                            return Err(Error::Done);
-                        },
-                    }
+                            None => {
+                                // We can't send more because there isn't enough
+                                // space available
+                                // in the output buffer.
+                                //
+                                // This usually happens when we try to send a new
+                                // packet but failed
+                                // because cwnd is almost full.
+                                //
+                                // In such case app_limited is set to false here
+                                // to
+                                // make cwnd grow when ACK
+                                // is received.
+                                active_path.recovery.update_app_limited(false);
+                                return Err(Error::Done);
+                            },
+                        }
 
-                    let frame = frame::Frame::Padding {
-                        len: probe_size - overhead - 1,
-                    };
-
-                    if push_frame_to_pkt!(b, frames, frame, left) {
-                        let frame = frame::Frame::Ping {
-                            mtu_probe: Some(probe_size),
+                        let frame = frame::Frame::Padding {
+                            len: probe_size - overhead - 1,
                         };
 
                         if push_frame_to_pkt!(b, frames, frame, left) {
-                            ack_eliciting = true;
-                            in_flight = true;
-                        }
-                    }
+                            let frame = frame::Frame::Ping {
+                                mtu_probe: Some(probe_size),
+                            };
 
-                    // Reset probe flag after sending to prevent duplicate probes
-                    // in a single flight.
-                    pmtud.set_in_flight(true);
-                    is_pmtud_probe = true;
+                            if push_frame_to_pkt!(b, frames, frame, left) {
+                                ack_eliciting = true;
+                                in_flight = true;
+                            }
+                        }
+
+                        // Reset probe flag after sending to prevent duplicate
+                        // probes in a single flight.
+                        pmtud.set_in_flight(true);
+                        is_pmtud_probe = true;
+                    }
                 }
             }
 
