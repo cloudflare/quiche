@@ -8701,6 +8701,143 @@ fn in_handshake_config(
     Ok(())
 }
 
+#[cfg(feature = "boringssl-boring-crate")]
+#[rstest]
+/// Tests that MAX_STREAMS threshold is correctly calculated after changing
+/// initial_max_streams_bidi via handshake callback.
+fn max_streams_threshold_after_handshake_callback_update(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    // Original config value - low value so threshold would be 4/2 = 2
+    const CONFIG_INITIAL_MAX_STREAMS_BIDI: u64 = 4;
+    // Value set during handshake callback - threshold should be 100/2 = 50
+    const CALLBACK_INITIAL_MAX_STREAMS_BIDI: u64 = 100;
+
+    // Setup server with handshake callback that changes initial_max_streams_bidi
+    let mut server_tls_ctx_builder = test_utils::Pipe::default_tls_ctx_builder();
+    server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
+        // Change initial_max_streams_bidi from 4 to 100 during handshake
+        <Connection>::set_initial_max_streams_bidi_in_handshake(
+            hello.ssl_mut(),
+            CALLBACK_INITIAL_MAX_STREAMS_BIDI,
+        )
+        .unwrap();
+
+        Ok(())
+    });
+
+    let mut server_config = Config::with_boring_ssl_ctx_builder(
+        PROTOCOL_VERSION,
+        server_tls_ctx_builder,
+    )
+    .unwrap();
+
+    let mut client_config =
+        test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+
+    for config in [&mut client_config, &mut server_config] {
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(1000000);
+        config.set_initial_max_stream_data_bidi_remote(1000);
+        // Server config uses CONFIG_INITIAL_MAX_STREAMS_BIDI, but callback
+        // changes it to CALLBACK_INITIAL_MAX_STREAMS_BIDI
+        config.set_initial_max_streams_bidi(CONFIG_INITIAL_MAX_STREAMS_BIDI);
+        config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+        config.verify_peer(false);
+    }
+
+    let mut pipe = test_utils::Pipe::with_client_and_server_config(
+        &mut client_config,
+        &mut server_config,
+    )
+    .unwrap();
+
+    // Complete handshake - server's callback changes max_streams to
+    // CALLBACK_INITIAL_MAX_STREAMS_BIDI so verify the client received that.
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    pipe.server_recv(&mut buf[..len]).unwrap();
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    pipe.client_recv(&mut buf[..len]).unwrap();
+
+    assert_eq!(
+        pipe.client.peer_streams_left_bidi(),
+        CALLBACK_INITIAL_MAX_STREAMS_BIDI
+    );
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let pre_threshold_streams = CALLBACK_INITIAL_MAX_STREAMS_BIDI / 2 - 1;
+    // Complete 49 streams to bring available down to 51
+    // With correct threshold (50), MAX_STREAMS should NOT be sent yet
+    // With buggy threshold (2), MAX_STREAMS would be sent way too early
+    for i in 0..pre_threshold_streams {
+        let stream_id = i * 4;
+        pipe.client.stream_send(stream_id, b"a", true).ok();
+    }
+    pipe.advance().ok();
+
+    for i in 0..pre_threshold_streams {
+        let stream_id = i * 4;
+        pipe.server.stream_recv(stream_id, &mut buf).ok();
+        pipe.server.stream_send(stream_id, b"b", true).ok();
+    }
+    pipe.advance().ok();
+
+    for i in 0..pre_threshold_streams {
+        let stream_id = i * 4;
+        pipe.client.stream_recv(stream_id, &mut buf).ok();
+    }
+    pipe.advance().ok();
+
+    assert_eq!(
+        pipe.server.streams.max_streams_bidi_next(),
+        CALLBACK_INITIAL_MAX_STREAMS_BIDI + pre_threshold_streams
+    );
+
+    // Verify MAX_STREAMS was NOT sent yet (available > threshold) With the bug
+    // (threshold = CONFIG_INITIAL_MAX_STREAMS_BIDI/2), MAX_STREAMS would have
+    // been sent when available dropped to it, and client would have more streams
+    // available.
+    assert_eq!(
+        pipe.client.streams.peer_streams_left_bidi(),
+        CALLBACK_INITIAL_MAX_STREAMS_BIDI - pre_threshold_streams,
+        "MAX_STREAMS should NOT have been sent yet."
+    );
+
+    // Complete 1 more stream → available = 50 (== threshold of 50)
+    // MAX_STREAMS SHOULD be sent now
+    let stream_id = pre_threshold_streams * 4;
+    pipe.client.stream_send(stream_id, b"a", true).ok();
+    pipe.advance().ok();
+
+    pipe.server.stream_recv(stream_id, &mut buf).ok();
+    pipe.server.stream_send(stream_id, b"b", true).ok();
+    pipe.advance().ok();
+
+    pipe.client.stream_recv(stream_id, &mut buf).ok();
+    pipe.advance().ok();
+
+    // Server's next should have increased by 1
+    assert_eq!(
+        pipe.server.streams.max_streams_bidi_next(),
+        CALLBACK_INITIAL_MAX_STREAMS_BIDI + CALLBACK_INITIAL_MAX_STREAMS_BIDI / 2
+    );
+
+    // Verify MAX_STREAMS WAS sent (available <= threshold). With the bug,
+    // threshold = CONFIG_INITIAL/2 = 2, so MAX_STREAMS won't be sent until
+    // available <= 2, which we never reach in this test.
+    let streams_left = pipe.client.streams.peer_streams_left_bidi();
+    assert!(
+        streams_left > CALLBACK_INITIAL_MAX_STREAMS_BIDI / 2 + 1,
+        "MAX_STREAMS was not sent when available hit the correct threshold (50)"
+    );
+}
+
 #[rstest]
 fn initial_cwnd(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
