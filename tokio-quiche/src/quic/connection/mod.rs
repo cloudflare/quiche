@@ -702,6 +702,10 @@ pub trait ApplicationOverQuic: Send + 'static {
     /// block the runtime. If it does, the other concurrent futures will be
     /// starved.
     ///
+    /// # Cancel safety
+    /// This method MUST be cancel safe.
+    /// It gets called inside select! and could be (repeatedly) cancelled
+    ///
     /// # Errors
     /// Returning an error from this method immediately stops the worker loop
     /// and transitions to the connection closing stage.
