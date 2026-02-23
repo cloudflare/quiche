@@ -534,6 +534,7 @@ impl<F: BufFactory> StreamMap<F> {
     pub fn set_max_streams_bidi(&mut self, max: u64) {
         self.local_max_streams_bidi = max;
         self.local_max_streams_bidi_next = max;
+        self.initial_max_streams_bidi = max;
     }
 
     /// Returns the current max_streams_bidi limit.

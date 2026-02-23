@@ -54,6 +54,24 @@ impl Pipe {
         Ok(config)
     }
 
+    #[cfg(feature = "boringssl-boring-crate")]
+    pub fn default_tls_ctx_builder() -> boring::ssl::SslContextBuilder {
+        let mut ctx_builder =
+            boring::ssl::SslContextBuilder::new(boring::ssl::SslMethod::tls())
+                .unwrap();
+        ctx_builder
+            .set_certificate_chain_file("examples/cert.crt")
+            .unwrap();
+        ctx_builder
+            .set_private_key_file(
+                "examples/cert.key",
+                boring::ssl::SslFiletype::PEM,
+            )
+            .unwrap();
+
+        ctx_builder
+    }
+
     pub fn new(cc_algorithm_name: &str) -> Result<Pipe> {
         let mut config = Self::default_config(cc_algorithm_name)?;
         Pipe::with_config(&mut config)
