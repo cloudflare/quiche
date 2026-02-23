@@ -11908,3 +11908,261 @@ fn connect_custom_client_dcid_too_short() {
     );
     assert_eq!(client.err().unwrap(), Error::InvalidDcidInitialization);
 }
+
+#[rstest]
+/// Tests that a bidirectional stream is collected when both sides are shut
+/// down and the peer's FIN arrives before our RESET_STREAM is acked.
+///
+/// This is the happy-path timing: the recv side completes before the ACK
+/// handler fires, so collection happens in the RESET_STREAM ACK handler.
+fn stream_shutdown_bidi_collect_fin_before_reset_ack(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens a bidi stream and sends data + FIN.
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Server shuts down both sides without reading.
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+
+    // At this point recv.is_fin() should already be true because the FIN
+    // was received before shutdown(Read), and shutdown sets off = len which
+    // equals fin_off.
+    //
+    // advance() will:
+    //   1. Send STOP_SENDING + RESET_STREAM from server to client
+    //   2. Client ACKs them
+    //   3. RESET_STREAM ACK handler fires and collects the stream
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Stream should be collected on the server.
+    assert_eq!(pipe.server.streams.len(), 0);
+    assert!(pipe.server.streams.is_collected(4));
+}
+
+#[rstest]
+/// Tests that a bidirectional stream leaks when the peer's FIN arrives
+/// after our RESET_STREAM has already been acked.
+///
+/// Timeline:
+///   1. Server calls stream_shutdown(Read) + stream_shutdown(Write)
+///   2. Server sends RESET_STREAM to client
+///   3. Client ACKs the RESET_STREAM (recv side not yet FIN'd)
+///   4. Client then sends FIN
+///   5. Server receives FIN -> stream is now complete, but nobody collects it
+fn stream_shutdown_bidi_leak_fin_after_reset_ack(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens a bidi stream but does NOT send FIN yet.
+    assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Server shuts down both directions.
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+
+    // Deliver STOP_SENDING + RESET_STREAM from server to client, and let
+    // the client ACK them. Do NOT let the client send its FIN yet.
+    //
+    // Server -> Client flight (STOP_SENDING + RESET_STREAM).
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // Client -> Server flight (ACK of the above).
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // At this point the RESET_STREAM ACK handler has fired, but
+    // recv.is_fin() was false (no FIN received yet) so the stream was NOT
+    // collected.
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Now client sends FIN.
+    assert_eq!(pipe.client.stream_send(4, b"", true), Ok(0));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // The STREAM frame handler does not attempt collection, so the stream
+    // is still present even though it is now complete.
+    //
+    // BUG: the stream is complete (recv.is_fin() && send.is_complete())
+    // but it was not collected because the STREAM/FIN frame handler does
+    // not check for completion on draining streams.
+    assert_eq!(pipe.server.streams.len(), 1);
+    assert!(!pipe.server.streams.is_collected(4));
+
+    // Even further exchanges don't help.
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.streams.len(), 1);
+}
+
+#[rstest]
+/// Tests that a bidirectional stream leaks when the peer sends
+/// RESET_STREAM (instead of FIN) after our RESET_STREAM is already acked.
+///
+/// Same as the FIN variant above, but the peer resets instead of finishing
+/// cleanly.
+fn stream_shutdown_bidi_leak_reset_after_reset_ack(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens a bidi stream without FIN.
+    assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Server shuts down both directions.
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+
+    // Exchange packets so the RESET_STREAM is sent and ACKed, but the
+    // client has not yet sent anything to terminate its send side.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // Stream not collected yet (recv side not finalized).
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Client sends RESET_STREAM to the server (simulating the peer
+    // resetting its send side, e.g. in response to the STOP_SENDING).
+    let frames = [frame::Frame::ResetStream {
+        stream_id: 4,
+        error_code: 77,
+        final_size: 5,
+    }];
+
+    let pkt_type = Type::Short;
+    pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    // The RESET_STREAM frame handler does not attempt collection on
+    // draining streams.
+    //
+    // BUG: the stream is now complete but not collected.
+    assert_eq!(pipe.server.streams.len(), 1);
+    assert!(!pipe.server.streams.is_collected(4));
+
+    // Further exchanges don't help either.
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.streams.len(), 1);
+}
+
+#[rstest]
+/// Tests that a bidirectional stream leaks when the peer sends
+/// STOP_SENDING after we already called stream_shutdown(Write), and the
+/// application never calls stream_send()/stream_capacity() to discover
+/// the StreamStopped error.
+///
+/// The STOP_SENDING re-inserts the stream into the writable set as
+/// "stopped", which blocks the RESET_STREAM ACK handler from collecting.
+fn stream_shutdown_bidi_leak_stop_sending_after_shutdown_write(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens a bidi stream and sends data + FIN.
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Server shuts down both directions.
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+
+    // Server sends its STOP_SENDING + RESET_STREAM to client.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // Before the client ACKs, the client sends STOP_SENDING for stream 4
+    // (the client doesn't want data from the server either).
+    let frames = [frame::Frame::StopSending {
+        stream_id: 4,
+        error_code: 77,
+    }];
+
+    let pkt_type = Type::Short;
+    pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+        .unwrap();
+
+    // The STOP_SENDING handler called send.stop() which set send.error,
+    // and re-inserted the stream into the writable set. The stream is now
+    // "writable + stopped".
+    let mut w = pipe.server.writable();
+    assert!(w.any(|s| s == 4));
+
+    // Now let everything settle.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // BUG: The stream is complete (recv.is_fin() is true because FIN was
+    // received before shutdown(Read), and send.is_complete() is true) but
+    // the RESET_STREAM ACK handler refused to collect because the stream
+    // is writable+stopped. The application never calls stream_send() or
+    // stream_capacity() so the StreamStopped error is never consumed.
+    assert_eq!(pipe.server.streams.len(), 1);
+    assert!(!pipe.server.streams.is_collected(4));
+}
+
+#[rstest]
+/// Tests that a bidirectional stream leaks permanently when both sides
+/// are shut down but the peer never sends FIN or RESET_STREAM.
+///
+/// recv.is_fin() can never become true because fin_off is never set.
+fn stream_shutdown_bidi_leak_peer_never_finishes(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens a bidi stream without FIN.
+    assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Server shuts down both directions.
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+
+    // Let everything settle. The STOP_SENDING + RESET_STREAM are sent
+    // and ACKed.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // The client received STOP_SENDING so it knows the server doesn't
+    // want data, but it never sends FIN or RESET_STREAM in response.
+    // (A well-behaved peer would reset, but the protocol doesn't
+    // guarantee it.)
+
+    // Stream leaks: recv.fin_off is None, so recv.is_fin() is false,
+    // so is_complete() is false, so the stream is never collected.
+    assert_eq!(pipe.server.streams.len(), 1);
+    assert!(!pipe.server.streams.is_collected(4));
+
+    // More round trips don't help.
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.streams.len(), 1);
+}
