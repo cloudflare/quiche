@@ -54,7 +54,7 @@ After cloning the project according to the command mentioned in the [building](#
  $ cargo run --bin quiche-client -- https://cloudflare-quic.com/
 ```
 
-while the server can be run as follows:
+While the server can be run as follows:
 
 ```bash
  $ cargo run --bin quiche-server -- --cert apps/src/bin/cert.crt --key apps/src/bin/cert.key
