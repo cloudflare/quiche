@@ -374,10 +374,10 @@ impl Path {
     }
 
     pub fn should_send_pmtu_probe(
-        &mut self, hs_confirmed: bool, hs_done: bool, out_len: usize,
+        &self, hs_confirmed: bool, hs_done: bool, out_len: usize,
         is_closing: bool, frames_empty: bool,
     ) -> bool {
-        let Some(pmtud) = self.pmtud.as_mut() else {
+        let Some(pmtud) = self.pmtud.as_ref() else {
             return false;
         };
 
