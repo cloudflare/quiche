@@ -735,6 +735,17 @@ impl<F: BufFactory> Connection<F> {
             // In addition, the PMTUD probe is only generated when the handshake
             // is confirmed, to avoid interfering with the handshake
             // (e.g. due to the anti-amplification limits).
+            //
+            // self.bla(
+            //     &ctx,
+            //     &mut b,
+            //     &mut frames,
+            //     &mut left,
+            //     overhead,
+            //     &mut ack_eliciting,
+            //     &mut in_flight,
+            //     &mut is_pmtud_probe,
+            // );
             if let Ok(active_path) = self.paths.get_active_mut() {
                 let should_probe_pmtu = active_path.should_send_pmtu_probe(
                     self.handshake_confirmed,
@@ -1619,3 +1630,78 @@ impl<F: BufFactory> Connection<F> {
 
         Ok((pkt_type, written))
     }
+
+    // fn bla(
+    //     &mut self, ctx: &SendSingleContext, mut b: &mut octets::OctetsMut,
+    //     frames: &mut SmallVec<[frame::Frame; 1]>, left: &mut usize,
+    //     overhead: usize, ack_eliciting: &mut bool, in_flight: &mut bool,
+    //     is_pmtud_probe: &mut bool,
+    // ) -> Result<()> {
+    //     if let Ok(active_path) = self.paths.get_active_mut() {
+    //         let should_probe_pmtu = active_path.should_send_pmtu_probe(
+    //             self.handshake_confirmed,
+    //             self.handshake_completed,
+    //             ctx.out_len,
+    //             ctx.is_closing,
+    //             frames.is_empty(),
+    //         );
+    //
+    //         if should_probe_pmtu {
+    //             if let Some(pmtud) = active_path.pmtud.as_mut() {
+    //                 let probe_size = pmtud.get_probe_size();
+    //                 trace!(
+    //                     "{} sending pmtud probe pmtu_probe={}
+    // estimated_pmtu={}",                     self.trace_id,
+    //                     probe_size,
+    //                     pmtud.get_current_mtu(),
+    //                 );
+    //
+    //                 *left = probe_size;
+    //
+    //                 match left.checked_sub(overhead) {
+    //                     Some(v) => *left = v,
+    //
+    //                     None => {
+    //                         // We can't send more because there isn't enough
+    //                         // space available
+    //                         // in the output buffer.
+    //                         //
+    //                         // This usually happens when we try to send a new
+    //                         // packet but failed
+    //                         // because cwnd is almost full.
+    //                         //
+    //                         // In such case app_limited is set to false here
+    //                         // to
+    //                         // make cwnd grow when ACK
+    //                         // is received.
+    //                         active_path.recovery.update_app_limited(false);
+    //                         return Err(Error::Done);
+    //                     },
+    //                 }
+    //
+    //                 let frame = frame::Frame::Padding {
+    //                     len: probe_size - overhead - 1,
+    //                 };
+    //
+    //                 if push_frame_to_pkt!(b, frames, frame, *left) {
+    //                     let frame = frame::Frame::Ping {
+    //                         mtu_probe: Some(probe_size),
+    //                     };
+    //
+    //                     if push_frame_to_pkt!(b, frames, frame, *left) {
+    //                         *ack_eliciting = true;
+    //                         *in_flight = true;
+    //                     }
+    //                 }
+    //
+    //                 // Reset probe flag after sending to prevent duplicate
+    //                 // probes in a single flight.
+    //                 pmtud.set_in_flight(true);
+    //                 *is_pmtud_probe = true;
+    //             }
+    //         }
+    //     }
+    //
+    //     Ok(())
+    // }
+}
