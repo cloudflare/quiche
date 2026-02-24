@@ -185,6 +185,9 @@ pub struct Path {
     /// Number of DATAGRAM frames sent on this path.
     pub dgram_sent_count: usize,
 
+    /// Number of DATAGRAM frames marked lost on this path.
+    pub dgram_lost_count: usize,
+
     /// Number of DATAGRAM frames received on this path.
     pub dgram_recv_count: usize,
 
@@ -276,6 +279,7 @@ impl Path {
             retrans_count: 0,
             total_pto_count: 0,
             dgram_sent_count: 0,
+            dgram_lost_count: 0,
             dgram_recv_count: 0,
             sent_bytes: 0,
             recv_bytes: 0,
@@ -559,6 +563,7 @@ impl Path {
             total_pto_count: self.total_pto_count,
             dgram_recv: self.dgram_recv_count,
             dgram_sent: self.dgram_sent_count,
+            dgram_lost: self.dgram_lost_count,
             rtt: self.recovery.rtt(),
             min_rtt: self.recovery.min_rtt(),
             max_rtt: self.recovery.max_rtt(),
@@ -963,6 +968,9 @@ pub struct PathStats {
 
     /// The number of DATAGRAM frames sent.
     pub dgram_sent: usize,
+
+    /// The number of DATAGRAM frames lost.
+    pub dgram_lost: usize,
 
     /// The estimated round-trip time of the connection.
     pub rtt: Duration,
