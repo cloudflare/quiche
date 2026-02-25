@@ -91,6 +91,12 @@ pub struct State {
     // Used in CUBIC fix (see on_packet_sent())
     last_sent_time: Option<Instant>,
 
+    // Tracks when the last ACK was processed, approximating when
+    // bytes_in_flight transitioned toward zero. Used to measure the
+    // actual idle duration in on_packet_sent() instead of the time
+    // since the last send (which inflates the delta by a full RTT).
+    last_ack_time: Option<Instant>,
+
     // Store cwnd increment during congestion avoidance.
     cwnd_inc: usize,
 
@@ -150,14 +156,19 @@ fn on_init(_r: &mut Congestion) {}
 
 fn on_packet_sent(
     r: &mut Congestion, sent_bytes: usize, bytes_in_flight: usize, now: Instant,
-) {
+) { 
     // See https://github.com/torvalds/linux/commit/30927520dbae297182990bb21d08762bcc35ce1d
     // First transmit when no packets in flight
     let cubic = &mut r.cubic_state;
 
     if let Some(last_sent_time) = cubic.last_sent_time {
         if bytes_in_flight == 0 {
-            let delta = now - last_sent_time;
+            // Measure idle from when bytes_in_flight hits 0 (approximate last ACK time), not from last send.
+            // When cwnd is small, bif transiently hits 0 between ACK
+            // processing and sending. Using last_sent_time would inflate
+            // the delta by a full RTT, incorrectly shifting the epoch.
+            let idle_start = cubic.last_ack_time.unwrap_or(last_sent_time);
+            let delta = now - idle_start;
 
             // We were application limited (idle) for a while.
             // Shift epoch start to keep cwnd growth to cubic curve.
@@ -179,6 +190,8 @@ fn on_packets_acked(
     r: &mut Congestion, bytes_in_flight: usize, packets: &mut Vec<Acked>,
     now: Instant, rtt_stats: &RttStats,
 ) {
+    r.cubic_state.last_ack_time = Some(now);
+
     for pkt in packets.drain(..) {
         on_packet_acked(r, bytes_in_flight, &pkt, now, rtt_stats);
     }
