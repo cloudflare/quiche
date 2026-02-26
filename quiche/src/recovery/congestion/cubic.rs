@@ -156,18 +156,30 @@ fn on_init(_r: &mut Congestion) {}
 
 fn on_packet_sent(
     r: &mut Congestion, sent_bytes: usize, bytes_in_flight: usize, now: Instant,
-) { 
+) {
+    // Don't adjust epoch or track send time for non-data packets
+    // (e.g. ACKs). These have in_flight=true but size=0.
+    // Skip all the following logic for these packets.
+    if sent_bytes == 0 {
+        reno::on_packet_sent(r, sent_bytes, bytes_in_flight, now);
+        return;
+    }
+
     // See https://github.com/torvalds/linux/commit/30927520dbae297182990bb21d08762bcc35ce1d
     // First transmit when no packets in flight
     let cubic = &mut r.cubic_state;
 
     if let Some(last_sent_time) = cubic.last_sent_time {
         if bytes_in_flight == 0 {
-            // Measure idle from when bytes_in_flight hits 0 (approximate last ACK time), not from last send.
-            // When cwnd is small, bif transiently hits 0 between ACK
-            // processing and sending. Using last_sent_time would inflate
-            // the delta by a full RTT, incorrectly shifting the epoch.
-            let idle_start = cubic.last_ack_time.unwrap_or(last_sent_time);
+            // Measure idle from the most recent activity: either the
+            // last ACK (approximating when bif hit 0) or the last data
+            // send, whichever is later. Using last_sent_time alone
+            // would inflate the delta by a full RTT when cwnd is small
+            // and bif transiently hits 0 between ACK and send.
+            let idle_start = match cubic.last_ack_time {
+                Some(ack_time) => cmp::max(ack_time, last_sent_time),
+                None => last_sent_time,
+            };
             let delta = now - idle_start;
 
             // We were application limited (idle) for a while.
@@ -849,6 +861,157 @@ mod tests {
         assert_eq!(
             sender.cubic_state.w_max,
             prev_cwnd as f64 * (1.0 + BETA_CUBIC) / 2.0
+        );
+    }
+
+    #[test]
+    fn cubic_perpetual_recovery_trap() {
+        // Reproduces the bug where cwnd stays pinned at minimum after a
+        // loss event because the idle-time epoch shift pushes
+        // congestion_recovery_start_time into the future on every
+        // send→ACK→send cycle when bif transiently hits 0.
+        let mut sender = test_sender();
+        let size = sender.max_datagram_size;
+        let rtt = Duration::from_millis(100);
+
+        // Fill the pipe.
+        for _ in 0..sender.initial_congestion_window_packets {
+            sender.send_packet(size);
+        }
+
+        sender.update_rtt(rtt);
+        sender.advance_time(rtt);
+
+        // Trigger a loss to enter recovery and reduce cwnd.
+        sender.lose_n_packets(1, size, None);
+        let post_loss_cwnd = sender.congestion_window;
+        assert!(post_loss_cwnd < sender.initial_congestion_window_packets * size);
+
+        // ACK remaining in-flight packets to exit recovery.
+        sender.ack_n_packets(sender.initial_congestion_window_packets - 1, size);
+        assert_eq!(sender.bytes_in_flight, 0);
+
+        // Now simulate the problematic pattern: send a small burst at
+        // minimum cwnd, ACK it (bif drops to 0), advance one RTT, repeat.
+        // With the bug, recovery_start_time would advance on every
+        // cycle, trapping cwnd.  With the fix, cwnd must grow.
+        let packets_per_burst = cmp::max(1, sender.congestion_window / size);
+
+        for _ in 0..20 {
+            sender.advance_time(rtt);
+
+            for _ in 0..packets_per_burst {
+                sender.send_packet(size);
+            }
+
+            sender.advance_time(rtt);
+            sender.ack_n_packets(packets_per_burst, size);
+            assert_eq!(sender.bytes_in_flight, 0);
+        }
+
+        // cwnd must have grown beyond the post-loss value.
+        assert!(
+            sender.congestion_window > post_loss_cwnd,
+            "cwnd stuck at {} (post-loss {}): perpetual recovery trap",
+            sender.congestion_window,
+            post_loss_cwnd,
+        );
+    }
+
+    #[test]
+    fn cubic_genuine_idle_epoch_shift() {
+        // After a loss + recovery, a long idle period (seconds) should
+        // shift the epoch so that cwnd growth resumes from where it
+        // left off rather than jumping.
+        let mut sender = test_sender();
+        let size = sender.max_datagram_size;
+        let rtt = Duration::from_millis(100);
+
+        // Fill the pipe and trigger loss.
+        for _ in 0..sender.initial_congestion_window_packets {
+            sender.send_packet(size);
+        }
+        sender.update_rtt(rtt);
+        sender.advance_time(rtt);
+        sender.lose_n_packets(1, size, None);
+
+        let post_loss_cwnd = sender.congestion_window;
+
+        // ACK remaining to exit recovery.
+        sender.ack_n_packets(sender.initial_congestion_window_packets - 1, size);
+
+        // App-limited like behavior
+        // Long idle: 5 seconds of silence.
+        let idle_duration = Duration::from_secs(5);
+        sender.advance_time(idle_duration);
+
+        // Resume sending and ACKing.
+        let packets_per_burst = cmp::max(1, sender.congestion_window / size);
+
+        for _ in 0..packets_per_burst {
+            sender.send_packet(size);
+        }
+        sender.advance_time(rtt);
+        sender.ack_n_packets(packets_per_burst, size);
+
+        // After one RTT of sending post-idle, cwnd should grow but
+        // not have jumped to an unreasonably large value.
+        assert!(
+            sender.congestion_window >= post_loss_cwnd,
+            "cwnd should not have shrunk after idle: {} < {}",
+            sender.congestion_window,
+            post_loss_cwnd,
+        );
+
+        // Verify recovery_start_time was shifted forward (i.e., the
+        // idle shift logic ran).
+        if let Some(recovery_start) = sender.congestion_recovery_start_time {
+            assert!(
+                recovery_start >
+                    sender.cubic_state.last_sent_time.unwrap() - idle_duration,
+                "epoch should have been shifted forward by idle period",
+            );
+        }
+    }
+
+    #[test]
+    fn cubic_zero_bytes_sent_no_epoch_shift() {
+        // A zero-byte packet (e.g. PADDING-only) must NOT shift
+        // congestion_recovery_start_time or update last_sent_time.
+        let mut sender = test_sender();
+        let size = sender.max_datagram_size;
+        let rtt = Duration::from_millis(100);
+
+        // Fill pipe, trigger loss to set congestion_recovery_start_time.
+        for _ in 0..sender.initial_congestion_window_packets {
+            sender.send_packet(size);
+        }
+        sender.update_rtt(rtt);
+        sender.advance_time(rtt);
+        sender.lose_n_packets(1, size, None);
+
+        // ACK everything → bif = 0.
+        sender.ack_n_packets(sender.initial_congestion_window_packets - 1, size);
+        assert_eq!(sender.bytes_in_flight, 0);
+
+        // Record state before zero-byte send.
+        let recovery_start_before = sender.congestion_recovery_start_time;
+        let last_sent_before = sender.cubic_state.last_sent_time;
+
+        // Advance time so any shift would be visible.
+        sender.advance_time(Duration::from_millis(500));
+
+        // Send a zero-byte packet (simulates PADDING-only).
+        sender.send_packet(0);
+
+        // Neither recovery_start_time nor last_sent_time should change.
+        assert_eq!(
+            sender.congestion_recovery_start_time, recovery_start_before,
+            "recovery_start_time must not shift on zero-byte send",
+        );
+        assert_eq!(
+            sender.cubic_state.last_sent_time, last_sent_before,
+            "last_sent_time must not update on zero-byte send",
         );
     }
 }
