@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use datagram_socket::QuicAuditStats;
 use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::InboundFrame;
@@ -58,6 +59,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::select;
+use tokio::sync::mpsc;
 
 // Re-export for convenience
 pub use tokio_quiche::http3::settings::Http3Settings;
@@ -205,28 +207,30 @@ pub async fn handle_forwarded_headers_frame(
     }
 }
 
-pub fn start_server() -> (String, Arc<TestConnectionHook>) {
+pub fn start_server() -> (
+    String,
+    Arc<TestConnectionHook>,
+    mpsc::UnboundedReceiver<Arc<QuicAuditStats>>,
+) {
     let mut quic_settings = QuicSettings::default();
     quic_settings.max_send_udp_payload_size = 1400;
     quic_settings.max_recv_udp_payload_size = 1400;
 
     let hook = TestConnectionHook::new();
 
-    (
-        start_server_with_settings(
-            quic_settings,
-            Http3Settings::default(),
-            hook.clone(),
-            handle_connection,
-        ),
-        hook,
-    )
+    let (url, audit_stats_rx) = start_server_with_settings(
+        quic_settings,
+        Http3Settings::default(),
+        hook.clone(),
+        handle_connection,
+    );
+    (url, hook, audit_stats_rx)
 }
 
 pub fn start_server_with_settings<F, Fut>(
     quic_settings: QuicSettings, http3_settings: Http3Settings,
     hook: Arc<impl ConnectionHook + Send + Sync + 'static>, hdl: F,
-) -> String
+) -> (String, mpsc::UnboundedReceiver<Arc<QuicAuditStats>>)
 where
     F: Fn(ServerH3Connection) -> Fut + Send + Clone + 'static,
     Fut: Future<Output = ()> + Send,
@@ -250,6 +254,8 @@ where
         .unwrap()
         .remove(0);
 
+    let (audit_stats_tx, audit_stats_rx) = mpsc::unbounded_channel();
+
     tokio::spawn(async move {
         loop {
             let (h3_driver, h3_controller) =
@@ -257,14 +263,17 @@ where
             let conn = stream.next().await.unwrap().unwrap().start(h3_driver);
             let h3_over_quic = ServerH3Connection::new(conn, h3_controller);
 
+            let audit_stats = Arc::clone(h3_over_quic.audit_log_stats());
             let hdl = hdl.clone();
+            let tx = audit_stats_tx.clone();
             tokio::spawn(async move {
                 hdl(h3_over_quic).await;
+                let _ = tx.send(audit_stats);
             });
         }
     });
 
-    url
+    (url, audit_stats_rx)
 }
 
 pub fn extract_host_ipv4(url: &str) -> SocketAddr {

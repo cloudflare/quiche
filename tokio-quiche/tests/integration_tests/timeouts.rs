@@ -102,7 +102,7 @@ async fn test_handshake_duration_ioworker() {
     quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
     quic_settings.handshake_timeout = Some(HANDSHAKE_TIMEOUT);
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings {
             post_accept_timeout: Some(HANDSHAKE_TIMEOUT),
@@ -137,7 +137,7 @@ async fn test_handshake_timeout_with_one_client_flight() {
     let mut quic_settings = QuicSettings::default();
     quic_settings.handshake_timeout = Some(HANDSHAKE_TIMEOUT);
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
         hook.clone(),
@@ -235,7 +235,7 @@ async fn test_post_accept_timeout() {
     // post-accept timeout rather than Quiche's idle timeout.
     quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings {
             post_accept_timeout: Some(POST_ACCEPT_TIMEOUT),
@@ -295,7 +295,7 @@ async fn test_post_accept_timeout_is_reset() {
     // post-accept timeout rather than Quiche's idle timeout.
     quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings {
             post_accept_timeout: Some(POST_ACCEPT_TIMEOUT),
