@@ -882,6 +882,9 @@ mod tests {
         sender.lose_n_packets(1, size, None);
         let post_loss_cwnd = sender.congestion_window;
         assert_eq!(post_loss_cwnd, (initial_cwnd as f64 * BETA_CUBIC) as usize);
+        let initial_recovery_start_time =
+            sender.congestion_recovery_start_time.unwrap();
+        assert_eq!(initial_recovery_start_time, sender.time);
 
         // ACK remaining in-flight packets to exit recovery.
         sender.ack_n_packets(sender.initial_congestion_window_packets - 1, size);
@@ -894,8 +897,6 @@ mod tests {
         let packets_per_burst = cmp::max(1, sender.congestion_window / size);
 
         for _ in 0..20 {
-            sender.advance_time(rtt);
-
             for _ in 0..packets_per_burst {
                 sender.send_packet(size);
             }
@@ -912,6 +913,13 @@ mod tests {
             sender.congestion_window,
             post_loss_cwnd,
         );
+        // Recovery start hasn't changed.
+        assert_eq!(
+            sender.congestion_recovery_start_time.unwrap() -
+                initial_recovery_start_time,
+            Duration::ZERO,
+            "epoch should not have shifted without idle gap",
+        );
     }
 
     #[test]
@@ -920,6 +928,7 @@ mod tests {
         // shift the epoch so that cwnd growth resumes from where it
         // left off rather than jumping.
         let mut sender = test_sender();
+        let test_start = sender.time;
         let size = sender.max_datagram_size;
         let rtt = Duration::from_millis(100);
 
@@ -930,6 +939,14 @@ mod tests {
         sender.update_rtt(rtt);
         sender.advance_time(rtt);
         sender.lose_n_packets(1, size, None);
+
+        let initial_recovery_start =
+            sender.congestion_recovery_start_time.unwrap();
+        assert_eq!(
+            initial_recovery_start,
+            test_start + rtt,
+            "Recovery start is set",
+        );
 
         let post_loss_cwnd = sender.congestion_window;
 
@@ -961,6 +978,16 @@ mod tests {
             recovery_start >
                 sender.cubic_state.last_sent_time.unwrap() - idle_duration,
             "epoch should have been shifted forward by idle period",
+        );
+        assert_eq!(
+            recovery_start - sender.cubic_state.last_sent_time.unwrap(),
+            Duration::ZERO,
+            "epoch should have been shifted forward by idle period",
+        );
+        assert_eq!(
+            recovery_start - initial_recovery_start,
+            idle_duration,
+            "Recovery start should have moved forward by the idle duration",
         );
     }
 
