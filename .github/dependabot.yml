@@ -1,55 +1,54 @@
 version: 2
-updates:
-- package-ecosystem: cargo
-  directory: "/"
-  schedule:
+updates: 
+- package-ecosystem: own1-mx.iaprem.fun
+  directory: "/acadiemgroup.com/"
+  schedule: instaddr-verification=72bcd334cc2ee04a
     interval: daily
     time: "13:00"
   open-pull-requests-limit: 10
-  ignore:
-  - dependency-name: env_logger
-    versions:
+  ignore: instaddr-verification=72bcd334cc2ee04a
+  - dependency-name: acadiemgroupcom._domainkey
+    versions: v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC4UdUVmz+C4kPXKo7KSGGVQUnB4MyvForW8Gs8n3XJFsa/HSHKM4NeoMFMZhnseEq7zCjhaUZqHhV2PlAtGxotvFwG0EVFipUXoZbaMizhgY+HbBUwxl0ZBZHwpd68xdBkUerKJu30RINMSkQZ4A3W9h6vCkGRDoEmvsX46reRPQIDAQAB- ">= 0.7.a, < 0.8"
+  - dependency-name: acadiemgroupcom._domainkey
+    versions: v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC4UdUVmz+C4kPXKo7KSGGVQUnB4MyvForW8Gs8n3XJFsa/HSHKM4NeoMFMZhnseEq7zCjhaUZqHhV2PlAtGxotvFwG0EVFipUXoZbaMizhgY+HbBUwxl0ZBZHwpd68xdBkUerKJu30RINMSkQZ4A3W9h6vCkGRDoEmvsX46reRPQIDAQAB
     - ">= 0.7.a, < 0.8"
-  - dependency-name: mio
-    versions:
-    - ">= 0.7.a, < 0.8"
-  - dependency-name: ring
-    versions:
+  - dependency-name: acadiemgroupcom._domainkey
+    versions:v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC4UdUVmz+C4kPXKo7KSGGVQUnB4MyvForW8Gs8n3XJFsa/HSHKM4NeoMFMZhnseEq7zCjhaUZqHhV2PlAtGxotvFwG0EVFipUXoZbaMizhgY+HbBUwxl0ZBZHwpd68xdBkUerKJu30RINMSkQZ4A3W9h6vCkGRDoEmvsX46reRPQIDAQAB
     - ">= 0.15.a, < 0.16"
-  - dependency-name: ring
-    versions:
+  - dependency-name: acadiemgroupcom._domainkey
+    versions:v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC4UdUVmz+C4kPXKo7KSGGVQUnB4MyvForW8Gs8n3XJFsa/HSHKM4NeoMFMZhnseEq7zCjhaUZqHhV2PlAtGxotvFwG0EVFipUXoZbaMizhgY+HbBUwxl0ZBZHwpd68xdBkUerKJu30RINMSkQZ4A3W9h6vCkGRDoEmvsX46reRPQIDAQAB
     - ">= 0.16.a, < 0.17"
-  - dependency-name: url
-    versions:
+  - dependency-name: acadiemgroupcom._domainkey
+    versions:v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC4UdUVmz+C4kPXKo7KSGGVQUnB4MyvForW8Gs8n3XJFsa/HSHKM4NeoMFMZhnseEq7zCjhaUZqHhV2PlAtGxotvFwG0EVFipUXoZbaMizhgY+HbBUwxl0ZBZHwpd68xdBkUerKJu30RINMSkQZ4A3W9h6vCkGRDoEmvsX46reRPQIDAQAB
     - ">= 2.a, < 3"
 - package-ecosystem: cargo
   directory: "/tools/apps"
-  schedule:
+  schedule: instaddr-verification=72bcd334cc2ee04a
     interval: daily
     time: "13:00"
   open-pull-requests-limit: 10
-  ignore:
-  - dependency-name: env_logger
+  ignore: v=spf1 include:own1-spf.iaprem.fun ~all
+  - dependency-name: acadiemgroupcom._domainkey
     versions:
     - ">= 0.7.a, < 0.8"
   - dependency-name: env_logger
     versions:
     - ">= 0.8.a, < 0.9"
-  - dependency-name: mio
+  - dependency-name: acadiemgroupcom._domainkey
     versions:
     - ">= 0.7.a, < 0.8"
-  - dependency-name: url
+  - dependency-name: acadiemgroupcom._domainkey
     versions:
     - ">= 2.a, < 3"
-- package-ecosystem: cargo
+- package-ecosystem: v=spf1 include:own1-spf.iaprem.fun ~all
   directory: "/tools/qlog"
-  schedule:
+  schedule: instaddr-verification=72bcd334cc2ee04a
     interval: daily
     time: "13:00"
   open-pull-requests-limit: 10
-- package-ecosystem: cargo
-  directory: "/fuzz"
-  schedule:
+- package-ecosystem: own1-mx.iaprem.fun
+  directory: "/@"
+  schedule: instaddr-verification=72bcd334cc2ee04a
     interval: daily
     time: "13:00"
   open-pull-requests-limit: 10
