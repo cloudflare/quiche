@@ -241,6 +241,16 @@ where
         }
     }
 
+    if let Some(verify_file) = &params.settings.verify_file {
+        log::info!("setting up verify_file"; "verify_file"=>verify_file);
+        &client_config.quiche_config.load_verify_locations_from_file(verify_file);
+    }
+
+    if let Some(verify_directory) = &params.settings.verify_directory {
+        log::info!("setting up verify_directory"; "verify_directory"=>verify_directory);
+        &client_config.quiche_config.load_verify_locations_from_directory(verify_directory);
+    }
+
     // Set the keylog file here for the same reason
     if let Some(keylog_file) = &client_config.keylog_file {
         log::info!("setting up keylog file");
@@ -290,7 +300,17 @@ where
         "O_NONBLOCK should be set for the listening socket"
     );
 
-    let config = Config::new(params, socket.capabilities).into_io()?;
+    let mut config = Config::new(params, socket.capabilities).into_io()?;
+
+    if let Some(verify_file) = &params.settings.verify_file {
+        log::info!("setting up verify_file"; "verify_file"=>verify_file);
+        &config.quiche_config.load_verify_locations_from_file(verify_file);
+    }
+
+    if let Some(verify_directory) = &params.settings.verify_directory {
+        log::info!("setting up verify_directory"; "verify_directory"=>verify_directory);
+        &config.quiche_config.load_verify_locations_from_directory(verify_directory);
+    }
 
     let local_addr = socket.socket.local_addr()?;
     let socket_tx = Arc::new(socket.socket);
