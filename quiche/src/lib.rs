@@ -3097,6 +3097,17 @@ impl<F: BufFactory> Connection<F> {
                     return Ok(pkt_len);
                 }
 
+                // A datagram with Initial+Handshake coalesced packets might be
+                // received after the Initial epoch has already been dropped.
+                //
+                // To avoid rejecting the Handshake packet (due to the Initial
+                // being undecryptable), simply skip over the Initial packet and
+                // continue processing the rest of the datagram.
+                if hdr.ty == packet::Type::Initial {
+                    let pkt_len = b.off() + payload_len;
+                    return Ok(pkt_len);
+                }
+
                 let e = drop_pkt_on_err(
                     Error::CryptoFail,
                     self.recv_count,
