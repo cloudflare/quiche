@@ -68,7 +68,7 @@ async fn run_migration_test(active: bool, base_port: u16) {
     quic_settings.disable_active_migration = !active;
     quic_settings.disable_dcid_reuse = false;
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
         TestConnectionHook::new(),
