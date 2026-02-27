@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["buffer_pool"],"struct":["ConsumeBuffer","Pool","Pooled"],"trait":["RawPoolBufDatagramIo","RawPoolBufIo","Reuse"],"type":["PooledBuf"]};

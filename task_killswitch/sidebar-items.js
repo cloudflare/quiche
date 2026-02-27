@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["activate","activate_now","killed_signal","spawn_with_killswitch"]};
