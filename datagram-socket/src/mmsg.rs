@@ -55,16 +55,18 @@ pub fn recvmmsg(fd: BorrowedFd, bufs: &mut [ReadBuf<'_>]) -> io::Result<usize> {
 
             slices.push(IoSlice::new(b));
 
+            let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };
+            msg_hdr.msg_iov = slices.last_mut().unwrap() as *mut _ as *mut _;
+            msg_hdr.msg_iovlen = 1;
+            // Fields below are already zero-initialized by std::mem::zeroed().
+            // msg_hdr.msg_name = std::ptr::null_mut();
+            // msg_hdr.msg_namelen = 0;
+            // msg_hdr.msg_control = std::ptr::null_mut();
+            // msg_hdr.msg_controllen = 0;
+            // msg_hdr.msg_flags = 0;
+
             msgvec.push(libc::mmsghdr {
-                msg_hdr: libc::msghdr {
-                    msg_name: std::ptr::null_mut(),
-                    msg_namelen: 0,
-                    msg_iov: slices.last_mut().unwrap() as *mut _ as *mut _,
-                    msg_iovlen: 1,
-                    msg_control: std::ptr::null_mut(),
-                    msg_controllen: 0,
-                    msg_flags: 0,
-                },
+                msg_hdr,
                 msg_len: buf.capacity().try_into().unwrap(),
             });
         }
@@ -115,16 +117,18 @@ pub fn sendmmsg(fd: BorrowedFd, bufs: &[ReadBuf<'_>]) -> io::Result<usize> {
         for buf in bufs.iter() {
             slices.push(IoSlice::new(buf.filled()));
 
+            let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };
+            msg_hdr.msg_iov = slices.last_mut().unwrap() as *mut _ as *mut _;
+            msg_hdr.msg_iovlen = 1;
+            // Fields below are already zero-initialized by std::mem::zeroed().
+            // msg_hdr.msg_name = std::ptr::null_mut();
+            // msg_hdr.msg_namelen = 0;
+            // msg_hdr.msg_control = std::ptr::null_mut();
+            // msg_hdr.msg_controllen = 0;
+            // msg_hdr.msg_flags = 0;
+
             msgvec.push(libc::mmsghdr {
-                msg_hdr: libc::msghdr {
-                    msg_name: std::ptr::null_mut(),
-                    msg_namelen: 0,
-                    msg_iov: slices.last_mut().unwrap() as *mut _ as *mut _,
-                    msg_iovlen: 1,
-                    msg_control: std::ptr::null_mut(),
-                    msg_controllen: 0,
-                    msg_flags: 0,
-                },
+                msg_hdr,
                 msg_len: buf.capacity().try_into().unwrap(),
             });
         }
