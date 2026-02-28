@@ -106,6 +106,14 @@ fn main() {
     config.load_cert_chain_from_pem_file(&args.cert).unwrap();
     config.load_priv_key_from_pem_file(&args.key).unwrap();
 
+    if let Some(ref trust_origin_ca_pem) = args.trust_origin_ca_pem {
+        config
+            .load_verify_locations_from_file(trust_origin_ca_pem)
+            .map_err(|e| format!("error loading origin CA file : {}", e))
+            .unwrap();
+        config.verify_peer(true);
+    }
+
     config.set_application_protos(&conn_args.alpns).unwrap();
 
     config.discover_pmtu(args.enable_pmtud);
@@ -442,6 +450,14 @@ fn main() {
                 (client.conn.is_in_early_data() ||
                     client.conn.is_established())
             {
+                if args.trust_origin_ca_pem.is_some() && args.trust_strict && client.conn.peer_cert().is_none() {
+                    info!("anonymous client connections disallowed due to trust-strict, closing connection");
+                    let reason = "certificate_required".as_bytes();
+                    // Using AlertDescription certificate_required(116) from
+                    // TLS 1.3 RFC, see https://www.rfc-editor.org/rfc/rfc8446#section-6
+                    let _ = client.conn.close(false, 0x100 + 116, &reason);
+                }
+
                 // At this stage the ALPN negotiation succeeded and selected a
                 // single application protocol name. We'll use this to construct
                 // the correct type of HttpConn but `application_proto()`

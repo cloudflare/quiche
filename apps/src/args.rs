@@ -299,6 +299,8 @@ Options:
   --source-port PORT       Source port to use when connecting to the server [default: 0].
   --initial-rtt MILLIS     The initial RTT in milliseconds [default: 333].
   --initial-cwnd-packets PACKETS   The initial congestion window size in terms of packet count [default: 10].
+  --cert <file>            TLS certificate path for client authentication
+  --key <file>             TLS certificate key path for client authentication
   -h --help                Show this screen.
 ";
 
@@ -319,6 +321,8 @@ pub struct ClientArgs {
     pub source_port: u16,
     pub perform_migration: bool,
     pub send_priority_update: bool,
+    pub cert: Option<String>,
+    pub key: Option<String>,
 }
 
 impl Args for ClientArgs {
@@ -396,6 +400,18 @@ impl Args for ClientArgs {
 
         let send_priority_update = args.get_bool("--send-priority-update");
 
+        let cert = if args.get_bool("--cert") {
+            Some(args.get_str("--cert").to_string())
+        } else {
+            None
+        };
+
+        let key = if args.get_bool("--key") {
+            Some(args.get_str("--key").to_string())
+        } else {
+            None
+        };
+
         ClientArgs {
             version,
             dump_response_path,
@@ -412,6 +428,8 @@ impl Args for ClientArgs {
             source_port,
             perform_migration,
             send_priority_update,
+            cert,
+            key,
         }
     }
 }
@@ -434,6 +452,8 @@ impl Default for ClientArgs {
             source_port: 0,
             perform_migration: false,
             send_priority_update: false,
+            cert: None,
+            key: None,
         }
     }
 }
@@ -475,6 +495,8 @@ Options:
   --disable-pacing            Disable pacing (linux only).
   --initial-rtt MILLIS     The initial RTT in milliseconds [default: 333].
   --initial-cwnd-packets PACKETS      The initial congestion window size in terms of packet count [default: 10].
+  --trust-origin-ca-pem <file>  Path to the pem file of the client origin's CA for mutual TLS.
+  --trust-strict              Enable mandatory client certificate presence when using mutual TLS.
   -h --help                   Show this screen.
 ";
 
@@ -489,6 +511,8 @@ pub struct ServerArgs {
     pub disable_gso: bool,
     pub disable_pacing: bool,
     pub enable_pmtud: bool,
+    pub trust_origin_ca_pem: Option<String>,
+    pub trust_strict: bool,
 }
 
 impl Args for ServerArgs {
@@ -505,6 +529,14 @@ impl Args for ServerArgs {
         let disable_pacing = args.get_bool("--disable-pacing");
         let enable_pmtud = args.get_bool("--enable-pmtud");
 
+        let trust_origin_ca_pem = if args.get_bool("--trust-origin-ca-pem") {
+            Some(args.get_str("--trust-origin-ca-pem").to_string())
+        } else {
+            None
+        };
+
+        let trust_strict = args.get_bool("--trust-strict");
+
         ServerArgs {
             listen,
             no_retry,
@@ -515,6 +547,8 @@ impl Args for ServerArgs {
             disable_gso,
             disable_pacing,
             enable_pmtud,
+            trust_origin_ca_pem,
+            trust_strict,
         }
     }
 }

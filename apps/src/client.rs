@@ -97,7 +97,15 @@ pub fn connect(
     };
 
     // Create the configuration for the QUIC connection.
-    let mut config = quiche::Config::new(args.version).unwrap();
+    let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+
+    if let Some(cert) = args.cert {
+        config.load_cert_chain_from_pem_file(&cert).unwrap();
+    }
+
+    if let Some(key) = args.key {
+        config.load_priv_key_from_pem_file(&key).unwrap();
+    }
 
     if let Some(ref trust_origin_ca_pem) = args.trust_origin_ca_pem {
         config
@@ -105,6 +113,7 @@ pub fn connect(
             .map_err(|e| {
                 ClientError::Other(format!("error loading origin CA file : {e}"))
             })?;
+        config.verify_peer(true);
     } else {
         config.verify_peer(!args.no_verify);
     }
