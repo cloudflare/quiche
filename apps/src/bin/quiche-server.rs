@@ -188,13 +188,10 @@ fn main() {
             false => clients.values().filter_map(|c| c.conn.timeout()).min(),
         };
 
-        let mut poll_res = poll.poll(&mut events, timeout);
-        while let Err(e) = poll_res.as_ref() {
-            if e.kind() == std::io::ErrorKind::Interrupted {
-                trace!("mio poll() call failed, retrying: {e:?}");
-                poll_res = poll.poll(&mut events, timeout);
-            } else {
-                panic!("mio poll() call failed fatally: {e:?}");
+        while let Err(e) = poll.poll(&mut events, timeout) {
+            match e.kind() {
+                std::io::ErrorKind::Interrupted => log::trace!("mio poll() call failed, retrying: {e:?}"),
+                _ => panic!("mio poll() call failed fatally: {e:?}"),
             }
         }
 
