@@ -972,6 +972,20 @@ where
             }
         }
 
+        if let Some(err) = qconn.local_error() {
+            if err.is_app {
+                self.audit_log_stats
+                    .set_sent_conn_close_application_error_code(
+                        err.error_code as _,
+                    );
+            } else {
+                self.audit_log_stats
+                    .set_sent_conn_close_transport_error_code(
+                        err.error_code as _,
+                    );
+            }
+        }
+
         self.close_connection(qconn);
 
         if let Err(work_loop_error) = self.conn_stage.work_loop_result {

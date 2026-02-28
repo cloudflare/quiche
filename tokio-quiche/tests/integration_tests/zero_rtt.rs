@@ -67,7 +67,7 @@ async fn handle_0_rtt_request() {
     let context_clone = context.clone();
     let mut quic_settings = QuicSettings::default();
     quic_settings.enable_early_data = true;
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
         TestConnectionHook::new(),

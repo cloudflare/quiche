@@ -79,7 +79,7 @@ async fn test_hello_world_async_callbacks() {
     let hook = Arc::new(TestAsyncCallbackConnectionHook {
         was_called: Arc::new(AtomicBool::new(false)),
     });
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         QuicSettings::default(),
         Http3Settings::default(),
         hook.clone(),
@@ -139,7 +139,7 @@ async fn test_async_callbacks_fail_after_initial_send() {
     }
 
     let hook = Arc::new(TestAsyncCallbackConnectionHook {});
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         QuicSettings::default(),
         Http3Settings::default(),
         hook.clone(),

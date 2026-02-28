@@ -45,7 +45,7 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
     const MAX_REQS: u64 = 10;
 
     let hook = TestConnectionHook::new();
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         QuicSettings::default(),
         Http3Settings {
             max_requests_per_connection: Some(MAX_REQS),
@@ -96,7 +96,7 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
 #[tokio::test]
 async fn test_max_header_list_size_limit() -> QuicResult<()> {
     let hook = TestConnectionHook::new();
-    let url = start_server_with_settings(
+    let (url, mut audit_stats_rx) = start_server_with_settings(
         QuicSettings::default(),
         Http3Settings {
             max_header_list_size: Some(5_000),
@@ -139,6 +139,20 @@ async fn test_max_header_list_size_limit() -> QuicResult<()> {
         quiche::h3::WireErrorCode::ExcessiveLoad as u64
     );
 
+    // Verify the QuicAuditStats has the correct error code set
+    let audit_stats = audit_stats_rx
+        .recv()
+        .await
+        .expect("audit stats not received");
+
+    // The server sent the EXCESSIVE_LOAD error, so it should be recorded as a
+    // sent application error code
+    assert_eq!(
+        audit_stats.sent_conn_close_application_error_code(),
+        quiche::h3::WireErrorCode::ExcessiveLoad as i64,
+        "QuicAuditStats should have recorded the sent H3_EXCESSIVE_LOAD error code"
+    );
+
     Ok(())
 }
 
@@ -151,7 +165,7 @@ async fn test_no_connection_close_frame_on_idle_timeout() -> QuicResult<()> {
     let mut quic_settings = QuicSettings::default();
     quic_settings.max_idle_timeout = Some(IDLE_TIMEOUT);
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
         hook,
