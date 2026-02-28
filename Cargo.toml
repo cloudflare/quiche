@@ -54,7 +54,7 @@ octets = { version = "0.3.5", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
 qlog = { version = "0.16.0", path = "./qlog" }
-quiche = { version = "0.26.0", path = "./quiche" }
+quiche = { version = "0.26.1", path = "./quiche" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
 rstest = { version = "0.26.1" }
@@ -67,7 +67,7 @@ smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.2.1", path = "./task-killswitch" }
 thiserror = { version = "2" }
 tokio = { version = "1.44", default-features = false }
-tokio-quiche = { version = "0.16.0", path = "./tokio-quiche" }
+tokio-quiche = { version = "0.16.1", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 triomphe = { version = "0.1" }
