@@ -34,13 +34,13 @@ use crate::datastore::StreamAccess;
 #[derive(Debug, Default)]
 pub struct StreamBufferTracker {
     /// Full time series per stream with StreamAccess details.
-    pub per_stream: BTreeMap<u64, Vec<(f32, StreamAccess)>>,
+    pub per_stream: BTreeMap<u64, Vec<(f64, StreamAccess)>>,
 
     /// Current maximum end position (offset + length) per stream.
     pub flat: BTreeMap<u64, u64>,
 
     /// Cumulative sum time series.
-    pub sum_series: Vec<(f32, u64)>,
+    pub sum_series: Vec<(f64, u64)>,
 
     /// Running sum for O(1) updates.
     running_sum: u64,
@@ -54,7 +54,7 @@ impl StreamBufferTracker {
     /// Updates stream buffer position, returns Some((old_max, new_max)) if
     /// changed.
     pub fn update(
-        &mut self, stream_id: u64, access: StreamAccess, ev_time: f32,
+        &mut self, stream_id: u64, access: StreamAccess, ev_time: f64,
     ) -> Option<(u64, u64)> {
         self.per_stream
             .entry(stream_id)

@@ -26,12 +26,12 @@
 
 #[derive(Clone, Copy)]
 pub struct XMinMax {
-    pub min: f32,
-    pub max: f32,
+    pub min: f64,
+    pub max: f64,
 }
 
 impl XMinMax {
-    pub fn new(min: f32, max: f32, start: Option<f32>, end: Option<f32>) -> Self {
+    pub fn new(min: f64, max: f64, start: Option<f64>, end: Option<f64>) -> Self {
         let mut minmax = Self { min, max };
 
         if let Some(s) = start {
@@ -45,7 +45,7 @@ impl XMinMax {
         minmax
     }
 
-    pub fn range(&self) -> std::ops::Range<f32> {
+    pub fn range(&self) -> std::ops::Range<f64> {
         self.min..self.max
     }
 }
@@ -57,8 +57,8 @@ pub struct XYMinMax<Y> {
 
 impl<Y> XYMinMax<Y> {
     pub fn init(
-        x_data_range: std::ops::Range<f32>, x_start: Option<f32>,
-        x_end: Option<f32>, y_range: std::ops::Range<Y>,
+        x_data_range: std::ops::Range<f64>, x_start: Option<f64>,
+        x_end: Option<f64>, y_range: std::ops::Range<Y>,
     ) -> Self {
         let x =
             XMinMax::new(x_data_range.start, x_data_range.end, x_start, x_end);

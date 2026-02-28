@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 
 use crate::datastore::Datastore;
 use crate::push_interp;
-use crate::QlogPointf32;
+use crate::QlogPointRtt;
 use crate::QlogPointu64;
 use netlog::h2::H2_DEFAULT_WINDOW_SIZE;
 
@@ -44,9 +44,9 @@ pub struct SeriesStore {
     pub local_send_rate: Vec<QlogPointu64>,
     pub local_ack_rate: Vec<QlogPointu64>,
 
-    pub local_min_rtt: Vec<QlogPointf32>,
-    pub local_latest_rtt: Vec<QlogPointf32>,
-    pub local_smoothed_rtt: Vec<QlogPointf32>,
+    pub local_min_rtt: Vec<QlogPointRtt>,
+    pub local_latest_rtt: Vec<QlogPointRtt>,
+    pub local_smoothed_rtt: Vec<QlogPointRtt>,
 
     pub onertt_packet_created: Vec<QlogPointu64>,
     pub onertt_packet_sent: Vec<QlogPointu64>,
@@ -57,10 +57,10 @@ pub struct SeriesStore {
 
     pub onertt_packet_received: Vec<QlogPointu64>,
 
-    pub netlog_missing_packets: Vec<f32>,
+    pub netlog_missing_packets: Vec<f64>,
 
     // this one is a little different, delta as a function of packet number
-    pub onertt_packet_created_sent_delta: Vec<(u64, f32)>,
+    pub onertt_packet_created_sent_delta: Vec<(u64, f64)>,
 
     pub sent_max_data: Vec<QlogPointu64>,
     pub sent_stream_max_data: BTreeMap<u64, Vec<QlogPointu64>>,
@@ -86,24 +86,24 @@ pub struct SeriesStore {
     pub sent_data_frames_series: BTreeMap<u64, Vec<QlogPointu64>>,
     pub sent_data_max: BTreeMap<u64, u64>,
 
-    pub h2_send_window_series_balanced: BTreeMap<u32, Vec<(f32, i32)>>,
+    pub h2_send_window_series_balanced: BTreeMap<u32, Vec<(f64, i32)>>,
     pub h2_send_window_balanced_max: BTreeMap<u32, i32>,
-    pub h2_send_window_series_absolute: BTreeMap<u32, Vec<(f32, u64)>>,
+    pub h2_send_window_series_absolute: BTreeMap<u32, Vec<(f64, u64)>>,
     pub h2_send_window_absolute_max: BTreeMap<u32, u64>,
 
     pub netlog_h2_stream_received_connection_cumulative: Vec<QlogPointu64>,
     pub netlog_quic_stream_received_connection_cumulative: Vec<QlogPointu64>,
 
-    pub netlog_quic_client_side_window_updates: BTreeMap<i64, Vec<(f32, u64)>>,
+    pub netlog_quic_client_side_window_updates: BTreeMap<i64, Vec<(f64, u64)>>,
 
     pub sum_received_stream_max_data: Vec<QlogPointu64>,
     pub sum_sent_stream_max_data: Vec<QlogPointu64>,
 
-    pub sent_x_min: f32,
-    pub sent_x_max: f32,
+    pub sent_x_min: f64,
+    pub sent_x_max: f64,
 
-    pub received_x_min: f32,
-    pub received_x_max: f32,
+    pub received_x_min: f64,
+    pub received_x_max: f64,
 
     pub y_max_stream_send_plot: u64,
     pub y_max_stream_recv_plot: u64,
@@ -111,8 +111,8 @@ pub struct SeriesStore {
     pub y_max_rtt_plot: f32,
 
     pub y_max_onertt_pkt_sent_plot: u64,
-    pub y_min_onertt_packet_created_sent_delta: f32,
-    pub y_max_onertt_packet_created_sent_delta: f32,
+    pub y_min_onertt_packet_created_sent_delta: f64,
+    pub y_max_onertt_packet_created_sent_delta: f64,
 
     pub y_max_onertt_pkt_received_plot: u64,
 
@@ -131,11 +131,11 @@ impl SeriesStore {
         series_store
     }
 
-    fn update_sent_x_axis_max(&mut self, x: f32) {
+    fn update_sent_x_axis_max(&mut self, x: f64) {
         self.sent_x_max = self.sent_x_max.max(x);
     }
 
-    fn update_received_x_axis_max(&mut self, x: f32) {
+    fn update_received_x_axis_max(&mut self, x: f64) {
         self.received_x_max = self.sent_x_max.max(x);
     }
 
@@ -490,7 +490,13 @@ impl SeriesStore {
             let mut series_points = vec![];
 
             for point in points {
-                if let (_, QuicFrame::Stream { offset, length, .. }) = point {
+                if let (_, QuicFrame::Stream { offset, raw, .. }) = point {
+                    let offset = offset.unwrap_or_default();
+                    let length = raw
+                        .clone()
+                        .unwrap_or_default()
+                        .payload_length
+                        .unwrap_or_default();
                     let y = offset + length;
 
                     self.update_sent_x_axis_max(point.0);

@@ -25,7 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use full_palette::PURPLE_500;
-use plotters::coord::types::RangedCoordf32;
+use plotters::coord::types::RangedCoordf64;
 use plotters::coord::types::RangedCoordu64;
 use plotters::coord::Shift;
 use plotters::prelude::*;
@@ -41,7 +41,7 @@ use super::minmax::XYMinMax;
 pub fn draw_congestion_plot<'a, DB: DrawingBackend + 'a>(
     params: &PlotParameters, axis: &XYMinMax<u64>, ss: &SeriesStore,
     ds: &Datastore, plot: &plotters::drawing::DrawingArea<DB, Shift>,
-) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>> {
+) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>> {
     let mut builder = ChartBuilder::on(plot);
 
     builder
@@ -94,7 +94,7 @@ pub fn draw_congestion_plot<'a, DB: DrawingBackend + 'a>(
 #[cfg(target_arch = "wasm32")]
 pub fn plot_cc_plot<'a>(
     params: &PlotParameters, ss: &SeriesStore, ds: &Datastore, canvas_id: &str,
-) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf32, RangedCoordu64>>
+) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf64, RangedCoordu64>>
 {
     let root =
         make_chart_canvas_area(&canvas_id, params.colors, params.chart_margin);
@@ -118,14 +118,14 @@ pub fn plot_cc_plot<'a>(
 }
 
 fn draw_cc_updates<DB: DrawingBackend>(
-    data: &[(f32, u64, String)], y_range: std::ops::Range<u64>,
+    data: &[(f64, u64, String)], y_range: std::ops::Range<u64>,
     y_range_extended: std::ops::Range<u64>,
     congestion_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
-    let my_label = |x: f32, y: u64, name: &str| {
+    let my_label = |x: f64, y: u64, name: &str| {
         let color = cc_state_to_color(name);
         let text_width = name.len() as i32 * 6; // Rough estimate
         let text_height = 12;
@@ -172,30 +172,30 @@ fn draw_cc_updates<DB: DrawingBackend>(
 }
 
 fn draw_bytes_in_flight<DB: DrawingBackend>(
-    data: &[(f32, u64)],
+    data: &[(f64, u64)],
     congestion_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     draw_line(data, Some("bytes in flight"), TAUPE, congestion_chart);
 }
 
 fn draw_cwnd<DB: DrawingBackend>(
-    data: &[(f32, u64)],
+    data: &[(f64, u64)],
     congestion_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     draw_line(data, Some("cwnd"), PURPLE_500, congestion_chart);
 }
 
 fn draw_ssthresh<DB: DrawingBackend>(
-    data: &[(f32, u64)],
+    data: &[(f64, u64)],
     congestion_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     draw_line(data, Some("ssthresh"), ORANGE, congestion_chart);

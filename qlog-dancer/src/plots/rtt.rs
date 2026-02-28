@@ -26,6 +26,7 @@
 
 use minmax::XYMinMax;
 use plotters::coord::types::RangedCoordf32;
+use plotters::coord::types::RangedCoordf64;
 
 use plotters::coord::Shift;
 use plotters::prelude::*;
@@ -36,8 +37,8 @@ use crate::plots::*;
 use crate::seriesstore::SeriesStore;
 
 fn draw_rtt_series<DB: DrawingBackend>(
-    data: &[(f32, f32)], label: &str, colour: RGBColor,
-    rtt_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordf32>>,
+    data: &[(f64, f32)], label: &str, colour: RGBColor,
+    rtt_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf32>>,
 ) {
     rtt_chart
         .draw_series(LineSeries::new(data.to_vec(), colour))
@@ -49,22 +50,22 @@ fn draw_rtt_series<DB: DrawingBackend>(
 }
 
 fn draw_min_rtt<DB: DrawingBackend>(
-    data: &[(f32, f32)],
-    rtt_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordf32>>,
+    data: &[(f64, f32)],
+    rtt_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf32>>,
 ) {
     draw_rtt_series(data, "Min RTT", SOFT_PINK, rtt_chart);
 }
 
 fn draw_latest_rtt<DB: DrawingBackend>(
-    data: &[(f32, f32)],
-    rtt_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordf32>>,
+    data: &[(f64, f32)],
+    rtt_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf32>>,
 ) {
     draw_rtt_series(data, "Latest RTT", ORANGE, rtt_chart);
 }
 
 fn draw_smoothed_rtt<DB: DrawingBackend>(
-    data: &[(f32, f32)],
-    rtt_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordf32>>,
+    data: &[(f64, f32)],
+    rtt_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordf32>>,
 ) {
     draw_rtt_series(data, "Smoothed RTT", BROWN, rtt_chart);
 }
@@ -72,7 +73,7 @@ fn draw_smoothed_rtt<DB: DrawingBackend>(
 pub fn draw_rtt_plot<'a, DB: DrawingBackend + 'a>(
     params: &PlotParameters, axis: &XYMinMax<u64>, ss: &SeriesStore,
     plot: &plotters::drawing::DrawingArea<DB, Shift>,
-) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordf32>> {
+) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf64, RangedCoordf32>> {
     let mut builder = ChartBuilder::on(plot);
     builder
         .x_label_area_size(params.area_margin.x)
@@ -84,7 +85,7 @@ pub fn draw_rtt_plot<'a, DB: DrawingBackend + 'a>(
     let mut chart = builder
         .build_cartesian_2d(
             axis.x.range(),
-            0.0..(ss.y_max_rtt_plot + ss.y_max_rtt_plot / 10.0),
+            0.0f32..(ss.y_max_rtt_plot + ss.y_max_rtt_plot / 10.0),
         )
         .unwrap();
 
@@ -117,7 +118,7 @@ pub fn draw_rtt_plot<'a, DB: DrawingBackend + 'a>(
 #[cfg(target_arch = "wasm32")]
 pub fn plot_rtt_plot<'a>(
     params: &PlotParameters, ss: &SeriesStore, canvas_id: &str,
-) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf32, RangedCoordf32>>
+) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf64, RangedCoordf32>>
 {
     let root =
         make_chart_canvas_area(&canvas_id, params.colors, params.chart_margin);
