@@ -1018,6 +1018,10 @@ enum quiche_h3_error {
     // over HTTP/1.1.
     QUICHE_H3_ERR_VERSION_FALLBACK = -20,
 
+    // An attempt to send a HEADERS frame did not fully complete. The local
+    // endpoint should try to continue sending the remainder at a future time.
+    QUICHE_H3_ERR_PARTIAL_HEADER = -21,
+
     // The following QUICHE_H3_TRANSPORT_ERR_* errors are propagated
     // from the QUIC transport layer.
 
@@ -1183,6 +1187,20 @@ typedef struct {
 int64_t quiche_h3_send_request(quiche_h3_conn *conn, quiche_conn *quic_conn,
                                const quiche_h3_header *headers, size_t headers_len,
                                bool fin);
+
+// Reserves an HTTP/3 request stream.
+int64_t quiche_h3_reserve_request_stream(quiche_h3_conn *conn,
+                            quiche_conn *quic_conn);
+
+// Initiates streaming of a new HTTP/3 HEADERS frame on the given stream.
+int quiche_h3_stream_headers(quiche_h3_conn *conn,
+                             quiche_conn *quic_conn, uint64_t stream_id,
+                             quiche_h3_header *headers, size_t headers_len,
+                             bool is_trailer_section, bool fin);
+
+// Continues sending a HTTP/3 HEADERS frame on the given stream.
+int quiche_h3_continue_partial_headers(quiche_h3_conn *conn,
+                            quiche_conn *quic_conn, uint64_t stream_id);
 
 // Sends an HTTP/3 response on the specified stream with default priority.
 int quiche_h3_send_response(quiche_h3_conn *conn, quiche_conn *quic_conn,
