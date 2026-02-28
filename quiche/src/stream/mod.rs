@@ -46,9 +46,6 @@ use crate::Result;
 
 const DEFAULT_URGENCY: u8 = 127;
 
-// The default size of the receiver stream flow control window.
-const DEFAULT_STREAM_WINDOW: u64 = 32 * 1024;
-
 /// The maximum size of the receiver stream flow control window.
 pub const MAX_STREAM_WINDOW: u64 = 16 * 1024 * 1024;
 
@@ -945,6 +942,9 @@ impl ExactSizeIterator for StreamIter {
         self.streams.len() - self.index
     }
 }
+
+#[cfg(test)]
+const DEFAULT_STREAM_WINDOW: u64 = 32 * 1024;
 
 #[cfg(test)]
 mod tests {
