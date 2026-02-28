@@ -370,6 +370,11 @@ struct LossThreshold {
     // INITIAL_TIME_THRESHOLD_OVERHEAD` and equivalent to the initial value
     // of INITIAL_TIME_THRESHOLD.
     time_thresh_overhead: Option<f64>,
+
+    // # Experiment: disable_dynamic_loss_threshold
+    //
+    // Disable dynamically increasing the loss thresholds on spurious loss.
+    disable_dynamic_loss_threshold: bool,
 }
 
 impl LossThreshold {
@@ -384,6 +389,8 @@ impl LossThreshold {
             pkt_thresh: Some(INITIAL_PACKET_THRESHOLD),
             time_thresh: INITIAL_TIME_THRESHOLD,
             time_thresh_overhead,
+            disable_dynamic_loss_threshold: recovery_config
+                .disable_dynamic_loss_threshold,
         }
     }
 
@@ -396,6 +403,10 @@ impl LossThreshold {
     }
 
     fn on_spurious_loss(&mut self, new_pkt_thresh: u64) {
+        if self.disable_dynamic_loss_threshold {
+            return;
+        }
+
         match &mut self.time_thresh_overhead {
             Some(time_thresh_overhead) => {
                 if self.pkt_thresh.is_some() {
@@ -1265,6 +1276,44 @@ mod tests {
         loss_thresh.on_spurious_loss(INITIAL_PACKET_THRESHOLD);
         assert_eq!(loss_thresh.pkt_thresh().unwrap(), MAX_PACKET_THRESHOLD);
         assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+    }
+
+    #[test]
+    fn disable_dynamic_loss_threshold() {
+        // Test the default behavior
+        let mut default_config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        default_config.set_disable_dynamic_loss_threshold(true);
+
+        // Test the relaxed threshold behavior
+        let mut relaxed_threshold_config =
+            Config::new(crate::PROTOCOL_VERSION).unwrap();
+        relaxed_threshold_config.set_enable_relaxed_loss_threshold(true);
+        relaxed_threshold_config.set_disable_dynamic_loss_threshold(true);
+
+        let configs = vec![default_config, relaxed_threshold_config];
+
+        for config in configs {
+            let recovery_config = RecoveryConfig::from_config(&config);
+
+            // Initial thresholds
+            let mut loss_thresh = LossThreshold::new(&recovery_config);
+            assert_eq!(
+                loss_thresh.pkt_thresh().unwrap(),
+                INITIAL_PACKET_THRESHOLD
+            );
+            assert_eq!(loss_thresh.time_thresh(), INITIAL_TIME_THRESHOLD);
+
+            // Spurious loss doesn't change the thresholds.
+            for packet_gap in 0..MAX_PACKET_THRESHOLD * 2 {
+                loss_thresh.on_spurious_loss(packet_gap);
+
+                assert_eq!(
+                    loss_thresh.pkt_thresh().unwrap(),
+                    INITIAL_PACKET_THRESHOLD
+                );
+                assert_eq!(loss_thresh.time_thresh(), INITIAL_TIME_THRESHOLD);
+            }
+        }
     }
 
     #[test]
