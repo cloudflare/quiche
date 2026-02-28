@@ -31,6 +31,7 @@
 //! Actions, that h3i iterates over in sequence and executes.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::quiche;
@@ -50,7 +51,7 @@ use crate::encode_header_block_literal;
 /// sequentially. Note that packets will be flushed when said iteration has
 /// completed, regardless of if an [`Action::FlushPackets`] was the terminal
 /// action.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     /// Send a [quiche::h3::frame::Frame] over a stream.
     SendFrame {
@@ -110,6 +111,43 @@ pub enum Action {
     Wait {
         wait_type: WaitType,
     },
+
+    /// Wait for an event. See [WaitType] for the events.
+    RunCallback {
+        cb: CustomCallback,
+    },
+}
+
+pub struct CustomCallback {
+    cb: Arc<dyn Fn() + Send + Sync + 'static>,
+}
+
+impl CustomCallback {
+    pub fn new(cb: Arc<dyn Fn() + Send + Sync + 'static>) -> Self {
+        Self { cb }
+    }
+
+    pub fn run(&self) {
+        (self.cb)()
+    }
+}
+
+impl PartialEq for CustomCallback {
+    fn eq(&self, _other: &Self) -> bool {
+        false
+    }
+}
+
+impl Clone for CustomCallback {
+    fn clone(&self) -> Self {
+        unreachable!()
+    }
+}
+
+impl std::fmt::Debug for CustomCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomCallback").finish()
+    }
 }
 
 /// Configure the wait behavior for a connection.
