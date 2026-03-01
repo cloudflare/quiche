@@ -284,7 +284,7 @@ where
         client_config.as_mut(),
     )?;
 
-    log::info!("created unestablished quiche::Connection"; "scid" => ?scid, "provided_dcid"=>?dcid);
+    log::info!("created unestablished quiche::Connection"; "scid" => ?scid, "provided_dcid" => ?dcid);
 
     if let Some(session) = &params.session {
         quiche_conn.set_session(session).map_err(|error| {
