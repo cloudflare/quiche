@@ -475,7 +475,7 @@ pub fn print_sqlog_events(events: &[qlog::reader::Event]) {
     );
     for p in &pp {
         println!(
-            "{:>12.2} | {:<10} | {:<25} | {}",
+            "{:>12.3} | {:<10} | {:<25} | {}",
             p.time, p.category, p.ty, p.details
         );
     }
