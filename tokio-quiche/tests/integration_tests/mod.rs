@@ -208,6 +208,7 @@ async fn test_connect_with_custom_dcid() {
     use tokio_quiche::http3::settings::Http3Settings;
     use tokio_quiche::quic::connect_with_config_and_dcid;
     use tokio_quiche::socket::Socket;
+    use tokio_quiche::ConnectionIdGenerator;
     use tokio_quiche::ClientH3Driver;
 
     let (url, _hook) = start_server();
@@ -219,10 +220,8 @@ async fn test_connect_with_custom_dcid() {
     let socket = Socket::try_from(tokio_socket).unwrap();
     let (h3_driver, _h3_controller) =
         ClientH3Driver::new(Http3Settings::default());
-    let dcid = tokio_quiche::quiche::ConnectionId::from_vec(vec![
-        0xba, 0xdb, 0xee, 0xf0, 0xca, 0xfe, 0x13, 0x37, 0xde, 0xad,
-        0xbe, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
-    ]);
+    let dcid = tokio_quiche::quic::SimpleConnectionIdGenerator
+        .new_connection_id();
 
     assert!(
         timeout(

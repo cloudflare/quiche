@@ -223,11 +223,6 @@ where
     Rx: DatagramSocketRecv + Unpin + 'static,
     App: ApplicationOverQuic,
 {
-    #[cfg(not(feature = "custom-client-dcid"))]
-    if dcid.is_some() {
-        return Err(quiche::Error::InvalidDcidInitialization.into());
-    }
-
     let mut client_config = Config::new(params, socket.capabilities)?;
     let scid = SimpleConnectionIdGenerator.new_connection_id();
 
