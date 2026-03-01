@@ -2646,6 +2646,9 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// Coalesced packets will be processed as necessary.
     ///
+    /// Note that on success the entire input buffer is processed, and the
+    /// returned value will be the total size of the buffer.
+    ///
     /// Note that the contents of the input buffer `buf` might be modified by
     /// this function due to, for example, in-place decryption.
     ///
