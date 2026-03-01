@@ -86,6 +86,7 @@ use std::time::Duration;
 use datagram_socket::DatagramSocketRecv;
 use datagram_socket::DatagramSocketSend;
 use foundations::telemetry::log;
+use quiche::ConnectionId;
 
 use crate::http3::settings::Http3Settings;
 use crate::metrics::DefaultMetrics;
@@ -197,10 +198,60 @@ where
     Rx: DatagramSocketRecv + Unpin + 'static,
     App: ApplicationOverQuic,
 {
+    connect_with_config_inner(socket, host, params, app, None).await
+}
+
+#[cfg(feature = "custom-client-dcid")]
+pub async fn connect_with_config_and_dcid<Tx, Rx, App>(
+    socket: Socket<Tx, Rx>, host: Option<&str>, params: &ConnectionParams<'_>,
+    app: App, dcid: Option<&ConnectionId<'static>>,
+) -> QuicResult<QuicConnection>
+where
+    Tx: DatagramSocketSend + Send + 'static,
+    Rx: DatagramSocketRecv + Unpin + 'static,
+    App: ApplicationOverQuic,
+{
+    connect_with_config_inner(socket, host, params, app, dcid).await
+}
+
+async fn connect_with_config_inner<Tx, Rx, App>(
+    socket: Socket<Tx, Rx>, host: Option<&str>, params: &ConnectionParams<'_>,
+    app: App, dcid: Option<&ConnectionId<'static>>,
+) -> QuicResult<QuicConnection>
+where
+    Tx: DatagramSocketSend + Send + 'static,
+    Rx: DatagramSocketRecv + Unpin + 'static,
+    App: ApplicationOverQuic,
+{
+    #[cfg(not(feature = "custom-client-dcid"))]
+    if dcid.is_some() {
+        return Err(quiche::Error::InvalidDcidInitialization.into());
+    }
+
     let mut client_config = Config::new(params, socket.capabilities)?;
     let scid = SimpleConnectionIdGenerator.new_connection_id();
 
-    #[cfg(feature = "zero-copy")]
+    #[cfg(all(feature = "zero-copy", feature = "custom-client-dcid"))]
+    let mut quiche_conn = if let Some(dcid) = dcid {
+        quiche::connect_with_dcid_and_buffer_factory(
+            host,
+            &scid,
+            dcid,
+            socket.local_addr,
+            socket.peer_addr,
+            client_config.as_mut(),
+        )?
+    } else {
+        quiche::connect_with_buffer_factory(
+            host,
+            &scid,
+            socket.local_addr,
+            socket.peer_addr,
+            client_config.as_mut(),
+        )?
+    };
+
+    #[cfg(all(feature = "zero-copy", not(feature = "custom-client-dcid")))]
     let mut quiche_conn = quiche::connect_with_buffer_factory(
         host,
         &scid,
@@ -209,7 +260,27 @@ where
         client_config.as_mut(),
     )?;
 
-    #[cfg(not(feature = "zero-copy"))]
+    #[cfg(all(not(feature = "zero-copy"), feature = "custom-client-dcid"))]
+    let mut quiche_conn = if let Some(dcid) = dcid {
+        quiche::connect_with_dcid(
+            host,
+            &scid,
+            dcid,
+            socket.local_addr,
+            socket.peer_addr,
+            client_config.as_mut(),
+        )?
+    } else {
+        quiche::connect(
+            host,
+            &scid,
+            socket.local_addr,
+            socket.peer_addr,
+            client_config.as_mut(),
+        )?
+    };
+
+    #[cfg(all(not(feature = "zero-copy"), not(feature = "custom-client-dcid")))]
     let mut quiche_conn = quiche::connect(
         host,
         &scid,
@@ -218,7 +289,7 @@ where
         client_config.as_mut(),
     )?;
 
-    log::info!("created unestablished quiche::Connection"; "scid" => ?scid);
+    log::info!("created unestablished quiche::Connection"; "scid" => ?scid, "provided_dcid"=>?dcid);
 
     if let Some(session) = &params.session {
         quiche_conn.set_session(session).map_err(|error| {
