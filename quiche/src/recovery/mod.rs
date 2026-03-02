@@ -485,6 +485,7 @@ struct QlogMetrics {
     ack_rate: Option<u64>,
     lost_packets: Option<u64>,
     lost_bytes: Option<u64>,
+    pto_count: Option<u32>,
 }
 
 #[cfg(feature = "qlog")]
@@ -662,6 +663,13 @@ impl QlogMetrics {
                     delta: Some(val - self.lost_bytes.unwrap_or(0)),
                 });
                 self.lost_bytes = latest.lost_bytes;
+            }
+        }
+        if self.pto_count != latest.pto_count {
+            if let Some(val) = latest.pto_count {
+                self.pto_count = latest.pto_count;
+                emit_event = true;
+                ex_data.insert("cf_pto_count", val);
             }
         }
 
