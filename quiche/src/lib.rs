@@ -2204,7 +2204,14 @@ impl<F: BufFactory> Connection<F> {
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String,
     ) {
-        self.set_qlog_with_level(writer, title, description, QlogLevel::Base)
+        self.set_qlog_with_details(
+            writer,
+            title,
+            description,
+            None,
+            None,
+            Instant::now(),
+        )
     }
 
     /// Sets qlog output to the designated [`Writer`].
@@ -2216,11 +2223,43 @@ impl<F: BufFactory> Connection<F> {
     /// missing some early logs.
     ///
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
+    #[deprecated(
+        since = "0.26.0",
+        note = "use `set_qlog` or `set_qlog_with_details` instead"
+    )]
     #[cfg(feature = "qlog")]
     #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
     pub fn set_qlog_with_level(
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String, qlog_level: QlogLevel,
+    ) {
+        self.set_qlog_with_details(
+            writer,
+            title,
+            description,
+            Some(qlog_level),
+            None,
+            Instant::now(),
+        )
+    }
+
+    /// Sets qlog output to the designated [`Writer`].
+    ///
+    /// Only qlog events included in the specified `QlogLevel` are written
+    /// (Default `QlogLevel::Base`). The serialization format is JSON-SEQ.
+    ///
+    /// If `system_time` is provided, the `reference_time` is included in
+    /// `common_fields`. `system_time` and `now` should be recorded at the
+    /// same time to ensure clock synchronization.
+    ///
+    /// This needs to be called as soon as the connection is created, to avoid
+    /// missing some early logs.
+    #[cfg(feature = "qlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+    pub fn set_qlog_with_details(
+        &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
+        description: String, qlog_level: Option<QlogLevel>,
+        system_time: Option<std::time::SystemTime>, now: Instant,
     ) {
         let vp = if self.is_server {
             qlog::VantagePointType::Server
@@ -2229,11 +2268,13 @@ impl<F: BufFactory> Connection<F> {
         };
 
         let level = match qlog_level {
-            QlogLevel::Core => EventImportance::Core,
+            Some(QlogLevel::Core) => EventImportance::Core,
 
-            QlogLevel::Base => EventImportance::Base,
+            Some(QlogLevel::Base) => EventImportance::Base,
 
-            QlogLevel::Extra => EventImportance::Extra,
+            Some(QlogLevel::Extra) => EventImportance::Extra,
+
+            None => EventImportance::Base, // default
         };
 
         self.qlog.level = level;
@@ -2250,7 +2291,16 @@ impl<F: BufFactory> Connection<F> {
                 time_offset: Some(0.0),
                 original_uris: None,
             }),
-            None,
+            system_time.map(|t| qlog::CommonFields {
+                group_id: None,
+                protocol_type: None,
+                reference_time: Some(
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64() * 1000.0)
+                        .unwrap_or(0.0),
+                ),
+                time_format: Some("relative".to_string()),
+            }),
         );
 
         let mut streamer = qlog::streamer::QlogStreamer::new(
@@ -2258,7 +2308,7 @@ impl<F: BufFactory> Connection<F> {
             Some(title),
             Some(description),
             None,
-            Instant::now(),
+            now,
             trace,
             self.qlog.level,
             writer,
