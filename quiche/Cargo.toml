@@ -1,6 +1,6 @@
 [package]
 name = "quiche"
-version = "0.26.0"
+version = "0.26.1"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 repository = { workspace = true }
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
