@@ -1629,6 +1629,8 @@ pub fn connect(
 /// certificate.
 ///
 /// [RFC 9000]: <https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3>
+#[cfg(feature = "custom-client-dcid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "custom-client-dcid")))]
 pub fn connect_with_dcid(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
@@ -1670,6 +1672,8 @@ pub fn connect_with_buffer_factory<F: BufFactory>(
 ///
 /// The buffers generated can be anything that can be drereferenced as a byte
 /// slice. See [`connect`] and [`BufFactory`] for more info.
+#[cfg(feature = "custom-client-dcid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "custom-client-dcid")))]
 pub fn connect_with_dcid_and_buffer_factory<F: BufFactory>(
     server_name: Option<&str>, scid: &ConnectionId, dcid: &ConnectionId,
     local: SocketAddr, peer: SocketAddr, config: &mut Config,
@@ -1896,12 +1900,17 @@ impl<F: BufFactory> Connection<F> {
             // other.
             return Err(Error::InvalidDcidInitialization);
         }
+        #[cfg(feature = "custom-client-dcid")]
         if let Some(client_dcid) = client_dcid {
             // The Minimum length is 8.
             // See https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
             if client_dcid.to_vec().len() < 8 {
                 return Err(Error::InvalidDcidInitialization);
             }
+        }
+        #[cfg(not(feature = "custom-client-dcid"))]
+        if client_dcid.is_some() {
+            return Err(Error::InvalidDcidInitialization);
         }
 
         let max_rx_data = config.local_transport_params.initial_max_data;

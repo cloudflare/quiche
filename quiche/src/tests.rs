@@ -11566,6 +11566,7 @@ fn configuration_values_are_limited_to_max_varint() {
     assert_eq!(pipe.handshake(), Err(Error::InvalidTransportParam));
 }
 
+#[cfg(feature = "custom-client-dcid")]
 #[rstest]
 fn connect_custom_client_dcid() {
     let mut client_scid = [0; 16];
@@ -12014,6 +12015,7 @@ fn max_streams_uni_frame_retransmit(
     assert!(has_max_streams, "Expected MAX_STREAMS in packet");
 }
 
+#[cfg(feature = "custom-client-dcid")]
 #[rstest]
 fn connect_custom_client_dcid_too_short() {
     let mut client_scid = [0; 16];

@@ -325,6 +325,7 @@ quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const quiche_config *config, void *ssl,
                                       bool is_server);
 
+// Needs to have custom-client-dcid feature enabled on compile time. Otherwise will always return NULL.
 quiche_conn *quiche_conn_new_with_tls_and_client_dcid(const uint8_t *scid, size_t scid_len,
                                       const uint8_t *dcid, size_t dcid_len,
                                       const struct sockaddr *local, socklen_t local_len,
