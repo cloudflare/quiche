@@ -612,7 +612,6 @@ pub extern "C" fn quiche_retry(
 }
 
 #[no_mangle]
-#[cfg(feature = "custom-client-dcid")]
 pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
     scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
@@ -650,19 +649,6 @@ pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
             Err(_) => ptr::null_mut(),
         }
     }
-}
-
-#[no_mangle]
-#[cfg(not(feature = "custom-client-dcid"))]
-#[allow(unused_variables)]
-pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
-    scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
-    local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
-    config: &Config, ssl: *mut c_void,
-) -> *mut Connection {
-    // It's always an error to call this function without the custom-client-dcid
-    // feature enabled.
-    ptr::null_mut()
 }
 
 #[no_mangle]

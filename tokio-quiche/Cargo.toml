@@ -27,8 +27,6 @@ rpk = ["boring/rpk"]
 gcongestion = ["quiche/gcongestion"]
 # Use quiche with zero-copy send calls.
 zero-copy = ["gcongestion"]
-# Forward custom-client-dcid to quiche.
-custom-client-dcid = ["quiche/custom-client-dcid"]
 
 # Deprecated: use `--cfg capture_keylogs` instead.
 capture_keylogs = []

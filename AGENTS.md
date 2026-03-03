@@ -98,7 +98,7 @@ quiche  datagram-socket    |        qlog-dancer        (Layer 1)
 
 ```
 quiche:        default=boringssl-vendored | boringssl-boring-crate | openssl
-               qlog, gcongestion, internal, ffi, fuzzing, sfv, custom-client-dcid
+               qlog, gcongestion, internal, ffi, fuzzing, sfv
 tokio-quiche:  fuzzing, quiche_internal, gcongestion, zero-copy, rpk
                (hardcodes: quiche/boringssl-boring-crate + quiche/qlog)
 h3i:           async (enables tokio-quiche dependency)

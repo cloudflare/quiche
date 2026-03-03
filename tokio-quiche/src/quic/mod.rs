@@ -200,7 +200,7 @@ where
     let mut client_config = Config::new(params, socket.capabilities)?;
     let scid = SimpleConnectionIdGenerator.new_connection_id();
 
-    #[cfg(all(feature = "zero-copy", feature = "custom-client-dcid"))]
+    #[cfg(feature = "zero-copy")]
     let mut quiche_conn = if let Some(dcid) = &params.dcid {
         quiche::connect_with_dcid_and_buffer_factory(
             host,
@@ -220,16 +220,7 @@ where
         )?
     };
 
-    #[cfg(all(feature = "zero-copy", not(feature = "custom-client-dcid")))]
-    let mut quiche_conn = quiche::connect_with_buffer_factory(
-        host,
-        &scid,
-        socket.local_addr,
-        socket.peer_addr,
-        client_config.as_mut(),
-    )?;
-
-    #[cfg(all(not(feature = "zero-copy"), feature = "custom-client-dcid"))]
+    #[cfg(not(feature = "zero-copy"))]
     let mut quiche_conn = if let Some(dcid) = &params.dcid {
         quiche::connect_with_dcid(
             host,
@@ -249,19 +240,7 @@ where
         )?
     };
 
-    #[cfg(all(not(feature = "zero-copy"), not(feature = "custom-client-dcid")))]
-    let mut quiche_conn = quiche::connect(
-        host,
-        &scid,
-        socket.local_addr,
-        socket.peer_addr,
-        client_config.as_mut(),
-    )?;
-
-    #[cfg(feature = "custom-client-dcid")]
     log::info!("created unestablished quiche::Connection"; "scid" => ?scid, "provided_dcid" => ?params.dcid);
-    #[cfg(not(feature = "custom-client-dcid"))]
-    log::info!("created unestablished quiche::Connection"; "scid" => ?scid);
 
     if let Some(session) = &params.session {
         quiche_conn.set_session(session).map_err(|error| {

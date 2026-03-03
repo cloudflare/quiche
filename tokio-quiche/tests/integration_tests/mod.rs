@@ -203,7 +203,6 @@ async fn test_ioworker_state_machine_pause() {
 }
 
 #[tokio::test]
-#[cfg(feature = "custom-client-dcid")]
 async fn test_connect_with_custom_dcid() {
     use tokio_quiche::http3::settings::Http3Settings;
     use tokio_quiche::quic::connect_with_config;
