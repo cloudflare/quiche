@@ -55,6 +55,9 @@ pub struct ConnectionParams<'a> {
     pub hooks: Hooks,
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
+    /// Custom destination connection ID to use for client connections.
+    #[cfg(feature = "custom-client-dcid")]
+    pub dcid: Option<quiche::ConnectionId<'static>>,
 }
 
 impl core::fmt::Debug for ConnectionParams<'_> {
@@ -80,6 +83,8 @@ impl<'a> ConnectionParams<'a> {
             tls_cert: Some(tls_cert),
             hooks,
             session: None,
+            #[cfg(feature = "custom-client-dcid")]
+            dcid: None,
         }
     }
 
@@ -95,6 +100,8 @@ impl<'a> ConnectionParams<'a> {
             tls_cert,
             hooks,
             session: None,
+            #[cfg(feature = "custom-client-dcid")]
+            dcid: None,
         }
     }
 }
