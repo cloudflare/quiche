@@ -208,36 +208,33 @@ async fn test_connect_with_custom_dcid() {
     use tokio_quiche::http3::settings::Http3Settings;
     use tokio_quiche::quic::connect_with_config_and_dcid;
     use tokio_quiche::socket::Socket;
-    use tokio_quiche::ConnectionIdGenerator;
     use tokio_quiche::ClientH3Driver;
+    use tokio_quiche::ConnectionIdGenerator;
 
     let (url, _hook) = start_server();
     let addr = extract_host_ipv4(&url);
 
-    let tokio_socket =
-        tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let tokio_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     tokio_socket.connect(addr).await.unwrap();
     let socket = Socket::try_from(tokio_socket).unwrap();
     let (h3_driver, _h3_controller) =
         ClientH3Driver::new(Http3Settings::default());
-    let dcid = tokio_quiche::quic::SimpleConnectionIdGenerator
-        .new_connection_id();
+    let dcid =
+        tokio_quiche::quic::SimpleConnectionIdGenerator.new_connection_id();
 
-    assert!(
-        timeout(
-            Duration::from_secs(5),
-            connect_with_config_and_dcid(
-                socket,
-                Some("127.0.0.1"),
-                &ConnectionParams::default(),
-                h3_driver,
-                Some(&dcid),
-            ),
-        )
-        .await
-        .expect("connection timed out")
-        .is_ok()
-    );
+    assert!(timeout(
+        Duration::from_secs(5),
+        connect_with_config_and_dcid(
+            socket,
+            Some("127.0.0.1"),
+            &ConnectionParams::default(),
+            h3_driver,
+            Some(&dcid),
+        ),
+    )
+    .await
+    .expect("connection timed out")
+    .is_ok());
 }
 
 #[tokio::test]
