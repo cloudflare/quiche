@@ -226,12 +226,7 @@ async fn test_connect_with_custom_dcid() {
 
     assert!(timeout(
         Duration::from_secs(5),
-        connect_with_config(
-            socket,
-            Some("127.0.0.1"),
-            &params,
-            h3_driver,
-        ),
+        connect_with_config(socket, Some("127.0.0.1"), &params, h3_driver,),
     )
     .await
     .expect("connection timed out")
