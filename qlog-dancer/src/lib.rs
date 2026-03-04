@@ -43,8 +43,8 @@ use serde::ser::Serialize;
 
 use crate::wirefilter::filter_sqlog_events;
 
-pub type QlogPointu64 = (f32, u64);
-pub type QlogPointf32 = (f32, f32);
+pub type QlogPointu64 = (f64, u64);
+pub type QlogPointRtt = (f64, f32);
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Copy, Clone)]
 pub enum PacketType {

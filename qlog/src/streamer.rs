@@ -189,7 +189,7 @@ impl QlogStreamer {
             now.duration_since(self.start_time)
         };
 
-        let rel_time = dur.as_secs_f32() * 1000.0;
+        let rel_time = dur.as_secs_f64() * 1000.0;
         event.set_time(rel_time);
 
         if pretty {
@@ -290,7 +290,7 @@ impl QlogStreamer {
             now.duration_since(self.start_time)
         };
 
-        let rel_time = dur.as_secs_f32() * 1000.0;
+        let rel_time = dur.as_secs_f64() * 1000.0;
         let event = Event::with_time_ex(rel_time, event_data, ex_data);
 
         if pretty {

@@ -26,7 +26,7 @@
 
 use minmax::XMinMax;
 
-use plotters::coord::types::RangedCoordf32;
+use plotters::coord::types::RangedCoordf64;
 use plotters::coord::types::RangedCoordu64;
 use plotters::coord::Shift;
 use plotters::prelude::*;
@@ -60,18 +60,18 @@ impl XYMinMax {
     }
 }
 
-const Y_WIGGLE: f32 = 1.1;
+const Y_WIGGLE: f64 = 1.1;
 
 pub fn draw_packet_sent_received_plot<'a, DB: DrawingBackend + 'a>(
     is_sent: bool, filename: &str, params: &PlotParameters, ss: &SeriesStore,
     plot: &plotters::drawing::DrawingArea<DB, Shift>,
-) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>> {
+) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>> {
     let (caption, y_max) = if is_sent {
-        let y_max = (ss.y_max_onertt_pkt_sent_plot as f32 * Y_WIGGLE) as u64;
+        let y_max = (ss.y_max_onertt_pkt_sent_plot as f64 * Y_WIGGLE) as u64;
 
         (format!("{} Packet Sent timeline", filename), y_max)
     } else {
-        let y_max = (ss.y_max_onertt_pkt_received_plot as f32 * Y_WIGGLE) as u64;
+        let y_max = (ss.y_max_onertt_pkt_received_plot as f64 * Y_WIGGLE) as u64;
 
         (format!("{} Packet Received timeline", filename), y_max)
     };
@@ -162,10 +162,10 @@ pub fn draw_packet_sent_received_plot<'a, DB: DrawingBackend + 'a>(
 pub fn draw_packet_sent_lost_delivered_count_plot<'a, DB: DrawingBackend + 'a>(
     params: &PlotParameters, ss: &SeriesStore,
     plot: &plotters::drawing::DrawingArea<DB, Shift>,
-) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>> {
+) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>> {
     let caption = "Packet sent/lost/delivered counts";
 
-    let y_max = (ss.y_max_onertt_pkt_sent_plot as f32 * Y_WIGGLE) as u64;
+    let y_max = (ss.y_max_onertt_pkt_sent_plot as f64 * Y_WIGGLE) as u64;
 
     let axis = XYMinMax::init(params, ss, y_max);
 
@@ -235,7 +235,7 @@ pub fn draw_packet_sent_lost_delivered_count_plot<'a, DB: DrawingBackend + 'a>(
 fn draw_delta_plot<'a, DB: DrawingBackend + 'a>(
     params: &PlotParameters, ss: &SeriesStore,
     plot: &plotters::drawing::DrawingArea<DB, Shift>,
-) -> ChartContext<'a, DB, Cartesian2d<RangedCoordu64, RangedCoordf32>> {
+) -> ChartContext<'a, DB, Cartesian2d<RangedCoordu64, RangedCoordf64>> {
     let y_range = ss.y_min_onertt_packet_created_sent_delta..
         (ss.y_max_onertt_packet_created_sent_delta * Y_WIGGLE);
 
@@ -297,13 +297,13 @@ fn draw_delta_plot<'a, DB: DrawingBackend + 'a>(
 fn draw_pacing_rate_plot<'a, DB: DrawingBackend + 'a>(
     params: &PlotParameters, ss: &SeriesStore, _ds: &Datastore,
     plot: &plotters::drawing::DrawingArea<DB, Shift>,
-) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>> {
+) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>> {
     let y_max = ss
         .max_pacing_rate
         .max(ss.max_delivery_rate)
         .max(ss.max_send_rate)
         .max(ss.max_ack_rate);
-    let y_max = (y_max as f32 * Y_WIGGLE) as u64;
+    let y_max = (y_max as f64 * Y_WIGGLE) as u64;
     let axis = XYMinMax::init(params, ss, y_max);
     let mut builder = ChartBuilder::on(plot);
 
@@ -408,7 +408,7 @@ pub fn plot_packet_sent(
 #[cfg(target_arch = "wasm32")]
 pub fn plot_packet_sent_plot_canvas<'a>(
     params: &PlotParameters, filename: &str, ss: &SeriesStore, canvas_id: &str,
-) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf32, RangedCoordu64>>
+) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf64, RangedCoordu64>>
 {
     let root =
         make_chart_canvas_area(canvas_id, params.colors, params.chart_margin);
@@ -419,7 +419,7 @@ pub fn plot_packet_sent_plot_canvas<'a>(
 #[cfg(target_arch = "wasm32")]
 pub fn plot_packet_sent_lost_delivered_count_plot<'a>(
     params: &PlotParameters, ss: &SeriesStore, canvas_id: &str,
-) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf32, RangedCoordu64>>
+) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf64, RangedCoordu64>>
 {
     let root =
         make_chart_canvas_area(canvas_id, params.colors, params.chart_margin);
@@ -430,7 +430,7 @@ pub fn plot_packet_sent_lost_delivered_count_plot<'a>(
 #[cfg(target_arch = "wasm32")]
 pub fn plot_packet_sent_delta_plot_canvas<'a>(
     params: &PlotParameters, ss: &SeriesStore, canvas_id: &str,
-) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordu64, RangedCoordf32>>
+) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordu64, RangedCoordf64>>
 {
     let root =
         make_chart_canvas_area(canvas_id, params.colors, params.chart_margin);
@@ -441,7 +441,7 @@ pub fn plot_packet_sent_delta_plot_canvas<'a>(
 #[cfg(target_arch = "wasm32")]
 pub fn plot_packet_sent_pacing_rate_plot_canvas<'a>(
     params: &PlotParameters, ss: &SeriesStore, ds: &Datastore, canvas_id: &str,
-) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf32, RangedCoordu64>>
+) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf64, RangedCoordu64>>
 {
     let root =
         make_chart_canvas_area(canvas_id, params.colors, params.chart_margin);

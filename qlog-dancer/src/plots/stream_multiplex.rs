@@ -423,9 +423,9 @@ pub fn plot_stream_multiplexing(
             1
         };
 
-        let mut bubbles: Vec<Circle<(f32, i32), i32>> = vec![];
-        let mut lines: Vec<PathElement<(f32, i32)>> = vec![];
-        let mut lines2: Vec<PathElement<(f32, u64)>> = vec![];
+        let mut bubbles: Vec<Circle<(f64, i32), i32>> = vec![];
+        let mut lines: Vec<PathElement<(f64, i32)>> = vec![];
+        let mut lines2: Vec<PathElement<(f64, u64)>> = vec![];
 
         let bubble_sizes = [1, 6, 11, 16, 21, 26, 31];
 

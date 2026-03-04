@@ -139,7 +139,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                             // need to rewrite the event time
                             ev.time = Instant::now()
                                 .duration_since(s.start_time())
-                                .as_secs_f32() *
+                                .as_secs_f64() *
                                 1000.0;
                             s.add_event(ev).ok();
                         },
@@ -190,7 +190,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                             // need to rewrite the event time
                             ev.time = Instant::now()
                                 .duration_since(s.start_time())
-                                .as_secs_f32() *
+                                .as_secs_f64() *
                                 1000.0;
                             s.add_event(ev).ok();
                         },

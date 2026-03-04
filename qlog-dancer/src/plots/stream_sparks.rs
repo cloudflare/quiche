@@ -34,7 +34,7 @@
 #![allow(unused_assignments)]
 
 use full_palette::PURPLE_500;
-use plotters::coord::types::RangedCoordf32;
+use plotters::coord::types::RangedCoordf64;
 use plotters::coord::types::RangedCoordu64;
 use plotters::prelude::*;
 
@@ -1194,9 +1194,9 @@ fn draw_captions<DB: DrawingBackend>(
 }
 
 fn draw_stream_frames_line<DB: DrawingBackend>(
-    stream_frames: &[(f32, u64)],
-    abs_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
-    rel_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    stream_frames: &[(f64, u64)],
+    abs_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
+    rel_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
 ) {
     abs_chart
         .draw_series(LineSeries::new(stream_frames.to_vec(), PURPLE_500))
@@ -1206,7 +1206,7 @@ fn draw_stream_frames_line<DB: DrawingBackend>(
         .draw_series(LineSeries::new(stream_frames.to_vec(), PURPLE_500))
         .unwrap();
 
-    let circles: Vec<Circle<(f32, u64), i32>> = stream_frames
+    let circles: Vec<Circle<(f64, u64), i32>> = stream_frames
         .iter()
         .map(|point| Circle::new(*point, 2, PURPLE_500))
         .collect();
@@ -1215,8 +1215,8 @@ fn draw_stream_frames_line<DB: DrawingBackend>(
 
 fn draw_buffered_data_line<DB: DrawingBackend>(
     stream_id: u64, ss: &SeriesStore, vantage_point: &VantagePoint,
-    abs_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
-    rel_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    abs_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
+    rel_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
 ) {
     let buffered_data_to_plot = match vantage_point {
         VantagePoint::Client => ss.stream_buffer_reads.get(&stream_id),
@@ -1245,8 +1245,8 @@ fn draw_buffered_data_line<DB: DrawingBackend>(
 fn draw_stream_max_line<DB: DrawingBackend>(
     stream_id: u64, ss: &SeriesStore, vantage_point: &VantagePoint,
     transmission_type: TransmissionType,
-    abs_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
-    rel_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    abs_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
+    rel_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
 ) {
     let stream_max_data_to_plot = match (vantage_point, transmission_type) {
         (VantagePoint::Client, TransmissionType::Download) =>
@@ -1272,8 +1272,8 @@ fn draw_stream_max_line<DB: DrawingBackend>(
 
 fn draw_request_timing_lines<DB: DrawingBackend>(
     ds: &Datastore, stream_id: u64, y_max: u64,
-    abs_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
-    rel_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    abs_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
+    rel_chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
 ) {
     if let Some(req) = ds.http_requests.get(&stream_id) {
         if let Some(h) = req.time_first_headers_rx {

@@ -627,7 +627,7 @@ mod tests {
     use quiche::h3::Header;
     use serde_json;
 
-    const NOW: f32 = 123.0;
+    const NOW: f64 = 123.0;
     const H3I_WAIT: &str = "h3i:wait";
 
     #[test]

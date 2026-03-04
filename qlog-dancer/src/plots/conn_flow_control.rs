@@ -26,7 +26,7 @@
 
 use minmax::XMinMax;
 use plotters::chart::ChartContext;
-use plotters::coord::types::RangedCoordf32;
+use plotters::coord::types::RangedCoordf64;
 use plotters::coord::types::RangedCoordu64;
 use plotters::prelude::Cartesian2d;
 use plotters::prelude::*;
@@ -82,7 +82,7 @@ impl XYMinMax {
 
 fn blocked_lines<DB: DrawingBackend>(
     ds: &Datastore, y_max: u64,
-    chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
 ) {
     if let Some(blocked) = ds.netlog_quic_server_window_blocked.get(&-1).cloned()
     {
@@ -100,7 +100,7 @@ fn blocked_lines<DB: DrawingBackend>(
 
 fn received_data<DB: DrawingBackend>(
     ss: &SeriesStore, proto: &ApplicationProto,
-    chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
 ) {
     let points = match proto {
         ApplicationProto::Http2 =>
@@ -118,7 +118,7 @@ fn received_data<DB: DrawingBackend>(
 
 fn window_updates<DB: DrawingBackend>(
     ss: &SeriesStore, ds: &Datastore,
-    chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    chart: &mut ChartContext<'_, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
 ) {
     let points = match ds.application_proto {
         ApplicationProto::Http2 => {
@@ -143,7 +143,7 @@ fn window_updates<DB: DrawingBackend>(
     };
 
     // Help us see the exact time a window update happened.
-    let circles: Vec<Circle<(f32, u64), i32>> = points
+    let circles: Vec<Circle<(f64, u64), i32>> = points
         .iter()
         .map(|point| Circle::new(*point, 2, BLUE))
         .collect();
@@ -158,7 +158,7 @@ fn window_updates<DB: DrawingBackend>(
 }
 
 fn draw_series<'a, DB: DrawingBackend + 'a>(
-    chart: &mut ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    chart: &mut ChartContext<'a, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
     params: &PlotParameters, ss: &SeriesStore, ds: &Datastore, axis: XYMinMax,
 ) {
     draw_mesh(
@@ -191,7 +191,7 @@ fn draw_series<'a, DB: DrawingBackend + 'a>(
 pub fn plot_conn_flow_control_canvas<'a>(
     params: &PlotParameters, filename: &str, ss: &SeriesStore, ds: &Datastore,
     ty: &ChartOutputType,
-) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf32, RangedCoordu64>>
+) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf64, RangedCoordu64>>
 {
     let chart_config =
         make_chart_config("flow_control", params, filename, ds, ty);

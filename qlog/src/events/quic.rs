@@ -670,7 +670,7 @@ pub struct PacketSent {
 
     pub trigger: Option<PacketSentTrigger>,
 
-    pub send_at_time: Option<f32>,
+    pub send_at_time: Option<f64>,
 
     pub frames: Option<SmallVec<[QuicFrame; 1]>>,
 }
