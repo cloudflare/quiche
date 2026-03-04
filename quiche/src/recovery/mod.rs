@@ -665,13 +665,13 @@ impl QlogMetrics {
                 self.lost_bytes = latest.lost_bytes;
             }
         }
-        if self.pto_count != latest.pto_count {
-            if let Some(val) = latest.pto_count {
-                self.pto_count = latest.pto_count;
-                emit_event = true;
-                ex_data.insert("cf_pto_count", val);
-            }
-        }
+        let new_pto_count = if self.pto_count != latest.pto_count {
+            self.pto_count = latest.pto_count;
+            emit_event = true;
+            latest.pto_count.map(|v| v as u16)
+        } else {
+            None
+        };
 
         if emit_event {
             return Some(EventData::MetricsUpdated(
@@ -684,6 +684,7 @@ impl QlogMetrics {
                     bytes_in_flight: new_bytes_in_flight,
                     ssthresh: new_ssthresh,
                     pacing_rate: new_pacing_rate,
+                    pto_count: new_pto_count,
                     ex_data: ex_data.into_inner(),
                     ..Default::default()
                 },
