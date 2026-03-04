@@ -1003,6 +1003,7 @@ impl RecoveryOps for LegacyRecovery {
             ssthresh: Some(self.congestion.ssthresh.get() as u64),
             lost_packets: Some(self.congestion.lost_count as u64),
             lost_bytes: Some(self.bytes_lost),
+            pto_count: Some(self.pto_count),
             ..Default::default()
         };
 
