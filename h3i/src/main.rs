@@ -415,7 +415,7 @@ fn prompt_frames(config: &Config) -> Vec<Action> {
                         // need to rewrite the event time
                         ev.time = Instant::now()
                             .duration_since(streamer.start_time())
-                            .as_secs_f32() *
+                            .as_secs_f64() *
                             1000.0;
                         streamer.add_event(ev).ok();
                     },

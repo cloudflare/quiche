@@ -72,7 +72,7 @@ macro_rules! printyo_json {
 
 #[derive(Debug, Default, Tabled)]
 struct PrintableEvent {
-    pub time: f32,
+    pub time: f64,
     pub category: String,
     #[tabled(rename = "Type")]
     pub ty: String,

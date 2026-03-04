@@ -47,7 +47,7 @@ pub struct PendingPlotParams {
 }
 
 struct PendingStack {
-    pub time: f32,
+    pub time: f64,
     pub pending: i32,
     pub in_flight: i32,
 }
@@ -76,8 +76,8 @@ pub fn plot_pending(
 
     chart_config.init_chart_dir();
 
-    let mut x = 0f32;
-    let step_size = 1f32;
+    let mut x = 0f64;
+    let step_size = 1f64;
 
     let mut series = vec![];
 
@@ -155,7 +155,7 @@ pub fn plot_pending(
         builder.caption(caption, chart_title_style(&params.colors.caption));
     }
 
-    let mut ctx = builder.build_cartesian_2d(0f32..x_max, 0..y_max).unwrap();
+    let mut ctx = builder.build_cartesian_2d(0f64..x_max, 0..y_max).unwrap();
 
     ctx.configure_mesh()
         .axis_style(params.colors.axis)
@@ -169,7 +169,7 @@ pub fn plot_pending(
         // make sure bars are narrow enough that they don't bleed over each
         // step. If we don't we'll miss periods where there's no requests in
         // flight.
-        let shrink = step_size / 4f32;
+        let shrink = step_size / 4f64;
         let x0 = stack.time + shrink;
         let x1 = x0 + (step_size - shrink);
 
@@ -192,7 +192,7 @@ pub fn plot_pending(
         // make sure bars are narrow enough that they don't bleed over each
         // step. If we don't we'll miss periods where there's no requests in
         // flight.
-        let shrink = step_size / 3f32;
+        let shrink = step_size / 3f64;
         let x0 = stack.time + shrink;
         let x1 = x0 + (step_size - shrink);
 

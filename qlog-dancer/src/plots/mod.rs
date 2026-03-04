@@ -28,7 +28,7 @@ use crate::datastore::ApplicationProto;
 use crate::datastore::Datastore;
 use colors::PlotColors;
 use plotters::coord::ranged1d::ValueFormatter;
-use plotters::coord::types::RangedCoordf32;
+use plotters::coord::types::RangedCoordf64;
 use plotters::coord::types::RangedCoordu64;
 use plotters::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -252,8 +252,8 @@ fn draw_mesh<XT, YT, X, Y, DB: DrawingBackend>(
 
 #[derive(Clone, Default, Debug)]
 pub struct ClampParams {
-    pub start: Option<f32>,
-    pub end: Option<f32>,
+    pub start: Option<f64>,
+    pub end: Option<f64>,
     pub stream_y_max: Option<u64>,
 }
 
@@ -290,8 +290,8 @@ pub struct PlotParameters {
 }
 
 fn draw_line<DB: DrawingBackend>(
-    data: &[(f32, u64)], label: Option<&str>, colour: RGBColor,
-    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf32, RangedCoordu64>>,
+    data: &[(f64, u64)], label: Option<&str>, colour: RGBColor,
+    chart: &mut ChartContext<DB, Cartesian2d<RangedCoordf64, RangedCoordu64>>,
 ) {
     let c = chart
         .draw_series(LineSeries::new(data.to_vec(), colour))

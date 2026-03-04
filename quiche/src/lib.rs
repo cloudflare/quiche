@@ -5123,7 +5123,7 @@ impl<F: BufFactory> Connection<F> {
                 };
 
                 let send_at_time =
-                    now.duration_since(q.start_time()).as_secs_f32() * 1000.0;
+                    now.duration_since(q.start_time()).as_secs_f64() * 1000.0;
 
                 let ev_data =
                     EventData::PacketSent(qlog::events::quic::PacketSent {

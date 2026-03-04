@@ -32,13 +32,13 @@ use std::collections::BTreeMap;
 #[derive(Debug, Default)]
 pub struct StreamMaxTracker {
     /// Full time series per stream.
-    pub per_stream: BTreeMap<u64, Vec<(f32, u64)>>,
+    pub per_stream: BTreeMap<u64, Vec<(f64, u64)>>,
 
     /// Current maximum per stream.
     pub flat: BTreeMap<u64, u64>,
 
     /// Cumulative sum time series.
-    pub sum_series: Vec<(f32, u64)>,
+    pub sum_series: Vec<(f64, u64)>,
 
     /// Running sum for O(1) updates.
     running_sum: u64,
@@ -51,7 +51,7 @@ impl StreamMaxTracker {
 
     /// Updates stream value, returns Some((old_max, new_max)) if changed.
     pub fn update(
-        &mut self, stream_id: u64, new_value: u64, ev_time: f32, init_val: u64,
+        &mut self, stream_id: u64, new_value: u64, ev_time: f64, init_val: u64,
     ) -> Option<(u64, u64)> {
         let entry = self
             .per_stream
