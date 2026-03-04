@@ -39,7 +39,7 @@ use tokio_quiche::quiche::h3::Header;
 async fn test_additional_headers() {
     let hook = TestConnectionHook::new();
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         QuicSettings::default(),
         Http3Settings::default(),
         hook,
