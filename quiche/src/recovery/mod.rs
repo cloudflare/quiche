@@ -621,13 +621,14 @@ impl QlogMetrics {
             None
         };
 
-        let new_pto_count = if self.pto_count != latest.pto_count {
-            self.pto_count = latest.pto_count;
-            emit_event = true;
-            latest.pto_count.map(|v| v as u16)
-        } else {
-            None
-        };
+        let new_pto_count =
+            if latest.pto_count.is_some() && self.pto_count != latest.pto_count {
+                self.pto_count = latest.pto_count;
+                emit_event = true;
+                latest.pto_count.map(|v| v as u16)
+            } else {
+                None
+            };
 
         // Build ex_data for rate metrics
         let mut ex_data = CfExData::new();
