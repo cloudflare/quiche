@@ -993,24 +993,11 @@ impl RecoveryOps for LegacyRecovery {
 
     #[cfg(feature = "qlog")]
     fn get_updated_qlog_event_data(&mut self) -> Option<EventData> {
-        let has_rtt = self.rtt_stats.has_first_rtt_sample;
         let qlog_metrics = QlogMetrics {
-            min_rtt: if has_rtt {
-                *self.rtt_stats.min_rtt
-            } else {
-                Duration::ZERO
-            },
-            smoothed_rtt: if has_rtt { self.rtt() } else { Duration::ZERO },
-            latest_rtt: if has_rtt {
-                self.rtt_stats.latest_rtt
-            } else {
-                Duration::ZERO
-            },
-            rttvar: if has_rtt {
-                self.rtt_stats.rttvar
-            } else {
-                Duration::ZERO
-            },
+            min_rtt: *self.rtt_stats.min_rtt,
+            smoothed_rtt: self.rtt(),
+            latest_rtt: self.rtt_stats.latest_rtt,
+            rttvar: self.rtt_stats.rttvar,
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: Some(self.congestion.ssthresh.get() as u64),
