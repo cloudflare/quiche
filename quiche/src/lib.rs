@@ -419,7 +419,7 @@ use qlog::events::RawInfo;
 
 use smallvec::SmallVec;
 
-use crate::range_buf::DefaultBufFactory;
+use crate::buffers::DefaultBufFactory;
 
 use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::OnLossDetectionTimeoutOutcome;
@@ -9049,14 +9049,15 @@ pub use crate::transport_params::UnknownTransportParameter;
 pub use crate::transport_params::UnknownTransportParameterIterator;
 pub use crate::transport_params::UnknownTransportParameters;
 
-pub use crate::range_buf::BufFactory;
-pub use crate::range_buf::BufSplit;
+pub use crate::buffers::BufFactory;
+pub use crate::buffers::BufSplit;
 
 pub use crate::error::ConnectionError;
 pub use crate::error::Error;
 pub use crate::error::Result;
 pub use crate::error::WireErrorCode;
 
+mod buffers;
 mod cid;
 mod crypto;
 mod dgram;

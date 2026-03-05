@@ -39,7 +39,7 @@ use intrusive_collections::RBTreeAtomicLink;
 
 use smallvec::SmallVec;
 
-use crate::range_buf::DefaultBufFactory;
+use crate::buffers::DefaultBufFactory;
 use crate::BufFactory;
 use crate::Error;
 use crate::Result;

@@ -28,13 +28,13 @@ use std::cmp;
 
 use std::collections::VecDeque;
 
-use crate::range_buf::BufSplit;
+use crate::buffers::BufSplit;
 use crate::range_buf::RangeBuf;
 use crate::BufFactory;
 use crate::Error;
 use crate::Result;
 
-use crate::range_buf::DefaultBufFactory;
+use crate::buffers::DefaultBufFactory;
 use crate::ranges;
 
 #[cfg(test)]
