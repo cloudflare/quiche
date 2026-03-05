@@ -279,7 +279,6 @@ pub struct Datastore {
     pub local_send_rate: Vec<QlogPointu64>,
     pub local_ack_rate: Vec<QlogPointu64>,
 
-    // E.C. (FLPROTO-4770 & FLPROTO-4282) — loss metrics from cf_* ex_data
     pub local_lost_packets: Vec<QlogPointu64>,
     pub local_lost_bytes: Vec<QlogPointu64>,
     pub local_lost_packets_delta: Vec<QlogPointu64>,
@@ -1523,7 +1522,6 @@ impl Datastore {
             self.local_ack_rate.push((ev_time, rate));
         }
 
-        // E.C. (FLPROTO-4770 & FLPROTO-4282) — loss metrics from ex_data
         if let Some(v) = mu.ex_data.get("cf_lost_packets").and_then(|v| v.as_u64())
         {
             self.local_lost_packets.push((ev_time, v));

@@ -42,7 +42,7 @@ use std::path::Path;
 /// This is the single source of truth for all default values.
 const DEFAULT_CONFIG_TOML: &str = include_str!("config.toml");
 
-/// Root configuration structure matching the TOML schema from FLPROTO-5244.
+/// Root configuration structure matching the TOML schema.
 ///
 /// Use `PlotConfig::default()` to get the embedded config.toml values.
 /// Use `PlotConfig::from_file()` to load a custom config (missing fields use

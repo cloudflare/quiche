@@ -30,7 +30,7 @@
 //! 1. Use SeriesData for automatic stat tracking (replaces manual
 //!    max_pacing_rate, etc.)
 //! 2. Apply PlotTheme from config.toml
-//! 3. Extend lines to full plot width (FLPROTO-5244 requirement)
+//! 3. Extend lines to full plot width
 //!
 //! Based on the pacing.rs from quiche esteban/qlog branch which plots:
 //! - pacing_rate, delivery_rate (cf_delivery_rate), send_rate (cf_send_rate),

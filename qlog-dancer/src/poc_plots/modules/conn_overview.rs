@@ -25,9 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //! Connection overview — config-driven POC pattern.
-//!
-//! E.C. (FLPROTO-4770 & FLPROTO-4282)
-//!
+//!//!
 //! Combines four subplots on a shared time axis:
 //! 1. Stream sends (cumulative buffer writes/dropped, MAX_DATA,
 //!    MAX_STREAM_DATA)

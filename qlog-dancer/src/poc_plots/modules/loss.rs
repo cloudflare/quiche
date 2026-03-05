@@ -26,7 +26,6 @@
 
 //! Loss plot module — visualizes packet loss events over time.
 //!
-//! E.C. (FLPROTO-4770 & FLPROTO-4282)
 //!
 //! This module shows:
 //! 1. Per-event loss spikes (delta packets/bytes lost per detection event)
