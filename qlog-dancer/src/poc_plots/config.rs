@@ -77,6 +77,8 @@ pub struct PlotConfig {
     pub figure: FigureConfig,
     #[serde(default)]
     pub output: OutputConfig,
+    #[serde(default)]
+    pub annotations: AnnotationsConfig,
 }
 
 impl Default for PlotConfig {
@@ -368,6 +370,53 @@ pub struct OutputConfig {
     pub bbox: String,
     #[serde(default)]
     pub pad_inches: f32,
+}
+
+/// Annotations configuration for congestion state transitions.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AnnotationsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_annotations_fontsize")]
+    pub fontsize: f32,
+    #[serde(default = "default_annotations_alpha")]
+    pub alpha: f32,
+    #[serde(default = "default_annotations_label_alpha")]
+    pub label_alpha: f32,
+    #[serde(default = "default_collapse_threshold_ms")]
+    pub collapse_threshold_ms: f32,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_annotations_fontsize() -> f32 {
+    8.0
+}
+
+fn default_annotations_alpha() -> f32 {
+    0.08
+}
+
+fn default_annotations_label_alpha() -> f32 {
+    0.5
+}
+
+fn default_collapse_threshold_ms() -> f32 {
+    200.0
+}
+
+impl Default for AnnotationsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            fontsize: 8.0,
+            alpha: 0.08,
+            label_alpha: 0.5,
+            collapse_threshold_ms: 200.0,
+        }
+    }
 }
 
 #[cfg(test)]

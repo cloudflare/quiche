@@ -39,6 +39,7 @@
 
 use std::fs::File;
 use std::io::BufReader;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -70,6 +71,7 @@ use qlog_dancer::poc_plots::modules::conn_overview::render_overview_to_svg;
 use qlog_dancer::poc_plots::modules::conn_overview::OverviewPlotParams;
 use qlog_dancer::poc_plots::modules::conn_overview::OverviewSeriesStore;
 use qlog_dancer::seriesstore::SeriesStore;
+use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = Command::new("poc_plotter")
@@ -117,6 +119,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("export-json")
+                .long("export-json")
+                .help("Export overview data to JSON instead of rendering a plot")
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
+        .arg(
             Arg::new("extend")
                 .long("extend")
                 .help("Extend lines to full plot width")
@@ -145,6 +153,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_path = matches.get_one::<PathBuf>("input");
     let use_demo = matches.get_flag("demo");
     let plot_type = matches.get_one::<String>("plot").unwrap();
+
+    let export_json = matches.get_one::<PathBuf>("export-json");
+
+    if let Some(json_path) = export_json {
+        run_overview_export_json(input_path, use_demo, json_path)?;
+        println!("Done!");
+        return Ok(());
+    }
 
     match plot_type.as_str() {
         "loss" => {
@@ -675,6 +691,88 @@ fn generate_overview_demo_data() -> OverviewSeriesStore {
     }
 
     store
+}
+
+/// Export overview data to JSON for use with Python/matplotlib.
+fn run_overview_export_json(
+    input_path: Option<&PathBuf>, use_demo: bool, json_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let store = if let Some(sqlog_path) = input_path {
+        println!("Loading sqlog from: {}", sqlog_path.display());
+        load_overview_from_sqlog(sqlog_path)?
+    } else if use_demo {
+        println!("Generating overview demo data...");
+        generate_overview_demo_data()
+    } else {
+        eprintln!("Error: Must specify --input <sqlog_file> or --demo");
+        std::process::exit(1);
+    };
+
+    let json_value = overview_store_to_json(&store);
+    let json_str = serde_json::to_string_pretty(&json_value)?;
+
+    let mut file = File::create(json_path)?;
+    file.write_all(json_str.as_bytes())?;
+
+    println!("Exported overview JSON to: {}", json_path.display());
+    Ok(())
+}
+
+/// Convert an OverviewSeriesStore to a serde_json::Value for export.
+fn overview_store_to_json(store: &OverviewSeriesStore) -> serde_json::Value {
+    // Helper: convert &[(f32, u64)] to [[f32, u64], ...]
+    let u64_series = |data: &[(f32, u64)]| -> Vec<serde_json::Value> {
+        data.iter().map(|(x, y)| json!([x, y])).collect()
+    };
+
+    // Helper: convert &[(f32, f32)] to [[f32, f32], ...]
+    let f32_series = |data: &[(f32, f32)]| -> Vec<serde_json::Value> {
+        data.iter().map(|(x, y)| json!([x, y])).collect()
+    };
+
+    // Helper: convert &[(f32, u32)] to [[f32, u32], ...]
+    let u32_series = |data: &[(f32, u32)]| -> Vec<serde_json::Value> {
+        data.iter().map(|(x, y)| json!([x, y])).collect()
+    };
+
+    // cc_states: [[time_ms, "state_name"], ...]
+    let cc_states: Vec<serde_json::Value> = store
+        .congestion
+        .cc_states
+        .iter()
+        .map(|(t, s)| json!([t, s]))
+        .collect();
+
+    json!({
+        "loss": {
+            "lost_packets_delta": u64_series(store.loss.lost_packets_delta.data()),
+            "lost_packets": u64_series(store.loss.lost_packets.data()),
+            "lost_bytes_delta": u64_series(store.loss.lost_bytes_delta.data()),
+            "lost_bytes": u64_series(store.loss.lost_bytes.data()),
+            "pto_count": u32_series(store.loss.pto_count.data()),
+        },
+        "congestion": {
+            "cwnd": u64_series(store.congestion.cwnd.data()),
+            "bytes_in_flight": u64_series(store.congestion.bytes_in_flight.data()),
+            "ssthresh": u64_series(store.congestion.ssthresh.data()),
+            "cc_states": cc_states,
+        },
+        "rtt": {
+            "min_rtt": f32_series(store.rtt.min_rtt.data()),
+            "smoothed_rtt": f32_series(store.rtt.smoothed_rtt.data()),
+            "latest_rtt": f32_series(store.rtt.latest_rtt.data()),
+        },
+        "stream_sends": {
+            "cumulative_buffer_writes": u64_series(store.stream_sends.cumulative_buffer_writes.data()),
+            "cumulative_buffer_dropped": u64_series(store.stream_sends.cumulative_buffer_dropped.data()),
+            "received_max_data": u64_series(store.stream_sends.received_max_data.data()),
+            "cumulative_received_stream_max_data": u64_series(store.stream_sends.cumulative_received_stream_max_data.data()),
+        },
+        "x_range": {
+            "min": store.global_x_min(),
+            "max": store.global_x_max(),
+        }
+    })
 }
 
 /// Load overview data from an sqlog file.

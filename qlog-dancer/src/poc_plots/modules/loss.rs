@@ -26,19 +26,20 @@
 
 //! Loss plot module — visualizes packet loss events over time.
 //!
-//!
 //! This module shows:
 //! 1. Per-event loss spikes (delta packets/bytes lost per detection event)
 //! 2. Cumulative loss count over time
 //!
 //! **Important distinction**: CCA "recovery" state != packet loss.
-//! This plot shows **actual detected packet losses**, not CCA state transitions.
+//! This plot shows **actual detected packet losses**, not CCA state
+//! transitions.
 //!
 //! Uses the config-driven POC pattern (PlotTheme, SeriesData, config.toml).
 
 use plotters::coord::types::RangedCoordf32;
 use plotters::coord::types::RangedCoordu64;
 use plotters::coord::Shift;
+use plotters::element::DashedPathElement;
 use plotters::prelude::*;
 
 use crate::datastore::Datastore;
@@ -86,6 +87,7 @@ pub struct LossSeriesStore {
     pub lost_packets_delta: SeriesDataU64,
     /// Per-event lost bytes delta (spikes)
     pub lost_bytes_delta: SeriesDataU64,
+    pub pto_count: SeriesData<u32>,
 }
 
 impl LossSeriesStore {
@@ -95,6 +97,7 @@ impl LossSeriesStore {
             lost_bytes: SeriesData::new("Lost Bytes (cumulative)"),
             lost_packets_delta: SeriesData::new("Detected Losses (per event)"),
             lost_bytes_delta: SeriesData::new("Lost Bytes (per event)"),
+            pto_count: SeriesData::new("PTO count"),
         }
     }
 
@@ -142,7 +145,9 @@ impl LossSeriesStore {
 
     /// Whether any loss data is available.
     pub fn has_data(&self) -> bool {
-        !self.lost_packets_delta.is_empty() || !self.lost_packets.is_empty()
+        !self.lost_packets_delta.is_empty() ||
+            !self.lost_packets.is_empty() ||
+            !self.pto_count.is_empty()
     }
 
     /// Create a LossSeriesStore from a Datastore.
@@ -160,6 +165,9 @@ impl LossSeriesStore {
         }
         for &(x, y) in &ds.local_lost_bytes_delta {
             store.lost_bytes_delta.push(x, y);
+        }
+        for &(x, y) in &ds.local_pto_count {
+            store.pto_count.push(x, y);
         }
 
         store
@@ -280,22 +288,50 @@ pub fn draw_loss_plot<'a, DB: DrawingBackend + 'a>(
             store.lost_packets_delta.data().to_vec();
 
         // Draw vertical lines from y=0 to y=delta for each spike
-        chart.draw_series(spike_data.iter().map(|&(x, y)| {
-            PathElement::new(
-                vec![(x, 0u64), (x, y)],
-                color.stroke_width(theme.line_width),
-            )
-        }))?
-        .label(store.lost_packets_delta.label())
-        .legend(move |(x, y)| {
-            PathElement::new(vec![(x, y), (x + 20, y)], color)
-        });
+        chart
+            .draw_series(spike_data.iter().map(|&(x, y)| {
+                PathElement::new(
+                    vec![(x, 0u64), (x, y)],
+                    color.stroke_width(theme.line_width),
+                )
+            }))?
+            .label(store.lost_packets_delta.label())
+            .legend(move |(x, y)| {
+                PathElement::new(vec![(x, y), (x + 20, y)], color)
+            });
 
         // Draw circle markers at spike tops
         let marker_color = color;
-        chart.draw_series(spike_data.iter().map(|&(x, y)| {
-            Circle::new((x, y), 3, marker_color.filled())
-        }))?;
+        chart.draw_series(
+            spike_data
+                .iter()
+                .map(|&(x, y)| Circle::new((x, y), 3, marker_color.filled())),
+        )?;
+    }
+
+    if !store.pto_count.is_empty() {
+        let pto_color = RGBColor(220, 50, 50); // red for PTO
+        let pto_data = store.pto_count.data();
+
+        chart
+            .draw_series(pto_data.iter().map(|&(x, _count)| {
+                // Full-height dashed vertical line at each PTO timestamp
+                DashedPathElement::new(
+                    vec![(x, 0u64), (x, y_max)],
+                    5,
+                    3,
+                    pto_color.mix(0.6).stroke_width(1),
+                )
+            }))?
+            .label("PTO")
+            .legend(move |(x, y)| {
+                DashedPathElement::new(
+                    vec![(x, y), (x + 20, y)],
+                    5,
+                    3,
+                    pto_color.mix(0.6).stroke_width(1),
+                )
+            });
     }
 
     // Draw cumulative lost packets as a step function

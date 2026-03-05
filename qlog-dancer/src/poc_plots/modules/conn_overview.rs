@@ -37,6 +37,7 @@
 //! and RTT spikes in one chart.
 
 use plotters::coord::Shift;
+use plotters::element::DashedPathElement;
 use plotters::prelude::*;
 
 use crate::datastore::Datastore;
@@ -99,6 +100,7 @@ pub struct CongestionSeriesStore {
     pub cwnd: SeriesDataU64,
     pub bytes_in_flight: SeriesDataU64,
     pub ssthresh: SeriesDataU64,
+    pub cc_states: Vec<(f32, String)>,
 }
 
 /// RTT-related series (f32 values in ms).
@@ -138,6 +140,7 @@ impl OverviewSeriesStore {
                 cwnd: SeriesData::new("cwnd"),
                 bytes_in_flight: SeriesData::new("bytes_in_flight"),
                 ssthresh: SeriesData::new("ssthresh"),
+                cc_states: Vec::new(),
             },
             rtt: RttSeriesStore {
                 min_rtt: SeriesData::new("min RTT"),
@@ -183,7 +186,7 @@ impl OverviewSeriesStore {
     pub fn from_datastore(ds: &Datastore) -> Self {
         let mut store = Self::new();
 
-        // Stream sends - use tracker pattern from upstream refactor
+        // Stream sends
         for &(x, y) in &ds.stream_buffer_writes_tracker.sum_series {
             store.stream_sends.cumulative_buffer_writes.push(x, y);
         }
@@ -209,6 +212,9 @@ impl OverviewSeriesStore {
         }
         for &(x, y) in &ds.local_ssthresh {
             store.congestion.ssthresh.push(x, y);
+        }
+        for (x, _y, state) in &ds.congestion_state_updates {
+            store.congestion.cc_states.push((*x, state.clone()));
         }
 
         // RTT
@@ -267,6 +273,75 @@ pub fn draw_overview_plot<DB: DrawingBackend>(
     Ok(())
 }
 
+/// Collapse rapid congestion state transitions into spans.
+///
+/// Returns (start_time, end_time, label) tuples. Transitions closer than
+/// `threshold_ms` are merged; the dominant state within each merged region
+/// is used as the label.
+fn collapse_cc_states(
+    states: &[(f32, String)], threshold_ms: f32, x_max: f32,
+) -> Vec<(f32, f32, String)> {
+    if states.is_empty() {
+        return Vec::new();
+    }
+
+    let mut spans: Vec<(f32, f32, String)> = Vec::new();
+    let mut span_start = states[0].0;
+    let mut span_state = states[0].1.clone();
+    let mut has_recovery =
+        span_state.contains("recovery") && !span_state.contains("avoidance");
+
+    for i in 1..states.len() {
+        let (t, ref state) = states[i];
+        let gap = t - states[i - 1].0;
+
+        if gap < threshold_ms {
+            // Within threshold — merge
+            if state.contains("recovery") && !state.contains("avoidance") {
+                has_recovery = true;
+            }
+        } else {
+            // Gap exceeded — close previous span, start new one
+            let label = if has_recovery && span_state != "recovery" {
+                "recovery (sustained)".to_string()
+            } else {
+                span_state.clone()
+            };
+            spans.push((span_start, states[i - 1].0, label));
+            span_start = t;
+            span_state = state.clone();
+            has_recovery =
+                state.contains("recovery") && !state.contains("avoidance");
+        }
+    }
+
+    // Close final span
+    let end = states.last().map(|(t, _)| *t).unwrap_or(x_max);
+    let label = if has_recovery && span_state != "recovery" {
+        "recovery (sustained)".to_string()
+    } else {
+        span_state
+    };
+    spans.push((span_start, end.max(span_start + 1.0), label));
+
+    spans
+}
+
+/// Map a congestion state name to an RGB color.
+fn cc_state_color(state: &str) -> RGBColor {
+    if state.contains("slow_start") && state.contains("conservative") {
+        RGBColor(23, 190, 207) // cyan
+    } else if state.contains("slow_start") {
+        RGBColor(31, 119, 180) // blue
+    } else if state.contains("recovery") {
+        RGBColor(214, 39, 40) // red
+    } else if state.contains("avoidance") {
+        RGBColor(44, 160, 44) // green
+    } else {
+        RGBColor(127, 127, 127) // gray fallback
+    }
+}
+
 fn draw_congestion_subplot<DB: DrawingBackend>(
     config: &PlotConfig, theme: &PlotTheme, x_min: f32, x_max: f32,
     store: &OverviewSeriesStore, area: &DrawingArea<DB, Shift>,
@@ -281,7 +356,7 @@ fn draw_congestion_subplot<DB: DrawingBackend>(
     .flatten()
     .max()
     .unwrap_or(1)
-        .saturating_add(1);
+    .saturating_add(1);
     let y_max = y_max.saturating_add(y_max / 10);
 
     let mut chart = ChartBuilder::on(area)
@@ -349,6 +424,69 @@ fn draw_congestion_subplot<DB: DrawingBackend>(
             .label("ssthresh")
             .legend(move |(x, y)| {
                 PathElement::new(vec![(x, y), (x + 15, y)], color)
+            });
+    }
+
+    if config.annotations.enabled && !store.congestion.cc_states.is_empty() {
+        let spans = collapse_cc_states(
+            &store.congestion.cc_states,
+            config.annotations.collapse_threshold_ms,
+            x_max,
+        );
+        let ann_alpha = config.annotations.alpha as f64;
+        let label_alpha = config.annotations.label_alpha as f64;
+        let fontsize = config.annotations.fontsize;
+
+        for (start, end, ref label) in &spans {
+            let color = cc_state_color(label);
+
+            // Background rectangle spanning full y range
+            chart.draw_series(std::iter::once(Rectangle::new(
+                [(*start, 0u64), (*end, y_max)],
+                color.mix(ann_alpha).filled(),
+            )))?;
+
+            // Text label at top of span (skip if span is very narrow)
+            let span_width = end - start;
+            if span_width > (x_max - x_min) * 0.02 {
+                let mid = (start + end) / 2.0;
+                let short_label = label
+                    .replace("congestion_avoidance", "CA")
+                    .replace("slow_start", "SS")
+                    .replace("recovery (sustained)", "Rec*")
+                    .replace("recovery", "Rec");
+                chart.draw_series(std::iter::once(Text::new(
+                    short_label,
+                    (mid, y_max - y_max / 20),
+                    ("sans-serif", fontsize)
+                        .into_font()
+                        .color(&color.mix(label_alpha)),
+                )))?;
+            }
+        }
+    }
+
+    if !store.loss.pto_count.is_empty() {
+        let pto_color = RGBColor(220, 50, 50);
+        let pto_data = store.loss.pto_count.data();
+
+        chart
+            .draw_series(pto_data.iter().map(|&(x, _count)| {
+                DashedPathElement::new(
+                    vec![(x, 0u64), (x, y_max)],
+                    5,
+                    3,
+                    pto_color.mix(0.6).stroke_width(1),
+                )
+            }))?
+            .label("PTO")
+            .legend(move |(x, y)| {
+                DashedPathElement::new(
+                    vec![(x, y), (x + 15, y)],
+                    5,
+                    3,
+                    pto_color.mix(0.6).stroke_width(1),
+                )
             });
     }
 
@@ -631,8 +769,7 @@ fn draw_loss_subplot<DB: DrawingBackend>(
     // Loss spikes as vertical lines (thin stems)
     if !store.loss.lost_packets_delta.is_empty() {
         let color = cc.next_color();
-        let data: Vec<(f32, u64)> =
-            store.loss.lost_packets_delta.data().to_vec();
+        let data: Vec<(f32, u64)> = store.loss.lost_packets_delta.data().to_vec();
 
         chart
             .draw_series(data.iter().map(|&(x, y)| {
@@ -677,6 +814,30 @@ fn draw_loss_subplot<DB: DrawingBackend>(
             .label("Cumulative lost")
             .legend(move |(x, y)| {
                 PathElement::new(vec![(x, y), (x + 15, y)], color)
+            });
+    }
+
+    if !store.loss.pto_count.is_empty() {
+        let pto_color = RGBColor(220, 50, 50);
+        let pto_data = store.loss.pto_count.data();
+
+        chart
+            .draw_series(pto_data.iter().map(|&(x, _count)| {
+                DashedPathElement::new(
+                    vec![(x, 0u64), (x, y_max)],
+                    5,
+                    3,
+                    pto_color.mix(0.6).stroke_width(1),
+                )
+            }))?
+            .label("PTO")
+            .legend(move |(x, y)| {
+                DashedPathElement::new(
+                    vec![(x, y), (x + 15, y)],
+                    5,
+                    3,
+                    pto_color.mix(0.6).stroke_width(1),
+                )
             });
     }
 

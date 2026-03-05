@@ -154,3 +154,10 @@ dpi = 600
 transparent = false
 bbox = "tight"
 pad_inches = 0.1
+
+[annotations]
+enabled = true
+fontsize = 8
+alpha = 0.08
+label_alpha = 0.5
+collapse_threshold_ms = 200
