@@ -187,7 +187,7 @@ impl PacketKey {
     }
 
     pub fn seal_with_u64_counter(
-        &self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
+        &mut self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
         _extra_in: Option<&[u8]>,
     ) -> Result<usize> {
         let tag_len = self.alg.tag_len();

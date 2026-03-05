@@ -67,7 +67,7 @@ impl PacketKey {
         derive_pkt_key(aead, secret, &mut key)?;
         derive_pkt_iv(aead, secret, &mut iv)?;
 
-        let pkt_key = Self::new(aead, key, iv, enc)?;
+        let mut pkt_key = Self::new(aead, key, iv, enc)?;
 
         // Dummy seal operation to prime the AEAD context with the nonce mask.
         //
@@ -117,7 +117,7 @@ impl PacketKey {
     }
 
     pub fn seal_with_u64_counter(
-        &self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
+        &mut self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
         extra_in: Option<&[u8]>,
     ) -> Result<usize> {
         let tag_len = self.alg.tag_len();
@@ -139,7 +139,7 @@ impl PacketKey {
 
         let rc = unsafe {
             EVP_AEAD_CTX_seal_scatter(
-                &self.ctx,                  // ctx
+                &mut self.ctx,              // ctx
                 buf.as_mut_ptr(),           // out
                 buf[in_len..].as_mut_ptr(), // out_tag
                 &mut out_tag_len,           // out_tag_len
@@ -350,7 +350,7 @@ extern "C" {
     ) -> c_int;
 
     fn EVP_AEAD_CTX_seal_scatter(
-        ctx: *const EVP_AEAD_CTX, out: *mut u8, out_tag: *mut u8,
+        ctx: *mut EVP_AEAD_CTX, out: *mut u8, out_tag: *mut u8,
         out_tag_len: *mut usize, max_out_tag_len: usize, nonce: *const u8,
         nonce_len: usize, inp: *const u8, in_len: usize, extra_in: *const u8,
         extra_in_len: usize, ad: *const u8, ad_len: usize,

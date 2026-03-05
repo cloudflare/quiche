@@ -476,7 +476,7 @@ pub fn encode_pkt(
     }
 
     let aead = match crypto_ctx.crypto_seal {
-        Some(ref v) => v,
+        Some(ref mut v) => v,
         None => return Err(Error::InvalidState),
     };
 

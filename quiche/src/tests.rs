@@ -4148,7 +4148,7 @@ fn invalid_initial_payload(
     // Use correct payload length when encrypting the packet.
     let payload_len = frames.iter().fold(0, |acc, x| acc + x.wire_len());
 
-    let aead = crypto_ctx.crypto_seal.as_ref().unwrap();
+    let aead = crypto_ctx.crypto_seal.as_mut().unwrap();
 
     let written = packet::encrypt_pkt(
         &mut b,
@@ -11072,7 +11072,7 @@ fn challenge_no_cids(
         frame.to_bytes(&mut b).expect("encode frames");
     }
 
-    let aead = crypto_ctx.crypto_seal.as_ref().expect("crypto seal");
+    let aead = crypto_ctx.crypto_seal.as_mut().expect("crypto seal");
 
     let written = packet::encrypt_pkt(
         &mut b,
