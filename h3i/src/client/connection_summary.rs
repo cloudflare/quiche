@@ -26,7 +26,6 @@
 
 //! Summarizes events that occurred during a connection.
 
-use quiche::Connection;
 use quiche::ConnectionError;
 use quiche::PathStats;
 use quiche::Stats;
@@ -408,7 +407,7 @@ impl core::fmt::Debug for ConnectionCloseDetails {
 }
 
 impl ConnectionCloseDetails {
-    pub fn new(qconn: &Connection) -> Self {
+    pub fn new<F: quiche::BufFactory>(qconn: &quiche::Connection<F>) -> Self {
         let session = qconn.session().map(|s| s.to_vec());
         Self {
             peer_error: qconn.peer_error().cloned(),

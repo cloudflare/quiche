@@ -105,8 +105,8 @@ pub(crate) trait Client {
 
 pub(crate) type StreamParserMap = HashMap<u64, FrameParser>;
 
-pub(crate) fn execute_action(
-    action: &Action, conn: &mut quiche::Connection,
+pub(crate) fn execute_action<F: quiche::BufFactory>(
+    action: &Action, conn: &mut quiche::Connection<F>,
     stream_parsers: &mut StreamParserMap,
 ) {
     match action {
@@ -316,8 +316,8 @@ pub(crate) fn execute_action(
     }
 }
 
-pub(crate) fn parse_streams<C: Client>(
-    conn: &mut quiche::Connection, client: &mut C,
+pub(crate) fn parse_streams<F: quiche::BufFactory, C: Client>(
+    conn: &mut quiche::Connection<F>, client: &mut C,
 ) -> Vec<StreamEvent> {
     let mut responded_streams: Vec<StreamEvent> =
         Vec::with_capacity(conn.readable().len());
