@@ -313,7 +313,7 @@ use qlog::events::EventImportance;
 #[cfg(feature = "qlog")]
 use qlog::events::EventType;
 
-use crate::range_buf::BufFactory;
+use crate::buffers::BufFactory;
 use crate::BufSplit;
 
 /// List of ALPN tokens of supported HTTP/3 versions.
