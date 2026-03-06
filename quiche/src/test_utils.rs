@@ -30,9 +30,12 @@ use smallvec::smallvec;
 
 use crate::recovery::Sent;
 
-pub struct Pipe {
-    pub client: Connection,
-    pub server: Connection,
+pub struct Pipe<F = DefaultBufFactory>
+where
+    F: BufFactory,
+{
+    pub client: Connection<F>,
+    pub server: Connection<F>,
 }
 
 impl Pipe {
@@ -72,11 +75,6 @@ impl Pipe {
         ctx_builder
     }
 
-    pub fn new(cc_algorithm_name: &str) -> Result<Pipe> {
-        let mut config = Self::default_config(cc_algorithm_name)?;
-        Pipe::with_config(&mut config)
-    }
-
     pub fn client_addr() -> SocketAddr {
         "127.0.0.1:1234".parse().unwrap()
     }
@@ -85,7 +83,50 @@ impl Pipe {
         "127.0.0.1:4321".parse().unwrap()
     }
 
+    pub fn new(cc_algorithm_name: &str) -> Result<Pipe> {
+        let mut config = Self::default_config(cc_algorithm_name)?;
+        Pipe::with_config(&mut config)
+    }
+
     pub fn with_config(config: &mut Config) -> Result<Pipe> {
+        Pipe::<DefaultBufFactory>::with_config_and_buf(config)
+    }
+
+    pub fn with_config_and_scid_lengths(
+        config: &mut Config, client_scid_len: usize, server_scid_len: usize,
+    ) -> Result<Pipe> {
+        Pipe::<DefaultBufFactory>::with_config_and_scid_lengths_and_buf(
+            config,
+            client_scid_len,
+            server_scid_len,
+        )
+    }
+
+    pub fn with_client_config(client_config: &mut Config) -> Result<Pipe> {
+        Pipe::<DefaultBufFactory>::with_client_config_and_buf(client_config)
+    }
+
+    pub fn with_server_config(server_config: &mut Config) -> Result<Pipe> {
+        Pipe::<DefaultBufFactory>::with_server_config_and_buf(server_config)
+    }
+
+    pub fn with_client_and_server_config(
+        client_config: &mut Config, server_config: &mut Config,
+    ) -> Result<Pipe> {
+        Pipe::<DefaultBufFactory>::with_client_and_server_config_and_buf(
+            client_config,
+            server_config,
+        )
+    }
+}
+
+impl<F: BufFactory> Pipe<F> {
+    pub fn new_with_buf(cc_algorithm_name: &str) -> Result<Pipe<F>> {
+        let mut config = Pipe::default_config(cc_algorithm_name)?;
+        Pipe::with_config_and_buf(&mut config)
+    }
+
+    pub fn with_config_and_buf(config: &mut Config) -> Result<Pipe<F>> {
         let mut client_scid = [0; 16];
         rand::rand_bytes(&mut client_scid[..]);
         let client_scid = ConnectionId::from_ref(&client_scid);
@@ -97,20 +138,26 @@ impl Pipe {
         let server_addr = Pipe::server_addr();
 
         Ok(Pipe {
-            client: connect(
+            client: connect_with_buffer_factory(
                 Some("quic.tech"),
                 &client_scid,
                 client_addr,
                 server_addr,
                 config,
             )?,
-            server: accept(&server_scid, None, server_addr, client_addr, config)?,
+            server: accept_with_buf_factory(
+                &server_scid,
+                None,
+                server_addr,
+                client_addr,
+                config,
+            )?,
         })
     }
 
-    pub fn with_config_and_scid_lengths(
+    pub fn with_config_and_scid_lengths_and_buf(
         config: &mut Config, client_scid_len: usize, server_scid_len: usize,
-    ) -> Result<Pipe> {
+    ) -> Result<Pipe<F>> {
         let mut client_scid = vec![0; client_scid_len];
         rand::rand_bytes(&mut client_scid[..]);
         let client_scid = ConnectionId::from_ref(&client_scid);
@@ -122,18 +169,26 @@ impl Pipe {
         let server_addr = Pipe::server_addr();
 
         Ok(Pipe {
-            client: connect(
+            client: connect_with_buffer_factory(
                 Some("quic.tech"),
                 &client_scid,
                 client_addr,
                 server_addr,
                 config,
             )?,
-            server: accept(&server_scid, None, server_addr, client_addr, config)?,
+            server: accept_with_buf_factory(
+                &server_scid,
+                None,
+                server_addr,
+                client_addr,
+                config,
+            )?,
         })
     }
 
-    pub fn with_client_config(client_config: &mut Config) -> Result<Pipe> {
+    pub fn with_client_config_and_buf(
+        client_config: &mut Config,
+    ) -> Result<Pipe<F>> {
         let mut client_scid = [0; 16];
         rand::rand_bytes(&mut client_scid[..]);
         let client_scid = ConnectionId::from_ref(&client_scid);
@@ -156,14 +211,14 @@ impl Pipe {
         config.set_ack_delay_exponent(8);
 
         Ok(Pipe {
-            client: connect(
+            client: connect_with_buffer_factory(
                 Some("quic.tech"),
                 &client_scid,
                 client_addr,
                 server_addr,
                 client_config,
             )?,
-            server: accept(
+            server: accept_with_buf_factory(
                 &server_scid,
                 None,
                 server_addr,
@@ -173,7 +228,9 @@ impl Pipe {
         })
     }
 
-    pub fn with_server_config(server_config: &mut Config) -> Result<Pipe> {
+    pub fn with_server_config_and_buf(
+        server_config: &mut Config,
+    ) -> Result<Pipe<F>> {
         let mut client_scid = [0; 16];
         rand::rand_bytes(&mut client_scid[..]);
         let client_scid = ConnectionId::from_ref(&client_scid);
@@ -194,14 +251,14 @@ impl Pipe {
         config.set_ack_delay_exponent(8);
 
         Ok(Pipe {
-            client: connect(
+            client: connect_with_buffer_factory(
                 Some("quic.tech"),
                 &client_scid,
                 client_addr,
                 server_addr,
                 &mut config,
             )?,
-            server: accept(
+            server: accept_with_buf_factory(
                 &server_scid,
                 None,
                 server_addr,
@@ -211,9 +268,9 @@ impl Pipe {
         })
     }
 
-    pub fn with_client_and_server_config(
+    pub fn with_client_and_server_config_and_buf(
         client_config: &mut Config, server_config: &mut Config,
-    ) -> Result<Pipe> {
+    ) -> Result<Pipe<F>> {
         let mut client_scid = [0; 16];
         rand::rand_bytes(&mut client_scid[..]);
         let client_scid = ConnectionId::from_ref(&client_scid);
@@ -225,14 +282,14 @@ impl Pipe {
         let server_addr = Pipe::server_addr();
 
         Ok(Pipe {
-            client: connect(
+            client: connect_with_buffer_factory(
                 Some("quic.tech"),
                 &client_scid,
                 client_addr,
                 server_addr,
                 client_config,
             )?,
-            server: accept(
+            server: accept_with_buf_factory(
                 &server_scid,
                 None,
                 server_addr,
@@ -362,8 +419,8 @@ pub fn recv_send<F: BufFactory>(
     Ok(off)
 }
 
-pub fn process_flight(
-    conn: &mut Connection, flight: Vec<(Vec<u8>, SendInfo)>,
+pub fn process_flight<F: BufFactory>(
+    conn: &mut Connection<F>, flight: Vec<(Vec<u8>, SendInfo)>,
 ) -> Result<()> {
     for (mut pkt, si) in flight {
         let info = RecvInfo {
@@ -377,8 +434,8 @@ pub fn process_flight(
     Ok(())
 }
 
-pub fn emit_flight_with_max_buffer(
-    conn: &mut Connection, out_size: usize, from: Option<SocketAddr>,
+pub fn emit_flight_with_max_buffer<F: BufFactory>(
+    conn: &mut Connection<F>, out_size: usize, from: Option<SocketAddr>,
     to: Option<SocketAddr>,
 ) -> Result<Vec<(Vec<u8>, SendInfo)>> {
     let mut flight = Vec::new();
@@ -407,18 +464,20 @@ pub fn emit_flight_with_max_buffer(
     Ok(flight)
 }
 
-pub fn emit_flight_on_path(
-    conn: &mut Connection, from: Option<SocketAddr>, to: Option<SocketAddr>,
+pub fn emit_flight_on_path<F: BufFactory>(
+    conn: &mut Connection<F>, from: Option<SocketAddr>, to: Option<SocketAddr>,
 ) -> Result<Vec<(Vec<u8>, SendInfo)>> {
     emit_flight_with_max_buffer(conn, 65535, from, to)
 }
 
-pub fn emit_flight(conn: &mut Connection) -> Result<Vec<(Vec<u8>, SendInfo)>> {
+pub fn emit_flight<F: BufFactory>(
+    conn: &mut Connection<F>,
+) -> Result<Vec<(Vec<u8>, SendInfo)>> {
     emit_flight_on_path(conn, None, None)
 }
 
-pub fn encode_pkt(
-    conn: &mut Connection, pkt_type: Type, frames: &[frame::Frame],
+pub fn encode_pkt<F: BufFactory>(
+    conn: &mut Connection<F>, pkt_type: Type, frames: &[frame::Frame],
     buf: &mut [u8],
 ) -> Result<usize> {
     let mut b = octets::OctetsMut::with_slice(buf);
@@ -495,8 +554,8 @@ pub fn encode_pkt(
     Ok(written)
 }
 
-pub fn decode_pkt(
-    conn: &mut Connection, buf: &mut [u8],
+pub fn decode_pkt<F: BufFactory>(
+    conn: &mut Connection<F>, buf: &mut [u8],
 ) -> Result<Vec<frame::Frame>> {
     let mut b = octets::OctetsMut::with_slice(buf);
 
@@ -566,8 +625,8 @@ pub fn helper_packet_sent(pkt_num: u64, now: Instant, size: usize) -> Sent {
 }
 
 // Helper function for testing either stream receive or discard.
-pub fn stream_recv_discard(
-    conn: &mut Connection, discard: bool, stream_id: u64,
+pub fn stream_recv_discard<F: BufFactory>(
+    conn: &mut Connection<F>, discard: bool, stream_id: u64,
 ) -> Result<(usize, bool)> {
     let mut buf = [0; 65535];
     if discard {
@@ -585,8 +644,8 @@ pub fn stream_recv_discard(
 /// function sends as many packets as needed to ensure any previously
 /// unacknowledged packets from the sender are detected as lost.
 #[cfg(test)]
-pub fn trigger_ack_based_loss(
-    sender: &mut Connection, receiver: &mut Connection,
+pub fn trigger_ack_based_loss<F: BufFactory>(
+    sender: &mut Connection<F>, receiver: &mut Connection<F>,
 ) {
     let mut buf = [0; 65535];
 

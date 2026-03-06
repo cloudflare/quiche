@@ -3155,6 +3155,7 @@ pub mod testing {
     use super::*;
 
     use crate::test_utils;
+    use crate::DefaultBufFactory;
 
     /// Session is an HTTP/3 test helper structure. It holds a client, server
     /// and pipe that allows them to communicate.
@@ -3170,14 +3171,29 @@ pub mod testing {
     /// request, responses and individual headers. The full quiche API remains
     /// available for any test that need to do unconventional things (such as
     /// bad behaviour that triggers errors).
-    pub struct Session {
-        pub pipe: test_utils::Pipe,
+    pub struct Session<F = DefaultBufFactory>
+    where
+        F: BufFactory,
+    {
+        pub pipe: test_utils::Pipe<F>,
         pub client: Connection,
         pub server: Connection,
     }
 
     impl Session {
         pub fn new() -> Result<Session> {
+            Session::<DefaultBufFactory>::new_with_buf()
+        }
+
+        pub fn with_configs(
+            config: &mut crate::Config, h3_config: &Config,
+        ) -> Result<Session> {
+            Session::<DefaultBufFactory>::with_configs_and_buf(config, h3_config)
+        }
+    }
+
+    impl<F: BufFactory> Session<F> {
+        pub fn new_with_buf() -> Result<Session<F>> {
             fn path_relative_to_manifest_dir(path: &str) -> String {
                 std::fs::canonicalize(
                     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path),
@@ -3206,13 +3222,13 @@ pub mod testing {
             config.set_ack_delay_exponent(8);
 
             let h3_config = Config::new()?;
-            Session::with_configs(&mut config, &h3_config)
+            Session::with_configs_and_buf(&mut config, &h3_config)
         }
 
-        pub fn with_configs(
+        pub fn with_configs_and_buf(
             config: &mut crate::Config, h3_config: &Config,
-        ) -> Result<Session> {
-            let pipe = test_utils::Pipe::with_config(config)?;
+        ) -> Result<Session<F>> {
+            let pipe = test_utils::Pipe::with_config_and_buf(config)?;
             let client_dgram = pipe.client.dgram_enabled();
             let server_dgram = pipe.server.dgram_enabled();
             Ok(Session {
