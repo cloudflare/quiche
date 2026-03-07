@@ -1334,6 +1334,8 @@ pub struct Stats {
     stream_data_blocked_sent_count: u64,
     data_blocked_recv_count: u64,
     stream_data_blocked_recv_count: u64,
+    streams_blocked_bidi_recv_count: u64,
+    streams_blocked_uni_recv_count: u64,
     path_challenge_rx_count: u64,
     bytes_in_flight_duration_msec: u64,
     tx_buffered_inconsistent: bool,
@@ -1380,6 +1382,8 @@ pub extern "C" fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.stream_data_blocked_sent_count = stats.stream_data_blocked_sent_count;
     out.data_blocked_recv_count = stats.data_blocked_recv_count;
     out.stream_data_blocked_recv_count = stats.stream_data_blocked_recv_count;
+    out.streams_blocked_bidi_recv_count = stats.streams_blocked_bidi_recv_count;
+    out.streams_blocked_uni_recv_count = stats.streams_blocked_uni_recv_count;
     out.path_challenge_rx_count = stats.path_challenge_rx_count;
     out.bytes_in_flight_duration_msec =
         stats.bytes_in_flight_duration.as_millis() as u64;

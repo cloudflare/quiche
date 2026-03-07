@@ -2280,6 +2280,72 @@ fn streams_blocked_max_uni(
 }
 
 #[rstest]
+fn streams_blocked_bidi_stat(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 0);
+    assert_eq!(pipe.server.streams_blocked_uni_recv_count, 0);
+    assert_eq!(pipe.client.streams_blocked_bidi_recv_count, 0);
+    assert_eq!(pipe.client.streams_blocked_uni_recv_count, 0);
+
+    let frames = [frame::Frame::StreamsBlockedBidi {
+        limit: MAX_STREAM_ID,
+    }];
+
+    let pkt_type = Type::Short;
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 1);
+    assert_eq!(pipe.server.streams_blocked_uni_recv_count, 0);
+    assert_eq!(pipe.client.streams_blocked_bidi_recv_count, 0);
+    assert_eq!(pipe.client.streams_blocked_uni_recv_count, 0);
+
+    // Sending again increments further.
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 2);
+    assert_eq!(pipe.server.streams_blocked_uni_recv_count, 0);
+}
+
+#[rstest]
+fn streams_blocked_uni_stat(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 0);
+    assert_eq!(pipe.server.streams_blocked_uni_recv_count, 0);
+    assert_eq!(pipe.client.streams_blocked_bidi_recv_count, 0);
+    assert_eq!(pipe.client.streams_blocked_uni_recv_count, 0);
+
+    let frames = [frame::Frame::StreamsBlockedUni {
+        limit: MAX_STREAM_ID,
+    }];
+
+    let pkt_type = Type::Short;
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 0);
+    assert_eq!(pipe.server.streams_blocked_uni_recv_count, 1);
+    assert_eq!(pipe.client.streams_blocked_bidi_recv_count, 0);
+    assert_eq!(pipe.client.streams_blocked_uni_recv_count, 0);
+
+    // Sending again increments further.
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 0);
+    assert_eq!(pipe.server.streams_blocked_uni_recv_count, 2);
+}
+
+#[rstest]
 fn stream_data_overlap(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
