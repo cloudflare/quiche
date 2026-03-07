@@ -1508,6 +1508,32 @@ where
     /// indicating the peer is blocked on opening new unidirectional streams.
     streams_blocked_uni_recv_count: u64,
 
+    /// The peer's max_streams_bidi limit at which we last became blocked on
+    /// opening new local bidirectional streams, if any.
+    streams_blocked_bidi_at: Option<u64>,
+
+    /// The peer's max_streams_bidi limit for which a STREAMS_BLOCKED (bidi)
+    /// frame was most recently sent. Used to suppress duplicate frames when
+    /// the limit has not changed since the last send.
+    streams_blocked_bidi_sent_at: Option<u64>,
+
+    /// The number of STREAMS_BLOCKED (bidi) frames sent because the local
+    /// endpoint hit the peer's bidirectional stream count limit.
+    streams_blocked_bidi_sent_count: u64,
+
+    /// The peer's max_streams_uni limit at which we last became blocked on
+    /// opening new local unidirectional streams, if any.
+    streams_blocked_uni_at: Option<u64>,
+
+    /// The peer's max_streams_uni limit for which a STREAMS_BLOCKED (uni)
+    /// frame was most recently sent. Used to suppress duplicate frames when
+    /// the limit has not changed since the last send.
+    streams_blocked_uni_sent_at: Option<u64>,
+
+    /// The number of STREAMS_BLOCKED (uni) frames sent because the local
+    /// endpoint hit the peer's unidirectional stream count limit.
+    streams_blocked_uni_sent_count: u64,
+
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
 }
@@ -2128,6 +2154,14 @@ impl<F: BufFactory> Connection<F> {
 
             streams_blocked_bidi_recv_count: 0,
             streams_blocked_uni_recv_count: 0,
+
+            streams_blocked_bidi_at: None,
+            streams_blocked_bidi_sent_at: None,
+            streams_blocked_bidi_sent_count: 0,
+
+            streams_blocked_uni_at: None,
+            streams_blocked_uni_sent_at: None,
+            streams_blocked_uni_sent_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
         };
@@ -4124,6 +4158,28 @@ impl<F: BufFactory> Connection<F> {
                         self.should_send_max_streams_bidi = true;
                     },
 
+                    // Retransmit STREAMS_BLOCKED frames if the frame with the
+                    // most recent limit is lost.  These are
+                    // informational signals to the peer and must be reliably
+                    // delivered so the peer knows it should send MAX_STREAMS.
+                    frame::Frame::StreamsBlockedBidi { limit } => {
+                        // If the lost frame has the most recently sent limit,
+                        // clear streams_blocked_bidi_sent_at to force
+                        // retransmission.
+                        if self.streams_blocked_bidi_sent_at == Some(limit) {
+                            self.streams_blocked_bidi_sent_at = None;
+                        }
+                    },
+
+                    frame::Frame::StreamsBlockedUni { limit } => {
+                        // If the lost frame has the most recently sent limit,
+                        // clear streams_blocked_uni_sent_at to force
+                        // retransmission.
+                        if self.streams_blocked_uni_sent_at == Some(limit) {
+                            self.streams_blocked_uni_sent_at = None;
+                        }
+                    },
+
                     frame::Frame::NewConnectionId { seq_num, .. } => {
                         self.ids.mark_advertise_new_scid_seq(seq_num, true);
                     },
@@ -4540,6 +4596,47 @@ impl<F: BufFactory> Connection<F> {
 
                     ack_eliciting = true;
                     in_flight = true;
+                }
+            }
+
+            // Create STREAMS_BLOCKED (bidi) frame when the local endpoint has
+            // exhausted the peer's bidirectional stream count limit.
+            if self.streams_blocked_bidi_sent_at < self.streams_blocked_bidi_at {
+                if let Some(limit) = self.streams_blocked_bidi_at {
+                    let frame = frame::Frame::StreamsBlockedBidi { limit };
+
+                    if push_frame_to_pkt!(b, frames, frame, left) {
+                        // Record the limit we just notified the peer about so
+                        // that redundant frames for the same limit are
+                        // suppressed.
+                        self.streams_blocked_bidi_sent_at = Some(limit);
+                        self.streams_blocked_bidi_sent_count = self
+                            .streams_blocked_bidi_sent_count
+                            .saturating_add(1);
+
+                        ack_eliciting = true;
+                        in_flight = true;
+                    }
+                }
+            }
+
+            // Create STREAMS_BLOCKED (uni) frame when the local endpoint has
+            // exhausted the peer's unidirectional stream count limit.
+            if self.streams_blocked_uni_sent_at < self.streams_blocked_uni_at {
+                if let Some(limit) = self.streams_blocked_uni_at {
+                    let frame = frame::Frame::StreamsBlockedUni { limit };
+
+                    if push_frame_to_pkt!(b, frames, frame, left) {
+                        // Record the limit we just notified the peer about so
+                        // that redundant frames for the same limit are
+                        // suppressed.
+                        self.streams_blocked_uni_sent_at = Some(limit);
+                        self.streams_blocked_uni_sent_count =
+                            self.streams_blocked_uni_sent_count.saturating_add(1);
+
+                        ack_eliciting = true;
+                        in_flight = true;
+                    }
                 }
             }
 
@@ -5644,7 +5741,34 @@ impl<F: BufFactory> Connection<F> {
         let cap = self.tx_cap;
 
         // Get existing stream or create a new one.
-        let stream = self.get_or_create_stream(stream_id, true)?;
+        let stream = match self.get_or_create_stream(stream_id, true) {
+            Ok(v) => v,
+
+            Err(Error::StreamLimit) => {
+                // If the local endpoint has exhausted the peer's stream count
+                // limit, record the current limit so that a STREAMS_BLOCKED
+                // frame can be sent. The stream blocked frame will only be sent
+                // in cases where the updated value increases beyond
+                // streams_blocked_bidi_sent_at or streams_blocked_uni_sent_at;
+                // there is no value in repeating the notification
+                // for the same limit.
+                if stream::is_local(stream_id, self.is_server) {
+                    if stream::is_bidi(stream_id) {
+                        let limit = self.streams.peer_max_streams_bidi();
+                        self.streams_blocked_bidi_at =
+                            self.streams_blocked_bidi_at.max(Some(limit));
+                    } else {
+                        let limit = self.streams.peer_max_streams_uni();
+                        self.streams_blocked_uni_at =
+                            self.streams_blocked_uni_at.max(Some(limit));
+                    }
+                }
+
+                return Err(Error::StreamLimit);
+            },
+
+            Err(e) => return Err(e),
+        };
 
         #[cfg(feature = "qlog")]
         let offset = stream.send.off_back();
@@ -7437,6 +7561,8 @@ impl<F: BufFactory> Connection<F> {
             stream_data_blocked_recv_count: self.stream_data_blocked_recv_count,
             streams_blocked_bidi_recv_count: self.streams_blocked_bidi_recv_count,
             streams_blocked_uni_recv_count: self.streams_blocked_uni_recv_count,
+            streams_blocked_bidi_sent_count: self.streams_blocked_bidi_sent_count,
+            streams_blocked_uni_sent_count: self.streams_blocked_uni_sent_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
             tx_buffered_state: self.tx_buffered_state,
@@ -7804,6 +7930,10 @@ impl<F: BufFactory> Connection<F> {
                 self.flow_control.should_update_max_data() ||
                 self.should_send_max_data ||
                 self.blocked_limit.is_some() ||
+                self.streams_blocked_bidi_sent_at <
+                    self.streams_blocked_bidi_at ||
+                self.streams_blocked_uni_sent_at <
+                    self.streams_blocked_uni_at ||
                 self.dgram_send_queue.has_pending() ||
                 self.local_error
                     .as_ref()
@@ -9019,6 +9149,14 @@ pub struct Stats {
     /// from the remote, indicating the peer is blocked on opening new
     /// unidirectional streams.
     pub streams_blocked_uni_recv_count: u64,
+
+    /// The number of STREAMS_BLOCKED (bidi) frames sent because the local
+    /// endpoint hit the peer's bidirectional stream count limit.
+    pub streams_blocked_bidi_sent_count: u64,
+
+    /// The number of STREAMS_BLOCKED (uni) frames sent because the local
+    /// endpoint hit the peer's unidirectional stream count limit.
+    pub streams_blocked_uni_sent_count: u64,
 
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
