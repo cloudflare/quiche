@@ -1,14 +1,14 @@
 [package]
 name = "tokio-quiche"
-version = "0.6.1"
-repository = { workspace = true }
-license = { workspace = true }
+version = "0.16.1"
 description = "Asynchronous wrapper around quiche"
+repository = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
 keywords = ["quic", "http3", "tokio"]
 categories = { workspace = true }
-rust-version = "1.83"
-edition = { workspace = true }
 readme = "README.md"
+rust-version = "1.85"
 
 [features]
 # Forwarded quiche features for re-exports
@@ -74,6 +74,7 @@ triomphe = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
 clap = { version = "4.5.40", features = ["derive"] }
 env_logger = { workspace = true }
 h3i = { workspace = true }

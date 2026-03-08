@@ -48,9 +48,6 @@ pub enum Error {
     /// The provided buffer is too short.
     BufferTooShort,
 
-    /// The provided string would be larger after huffman encoding.
-    InflatedHuffmanEncoding,
-
     /// The QPACK header block's huffman encoding is invalid.
     InvalidHuffmanEncoding,
 
@@ -202,5 +199,4 @@ pub use encoder::Encoder;
 
 mod decoder;
 mod encoder;
-mod huffman;
 mod static_table;

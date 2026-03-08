@@ -187,6 +187,7 @@ impl Rate {
         self.end_of_app_limited != 0
     }
 
+    #[cfg(test)]
     pub fn delivered(&self) -> usize {
         self.delivered
     }
@@ -195,20 +196,9 @@ impl Rate {
         self.rate_sample.bandwidth
     }
 
-    pub fn sample_rtt(&self) -> Duration {
-        self.rate_sample.rtt
-    }
-
+    #[cfg(test)]
     pub fn sample_is_app_limited(&self) -> bool {
         self.rate_sample.is_app_limited
-    }
-
-    pub fn sample_delivered(&self) -> usize {
-        self.rate_sample.delivered
-    }
-
-    pub fn sample_prior_delivered(&self) -> usize {
-        self.rate_sample.prior_delivered
     }
 }
 

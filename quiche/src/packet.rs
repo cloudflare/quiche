@@ -568,8 +568,8 @@ impl std::fmt::Debug for Header<'_> {
 
 pub fn pkt_num_len(pn: u64, largest_acked: u64) -> usize {
     let num_unacked: u64 = pn.saturating_sub(largest_acked) + 1;
-    // computes ceil of num_unacked.log2()
-    let min_bits = u64::BITS - num_unacked.leading_zeros();
+    // computes ceil of num_unacked.log2() + 1
+    let min_bits = u64::BITS - num_unacked.leading_zeros() + 1;
     // get the num len in bytes
     min_bits.div_ceil(8) as usize
 }
@@ -699,7 +699,7 @@ pub fn encrypt_hdr(
 
 pub fn encrypt_pkt(
     b: &mut octets::OctetsMut, pn: u64, pn_len: usize, payload_len: usize,
-    payload_offset: usize, extra_in: Option<&[u8]>, aead: &crypto::Seal,
+    payload_offset: usize, extra_in: Option<&[u8]>, aead: &mut crypto::Seal,
 ) -> Result<usize> {
     let (mut header, mut payload) = b.split_at(payload_offset)?;
 
@@ -826,7 +826,7 @@ fn compute_retry_integrity_tag(
     pb.put_bytes(odcid)?;
     pb.put_bytes(&b.buf()[..hdr_len])?;
 
-    let key = crypto::PacketKey::new(
+    let mut key = crypto::PacketKey::new(
         RETRY_AEAD_ALG,
         key.to_vec(),
         nonce.to_vec(),
@@ -1110,9 +1110,9 @@ impl PktNumManager {
         //
         // curr_pn
         //  |
-        //  v               |-lower-|
-        // [c x x x x x x x x x x x s s s s s s s s s s x x]
-        //    |--min_skip---|       |---skip_range----|
+        //  v                 |--- (upper - lower) ---|
+        // [c x x x x x x x x s s s s s s s s s s s s s x x]
+        //    |--min_skip---| |------skip_range-------|
         //
         //```
         let skip_pn_counter = MIN_SKIP_COUNTER_VALUE + lower + rand_skip_value;
@@ -1380,6 +1380,20 @@ mod tests {
         let hdr_num = u64::from(b.get_u24().unwrap());
         let pn = decode_pkt_num(0xace9fa, hdr_num, num_len);
         assert_eq!(pn, 0xace9fe);
+        // roundtrip
+        let base = 0xdeadbeef;
+        for i in 1..255 {
+            let pn = base + i;
+            let num_len = pkt_num_len(pn, base);
+            if num_len == 1 {
+                let decoded = decode_pkt_num(base, pn & 0xff, num_len);
+                assert_eq!(decoded, pn);
+            } else {
+                assert_eq!(num_len, 2);
+                let decoded = decode_pkt_num(base, pn & 0xffff, num_len);
+                assert_eq!(decoded, pn);
+            }
+        }
     }
 
     #[test]
@@ -1752,7 +1766,7 @@ mod tests {
 
         b.put_bytes(header).unwrap();
 
-        let (_, aead) = crypto::derive_initial_key_material(
+        let (_, mut aead) = crypto::derive_initial_key_material(
             dcid,
             hdr.version,
             is_server,
@@ -1773,7 +1787,7 @@ mod tests {
             payload_len,
             payload_offset,
             None,
-            &aead,
+            &mut aead,
         )
         .unwrap();
 
@@ -2090,7 +2104,7 @@ mod tests {
 
         let alg = crypto::Algorithm::ChaCha20_Poly1305;
 
-        let aead = crypto::Seal::from_secret(alg, &secret).unwrap();
+        let mut aead = crypto::Seal::from_secret(alg, &secret).unwrap();
 
         let pn = 654_360_564;
         let pn_len = 3;
@@ -2110,7 +2124,7 @@ mod tests {
             payload_len,
             payload_offset,
             None,
-            &aead,
+            &mut aead,
         )
         .unwrap();
 

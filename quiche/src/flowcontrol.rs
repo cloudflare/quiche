@@ -77,6 +77,12 @@ impl FlowControl {
         self.max_data
     }
 
+    /// Returns the consumed bytes by the receiver.
+    #[cfg(test)]
+    pub fn consumed(&self) -> u64 {
+        self.consumed
+    }
+
     /// Update consumed bytes.
     pub fn add_consumed(&mut self, consumed: u64) {
         self.consumed += consumed;
@@ -104,7 +110,7 @@ impl FlowControl {
     }
 
     /// Autotune the window size. When there is an another update
-    /// within RTT x 2, bump the window x 1.5, capped by
+    /// within RTT x 2, bump the window x 2, capped by
     /// max_window.
     pub fn autotune_window(&mut self, now: Instant, rtt: Duration) {
         if let Some(last_update) = self.last_update {
@@ -121,7 +127,8 @@ impl FlowControl {
     /// the current window.
     pub fn ensure_window_lower_bound(&mut self, min_window: u64) {
         if min_window > self.window {
-            self.window = min_window;
+            // ... we still need to clamp to `max_window`
+            self.window = std::cmp::min(min_window, self.max_window);
         }
     }
 }

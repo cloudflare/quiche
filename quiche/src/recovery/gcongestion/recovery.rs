@@ -104,8 +104,8 @@ struct RecoveryEpoch {
     loss_probes: usize,
     pkts_in_flight: usize,
 
-    acked_frames: Vec<frame::Frame>,
-    lost_frames: Vec<frame::Frame>,
+    acked_frames: VecDeque<frame::Frame>,
+    lost_frames: VecDeque<frame::Frame>,
 
     /// The largest packet number sent in the packet number space so far.
     #[allow(dead_code)]
@@ -447,6 +447,7 @@ pub struct GRecovery {
     pub bytes_lost: u64,
 
     max_datagram_size: usize,
+    time_sent_set_to_now: bool,
 
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
@@ -468,6 +469,16 @@ pub struct GRecovery {
 }
 
 impl GRecovery {
+    #[cfg(feature = "qlog")]
+    fn send_rate(&self) -> Bandwidth {
+        self.pacer.send_rate().unwrap_or(Bandwidth::zero())
+    }
+
+    #[cfg(feature = "qlog")]
+    fn ack_rate(&self) -> Bandwidth {
+        self.pacer.ack_rate().unwrap_or(Bandwidth::zero())
+    }
+
     pub fn new(recovery_config: &RecoveryConfig) -> Option<Self> {
         let cc = match recovery_config.cc_algorithm {
             CongestionControlAlgorithm::Bbr2Gcongestion => BBRv2::new(
@@ -499,6 +510,7 @@ impl GRecovery {
             bytes_lost: 0,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
+            time_sent_set_to_now: cc.time_sent_set_to_now(),
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
@@ -654,12 +666,12 @@ impl RecoveryOps for GRecovery {
                 MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
-    fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].acked_frames)
+    fn next_acked_frame(&mut self, epoch: packet::Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].acked_frames.pop_front()
     }
 
-    fn get_lost_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].lost_frames)
+    fn next_lost_frame(&mut self, epoch: packet::Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].lost_frames.pop_front()
     }
 
     fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64> {
@@ -688,7 +700,11 @@ impl RecoveryOps for GRecovery {
         &mut self, pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
-        let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
+        let time_sent = if self.time_sent_set_to_now {
+            now
+        } else {
+            self.get_next_release_time().time(now).unwrap_or(now)
+        };
 
         let epoch = &mut self.epochs[epoch];
 
@@ -1042,7 +1058,6 @@ impl RecoveryOps for GRecovery {
         self.epochs[epoch].pkts_in_flight
     }
 
-    #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
         self.bytes_in_flight.get()
     }
@@ -1134,7 +1149,18 @@ impl RecoveryOps for GRecovery {
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: self.pacer.ssthresh(),
-            pacing_rate: self.delivery_rate().to_bytes_per_second(),
+
+            pacing_rate: Some(
+                self.pacer
+                    .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats)
+                    .to_bytes_per_second(),
+            ),
+            delivery_rate: Some(self.delivery_rate().to_bytes_per_second()),
+            send_rate: Some(self.send_rate().to_bytes_per_second()),
+            ack_rate: Some(self.ack_rate().to_bytes_per_second()),
+            lost_packets: Some(self.lost_count as u64),
+            lost_bytes: Some(self.bytes_lost),
+            pto_count: Some(self.pto_count),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
@@ -1190,7 +1216,7 @@ mod tests {
     fn loss_threshold() {
         let config = Config::new(crate::PROTOCOL_VERSION).unwrap();
         let recovery_config = RecoveryConfig::from_config(&config);
-        assert_eq!(recovery_config.enable_relaxed_loss_threshold, false);
+        assert!(!recovery_config.enable_relaxed_loss_threshold);
 
         let mut loss_thresh = LossThreshold::new(&recovery_config);
         assert_eq!(loss_thresh.time_thresh_overhead, None);

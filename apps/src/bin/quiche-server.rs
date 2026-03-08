@@ -491,9 +491,8 @@ fn main() {
                     client.conn.max_send_udp_payload_size();
             }
 
-            if client.http_conn.is_some() {
+            if let Some(http_conn) = client.http_conn.as_mut() {
                 let conn = &mut client.conn;
-                let http_conn = client.http_conn.as_mut().unwrap();
                 let partial_responses = &mut client.partial_responses;
 
                 // Visit all writable response streams to send any remaining HTTP
@@ -778,14 +777,14 @@ fn handle_path_events(client: &mut Client) {
 fn set_txtime_sockopt(sock: &mio::net::UdpSocket) -> io::Result<()> {
     use nix::sys::socket::setsockopt;
     use nix::sys::socket::sockopt::TxTime;
-    use std::os::unix::io::AsRawFd;
+    use std::os::unix::io::AsFd;
 
     let config = nix::libc::sock_txtime {
         clockid: libc::CLOCK_MONOTONIC,
         flags: 0,
     };
 
-    setsockopt(sock.as_raw_fd(), TxTime, &config)?;
+    setsockopt(&sock.as_fd(), TxTime, &config)?;
 
     Ok(())
 }

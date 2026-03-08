@@ -136,6 +136,7 @@ impl RangeSet {
 
     /// Iterate over every single [`u64`] value covered by the ranges in this
     /// [`RangeSet`] in incremental order.
+    #[cfg(test)]
     pub fn flatten(&self) -> impl DoubleEndedIterator<Item = u64> + '_ {
         match self {
             RangeSet::BTree(set) =>
@@ -147,6 +148,7 @@ impl RangeSet {
     }
 
     /// The smallest value covered by ranges in this collection.
+    #[cfg(test)]
     pub fn first(&self) -> Option<u64> {
         match self {
             RangeSet::Inline(set) => set.inner.first().map(|(s, _)| *s),

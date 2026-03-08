@@ -1,5 +1,9 @@
 # Running the example server
 
+⚠️ This example demonstrate simples usage of the tokio-quiche API. It is not
+intended to be used in production environments; no performance, security or
+reliability guarantees are provided.
+
 First, start the server. In this example, we'll be listening on
 `127.0.0.1:5757`. We can pass that to the `address` argument to specify it as
 the listening address:

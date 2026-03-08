@@ -54,6 +54,14 @@ pub trait Metrics: Send + Sync + Clone + Unpin + 'static {
     /// Number of error and partial writes while sending QUIC packets
     fn write_errors(&self, reason: labels::QuicWriteError) -> Counter;
 
+    /// Record timing information from sendmsg calls that return
+    /// WouldBlock and are retried in a loop.
+    fn send_to_wouldblock_duration_s(&self) -> TimeHistogram;
+
+    /// Number of mid-handshake flush operations that were skipped due to future
+    /// cancellation.
+    fn skipped_mid_handshake_flush_count(&self) -> Counter;
+
     /// Number of QUIC packets received where the CID could not be verified.
     fn invalid_cid_packet_count(&self, reason: crate::BoxError) -> Counter;
 
@@ -151,6 +159,14 @@ impl Metrics for DefaultMetrics {
 
     fn write_errors(&self, reason: labels::QuicWriteError) -> Counter {
         quic::write_errors(reason)
+    }
+
+    fn send_to_wouldblock_duration_s(&self) -> TimeHistogram {
+        quic::send_to_wouldblock_duration_s()
+    }
+
+    fn skipped_mid_handshake_flush_count(&self) -> Counter {
+        quic::skipped_mid_handshake_flush_count()
     }
 
     fn invalid_cid_packet_count(&self, reason: crate::BoxError) -> Counter {
@@ -263,6 +279,15 @@ pub(crate) mod quic {
 
     /// Number of error and partial writes while sending QUIC packets
     pub fn write_errors(reason: labels::QuicWriteError) -> Counter;
+
+    /// Record timing information from sendmsg calls that return
+    /// WouldBlock and are retried in a loop.
+    #[ctor = HistogramBuilder { buckets: &[1E-6, 1E-5, 1E-4, 1E-3, 5E-3, 1E-2, 2E-2, 4E-2, 8E-2, 16E-2, 1.0], }]
+    pub fn send_to_wouldblock_duration_s() -> TimeHistogram;
+
+    /// Number of mid-handshake flush operations that were skipped due to future
+    /// cancellation.
+    pub fn skipped_mid_handshake_flush_count() -> Counter;
 
     /// Number of QUIC packets received where the CID could not be verified.
     pub fn invalid_cid_packet_count(reason: String) -> Counter;

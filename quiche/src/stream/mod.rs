@@ -39,7 +39,7 @@ use intrusive_collections::RBTreeAtomicLink;
 
 use smallvec::SmallVec;
 
-use crate::range_buf::DefaultBufFactory;
+use crate::buffers::DefaultBufFactory;
 use crate::BufFactory;
 use crate::Error;
 use crate::Result;
@@ -59,6 +59,35 @@ pub const MAX_STREAM_WINDOW: u64 = 16 * 1024 * 1024;
 #[derive(Default)]
 pub struct StreamIdHasher {
     id: u64,
+}
+
+/// Return value type of `RecvBuf::reset()`
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct RecvBufResetReturn {
+    /// Returns the difference between the previous max_data offset
+    /// received and the final size reported by the reset
+    pub max_data_delta: u64,
+
+    /// The amount of flow control credit that should be returned to the
+    /// connection level flow control.
+    pub consumed_flowcontrol: u64,
+}
+
+impl RecvBufResetReturn {
+    pub fn zero() -> Self {
+        Self {
+            max_data_delta: 0,
+            consumed_flowcontrol: 0,
+        }
+    }
+}
+
+/// Action to perform when reading from a stream's receive buffer.
+pub enum RecvAction<'a> {
+    /// Emit data by copying it into the provided buffer.
+    Emit { out: &'a mut [u8] },
+    /// Discard up to the specified number of bytes without copying.
+    Discard { len: usize },
 }
 
 impl std::hash::Hasher for StreamIdHasher {
@@ -114,9 +143,15 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     local_max_streams_bidi: u64,
     local_max_streams_bidi_next: u64,
 
+    /// Initial maximum bidirectional stream count.
+    initial_max_streams_bidi: u64,
+
     /// Local maximum unidirectional stream count limit.
     local_max_streams_uni: u64,
     local_max_streams_uni_next: u64,
+
+    /// Initial maximum unidirectional stream count.
+    initial_max_streams_uni: u64,
 
     /// The total number of bidirectional streams opened by the local endpoint.
     local_opened_streams_bidi: u64,
@@ -172,9 +207,11 @@ impl<F: BufFactory> StreamMap<F> {
         StreamMap {
             local_max_streams_bidi: max_streams_bidi,
             local_max_streams_bidi_next: max_streams_bidi,
+            initial_max_streams_bidi: max_streams_bidi,
 
             local_max_streams_uni: max_streams_uni,
             local_max_streams_uni_next: max_streams_uni,
+            initial_max_streams_uni: max_streams_uni,
 
             max_stream_window,
 
@@ -497,6 +534,7 @@ impl<F: BufFactory> StreamMap<F> {
     pub fn set_max_streams_bidi(&mut self, max: u64) {
         self.local_max_streams_bidi = max;
         self.local_max_streams_bidi_next = max;
+        self.initial_max_streams_bidi = max;
     }
 
     /// Returns the current max_streams_bidi limit.
@@ -633,18 +671,28 @@ impl<F: BufFactory> StreamMap<F> {
 
     /// Returns true if the max bidirectional streams count needs to be updated
     /// by sending a MAX_STREAMS frame to the peer.
+    ///
+    /// This only sends MAX_STREAMS when available capacity is at or below 50%
+    /// of the initial maximum streams target.
     pub fn should_update_max_streams_bidi(&self) -> bool {
+        let available = self
+            .local_max_streams_bidi
+            .saturating_sub(self.peer_opened_streams_bidi);
         self.local_max_streams_bidi_next != self.local_max_streams_bidi &&
-            self.local_max_streams_bidi_next / 2 >
-                self.local_max_streams_bidi - self.peer_opened_streams_bidi
+            available <= self.initial_max_streams_bidi / 2
     }
 
     /// Returns true if the max unidirectional streams count needs to be updated
     /// by sending a MAX_STREAMS frame to the peer.
+    ///
+    /// This only send MAX_STREAMS when available capacity is at or below 50% of
+    /// the initial maximum streams target.
     pub fn should_update_max_streams_uni(&self) -> bool {
+        let available = self
+            .local_max_streams_uni
+            .saturating_sub(self.peer_opened_streams_uni);
         self.local_max_streams_uni_next != self.local_max_streams_uni &&
-            self.local_max_streams_uni_next / 2 >
-                self.local_max_streams_uni - self.peer_opened_streams_uni
+            available <= self.initial_max_streams_uni / 2
     }
 
     /// Returns the number of active streams in the map.
@@ -795,44 +843,41 @@ impl PartialEq for StreamPriorityKey {
 impl Eq for StreamPriorityKey {}
 
 impl PartialOrd for StreamPriorityKey {
-    // Priority ordering is complex, disable Clippy warning.
-    #[allow(clippy::non_canonical_partial_ord_impl)]
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        // Ignore priority if ID matches.
-        if self.id == other.id {
-            return Some(cmp::Ordering::Equal);
-        }
-
-        // First, order by urgency...
-        if self.urgency != other.urgency {
-            return self.urgency.partial_cmp(&other.urgency);
-        }
-
-        // ...when the urgency is the same, and both are not incremental, order
-        // by stream ID...
-        if !self.incremental && !other.incremental {
-            return self.id.partial_cmp(&other.id);
-        }
-
-        // ...non-incremental takes priority over incremental...
-        if self.incremental && !other.incremental {
-            return Some(cmp::Ordering::Greater);
-        }
-        if !self.incremental && other.incremental {
-            return Some(cmp::Ordering::Less);
-        }
-
-        // ...finally, when both are incremental, `other` takes precedence (so
-        // `self` is always sorted after other same-urgency incremental
-        // entries).
-        Some(cmp::Ordering::Greater)
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for StreamPriorityKey {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        // `partial_cmp()` never returns `None`, so this should be safe.
-        self.partial_cmp(other).unwrap()
+        // Ignore priority if ID matches.
+        if self.id == other.id {
+            return cmp::Ordering::Equal;
+        }
+
+        // First, order by urgency...
+        if self.urgency != other.urgency {
+            return self.urgency.cmp(&other.urgency);
+        }
+
+        // ...when the urgency is the same, and both are not incremental, order
+        // by stream ID...
+        if !self.incremental && !other.incremental {
+            return self.id.cmp(&other.id);
+        }
+
+        // ...non-incremental takes priority over incremental...
+        if self.incremental && !other.incremental {
+            return cmp::Ordering::Greater;
+        }
+        if !self.incremental && other.incremental {
+            return cmp::Ordering::Less;
+        }
+
+        // ...finally, when both are incremental, `other` takes precedence (so
+        // `self` is always sorted after other same-urgency incremental
+        // entries).
+        cmp::Ordering::Greater
     }
 }
 
@@ -1031,6 +1076,29 @@ mod tests {
     }
 
     #[test]
+    fn recv_reset_with_gap() {
+        let mut stream =
+            <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
+        assert!(!stream.recv.almost_full());
+
+        let first = RangeBuf::from(b"hello", 0, false);
+
+        assert_eq!(stream.recv.write(first), Ok(()));
+        // Read one byte.
+        assert_eq!(stream.recv.emit(&mut [0; 1]), Ok((1, false)));
+        // Reset with a final size > than max previously received
+        assert_eq!(
+            stream.recv.reset(0, 10),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 5,
+                // consumed_flowcontrol is 9, since we already read 1 byte
+                consumed_flowcontrol: 9
+            })
+        );
+        assert_eq!(stream.recv.reset(0, 10), Ok(RecvBufResetReturn::zero()));
+    }
+
+    #[test]
     fn recv_reset_dup() {
         let mut stream =
             <Stream>::new(0, 15, 0, true, true, DEFAULT_STREAM_WINDOW);
@@ -1039,8 +1107,14 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv.write(first), Ok(()));
-        assert_eq!(stream.recv.reset(0, 5), Ok(0));
-        assert_eq!(stream.recv.reset(0, 5), Ok(0));
+        assert_eq!(
+            stream.recv.reset(0, 5),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 0,
+                consumed_flowcontrol: 5
+            })
+        );
+        assert_eq!(stream.recv.reset(0, 5), Ok(RecvBufResetReturn::zero()));
     }
 
     #[test]
@@ -1052,7 +1126,13 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv.write(first), Ok(()));
-        assert_eq!(stream.recv.reset(0, 5), Ok(0));
+        assert_eq!(
+            stream.recv.reset(0, 5),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 0,
+                consumed_flowcontrol: 5
+            })
+        );
         assert_eq!(stream.recv.reset(0, 10), Err(Error::FinalSize));
     }
 

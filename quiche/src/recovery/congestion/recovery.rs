@@ -52,7 +52,6 @@ use crate::frame;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-use super::pacer;
 use super::Congestion;
 use crate::recovery::bytes_in_flight::BytesInFlight;
 use crate::recovery::rtt::RttStats;
@@ -549,12 +548,12 @@ impl RecoveryOps for LegacyRecovery {
                 MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
-    fn get_acked_frames(&mut self, epoch: Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].acked_frames)
+    fn next_acked_frame(&mut self, epoch: Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].acked_frames.pop()
     }
 
-    fn get_lost_frames(&mut self, epoch: Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].lost_frames)
+    fn next_lost_frame(&mut self, epoch: Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].lost_frames.pop()
     }
 
     fn get_largest_acked_on_epoch(&self, epoch: Epoch) -> Option<u64> {
@@ -602,7 +601,6 @@ impl RecoveryOps for LegacyRecovery {
             sent_bytes,
             now,
             &mut pkt,
-            &self.rtt_stats,
             self.bytes_lost,
             in_flight,
         );
@@ -629,9 +627,8 @@ impl RecoveryOps for LegacyRecovery {
         trace!("{trace_id} {self:?}");
     }
 
-    fn get_packet_send_time(&self, _now: Instant) -> Instant {
-        // TODO .max(now)
-        self.congestion.get_packet_send_time()
+    fn get_packet_send_time(&self, now: Instant) -> Instant {
+        now
     }
 
     // `peer_sent_ack_ranges` should not be used without validation.
@@ -900,14 +897,6 @@ impl RecoveryOps for LegacyRecovery {
                 self.congestion.initial_congestion_window_packets;
         }
 
-        self.congestion.pacer = pacer::Pacer::new(
-            self.congestion.pacer.enabled(),
-            self.cwnd(),
-            0,
-            new_max_datagram_size,
-            self.congestion.pacer.max_pacing_rate(),
-        );
-
         self.max_datagram_size = new_max_datagram_size;
     }
 
@@ -927,7 +916,6 @@ impl RecoveryOps for LegacyRecovery {
         self.epochs[epoch].in_flight_count
     }
 
-    #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
         self.bytes_in_flight.get()
     }
@@ -938,7 +926,7 @@ impl RecoveryOps for LegacyRecovery {
 
     #[cfg(test)]
     fn pacing_rate(&self) -> u64 {
-        self.congestion.pacer.rate()
+        0
     }
 
     #[cfg(test)]
@@ -1013,7 +1001,10 @@ impl RecoveryOps for LegacyRecovery {
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: Some(self.congestion.ssthresh.get() as u64),
-            pacing_rate: self.congestion.pacer.rate(),
+            lost_packets: Some(self.congestion.lost_count as u64),
+            lost_bytes: Some(self.bytes_lost),
+            pto_count: Some(self.pto_count),
+            ..Default::default()
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
@@ -1036,20 +1027,10 @@ impl RecoveryOps for LegacyRecovery {
         self.congestion.send_quantum()
     }
 
-    // TODO tests
     fn get_next_release_time(&self) -> ReleaseDecision {
-        let now = Instant::now();
-        let next_send_time = self.congestion.get_packet_send_time();
-        if next_send_time > now {
-            ReleaseDecision {
-                time: ReleaseTime::At(next_send_time),
-                allow_burst: false,
-            }
-        } else {
-            ReleaseDecision {
-                time: ReleaseTime::Immediate,
-                allow_burst: false,
-            }
+        ReleaseDecision {
+            time: ReleaseTime::Immediate,
+            allow_burst: false,
         }
     }
 
@@ -1083,7 +1064,6 @@ impl std::fmt::Debug for LegacyRecovery {
             self.congestion.congestion_recovery_start_time
         )?;
         write!(f, "{:?} ", self.congestion.delivery_rate)?;
-        write!(f, "pacer={:?} ", self.congestion.pacer)?;
 
         if self.congestion.hystart.enabled() {
             write!(f, "hystart={:?} ", self.congestion.hystart)?;

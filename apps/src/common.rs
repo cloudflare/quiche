@@ -677,11 +677,13 @@ impl HttpConn for Http09Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
+        let stream_cap = conn.stream_capacity(stream_id);
+
         debug!(
             "{} response stream {} is writable with capacity {:?}",
             conn.trace_id(),
             stream_id,
-            conn.stream_capacity(stream_id)
+            stream_cap,
         );
 
         if !partial_responses.contains_key(&stream_id) {
@@ -1601,11 +1603,13 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
+        let stream_cap = conn.stream_capacity(stream_id);
+
         debug!(
             "{} response stream {} is writable with capacity {:?}",
             conn.trace_id(),
             stream_id,
-            conn.stream_capacity(stream_id)
+            stream_cap,
         );
 
         if !partial_responses.contains_key(&stream_id) {

@@ -28,6 +28,7 @@ use crate::fixtures::*;
 
 use futures::SinkExt;
 
+use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::http3::driver::OutboundFrame;
@@ -38,19 +39,24 @@ use tokio_quiche::quiche::h3::Header;
 async fn test_additional_headers() {
     let hook = TestConnectionHook::new();
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         QuicSettings::default(),
         Http3Settings::default(),
         hook,
         move |mut h3_conn| async move {
             let event_rx = h3_conn.h3_controller.event_receiver_mut();
 
-            while let Some(frame) = event_rx.recv().await {
-                let ServerH3Event::Core(frame) = frame;
+            while let Some(event) = event_rx.recv().await {
+                match event {
+                    ServerH3Event::Core(event) =>
+                        if let H3Event::ConnectionShutdown(_) = event {
+                            break;
+                        },
 
-                match frame {
-                    H3Event::IncomingHeaders(headers) => {
-                        let IncomingH3Headers { mut send, .. } = headers;
+                    ServerH3Event::Headers {
+                        incoming_headers, ..
+                    } => {
+                        let IncomingH3Headers { mut send, .. } = incoming_headers;
 
                         // Send initial headers.
                         send.send(OutboundFrame::Headers(
@@ -72,11 +78,15 @@ async fn test_additional_headers() {
                         ))
                         .await
                         .unwrap();
+
+                        // Send fin
+                        send.send(OutboundFrame::Body(
+                            BufFactory::get_empty_buf(),
+                            true,
+                        ))
+                        .await
+                        .unwrap();
                     },
-
-                    H3Event::ConnectionShutdown(_) => break,
-
-                    _ => (),
                 }
             }
         },

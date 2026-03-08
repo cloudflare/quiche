@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
@@ -60,15 +61,71 @@ pub type ServerH3Controller = H3Controller<ServerHooks>;
 /// transfer data.
 pub type ServerEventStream = mpsc::UnboundedReceiver<ServerH3Event>;
 
+#[derive(Clone, Debug)]
+pub struct RawPriorityValue(Vec<u8>);
+
+impl From<Vec<u8>> for RawPriorityValue {
+    fn from(value: Vec<u8>) -> Self {
+        RawPriorityValue(value)
+    }
+}
+
+impl Deref for RawPriorityValue {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// The request was received during early data (0-RTT).
+#[derive(Clone, Debug)]
+pub struct IsInEarlyData(bool);
+
+impl IsInEarlyData {
+    fn new(is_in_early_data: bool) -> Self {
+        IsInEarlyData(is_in_early_data)
+    }
+}
+
+impl Deref for IsInEarlyData {
+    type Target = bool;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Events produced by [ServerH3Driver].
 #[derive(Debug)]
 pub enum ServerH3Event {
     Core(H3Event),
+
+    Headers {
+        incoming_headers: IncomingH3Headers,
+        /// The latest PRIORITY_UPDATE frame value, if any.
+        priority: Option<RawPriorityValue>,
+        is_in_early_data: IsInEarlyData,
+    },
 }
 
 impl From<H3Event> for ServerH3Event {
     fn from(ev: H3Event) -> Self {
-        Self::Core(ev)
+        match ev {
+            H3Event::IncomingHeaders(incoming_headers) => {
+                // Server `incoming_headers` are exclusively created in
+                // `ServerHooks::handle_request`, which correctly serializes the
+                // RawPriorityValue and IsInEarlyData values.
+                //
+                // See `H3Driver::process_read_event` for implementation details.
+                Self::Headers {
+                    incoming_headers,
+                    priority: None,
+                    is_in_early_data: IsInEarlyData::new(false),
+                }
+            },
+            _ => Self::Core(ev),
+        }
     }
 }
 
@@ -90,6 +147,14 @@ impl From<QuicCommand> for ServerH3Command {
     }
 }
 
+// Quiche urgency is an 8-bit space. Internally, quiche reserves 0 for HTTP/3
+// control streams and request are shifted up by 124. Any value in that range is
+// suitable here.
+const PRE_HEADERS_BOOSTED_PRIORITY_URGENCY: u8 = 64;
+// Non-incremental streams are served in stream ID order, matching the client
+// FIFO expectation.
+const PRE_HEADERS_BOOSTED_PRIORITY_INCREMENTAL: bool = false;
+
 pub struct ServerHooks {
     /// Helper to enforce limits and timeouts on an HTTP/3 connection.
     settings_enforcer: Http3SettingsEnforcer,
@@ -107,7 +172,8 @@ impl ServerHooks {
     /// [`H3Event`] to the [ServerH3Controller] for application-level
     /// processing.
     fn handle_request(
-        driver: &mut H3Driver<Self>, headers: InboundHeaders,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
+        headers: InboundHeaders,
     ) -> H3ConnectionResult<()> {
         let InboundHeaders {
             stream_id,
@@ -130,6 +196,23 @@ impl ServerHooks {
             stream_ctx.associated_dgram_flow_id = Some(flow_id);
         }
 
+        let latest_priority_update: Option<RawPriorityValue> = driver
+            .conn_mut()?
+            .take_last_priority_update(stream_id)
+            .ok()
+            .map(|v| v.into());
+
+        // Boost the priority of the stream until we write response headers via
+        // process_write_frame(), which will set the desired priority. Since it
+        // will get set later, just swallow any error here.
+        qconn
+            .stream_priority(
+                stream_id,
+                PRE_HEADERS_BOOSTED_PRIORITY_URGENCY,
+                PRE_HEADERS_BOOSTED_PRIORITY_INCREMENTAL,
+            )
+            .ok();
+
         let headers = IncomingH3Headers {
             stream_id,
             headers,
@@ -146,7 +229,11 @@ impl ServerHooks {
 
         driver
             .h3_event_sender
-            .send(H3Event::IncomingHeaders(headers).into())
+            .send(ServerH3Event::Headers {
+                incoming_headers: headers,
+                priority: latest_priority_update,
+                is_in_early_data: IsInEarlyData::new(qconn.is_in_early_data()),
+            })
             .map_err(|_| H3ConnectionError::ControllerWentAway)?;
         driver.hooks.requests += 1;
 
@@ -213,7 +300,7 @@ impl DriverHooks for ServerHooks {
             driver.hooks.settings_enforcer.cancel_timeout(timeout);
         }
 
-        Self::handle_request(driver, headers)
+        Self::handle_request(driver, qconn, headers)
     }
 
     fn conn_command(

@@ -35,7 +35,6 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
-use tokio_quiche::quic::SimpleConnectionIdGenerator;
 use tokio_quiche::settings::Hooks;
 use tokio_quiche::settings::TlsCertificatePaths;
 use tokio_quiche::ConnectionParams;
@@ -46,13 +45,14 @@ pub mod connection_close;
 pub mod headers;
 pub mod migration;
 pub mod timeouts;
+pub mod zero_rtt;
 
 #[tokio::test]
 async fn echo() {
     const CONN_COUNT: usize = 5;
 
     let req_count = |conn_num| conn_num * 100;
-    let (url, hook) = start_server();
+    let (url, hook, _) = start_server();
     let mut reqs = vec![];
 
     for i in 1..=CONN_COUNT {
@@ -77,7 +77,7 @@ async fn echo() {
 
 #[tokio::test]
 async fn e2e() {
-    let (url, hook) = start_server();
+    let (url, hook, _) = start_server();
     let url = format!("{url}/1");
 
     let res = request(url, 1).await.unwrap();
@@ -100,7 +100,7 @@ async fn e2e_client_ip_validation_disabled() {
 
     let hook = TestConnectionHook::new();
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
         hook.clone(),
@@ -126,7 +126,7 @@ async fn quiche_logs_forwarded_server_side(cx: TestTelemetryContext) {
 
     let hook = TestConnectionHook::new();
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
         hook,
@@ -170,14 +170,9 @@ async fn test_ioworker_state_machine_pause() {
         tls_cert_settings,
         hooks,
     );
-    let mut stream = listen(
-        vec![socket],
-        params,
-        SimpleConnectionIdGenerator,
-        DefaultMetrics,
-    )
-    .unwrap()
-    .remove(0);
+    let mut stream = listen(vec![socket], params, DefaultMetrics)
+        .unwrap()
+        .remove(0);
 
     tokio::spawn(async move {
         loop {
@@ -205,4 +200,25 @@ async fn test_ioworker_state_machine_pause() {
         .expect("request failed");
 
     assert!(received_status_code_on_stream(&summary, 0, 200));
+}
+
+#[tokio::test]
+#[cfg(target_os = "linux")]
+async fn test_so_mark_receive_data() {
+    let (url, _, mut audit_stats_rx) = start_server();
+
+    let url = format!("{url}/1");
+    let summary = timeout(Duration::from_secs(2), h3i_fixtures::request(&url, 1))
+        .await
+        .expect("request timed out")
+        .expect("request failed");
+
+    assert!(received_status_code_on_stream(&summary, 0, 200));
+
+    let audit_stats = audit_stats_rx.recv().await.expect("should receive stats");
+    let so_mark_data = audit_stats.initial_so_mark_data();
+    // We don't actually set SO_MARK anywhere, so we just want to ensure that the
+    // data is `Some`, indicating that we at least received the cmsg from the
+    // socket.
+    assert_eq!(so_mark_data.unwrap(), &[0, 0, 0, 0]);
 }

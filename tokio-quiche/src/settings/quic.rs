@@ -59,6 +59,12 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_dgram_max_queue_len")]
     pub dgram_send_max_queue_len: usize,
 
+    /// Configures whether to enable early data (0-RTT) support. Currently only
+    /// supported for servers.
+    ///
+    /// Defaults to `false`.
+    pub enable_early_data: bool,
+
     /// Sets the `initial_max_data` transport parameter.
     ///
     /// Defaults to 10 MB.
@@ -161,10 +167,23 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_initial_congestion_window_packets")]
     pub initial_congestion_window_packets: usize,
 
+    /// Configures whether to enable relaxed loss detection on spurious loss.
+    ///
+    /// Defaults to `false`.
+    pub enable_relaxed_loss_threshold: bool,
+
     /// Configures whether to do path MTU discovery.
     ///
     /// Defaults to `false`.
     pub discover_path_mtu: bool,
+
+    /// Configures the maximum number of PMTUD probe attempts before treating
+    /// a size as failed.
+    ///
+    /// Defaults to 3 per [RFC 8899 Section 5.1.2](https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2).
+    /// If 0 is passed, the default value is used.
+    #[serde(default = "QuicSettings::default_pmtud_max_probes")]
+    pub pmtud_max_probes: u8,
 
     /// Whether to use HyStart++ (only with `cubic` and `reno` CC).
     ///
@@ -250,6 +269,16 @@ pub struct QuicSettings {
     /// Defaults to 3.
     #[serde(default = "QuicSettings::default_amplification_factor")]
     pub max_amplification_factor: usize,
+
+    /// Sets the send capacity factor.
+    ///
+    /// A factor greater than 1 allows the connection to buffer more outbound
+    /// data than can be sent at this moment. This can improve throughput by
+    /// reducing time spent waiting for new data.
+    ///
+    /// Defaults to 1.
+    #[serde(default = "QuicSettings::default_send_capacity_factor")]
+    pub send_capacity_factor: f64,
 
     /// Sets the `ack_delay_exponent` transport parameter.
     ///
@@ -395,6 +424,11 @@ impl QuicSettings {
     }
 
     #[inline]
+    fn default_send_capacity_factor() -> f64 {
+        1.0
+    }
+
+    #[inline]
     fn default_ack_delay_exponent() -> u64 {
         3
     }
@@ -411,6 +445,11 @@ impl QuicSettings {
 
     #[inline]
     fn default_max_path_challenge_recv_queue_len() -> usize {
+        3
+    }
+
+    #[inline]
+    fn default_pmtud_max_probes() -> u8 {
         3
     }
 }

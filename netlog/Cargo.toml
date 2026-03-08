@@ -1,0 +1,17 @@
+[package]
+name = "netlog"
+version = "0.1.0"
+description = "Chrome netlog parsing"
+repository = { workspace = true }
+authors = ["Lucas Pardue <lucas@lucaspardue.com>"]
+edition = { workspace = true }
+license = { workspace = true }
+keywords = ["quic", "http2", "http3"]
+categories = { workspace = true }
+readme = "README.md"
+
+[dependencies]
+log = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }

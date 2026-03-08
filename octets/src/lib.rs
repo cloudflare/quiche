@@ -28,6 +28,9 @@
 use std::mem;
 use std::ptr;
 
+/// Maximum value that can be encoded via varint.
+pub const MAX_VAR_INT: u64 = 4_611_686_018_427_387_903;
+
 /// A specialized [`Result`] type for [`OctetsMut`] operations.
 ///
 /// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
@@ -245,6 +248,49 @@ impl<'a> Octets<'a> {
         self.get_bytes(len as usize)
     }
 
+    /// Decodes a Huffman-encoded value from the current offset.
+    ///
+    /// The Huffman code implemented is the one defined for HPACK (RFC7541).
+    #[cfg(feature = "huffman_hpack")]
+    pub fn get_huffman_decoded(&mut self) -> Result<Vec<u8>> {
+        use self::huffman_table::DECODE_TABLE;
+
+        const FLAG_END: u8 = 1;
+        const FLAG_SYM: u8 = 2;
+        const FLAG_ERR: u8 = 4;
+
+        // Max compression ratio is >= 0.5.
+        let mut out = Vec::with_capacity(self.cap() << 1);
+
+        let mut state = 0;
+        let mut eos = false;
+
+        while let Ok(byte) = self.get_u8() {
+            for data in [byte >> 4, byte & 0xf] {
+                let (next, sym, flags) = DECODE_TABLE[state][(data) as usize];
+
+                if flags & FLAG_ERR == FLAG_ERR {
+                    // Data followed the "end" marker.
+                    return Err(BufferTooShortError);
+                } else if flags & FLAG_SYM == FLAG_SYM {
+                    out.push(sym);
+                }
+
+                state = next;
+
+                // `eos` only correct when handling the byte & 0xf case; ignored
+                // and overwritten in the byte >> 4 case.
+                eos = flags & FLAG_END == FLAG_END;
+            }
+        }
+
+        if state != 0 && !eos {
+            return Err(BufferTooShortError);
+        }
+
+        Ok(out)
+    }
+
     /// Reads `len` bytes from the current offset without copying and without
     /// advancing the buffer.
     pub fn peek_bytes(&self, len: usize) -> Result<Octets<'a>> {
@@ -258,6 +304,17 @@ impl<'a> Octets<'a> {
         };
 
         Ok(out)
+    }
+
+    /// Rewinds the buffer offset by `len` elements.
+    pub fn rewind(&mut self, len: usize) -> Result<()> {
+        if self.off() < len {
+            return Err(BufferTooShortError);
+        }
+
+        self.off -= len;
+
+        Ok(())
     }
 
     /// Returns a slice of `len` elements from the current offset.
@@ -275,8 +332,8 @@ impl<'a> Octets<'a> {
             return Err(BufferTooShortError);
         }
 
-        let cap = self.cap();
-        Ok(&self.buf[cap - len..])
+        let end = self.buf.len();
+        Ok(&self.buf[end - len..end])
     }
 
     /// Advances the buffer's offset.
@@ -566,8 +623,7 @@ impl<'a> OctetsMut<'a> {
         Ok(out)
     }
 
-    /// Writes `len` bytes from the current offset without copying and advances
-    /// the buffer.
+    /// Writes `v` to the current offset.
     pub fn put_bytes(&mut self, v: &[u8]) -> Result<()> {
         let len = v.len();
 
@@ -582,6 +638,79 @@ impl<'a> OctetsMut<'a> {
         self.as_mut()[..len].copy_from_slice(v);
 
         self.off += len;
+
+        Ok(())
+    }
+
+    /// Writes `v` to the current offset after Huffman-encoding it.
+    ///
+    /// The Huffman code implemented is the one defined for HPACK (RFC7541).
+    #[cfg(feature = "huffman_hpack")]
+    pub fn put_huffman_encoded<const LOWER_CASE: bool>(
+        &mut self, v: &[u8],
+    ) -> Result<()> {
+        use self::huffman_table::ENCODE_TABLE;
+
+        let mut bits: u64 = 0;
+        let mut pending = 0;
+
+        for &b in v {
+            let b = if LOWER_CASE {
+                b.to_ascii_lowercase()
+            } else {
+                b
+            };
+            let (nbits, code) = ENCODE_TABLE[b as usize];
+
+            pending += nbits;
+
+            if pending < 64 {
+                // Have room for the new token
+                bits |= code << (64 - pending);
+                continue;
+            }
+
+            pending -= 64;
+            // Take only the bits that fit
+            bits |= code >> pending;
+            self.put_u64(bits)?;
+
+            bits = if pending == 0 {
+                0
+            } else {
+                code << (64 - pending)
+            };
+        }
+
+        if pending == 0 {
+            return Ok(());
+        }
+
+        bits |= u64::MAX >> pending;
+        // TODO: replace with `next_multiple_of(8)` when stable
+        pending = (pending + 7) & !7; // Round up to a byte
+        bits >>= 64 - pending;
+
+        if pending >= 32 {
+            pending -= 32;
+            self.put_u32((bits >> pending) as u32)?;
+        }
+
+        while pending > 0 {
+            pending -= 8;
+            self.put_u8((bits >> pending) as u8)?;
+        }
+
+        Ok(())
+    }
+
+    /// Rewinds the buffer offset by `len` elements.
+    pub fn rewind(&mut self, len: usize) -> Result<()> {
+        if self.off() < len {
+            return Err(BufferTooShortError);
+        }
+
+        self.off -= len;
 
         Ok(())
     }
@@ -618,8 +747,8 @@ impl<'a> OctetsMut<'a> {
             return Err(BufferTooShortError);
         }
 
-        let cap = self.cap();
-        Ok(&mut self.buf[cap - len..])
+        let end = self.buf.len();
+        Ok(&mut self.buf[end - len..end])
     }
 
     /// Advances the buffer's offset.
@@ -685,7 +814,7 @@ pub const fn varint_len(v: u64) -> usize {
         2
     } else if v <= 1_073_741_823 {
         4
-    } else if v <= 4_611_686_018_427_387_903 {
+    } else if v <= MAX_VAR_INT {
         8
     } else {
         unreachable!()
@@ -701,6 +830,39 @@ pub const fn varint_parse_len(first: u8) -> usize {
         3 => 8,
         _ => unreachable!(),
     }
+}
+
+/// Returns how long the Huffman encoding of the given buffer will be.
+///
+/// The Huffman code implemented is the one defined for HPACK (RFC7541).
+#[cfg(feature = "huffman_hpack")]
+pub fn huffman_encoding_len<const LOWER_CASE: bool>(src: &[u8]) -> Result<usize> {
+    use self::huffman_table::ENCODE_TABLE;
+
+    let mut bits: usize = 0;
+
+    for &b in src {
+        let b = if LOWER_CASE {
+            b.to_ascii_lowercase()
+        } else {
+            b
+        };
+
+        let (nbits, _) = ENCODE_TABLE[b as usize];
+        bits += nbits;
+    }
+
+    let mut len = bits / 8;
+
+    if bits & 7 != 0 {
+        len += 1;
+    }
+
+    if len > src.len() {
+        return Err(BufferTooShortError);
+    }
+
+    Ok(len)
 }
 
 /// The functions in this mod test the compile time assertions in the
@@ -996,6 +1158,27 @@ mod tests {
         assert_eq!(b.off(), 1);
     }
 
+    #[cfg(feature = "huffman_hpack")]
+    #[test]
+    fn invalid_huffman() {
+        // Extra non-zero padding byte at the end.
+        let mut b = Octets::with_slice(
+            b"\x00\x85\xf2\xb2\x4a\x84\xff\x84\x49\x50\x9f\xff",
+        );
+        assert!(b.get_huffman_decoded().is_err());
+
+        // Zero padded.
+        let mut b =
+            Octets::with_slice(b"\x00\x85\xf2\xb2\x4a\x84\xff\x83\x49\x50\x90");
+        assert!(b.get_huffman_decoded().is_err());
+
+        // Non-final EOS symbol.
+        let mut b = Octets::with_slice(
+            b"\x00\x85\xf2\xb2\x4a\x84\xff\x87\x49\x51\xff\xff\xff\xfa\x7f",
+        );
+        assert!(b.get_huffman_decoded().is_err());
+    }
+
     #[test]
     fn put_varint() {
         let mut d = [0; 8];
@@ -1114,6 +1297,56 @@ mod tests {
 
         let exp = [0xa, 0xb, 0xc, 0xd, 0xe];
         assert_eq!(&d, &exp);
+    }
+
+    #[test]
+    fn rewind() {
+        let d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
+        let mut b = Octets::with_slice(&d);
+        assert_eq!(b.get_varint().unwrap(), 151288809941952652);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 8);
+
+        assert_eq!(b.rewind(4), Ok(()));
+        assert_eq!(b.cap(), 4);
+        assert_eq!(b.off(), 4);
+
+        assert_eq!(b.get_u8().unwrap(), 0xff);
+        assert_eq!(b.cap(), 3);
+        assert_eq!(b.off(), 5);
+
+        assert!(b.rewind(6).is_err());
+
+        assert_eq!(b.rewind(5), Ok(()));
+        assert_eq!(b.cap(), 8);
+        assert_eq!(b.off(), 0);
+
+        assert!(b.rewind(1).is_err());
+    }
+
+    #[test]
+    fn rewind_mut() {
+        let mut d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
+        let mut b = OctetsMut::with_slice(&mut d);
+        assert_eq!(b.get_varint().unwrap(), 151288809941952652);
+        assert_eq!(b.cap(), 0);
+        assert_eq!(b.off(), 8);
+
+        assert_eq!(b.rewind(4), Ok(()));
+        assert_eq!(b.cap(), 4);
+        assert_eq!(b.off(), 4);
+
+        assert_eq!(b.get_u8().unwrap(), 0xff);
+        assert_eq!(b.cap(), 3);
+        assert_eq!(b.off(), 5);
+
+        assert!(b.rewind(6).is_err());
+
+        assert_eq!(b.rewind(5), Ok(()));
+        assert_eq!(b.cap(), 8);
+        assert_eq!(b.off(), 0);
+
+        assert!(b.rewind(1).is_err());
     }
 
     #[test]
@@ -1256,6 +1489,13 @@ mod tests {
         }
 
         {
+            let mut b = Octets::with_slice(&d);
+            b.get_bytes(5).unwrap();
+            let exp = b"orld".to_vec();
+            assert_eq!(b.slice_last(4), Ok(&exp[..]));
+        }
+
+        {
             let b = Octets::with_slice(&d);
             let exp = b"d".to_vec();
             assert_eq!(b.slice_last(1), Ok(&exp[..]));
@@ -1291,6 +1531,13 @@ mod tests {
 
         {
             let mut b = OctetsMut::with_slice(&mut d);
+            b.get_bytes(5).unwrap();
+            let mut exp = b"orld".to_vec();
+            assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
+        }
+
+        {
+            let mut b = OctetsMut::with_slice(&mut d);
             let mut exp = b"d".to_vec();
             assert_eq!(b.slice_last(1), Ok(&mut exp[..]));
         }
@@ -1313,3 +1560,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(feature = "huffman_hpack")]
+mod huffman_table;

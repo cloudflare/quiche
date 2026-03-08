@@ -30,6 +30,7 @@ mod map;
 
 pub use self::error::HandshakeError;
 pub use self::id::ConnectionIdGenerator;
+pub use self::id::SharedConnectionIdGenerator;
 pub use self::id::SimpleConnectionIdGenerator;
 pub(crate) use self::map::ConnectionMap;
 
@@ -103,6 +104,8 @@ impl QuicConnectionStats {
                 datagram_socket::StartupExitReason::BandwidthPlateau,
             quiche::StartupExitReason::PersistentQueue =>
                 datagram_socket::StartupExitReason::PersistentQueue,
+            quiche::StartupExitReason::ConservativeSlowStartRounds =>
+                datagram_socket::StartupExitReason::ConservativeSlowStartRounds,
         };
 
         datagram_socket::StartupExit {
@@ -196,7 +199,15 @@ pub struct Incoming {
     pub buf: PooledBuf,
     /// If set, then `buf` is a GRO buffer containing multiple packets.
     /// Each individual packet has a size of `gso` (except for the last one).
-    pub gro: Option<u16>,
+    pub gro: Option<i32>,
+    /// [SO_MARK] control message value received from the socket.
+    ///
+    /// This will always be `None` after the connection has been spawned as
+    /// the message is `take()`d before spawning.
+    ///
+    /// [SO_MARK]: https://man7.org/linux/man-pages/man7/socket.7.html
+    #[cfg(target_os = "linux")]
+    pub so_mark_data: Option<[u8; 4]>,
 }
 
 /// A QUIC connection that has not performed a handshake yet.
@@ -223,9 +234,6 @@ where
     Tx: DatagramSocketSend + Send + 'static + ?Sized,
     M: Metrics,
 {
-    /// An internal ID, to uniquely identify the connection across multiple QUIC
-    /// connection IDs.
-    pub(crate) id: u64,
     params: QuicConnectionParams<Tx, M>,
     pub(crate) audit_log_stats: Arc<QuicAuditStats>,
     stats: QuicConnectionStatsShared,
@@ -249,7 +257,6 @@ where
         )));
 
         Self {
-            id: Self::generate_id(),
             params,
             audit_log_stats,
             stats,
@@ -333,6 +340,7 @@ where
             audit_log_stats: self.audit_log_stats,
             write_state: WriteState::default(),
             conn_map_cmd_tx: self.params.conn_map_cmd_tx,
+            cid_generator: self.params.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: self.params.init_rx_time,
             metrics: self.params.metrics.clone(),
@@ -435,8 +443,9 @@ where
         let fut = async move {
             match handshake_fut.await {
                 Ok(running) => Self::resume(running),
-                Err(e) =>
-                    log::error!("QUIC handshake failed in IQC::start"; "error" => e),
+                Err(e) => {
+                    log::error!("QUIC handshake failed in IQC::start"; "error" => e)
+                },
             }
         };
 
@@ -447,14 +456,6 @@ where
         );
 
         conn
-    }
-
-    fn generate_id() -> u64 {
-        let mut buf = [0; 8];
-
-        boring::rand::rand_bytes(&mut buf).unwrap();
-
-        u64::from_ne_bytes(buf)
     }
 }
 
@@ -468,6 +469,7 @@ where
     pub shutdown_tx: mpsc::Sender<()>,
     pub conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>, /* channel that signals connection map changes */
     pub scid: ConnectionId<'static>,
+    pub cid_generator: Option<SharedConnectionIdGenerator>,
     pub metrics: M,
     #[cfg(feature = "perf-quic-listener-metrics")]
     pub init_rx_time: Option<SystemTime>,
@@ -766,6 +768,11 @@ pub enum QuicCommand {
     /// Unlike [`QuicConnection::stats()`], these statistics are not cached and
     /// instead are retrieved right before the command is executed.
     Stats(Box<dyn FnOnce(datagram_socket::SocketStats) + Send + 'static>),
+    /// Collect the current [`QuicConnectionStats`] from the connection.
+    ///
+    /// These statistics are not cached and instead are retrieved right before
+    /// the command is executed.
+    ConnectionStats(Box<dyn FnOnce(QuicConnectionStats) + Send + 'static>),
 }
 
 impl QuicCommand {
@@ -791,6 +798,10 @@ impl QuicCommand {
                 let stats_pair = QuicConnectionStats::from_conn(qconn);
                 (callback)(stats_pair.as_socket_stats());
             },
+            Self::ConnectionStats(callback) => {
+                let stats_pair = QuicConnectionStats::from_conn(qconn);
+                (callback)(stats_pair);
+            },
         }
     }
 }
@@ -802,6 +813,8 @@ impl fmt::Debug for QuicCommand {
                 f.debug_tuple("ConnectionClose").field(b).finish(),
             Self::Custom(_) => f.debug_tuple("Custom").finish_non_exhaustive(),
             Self::Stats(_) => f.debug_tuple("Stats").finish_non_exhaustive(),
+            Self::ConnectionStats(_) =>
+                f.debug_tuple("ConnectionStats").finish_non_exhaustive(),
         }
     }
 }

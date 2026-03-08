@@ -214,6 +214,19 @@ impl From<&Action> for QlogEvents {
                 }]
             },
 
+            Action::SendDatagram { payload } => {
+                let len = payload.len() as u64;
+                let ev = fake_packet_sent(Some(smallvec![QuicFrame::Datagram {
+                    length: len,
+                    raw: String::from_utf8(payload.clone()).ok()
+                }]));
+
+                vec![QlogEvent::Event {
+                    data: Box::new(ev),
+                    ex_data: BTreeMap::new(),
+                }]
+            },
+
             Action::ResetStream {
                 stream_id,
                 error_code,
@@ -425,6 +438,11 @@ impl From<&PacketSent> for H3Actions {
                         }
                     },
 
+                    QuicFrame::Datagram { raw, .. } => {
+                        actions.push(Action::SendDatagram {
+                            payload: raw.clone().unwrap_or_default().into(),
+                        });
+                    },
                     _ => (),
                 }
             }

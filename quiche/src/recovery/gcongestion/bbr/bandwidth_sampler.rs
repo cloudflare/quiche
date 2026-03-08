@@ -169,6 +169,8 @@ struct ExtraAckedEvent {
     round: usize,
 }
 
+// BandwidthSample holds per-packet rate measurements
+// This is the internal struct used by BandwidthSampler to track rates
 struct BandwidthSample {
     /// The bandwidth at that particular sample.
     bandwidth: Bandwidth,
@@ -177,7 +179,12 @@ struct BandwidthSample {
     rtt: Duration,
     /// `send_rate` is computed from the current packet being acked('P') and
     /// an earlier packet that is acked before P was sent.
+    /// <https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-send-rate>
     send_rate: Option<Bandwidth>,
+    // ack_rate tracks the acknowledgment rate for this sample
+    /// `ack_rate` is computed as bytes_acked_delta / time_delta between ack
+    /// points. <https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-ack-rate>
+    ack_rate: Bandwidth,
     /// States captured when the packet was sent.
     state_at_send: SendTimeState,
 }
@@ -243,6 +250,8 @@ struct MaxAckHeightTracker {
     reduce_extra_acked_on_bandwidth_increase: bool,
 }
 
+/// Measurements collected from a congestion event, used for bandwidth
+/// estimation and congestion control in BBR.
 #[derive(Default)]
 pub(crate) struct CongestionEventSample {
     /// The maximum bandwidth sample from all acked packets.
@@ -263,6 +272,13 @@ pub(crate) struct CongestionEventSample {
     /// expected from the flow's bandwidth. Larger value means more ack
     /// aggregation.
     pub extra_acked: usize,
+
+    /// The maximum send rate observed across all acked packets in this event.
+    /// Computed as bytes_sent_delta / time_delta between packet send times.
+    pub sample_max_send_rate: Option<Bandwidth>,
+    /// The maximum ack rate observed across all acked packets in this event.
+    /// Computed as bytes_acked_delta / time_delta between ack times.
+    pub sample_max_ack_rate: Option<Bandwidth>,
 }
 
 impl MaxAckHeightTracker {
@@ -585,6 +601,7 @@ impl BandwidthSampler {
         let mut event_sample = CongestionEventSample::default();
 
         let mut max_send_rate = None;
+        let mut max_ack_rate = None;
         for packet in acked_packets {
             let sample =
                 match self.on_packet_acknowledged(ack_time, packet.pkt_num) {
@@ -607,6 +624,7 @@ impl BandwidthSampler {
                     sample.state_at_send.is_app_limited;
             }
             max_send_rate = max_send_rate.max(sample.send_rate);
+            max_ack_rate = max_ack_rate.max(Some(sample.ack_rate));
 
             let inflight_sample = self.total_bytes_acked -
                 last_acked_packet_send_state.total_bytes_acked;
@@ -651,6 +669,9 @@ impl BandwidthSampler {
             is_new_max_bandwidth,
             round_trip_count,
         );
+
+        event_sample.sample_max_send_rate = max_send_rate;
+        event_sample.sample_max_ack_rate = max_ack_rate;
 
         event_sample
     }
@@ -789,6 +810,7 @@ impl BandwidthSampler {
             bandwidth,
             rtt,
             send_rate,
+            ack_rate,
             state_at_send: SendTimeState {
                 is_valid: true,
                 ..sent_packet.send_time_state
@@ -947,6 +969,8 @@ mod bandwidth_sampler_tests {
                 bandwidth: sample_max_bandwidth,
                 rtt: sample.sample_rtt.unwrap(),
                 send_rate: None,
+                // Use zero for ack_rate in test helper
+                ack_rate: Bandwidth::zero(),
                 state_at_send: sample.last_packet_send_state,
             };
             assert!(bandwidth_sample.state_at_send.is_valid);

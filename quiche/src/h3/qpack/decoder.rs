@@ -137,7 +137,7 @@ impl Decoder {
                     let mut name = b.get_bytes(name_len)?;
 
                     let name = if name_huff {
-                        super::huffman::decode(&mut name)?
+                        name.get_huffman_decoded()?
                     } else {
                         name.to_vec()
                     };
@@ -250,7 +250,7 @@ fn decode_str(b: &mut octets::Octets) -> Result<Vec<u8>> {
     let mut val = b.get_bytes(len)?;
 
     let val = if huff {
-        super::huffman::decode(&mut val)?
+        val.get_huffman_decoded()?
     } else {
         val.to_vec()
     };

@@ -40,6 +40,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::time::sleep;
 use tokio::time::sleep_until;
 use tokio::time::Instant;
 use tokio_quiche::buf_factory::BufFactory;
@@ -79,8 +80,10 @@ pub async fn connect(
     close_trigger_frames: Option<CloseTriggerFrames>,
 ) -> std::result::Result<BuildingConnectionSummary, ClientError> {
     let quic_settings = create_config(args);
-    let connection_params =
+    let mut connection_params =
         ConnectionParams::new_client(quic_settings, None, Hooks::default());
+
+    connection_params.session = args.session.clone();
 
     let ParsedArgs {
         connect_url,
@@ -137,6 +140,10 @@ fn create_config(args: &H3iConfig) -> QuicSettings {
     quic_settings.capture_quiche_logs = true;
     quic_settings.keylog_file = std::env::var_os("SSLKEYLOGFILE")
         .and_then(|os_str| os_str.into_string().ok());
+
+    quic_settings.enable_dgram = args.enable_dgram;
+    quic_settings.dgram_recv_max_queue_len = args.dgram_recv_queue_len;
+    quic_settings.dgram_send_max_queue_len = args.dgram_send_queue_len;
 
     quic_settings
 }
@@ -349,6 +356,7 @@ impl ApplicationOverQuic for H3iDriver {
             match action {
                 Action::SendFrame { .. } |
                 Action::StreamBytes { .. } |
+                Action::SendDatagram { .. } |
                 Action::ResetStream { .. } |
                 Action::StopSending { .. } |
                 Action::OpenUniStream { .. } |
@@ -387,7 +395,14 @@ impl ApplicationOverQuic for H3iDriver {
     ) -> QuicResult<()> {
         log::trace!("h3i: wait_for_data");
 
-        let waiting = !self.should_fire();
+        let sleep_fut = if !self.should_fire() {
+            sleep_until(self.next_fire_time)
+        } else {
+            // If we have nothing to send, allow the IOW to resolve wait_for_data
+            // on its own (whether via Quiche timer or incoming data).
+            sleep(Duration::MAX)
+        };
+
         select! {
             rx = &mut self.close_trigger_seen_rx, if !self.close_trigger_seen_rx.is_terminated() => {
                 // NOTE: wait_for_data can be called again after all close triggers have been seen,
@@ -398,10 +413,7 @@ impl ApplicationOverQuic for H3iDriver {
                     let _ = qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, b"saw all expected frames");
                 }
             }
-            _ = sleep_until(self.next_fire_time), if waiting => {
-                log::debug!("h3i: releasing wait timer");
-            }
-            else => {}
+            _ = sleep_fut => {}
         }
 
         Ok(())

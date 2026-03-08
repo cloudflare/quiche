@@ -38,7 +38,6 @@ use crate::metrics::Metrics;
 use foundations::telemetry::TelemetryContext;
 use pin_project::pin_project;
 use std::future::Future;
-use std::pin::pin;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -165,6 +164,7 @@ impl<F: Future, M: Metrics> Future for Instrumented<F, M> {
 ///
 /// Depending on whether the `tokio-task-metrics` feature is enabled, this may
 /// instrument the task and collect metrics for it.
+#[track_caller]
 pub fn spawn<M, T>(name: &str, metrics: M, future: T) -> JoinHandle<T::Output>
 where
     T: Future + Send + 'static,
@@ -185,6 +185,7 @@ where
 ///
 /// Depending on whether the `tokio-task-metrics` feature is enabled, this may
 /// instrument the task and collect metrics for it.
+#[track_caller]
 pub fn spawn_with_killswitch<M, T>(name: &str, metrics: M, future: T)
 where
     T: Future<Output = ()> + Send + 'static,
@@ -193,8 +194,8 @@ where
     let ctx = TelemetryContext::current();
 
     if cfg!(feature = "tokio-task-metrics") {
-        killswitch_spawn(Instrumented::new(name, metrics, ctx.apply(future)))
+        killswitch_spawn(Instrumented::new(name, metrics, ctx.apply(future)));
     } else {
-        killswitch_spawn(ctx.apply(future))
+        killswitch_spawn(ctx.apply(future));
     }
 }

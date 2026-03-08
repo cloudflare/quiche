@@ -133,7 +133,6 @@ impl Pacer {
             packet_number,
             bytes,
             is_retransmissible,
-            rtt_stats,
         );
 
         if !self.enabled || !is_retransmissible {
@@ -257,6 +256,16 @@ impl Pacer {
 
     pub fn max_bandwidth(&self) -> Bandwidth {
         self.sender.max_bandwidth()
+    }
+
+    #[cfg(feature = "qlog")]
+    pub fn send_rate(&self) -> Option<Bandwidth> {
+        self.sender.send_rate()
+    }
+
+    #[cfg(feature = "qlog")]
+    pub fn ack_rate(&self) -> Option<Bandwidth> {
+        self.sender.ack_rate()
     }
 
     pub fn on_app_limited(&mut self, bytes_in_flight: usize) {

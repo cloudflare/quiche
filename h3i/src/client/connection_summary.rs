@@ -26,7 +26,6 @@
 
 //! Summarizes events that occurred during a connection.
 
-use quiche::Connection;
 use quiche::ConnectionError;
 use quiche::PathStats;
 use quiche::Stats;
@@ -386,20 +385,35 @@ impl From<Vec<CloseTriggerFrame>> for CloseTriggerFrames {
 }
 
 /// Denotes why the connection was closed.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct ConnectionCloseDetails {
     peer_error: Option<ConnectionError>,
     local_error: Option<ConnectionError>,
     /// If the connection timed out.
     pub timed_out: bool,
+    /// Return the session from the underlying connection.
+    pub session: Option<Vec<u8>>,
+}
+
+impl core::fmt::Debug for ConnectionCloseDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Avoid printing 'session' since it contains connection secrets.
+        f.debug_struct("ConnectionCloseDetails")
+            .field("peer_error", &self.peer_error)
+            .field("local_error", &self.local_error)
+            .field("timed_out", &self.timed_out)
+            .finish()
+    }
 }
 
 impl ConnectionCloseDetails {
-    pub fn new(qconn: &Connection) -> Self {
+    pub fn new<F: quiche::BufFactory>(qconn: &quiche::Connection<F>) -> Self {
+        let session = qconn.session().map(|s| s.to_vec());
         Self {
             peer_error: qconn.peer_error().cloned(),
             local_error: qconn.local_error().cloned(),
             timed_out: qconn.is_timed_out(),
+            session,
         }
     }
 

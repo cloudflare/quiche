@@ -248,7 +248,7 @@ impl Path {
                         .unwrap_or(c.max_send_udp_payload_size),
                     c.max_send_udp_payload_size,
                 );
-                Some(pmtud::Pmtud::new(maximum_supported_mtu))
+                Some(pmtud::Pmtud::new(maximum_supported_mtu, c.pmtud_max_probes))
             } else {
                 None
             }
@@ -382,7 +382,6 @@ impl Path {
         };
 
         (hs_confirmed && hs_done) &&
-            pmtud.get_probe_size() > pmtud.get_current_mtu() &&
             self.recovery.cwnd_available() > pmtud.get_probe_size() &&
             out_len >= pmtud.get_probe_size() &&
             pmtud.should_probe() &&
@@ -521,6 +520,20 @@ impl Path {
         outcome
     }
 
+    /// Returns true if the path's recovery module hasn't processed any non-ACK
+    /// packets, and it is still OK to fully reinitialize the recovery module to
+    /// pickup changes to congestion control config.
+    pub fn can_reinit_recovery(&self) -> bool {
+        // The recovery module can be reinitialized until the connection attempts
+        // to send a packet with inflight data. The congestion
+        // controller doesn't track anything interesting until inflight
+        // data is sent. Handshake ACKs may be sent prior to arrival of
+        // the full ClientHello, but the send of ACK only packets
+        // shouldn't prevent the reinit of the recovery module.
+        self.recovery.bytes_in_flight() == 0 &&
+            self.recovery.bytes_in_flight_duration() == Duration::ZERO
+    }
+
     pub fn reinit_recovery(
         &mut self, recovery_config: &recovery::RecoveryConfig,
     ) {
@@ -528,6 +541,12 @@ impl Path {
     }
 
     pub fn stats(&self) -> PathStats {
+        let pmtu = match self.pmtud.as_ref().map(|p| p.get_current_mtu()) {
+            Some(v) => v,
+
+            None => self.recovery.max_datagram_size(),
+        };
+
         PathStats {
             local_addr: self.local_addr,
             peer_addr: self.peer_addr,
@@ -549,7 +568,7 @@ impl Path {
             recv_bytes: self.recv_bytes,
             lost_bytes: self.recovery.bytes_lost(),
             stream_retrans_bytes: self.stream_retrans_bytes,
-            pmtu: self.recovery.max_datagram_size(),
+            pmtu,
             delivery_rate: self.recovery.delivery_rate().to_bytes_per_second(),
             max_bandwidth: self
                 .recovery
@@ -884,10 +903,14 @@ impl PathMap {
     /// Configures path MTU discovery on all existing paths.
     pub fn set_discover_pmtu_on_existing_paths(
         &mut self, discover: bool, max_send_udp_payload_size: usize,
+        pmtud_max_probes: u8,
     ) {
         for (_, path) in self.paths.iter_mut() {
             path.pmtud = if discover {
-                Some(pmtud::Pmtud::new(max_send_udp_payload_size))
+                Some(pmtud::Pmtud::new(
+                    max_send_udp_payload_size,
+                    pmtud_max_probes,
+                ))
             } else {
                 None
             };

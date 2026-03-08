@@ -27,6 +27,7 @@
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use crossbeam::atomic::AtomicCell;
 use datagram_socket::StreamClosureKind;
@@ -61,6 +62,13 @@ pub struct H3AuditStats {
     recvd_stream_fin: AtomicCell<StreamClosureKind>,
     /// Stream FIN sent to the peer.
     sent_stream_fin: AtomicCell<StreamClosureKind>,
+    /// Cumulative time between HEADERS failed flush and complete.
+    ///
+    /// Measured as the duration between the first moment a HEADERS frame was
+    /// not flushed in full, and the moment that it was completely flushed.
+    /// Measured across all HEADERS frames sent on the stream. A value of 0
+    /// indicates there was no failed flushing.
+    headers_flush_duration: AtomicCell<Duration>,
 }
 
 impl H3AuditStats {
@@ -75,6 +83,7 @@ impl H3AuditStats {
             sent_reset_stream_error_code: AtomicI64::new(-1),
             recvd_stream_fin: AtomicCell::new(StreamClosureKind::None),
             sent_stream_fin: AtomicCell::new(StreamClosureKind::None),
+            headers_flush_duration: AtomicCell::new(Duration::from_secs(0)),
         }
     }
 
@@ -140,6 +149,17 @@ impl H3AuditStats {
         self.sent_stream_fin.load()
     }
 
+    /// Cumulative time between HEADERS failed flush and complete.
+    ///
+    /// Measured as the duration between the first moment a HEADERS frame was
+    /// not flushed in full, and the moment that it was completely flushed.
+    /// Measured across all HEADERS frames sent on the stream. A value of 0
+    /// indicates there was no failed flushing.
+    #[inline]
+    pub fn headers_flush_duration(&self) -> Duration {
+        self.headers_flush_duration.load()
+    }
+
     #[inline]
     pub fn add_downstream_bytes_sent(&self, bytes_sent: u64) {
         self.downstream_bytes_sent
@@ -192,5 +212,13 @@ impl H3AuditStats {
     #[inline]
     pub fn set_sent_stream_fin(&self, sent_stream_fin: StreamClosureKind) {
         self.sent_stream_fin.store(sent_stream_fin);
+    }
+
+    #[inline]
+    pub fn add_header_flush_duration(&self, duration: Duration) {
+        // NB: load and store may not be atomic but we aren't accessing the
+        // object from any other thread so things should be ok.
+        let current = self.headers_flush_duration.load();
+        self.headers_flush_duration.store(current + duration);
     }
 }

@@ -313,7 +313,7 @@ use qlog::events::EventImportance;
 #[cfg(feature = "qlog")]
 use qlog::events::EventType;
 
-use crate::range_buf::BufFactory;
+use crate::buffers::BufFactory;
 use crate::BufSplit;
 
 /// List of ALPN tokens of supported HTTP/3 versions.
@@ -2877,16 +2877,6 @@ impl Connection {
             },
 
             frame::Frame::Headers { header_block } => {
-                if Some(stream_id) == self.peer_control_stream_id {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"HEADERS received on control stream",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
                 // Servers reject too many HEADERS frames.
                 if let Some(s) = self.streams.get_mut(&stream_id) {
                     if self.is_server && s.headers_received_count() == 2 {
@@ -2961,30 +2951,10 @@ impl Connection {
             },
 
             frame::Frame::Data { .. } => {
-                if Some(stream_id) == self.peer_control_stream_id {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"DATA received on control stream",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
                 // Do nothing. The Data event is returned separately.
             },
 
             frame::Frame::GoAway { id } => {
-                if Some(stream_id) != self.peer_control_stream_id {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"GOAWAY received on non-control stream",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
                 if !self.is_server && id % 4 != 0 {
                     conn.close(
                         true,
@@ -3013,16 +2983,6 @@ impl Connection {
             },
 
             frame::Frame::MaxPushId { push_id } => {
-                if Some(stream_id) != self.peer_control_stream_id {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"MAX_PUSH_ID received on non-control stream",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
                 if !self.is_server {
                     conn.close(
                         true,
@@ -3071,16 +3031,6 @@ impl Connection {
             },
 
             frame::Frame::CancelPush { .. } => {
-                if Some(stream_id) != self.peer_control_stream_id {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"CANCEL_PUSH received on non-control stream",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
                 // TODO: implement CANCEL_PUSH frame
             },
 
@@ -3093,16 +3043,6 @@ impl Connection {
                         true,
                         Error::FrameUnexpected.to_wire(),
                         b"PRIORITY_UPDATE received by client",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
-                if Some(stream_id) != self.peer_control_stream_id {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"PRIORITY_UPDATE received on non-control stream",
                     )?;
 
                     return Err(Error::FrameUnexpected);
@@ -3170,16 +3110,6 @@ impl Connection {
                     return Err(Error::FrameUnexpected);
                 }
 
-                if Some(stream_id) != self.peer_control_stream_id {
-                    conn.close(
-                        true,
-                        Error::FrameUnexpected.to_wire(),
-                        b"PRIORITY_UPDATE received on non-control stream",
-                    )?;
-
-                    return Err(Error::FrameUnexpected);
-                }
-
                 if prioritized_element_id % 3 != 0 {
                     conn.close(
                         true,
@@ -3220,10 +3150,12 @@ pub fn grease_value() -> u64 {
 }
 
 #[doc(hidden)]
+#[cfg(any(test, feature = "internal"))]
 pub mod testing {
     use super::*;
 
     use crate::test_utils;
+    use crate::DefaultBufFactory;
 
     /// Session is an HTTP/3 test helper structure. It holds a client, server
     /// and pipe that allows them to communicate.
@@ -3239,14 +3171,29 @@ pub mod testing {
     /// request, responses and individual headers. The full quiche API remains
     /// available for any test that need to do unconventional things (such as
     /// bad behaviour that triggers errors).
-    pub struct Session {
-        pub pipe: test_utils::Pipe,
+    pub struct Session<F = DefaultBufFactory>
+    where
+        F: BufFactory,
+    {
+        pub pipe: test_utils::Pipe<F>,
         pub client: Connection,
         pub server: Connection,
     }
 
     impl Session {
         pub fn new() -> Result<Session> {
+            Session::<DefaultBufFactory>::new_with_buf()
+        }
+
+        pub fn with_configs(
+            config: &mut crate::Config, h3_config: &Config,
+        ) -> Result<Session> {
+            Session::<DefaultBufFactory>::with_configs_and_buf(config, h3_config)
+        }
+    }
+
+    impl<F: BufFactory> Session<F> {
+        pub fn new_with_buf() -> Result<Session<F>> {
             fn path_relative_to_manifest_dir(path: &str) -> String {
                 std::fs::canonicalize(
                     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path),
@@ -3275,13 +3222,13 @@ pub mod testing {
             config.set_ack_delay_exponent(8);
 
             let h3_config = Config::new()?;
-            Session::with_configs(&mut config, &h3_config)
+            Session::with_configs_and_buf(&mut config, &h3_config)
         }
 
-        pub fn with_configs(
+        pub fn with_configs_and_buf(
             config: &mut crate::Config, h3_config: &Config,
-        ) -> Result<Session> {
-            let pipe = test_utils::Pipe::with_config(config)?;
+        ) -> Result<Session<F>> {
+            let pipe = test_utils::Pipe::with_config_and_buf(config)?;
             let client_dgram = pipe.client.dgram_enabled();
             let server_dgram = pipe.server.dgram_enabled();
             Ok(Session {
@@ -5057,6 +5004,9 @@ mod tests {
 
         // No event generated at server
         assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert!(s.pipe.server.streams.is_collected(0));
+        assert!(s.pipe.client.streams.is_collected(0));
     }
 
     #[test]
@@ -5547,6 +5497,16 @@ mod tests {
         // Fin flag from last send_body() call was not sent as the buffer was
         // only partially written.
         assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert_eq!(s.pipe.server.data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.data_blocked_recv_count, 0);
+        assert_eq!(s.pipe.server.stream_data_blocked_recv_count, 1);
+
+        assert_eq!(s.pipe.client.data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.client.stream_data_blocked_sent_count, 1);
+        assert_eq!(s.pipe.client.data_blocked_recv_count, 0);
+        assert_eq!(s.pipe.client.stream_data_blocked_recv_count, 0);
     }
 
     #[test]
@@ -5737,6 +5697,16 @@ mod tests {
         // request.
         assert_eq!(s.pipe.client.stream_writable_next(), Some(4));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(4));
+
+        assert_eq!(s.pipe.server.data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.data_blocked_recv_count, 1);
+        assert_eq!(s.pipe.server.stream_data_blocked_recv_count, 0);
+
+        assert_eq!(s.pipe.client.data_blocked_sent_count, 1);
+        assert_eq!(s.pipe.client.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.client.data_blocked_recv_count, 0);
+        assert_eq!(s.pipe.client.stream_data_blocked_recv_count, 0);
     }
 
     #[test]
@@ -5795,6 +5765,16 @@ mod tests {
         assert_eq!(s.pipe.client.stream_writable_next(), Some(2));
         assert_eq!(s.pipe.client.stream_writable_next(), Some(6));
         assert_eq!(s.client.send_request(&mut s.pipe.client, &req, true), Ok(0));
+
+        assert_eq!(s.pipe.server.data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.server.data_blocked_recv_count, 1);
+        assert_eq!(s.pipe.server.stream_data_blocked_recv_count, 0);
+
+        assert_eq!(s.pipe.client.data_blocked_sent_count, 1);
+        assert_eq!(s.pipe.client.stream_data_blocked_sent_count, 0);
+        assert_eq!(s.pipe.client.data_blocked_recv_count, 0);
+        assert_eq!(s.pipe.client.stream_data_blocked_recv_count, 0);
     }
 
     #[test]
@@ -7134,6 +7114,19 @@ mod tests {
 
         assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
         assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        // Verify that dgram counts are incremented.
+        assert_eq!(s.pipe.client.dgram_sent_count, 6);
+        assert_eq!(s.pipe.client.dgram_recv_count, 0);
+        assert_eq!(s.pipe.server.dgram_sent_count, 0);
+        assert_eq!(s.pipe.server.dgram_recv_count, 6);
+
+        let server_path = s.pipe.server.paths.get_active().expect("no active");
+        let client_path = s.pipe.client.paths.get_active().expect("no active");
+        assert_eq!(client_path.dgram_sent_count, 6);
+        assert_eq!(client_path.dgram_recv_count, 0);
+        assert_eq!(server_path.dgram_sent_count, 0);
+        assert_eq!(server_path.dgram_recv_count, 6);
     }
 
     #[test]
@@ -7190,6 +7183,170 @@ mod tests {
         );
 
         assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    /// The client shuts down the stream's write direction, the server
+    /// shuts down its side with fin
+    #[test]
+    fn client_shutdown_write_server_fin() {
+        let mut buf = [0; 65535];
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends request.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server sends response and closes stream.
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = s.send_response(stream, true).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: false,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // Client shuts down stream ==> sends RESET_STREAM
+        assert_eq!(
+            s.pipe
+                .client
+                .stream_shutdown(stream, crate::Shutdown::Write, 42),
+            Ok(())
+        );
+        assert_eq!(s.advance(), Ok(()));
+
+        // Server sees the Reset event for the stream.
+        assert_eq!(s.poll_server(), Ok((stream, Event::Reset(42))));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Streams have been collected by quiche
+        assert!(s.pipe.server.streams.is_collected(stream));
+        assert!(s.pipe.client.streams.is_collected(stream));
+
+        // Client sends another request, server sends response without fin
+        //
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Check that server has received the request.
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Server sends reponse without closing the stream.
+        let resp = s.send_response(stream, false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // Client shuts down stream ==> sends RESET_STREAM
+        assert_eq!(
+            s.pipe
+                .client
+                .stream_shutdown(stream, crate::Shutdown::Write, 42),
+            Ok(())
+        );
+        assert_eq!(s.advance(), Ok(()));
+
+        // Server sees the Reset event for the stream.
+        assert_eq!(s.poll_server(), Ok((stream, Event::Reset(42))));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Server sends body and closes the stream.
+        s.send_body_server(stream, true).unwrap();
+
+        // Stream has been collected on server by quiche
+        assert!(s.pipe.server.streams.is_collected(stream));
+        // Client stream has not been collected, the client needs to
+        // read the fin from the stream first.
+        assert!(!s.pipe.client.streams.is_collected(stream));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        s.recv_body_client(stream, &mut buf).unwrap();
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert!(s.pipe.client.streams.is_collected(stream));
+    }
+
+    #[test]
+    fn client_shutdown_read() {
+        let mut buf = [0; 65535];
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends request and leaves stream open.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server sends response and leaves stream open.
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        // Client shuts down read
+        assert_eq!(
+            s.pipe
+                .client
+                .stream_shutdown(stream, crate::Shutdown::Read, 42),
+            Ok(())
+        );
+        assert_eq!(s.advance(), Ok(()));
+
+        // Stream is writable on server side, but returns StreamStopped
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        let writables: Vec<u64> = s.pipe.server.writable().collect();
+        assert!(writables.contains(&stream));
+        assert_eq!(
+            s.send_body_server(stream, false),
+            Err(Error::TransportError(crate::Error::StreamStopped(42)))
+        );
+
+        // Client needs to finish its side by sending a fin
+        assert_eq!(
+            s.client.send_body(&mut s.pipe.client, stream, &[], true),
+            Ok(0)
+        );
+        assert_eq!(s.advance(), Ok(()));
+        // Note, we get an Event::Data for an empty buffer today. But it
+        // would also be fine to not get it.
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+        assert_eq!(s.recv_body_server(stream, &mut buf), Err(Error::Done));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Since the client has already send a fin, the stream is collected
+        // on both client and server
+        assert!(s.pipe.client.streams.is_collected(stream));
+        assert!(s.pipe.server.streams.is_collected(stream));
     }
 
     #[test]
@@ -7263,8 +7420,53 @@ mod tests {
 
         assert_eq!(s.pipe.advance(), Ok(()));
 
-        // Server receives the reset and there are no more readable streams.
+        // The server does *not* attempt to read from the stream,
+        // but polls and receives the reset and there are no more
+        // readable streams.
         assert_eq!(s.poll_server(), Ok((stream, Event::Reset(0))));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.pipe.server.readable().len(), 0);
+    }
+
+    #[test]
+    fn reset_finished_at_server_with_data_pending_2() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends HEADERS and doesn't fin.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        assert!(s.send_body_client(stream, false).is_ok());
+
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server receives headers and data...
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+
+        // ..then Client sends RESET_STREAM.
+        assert_eq!(
+            s.pipe
+                .client
+                .stream_shutdown(stream, crate::Shutdown::Write, 0),
+            Ok(())
+        );
+
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        // Server reads from the stream and receives the reset while
+        // attempting to read.
+        assert_eq!(
+            s.recv_body_server(stream, &mut [0; 100]),
+            Err(Error::TransportError(crate::Error::StreamReset(0)))
+        );
+
+        // No more events and there are no more readable streams.
         assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.pipe.server.readable().len(), 0);
     }
