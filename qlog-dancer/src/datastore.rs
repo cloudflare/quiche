@@ -279,6 +279,13 @@ pub struct Datastore {
     pub local_send_rate: Vec<QlogPointu64>,
     pub local_ack_rate: Vec<QlogPointu64>,
 
+    pub local_lost_packets: Vec<QlogPointu64>,
+    pub local_lost_bytes: Vec<QlogPointu64>,
+    pub local_lost_packets_delta: Vec<QlogPointu64>,
+    pub local_lost_bytes_delta: Vec<QlogPointu64>,
+
+    pub local_pto_count: Vec<(f32, u32)>,
+
     pub local_min_rtt: Vec<QlogPointf32>,
     pub local_latest_rtt: Vec<QlogPointf32>,
     pub local_smoothed_rtt: Vec<QlogPointf32>,
@@ -1499,22 +1506,69 @@ impl Datastore {
             self.local_pacing_rate.push((ev_time, pacing_rate));
         }
 
-        // Extract rate metrics from ex_data
-        if let Some(rate) =
-            mu.ex_data.get("cf_delivery_rate").and_then(|v| v.as_u64())
-        {
+        // Extract rate metrics from ex_data (supports both cf_ prefixed and
+        // non-prefixed)
+        let delivery_rate = mu
+            .ex_data
+            .get("cf_delivery_rate")
+            .or_else(|| mu.ex_data.get("delivery_rate"))
+            .and_then(|v| v.as_u64());
+        if let Some(rate) = delivery_rate {
             self.local_delivery_rate.push((ev_time, rate));
         }
 
-        if let Some(rate) =
-            mu.ex_data.get("cf_send_rate").and_then(|v| v.as_u64())
-        {
+        let send_rate = mu
+            .ex_data
+            .get("cf_send_rate")
+            .or_else(|| mu.ex_data.get("send_rate"))
+            .and_then(|v| v.as_u64());
+        if let Some(rate) = send_rate {
             self.local_send_rate.push((ev_time, rate));
         }
 
-        if let Some(rate) = mu.ex_data.get("cf_ack_rate").and_then(|v| v.as_u64())
-        {
+        let ack_rate = mu
+            .ex_data
+            .get("cf_ack_rate")
+            .or_else(|| mu.ex_data.get("ack_rate"))
+            .and_then(|v| v.as_u64());
+        if let Some(rate) = ack_rate {
             self.local_ack_rate.push((ev_time, rate));
+        }
+
+        // Supports both TotalAndDelta objects {total, delta} and flat scalars
+        if let Some(obj) = mu.ex_data.get("cf_lost_packets") {
+            if let Some(total) = obj.get("total").and_then(|v| v.as_u64()) {
+                self.local_lost_packets.push((ev_time, total));
+            } else if let Some(v) = obj.as_u64() {
+                self.local_lost_packets.push((ev_time, v));
+            }
+            if let Some(delta) = obj.get("delta").and_then(|v| v.as_u64()) {
+                self.local_lost_packets_delta.push((ev_time, delta));
+            }
+        }
+        if let Some(obj) = mu.ex_data.get("cf_lost_packets_delta") {
+            if let Some(v) = obj.as_u64() {
+                self.local_lost_packets_delta.push((ev_time, v));
+            }
+        }
+        if let Some(obj) = mu.ex_data.get("cf_lost_bytes") {
+            if let Some(total) = obj.get("total").and_then(|v| v.as_u64()) {
+                self.local_lost_bytes.push((ev_time, total));
+            } else if let Some(v) = obj.as_u64() {
+                self.local_lost_bytes.push((ev_time, v));
+            }
+            if let Some(delta) = obj.get("delta").and_then(|v| v.as_u64()) {
+                self.local_lost_bytes_delta.push((ev_time, delta));
+            }
+        }
+        if let Some(obj) = mu.ex_data.get("cf_lost_bytes_delta") {
+            if let Some(v) = obj.as_u64() {
+                self.local_lost_bytes_delta.push((ev_time, v));
+            }
+        }
+
+        if let Some(v) = mu.ex_data.get("cf_pto_count").and_then(|v| v.as_u64()) {
+            self.local_pto_count.push((ev_time, v as u32));
         }
     }
 
