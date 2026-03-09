@@ -1500,6 +1500,14 @@ where
     /// endpoint.
     stream_data_blocked_recv_count: u64,
 
+    /// The number of STREAMS_BLOCKED frames received from the remote endpoint
+    /// indicating the peer is blocked on opening new bidirectional streams.
+    streams_blocked_bidi_recv_count: u64,
+
+    /// The number of STREAMS_BLOCKED frames received from the remote endpoint
+    /// indicating the peer is blocked on opening new unidirectional streams.
+    streams_blocked_uni_recv_count: u64,
+
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
 }
@@ -2117,6 +2125,9 @@ impl<F: BufFactory> Connection<F> {
             stream_data_blocked_sent_count: 0,
             data_blocked_recv_count: 0,
             stream_data_blocked_recv_count: 0,
+
+            streams_blocked_bidi_recv_count: 0,
+            streams_blocked_uni_recv_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
         };
@@ -7424,6 +7435,8 @@ impl<F: BufFactory> Connection<F> {
             stream_data_blocked_sent_count: self.stream_data_blocked_sent_count,
             data_blocked_recv_count: self.data_blocked_recv_count,
             stream_data_blocked_recv_count: self.stream_data_blocked_recv_count,
+            streams_blocked_bidi_recv_count: self.streams_blocked_bidi_recv_count,
+            streams_blocked_uni_recv_count: self.streams_blocked_uni_recv_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
             tx_buffered_state: self.tx_buffered_state,
@@ -8234,12 +8247,18 @@ impl<F: BufFactory> Connection<F> {
                 if limit > MAX_STREAM_ID {
                     return Err(Error::InvalidFrame);
                 }
+
+                self.streams_blocked_bidi_recv_count =
+                    self.streams_blocked_bidi_recv_count.saturating_add(1);
             },
 
             frame::Frame::StreamsBlockedUni { limit } => {
                 if limit > MAX_STREAM_ID {
                     return Err(Error::InvalidFrame);
                 }
+
+                self.streams_blocked_uni_recv_count =
+                    self.streams_blocked_uni_recv_count.saturating_add(1);
             },
 
             frame::Frame::NewConnectionId {
@@ -8990,6 +9009,16 @@ pub struct Stats {
 
     /// The number of STREAM_DATA_BLOCKED frames received from the remote.
     pub stream_data_blocked_recv_count: u64,
+
+    /// The number of STREAMS_BLOCKED frames for bidirectional streams received
+    /// from the remote, indicating the peer is blocked on opening new
+    /// bidirectional streams.
+    pub streams_blocked_bidi_recv_count: u64,
+
+    /// The number of STREAMS_BLOCKED frames for unidirectional streams received
+    /// from the remote, indicating the peer is blocked on opening new
+    /// unidirectional streams.
+    pub streams_blocked_uni_recv_count: u64,
 
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
