@@ -108,7 +108,7 @@ pub(crate) type StreamParserMap = HashMap<u64, FrameParser>;
 pub(crate) fn execute_action<F: quiche::BufFactory>(
     action: &Action, conn: &mut quiche::Connection<F>,
     stream_parsers: &mut StreamParserMap,
-) {
+) -> Result<(), quiche::Error> {
     match action {
         Action::SendFrame {
             stream_id,
@@ -148,11 +148,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
             }
             let len = frame.to_bytes(&mut b).unwrap();
 
-            // TODO - pass errors here to the connectionsummary, which means we
-            // can't initialize it when the connection's been shut
-            // down
-            conn.stream_send(*stream_id, &d[..len], *fin_stream)
-                .unwrap();
+            conn.stream_send(*stream_id, &d[..len], *fin_stream)?;
 
             stream_parsers
                 .entry(*stream_id)
@@ -198,8 +194,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                 }
             }
             let len = frame.to_bytes(&mut b).unwrap();
-            conn.stream_send(*stream_id, &d[..len], *fin_stream)
-                .unwrap();
+            conn.stream_send(*stream_id, &d[..len], *fin_stream)?;
 
             stream_parsers
                 .entry(*stream_id)
@@ -220,8 +215,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
             b.put_varint(*stream_type).unwrap();
             let off = b.off();
 
-            conn.stream_send(*stream_id, &d[..off], *fin_stream)
-                .unwrap();
+            conn.stream_send(*stream_id, &d[..off], *fin_stream)?;
 
             stream_parsers
                 .entry(*stream_id)
@@ -239,7 +233,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                 bytes.len(),
                 fin_stream
             );
-            conn.stream_send(*stream_id, bytes, *fin_stream).unwrap();
+            conn.stream_send(*stream_id, bytes, *fin_stream)?;
 
             stream_parsers
                 .entry(*stream_id)
@@ -269,7 +263,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                 // Clients can't reset streams they don't own. If we attempt to do
                 // this, stream_shutdown would fail, and we
                 // shouldn't create a parser.
-                return;
+                return Ok(());
             }
 
             stream_parsers
@@ -314,6 +308,8 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
         // Neither of these actions will manipulate the Quiche connection
         Action::FlushPackets | Action::Wait { .. } => unreachable!(),
     }
+
+    Ok(())
 }
 
 pub(crate) fn parse_streams<F: quiche::BufFactory, C: Client>(

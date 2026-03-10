@@ -367,7 +367,11 @@ impl ApplicationOverQuic for H3iDriver {
                         // still fire.
                         self.next_fire_time = Instant::now();
 
-                        execute_action(&action, qconn, self.stream_parsers_mut());
+                        execute_action(
+                            &action,
+                            qconn,
+                            self.stream_parsers_mut(),
+                        )?;
                         self.actions_executed += 1;
                     } else {
                         break;

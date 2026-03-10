@@ -226,6 +226,7 @@ pub fn connect_with_early_data(
             let mut wait_duration = None;
             let mut wait_instant = None;
             let mut waiting_for = WaitingFor::default();
+            let mut blocked_action = None;
 
             check_duration_and_do_actions(
                 &mut wait_duration,
@@ -234,7 +235,9 @@ pub fn connect_with_early_data(
                 &mut conn,
                 &mut waiting_for,
                 client.stream_parsers_mut(),
-            );
+                &mut blocked_action,
+            )
+            .map_err(|e| ClientError::Other(e.to_string()))?;
         }
     }
 
@@ -258,6 +261,7 @@ pub fn connect_with_early_data(
     let mut wait_instant = None;
 
     let mut waiting_for = WaitingFor::default();
+    let mut blocked_action: Option<Action> = None;
 
     loop {
         let actual_sleep = match (wait_duration, conn.timeout()) {
@@ -375,7 +379,9 @@ pub fn connect_with_early_data(
                 &mut conn,
                 &mut waiting_for,
                 client.stream_parsers_mut(),
-            );
+                &mut blocked_action,
+            )
+            .map_err(|e| ClientError::Other(e.to_string()))?;
 
             let mut wait_cleared = false;
             for response in parse_streams(&mut conn, &mut client) {
@@ -402,7 +408,9 @@ pub fn connect_with_early_data(
                     &mut conn,
                     &mut waiting_for,
                     client.stream_parsers_mut(),
-                );
+                    &mut blocked_action,
+                )
+                .map_err(|e| ClientError::Other(e.to_string()))?;
             }
         }
 
@@ -496,12 +504,17 @@ fn check_duration_and_do_actions(
     wait_duration: &mut Option<Duration>, wait_instant: &mut Option<Instant>,
     action_iter: &mut Iter<Action>, conn: &mut quiche::Connection,
     waiting_for: &mut WaitingFor, stream_parsers: &mut StreamParserMap,
-) {
+    blocked_action: &mut Option<Action>,
+) -> Result<(), quiche::Error> {
     match wait_duration.as_ref() {
         None => {
-            if let Some(idle_wait) =
-                handle_actions(action_iter, conn, waiting_for, stream_parsers)
-            {
+            if let Some(idle_wait) = handle_actions(
+                action_iter,
+                conn,
+                waiting_for,
+                stream_parsers,
+                blocked_action,
+            )? {
                 *wait_duration = Some(idle_wait);
                 *wait_instant = Some(Instant::now());
 
@@ -527,14 +540,20 @@ fn check_duration_and_do_actions(
                 log::debug!("yup!");
                 *wait_duration = None;
 
-                if let Some(idle_wait) =
-                    handle_actions(action_iter, conn, waiting_for, stream_parsers)
-                {
+                if let Some(idle_wait) = handle_actions(
+                    action_iter,
+                    conn,
+                    waiting_for,
+                    stream_parsers,
+                    blocked_action,
+                )? {
                     *wait_duration = Some(idle_wait);
                 }
             }
         },
     }
+
+    Ok(())
 }
 
 /// Generate a new pair of Source Connection ID and reset token.
@@ -554,8 +573,8 @@ pub fn generate_cid_and_reset_token() -> (quiche::ConnectionId<'static>, u128) {
 
 fn handle_actions<'a, I>(
     iter: &mut I, conn: &mut quiche::Connection, waiting_for: &mut WaitingFor,
-    stream_parsers: &mut StreamParserMap,
-) -> Option<Duration>
+    stream_parsers: &mut StreamParserMap, blocked_action: &mut Option<Action>,
+) -> Result<Option<Duration>, quiche::Error>
 where
     I: Iterator<Item = &'a Action>,
 {
@@ -563,26 +582,57 @@ where
         log::debug!(
             "won't fire an action due to waiting for responses: {waiting_for:?}"
         );
-        return None;
+        return Ok(None);
+    }
+
+    // If a previous action was blocked by StreamLimit, retry it before
+    // consuming new actions from the iterator.
+    if let Some(action) = blocked_action.take() {
+        match execute_action(&action, conn, stream_parsers) {
+            Ok(()) => {},
+
+            Err(quiche::Error::StreamLimit) => {
+                log::debug!(
+                    "retried blocked action still hit StreamLimit, deferring again"
+                );
+                *blocked_action = Some(action);
+                return Ok(None);
+            },
+
+            Err(e) => return Err(e),
+        }
     }
 
     // Send actions
-    for action in iter {
+    while let Some(action) = iter.next() {
         match action {
-            Action::FlushPackets => return None,
+            Action::FlushPackets => return Ok(None),
             Action::Wait { wait_type } => match wait_type {
-                WaitType::WaitDuration(period) => return Some(*period),
+                WaitType::WaitDuration(period) => return Ok(Some(*period)),
                 WaitType::StreamEvent(response) => {
                     log::info!(
                         "waiting for {response:?} before executing more actions"
                     );
                     waiting_for.add_wait(response);
-                    return None;
+                    return Ok(None);
                 },
             },
-            action => execute_action(action, conn, stream_parsers),
+            action => match execute_action(action, conn, stream_parsers) {
+                Ok(()) => {},
+
+                Err(quiche::Error::StreamLimit) => {
+                    log::debug!(
+                        "stream limit reached, deferring action until \
+                         MAX_STREAMS update is received"
+                    );
+                    *blocked_action = Some(action.clone());
+                    return Ok(None);
+                },
+
+                Err(e) => return Err(e),
+            },
         }
     }
 
-    None
+    Ok(None)
 }
