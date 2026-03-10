@@ -26,7 +26,7 @@
 
 use crate::Bytes;
 use crate::Token;
-use h3::*;
+use http3::*;
 use qpack::*;
 use quic::*;
 
@@ -621,22 +621,22 @@ pub enum EventData {
 
     // HTTP/3
     #[serde(rename = "http:parameters_set")]
-    H3ParametersSet(h3::H3ParametersSet),
+    H3ParametersSet(http3::H3ParametersSet),
 
     #[serde(rename = "http:parameters_restored")]
-    H3ParametersRestored(h3::H3ParametersRestored),
+    H3ParametersRestored(http3::H3ParametersRestored),
 
     #[serde(rename = "http:stream_type_set")]
-    H3StreamTypeSet(h3::H3StreamTypeSet),
+    H3StreamTypeSet(http3::H3StreamTypeSet),
 
     #[serde(rename = "http:frame_created")]
-    H3FrameCreated(h3::H3FrameCreated),
+    H3FrameCreated(http3::H3FrameCreated),
 
     #[serde(rename = "http:frame_parsed")]
-    H3FrameParsed(h3::H3FrameParsed),
+    H3FrameParsed(http3::H3FrameParsed),
 
     #[serde(rename = "http:push_resolved")]
-    H3PushResolved(h3::H3PushResolved),
+    H3PushResolved(http3::H3PushResolved),
 
     // QPACK
     #[serde(rename = "qpack:state_updated")]
@@ -753,6 +753,6 @@ pub enum CryptoError {
 pub mod quic;
 
 pub mod connectivity;
-pub mod h3;
+pub mod http3;
 pub mod qpack;
 pub mod security;

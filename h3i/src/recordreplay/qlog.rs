@@ -27,11 +27,11 @@
 use std::collections::BTreeMap;
 
 use crate::quiche;
-use qlog::events::h3::H3FrameCreated;
-use qlog::events::h3::H3Owner;
-use qlog::events::h3::H3StreamTypeSet;
-use qlog::events::h3::Http3Frame;
-use qlog::events::h3::HttpHeader;
+use qlog::events::http3::H3FrameCreated;
+use qlog::events::http3::H3Owner;
+use qlog::events::http3::H3StreamTypeSet;
+use qlog::events::http3::Http3Frame;
+use qlog::events::http3::HttpHeader;
 use qlog::events::quic::ErrorSpace;
 use qlog::events::quic::PacketSent;
 use qlog::events::quic::QuicFrame;
@@ -114,7 +114,7 @@ impl From<&Action> for QlogEvents {
             } => {
                 let qlog_headers = headers
                     .iter()
-                    .map(|h| qlog::events::h3::HttpHeader {
+                    .map(|h| qlog::events::http3::HttpHeader {
                         name: String::from_utf8_lossy(h.name()).into_owned(),
                         value: String::from_utf8_lossy(h.value()).into_owned(),
                     })
@@ -153,18 +153,18 @@ impl From<&Action> for QlogEvents {
             } => {
                 let ty = match *stream_type {
                     HTTP3_CONTROL_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::Control,
+                        qlog::events::http3::H3StreamType::Control,
                     HTTP3_PUSH_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::Push,
+                        qlog::events::http3::H3StreamType::Push,
                     QPACK_ENCODER_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::QpackEncode,
+                        qlog::events::http3::H3StreamType::QpackEncode,
                     QPACK_DECODER_STREAM_TYPE_ID =>
-                        qlog::events::h3::H3StreamType::QpackDecode,
+                        qlog::events::http3::H3StreamType::QpackDecode,
 
-                    _ => qlog::events::h3::H3StreamType::Unknown,
+                    _ => qlog::events::http3::H3StreamType::Unknown,
                 };
                 let ty_val =
-                    if matches!(ty, qlog::events::h3::H3StreamType::Unknown) {
+                    if matches!(ty, qlog::events::http3::H3StreamType::Unknown) {
                         Some(*stream_type)
                     } else {
                         None
@@ -588,12 +588,12 @@ fn from_qlog_stream_type_set(
     let mut actions = vec![];
     let fin_stream = parse_ex_data(ex_data);
     let stream_type = match st.stream_type {
-        qlog::events::h3::H3StreamType::Control => Some(0x0),
-        qlog::events::h3::H3StreamType::Push => Some(0x1),
-        qlog::events::h3::H3StreamType::QpackEncode => Some(0x2),
-        qlog::events::h3::H3StreamType::QpackDecode => Some(0x3),
-        qlog::events::h3::H3StreamType::Reserved |
-        qlog::events::h3::H3StreamType::Unknown => st.stream_type_value,
+        qlog::events::http3::H3StreamType::Control => Some(0x0),
+        qlog::events::http3::H3StreamType::Push => Some(0x1),
+        qlog::events::http3::H3StreamType::QpackEncode => Some(0x2),
+        qlog::events::http3::H3StreamType::QpackDecode => Some(0x3),
+        qlog::events::http3::H3StreamType::Reserved |
+        qlog::events::http3::H3StreamType::Unknown => st.stream_type_value,
         _ => None,
     };
 

@@ -36,7 +36,7 @@ pub mod connection_summary;
 pub mod sync_client;
 
 use connection_summary::*;
-use qlog::events::h3::HttpHeader;
+use qlog::events::http3::HttpHeader;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -53,8 +53,8 @@ use crate::frame_parser::FrameParser;
 use crate::frame_parser::InterruptCause;
 use crate::recordreplay::qlog::QlogEvent;
 use crate::recordreplay::qlog::*;
-use qlog::events::h3::H3FrameParsed;
-use qlog::events::h3::Http3Frame;
+use qlog::events::http3::H3FrameParsed;
+use qlog::events::http3::Http3Frame;
 use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
 use serde::Serialize;
@@ -456,7 +456,7 @@ fn handle_response_frame<C: Client>(
             let qlog_headers: Vec<HttpHeader> = enriched_headers
                 .headers()
                 .iter()
-                .map(|h| qlog::events::h3::HttpHeader {
+                .map(|h| qlog::events::http3::HttpHeader {
                     name: String::from_utf8_lossy(h.name()).into_owned(),
                     value: String::from_utf8_lossy(h.value()).into_owned(),
                 })

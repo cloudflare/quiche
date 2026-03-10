@@ -291,21 +291,21 @@ use std::fmt;
 use std::fmt::Write;
 
 #[cfg(feature = "qlog")]
-use qlog::events::h3::H3FrameCreated;
+use qlog::events::http3::H3FrameCreated;
 #[cfg(feature = "qlog")]
-use qlog::events::h3::H3FrameParsed;
+use qlog::events::http3::H3FrameParsed;
 #[cfg(feature = "qlog")]
-use qlog::events::h3::H3Owner;
+use qlog::events::http3::H3Owner;
 #[cfg(feature = "qlog")]
-use qlog::events::h3::H3PriorityTargetStreamType;
+use qlog::events::http3::H3PriorityTargetStreamType;
 #[cfg(feature = "qlog")]
-use qlog::events::h3::H3StreamType;
+use qlog::events::http3::H3StreamType;
 #[cfg(feature = "qlog")]
-use qlog::events::h3::H3StreamTypeSet;
+use qlog::events::http3::H3StreamTypeSet;
 #[cfg(feature = "qlog")]
-use qlog::events::h3::Http3EventType;
+use qlog::events::http3::Http3EventType;
 #[cfg(feature = "qlog")]
-use qlog::events::h3::Http3Frame;
+use qlog::events::http3::Http3Frame;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 #[cfg(feature = "qlog")]
@@ -1463,7 +1463,7 @@ impl Connection {
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let qlog_headers = headers
                 .iter()
-                .map(|h| qlog::events::h3::HttpHeader {
+                .map(|h| qlog::events::http3::HttpHeader {
                     name: String::from_utf8_lossy(h.name()).into_owned(),
                     value: String::from_utf8_lossy(h.value()).into_owned(),
                 })
@@ -2921,7 +2921,7 @@ impl Connection {
                 qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
                     let qlog_headers = headers
                         .iter()
-                        .map(|h| qlog::events::h3::HttpHeader {
+                        .map(|h| qlog::events::http3::HttpHeader {
                             name: String::from_utf8_lossy(h.name()).into_owned(),
                             value: String::from_utf8_lossy(h.value())
                                 .into_owned(),
