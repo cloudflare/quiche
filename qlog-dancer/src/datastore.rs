@@ -35,7 +35,7 @@ use std::fmt::Display;
 use log::error;
 use log::trace;
 use qlog::events::connectivity::TransportOwner;
-use qlog::events::h3::Http3Frame;
+use qlog::events::http3::Http3Frame;
 use qlog::events::quic::AckedRanges;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
@@ -1541,7 +1541,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_created_client(
-        &mut self, fc: &qlog::events::h3::H3FrameCreated, ev_time: f64,
+        &mut self, fc: &qlog::events::http3::H3FrameCreated, ev_time: f64,
     ) {
         match &fc.frame {
             Http3Frame::Headers { headers } => {
@@ -1580,7 +1580,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_created_server(
-        &mut self, fc: &qlog::events::h3::H3FrameCreated, ev_time: f64,
+        &mut self, fc: &qlog::events::http3::H3FrameCreated, ev_time: f64,
     ) {
         match &fc.frame {
             Http3Frame::Headers { headers } => {
@@ -1610,7 +1610,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_parsed_client(
-        &mut self, fp: &qlog::events::h3::H3FrameParsed, ev_time: f64,
+        &mut self, fp: &qlog::events::http3::H3FrameParsed, ev_time: f64,
     ) {
         match &fp.frame {
             Http3Frame::Headers { headers } => {
@@ -1647,7 +1647,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_parsed_server(
-        &mut self, fp: &qlog::events::h3::H3FrameParsed, ev_time: f64,
+        &mut self, fp: &qlog::events::http3::H3FrameParsed, ev_time: f64,
     ) {
         match &fp.frame {
             Http3Frame::Headers { headers } => {

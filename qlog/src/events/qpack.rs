@@ -27,7 +27,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::h3::HttpHeader;
+use super::http3::HttpHeader;
 use super::RawInfo;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
