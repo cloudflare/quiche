@@ -2608,16 +2608,12 @@ fn streams_blocked_bidi_retransmit(
     // The server has not received anything yet.
     assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 0);
 
-    // Advance the clock past the PTO deadline so the client schedules a
-    // retransmission probe.
-    let timer = pipe.client.timeout().unwrap();
-    std::thread::sleep(timer + Duration::from_millis(1));
-    pipe.client.on_timeout();
+    // Trigger loss detection
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
 
-    // `on_timeout()` copies the frames of the oldest un-ACKed packet into the
-    // lost-frames queue (without declaring the packet lost for CC purposes).
-    // The lost-frames queue is drained during the next `send()` call.  Trigger
-    // that processing by calling send() directly before we inspect the state.
+    // Trigger the lost-frames processing by calling send().  The loss handler
+    // is invoked at the start of each send_on_path() call to process any frames
+    // added to lost_frames by ack-based loss detection.
     let (len, send_info) = pipe.client.send(&mut buf).unwrap();
 
     // After the retransmit send the sequence is:
@@ -2694,15 +2690,12 @@ fn streams_blocked_uni_retransmit(
     // The server has not received anything yet.
     assert_eq!(pipe.server.streams_blocked_uni_recv_count, 0);
 
-    // Advance the clock past the PTO deadline so the client schedules a
-    // retransmission probe.
-    let timer = pipe.client.timeout().unwrap();
-    std::thread::sleep(timer + Duration::from_millis(1));
-    pipe.client.on_timeout();
+    // Trigger loss detection
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
 
     // Trigger the lost-frames processing by calling send().  The loss handler
     // is invoked at the start of each send_on_path() call to process any frames
-    // copied into lost_frames by on_timeout().
+    // added to lost_frames by ack-based loss detection.
     let (len, send_info) = pipe.client.send(&mut buf).unwrap();
 
     assert!(!pipe
