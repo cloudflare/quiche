@@ -41,8 +41,6 @@ use crate::flowcontrol;
 
 use crate::range_buf::RangeBuf;
 
-use super::DEFAULT_STREAM_WINDOW;
-
 /// Receive-side stream buffer.
 ///
 /// Stream data received by the peer is buffered in a list of data chunks
@@ -78,9 +76,7 @@ impl RecvBuf {
     pub fn new(max_data: u64, max_window: u64) -> RecvBuf {
         RecvBuf {
             flow_control: flowcontrol::FlowControl::new(
-                max_data,
-                cmp::min(max_data, DEFAULT_STREAM_WINDOW),
-                max_window,
+                max_data, max_data, max_window,
             ),
             ..RecvBuf::default()
         }
@@ -416,6 +412,7 @@ impl RecvBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stream::DEFAULT_STREAM_WINDOW;
     use rstest::rstest;
 
     // Helper function for testing either buffer emit or discard.
