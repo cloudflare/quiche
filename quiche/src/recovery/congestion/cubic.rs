@@ -162,7 +162,7 @@ fn on_packet_sent(
     // Don't adjust epoch or track send time for non-data packets
     // (e.g. ACKs). These have in_flight=true but size=0.
     // Skip all the following logic for these packets.
-    if sent_bytes == 0 {
+    if sent_bytes == 0 && r.enable_cubic_idle_restart_fix {
         return;
     }
 
