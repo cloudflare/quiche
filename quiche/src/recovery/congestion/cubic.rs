@@ -178,7 +178,11 @@ fn on_packet_sent(
             // send, whichever is later. Using last_sent_time alone
             // would inflate the delta by a full RTT when cwnd is small
             // and bif transiently hits 0 between ACK and send.
-            let idle_start = cmp::max(cubic.last_ack_time, cubic.last_sent_time);
+            let idle_start = if r.enable_cubic_idle_restart_fix {
+                cmp::max(cubic.last_ack_time, cubic.last_sent_time)
+            } else {
+                cubic.last_sent_time
+            };
 
             if let Some(idle_start) = idle_start {
                 if idle_start < now {

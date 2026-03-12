@@ -116,6 +116,8 @@ pub struct Congestion {
     max_datagram_size: usize,
 
     pub(crate) lost_count: usize,
+
+    pub(crate) enable_cubic_idle_restart_fix: bool,
 }
 
 impl Congestion {
@@ -154,6 +156,9 @@ impl Congestion {
             hystart: hystart::Hystart::new(recovery_config.hystart),
 
             prr: prr::PRR::default(),
+
+            enable_cubic_idle_restart_fix: recovery_config
+                .enable_cubic_idle_restart_fix,
         };
 
         (cc.cc_ops.on_init)(&mut cc);

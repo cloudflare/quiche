@@ -576,6 +576,7 @@ pub struct Config {
     custom_bbr_params: Option<BbrParams>,
     initial_congestion_window_packets: usize,
     enable_relaxed_loss_threshold: bool,
+    enable_cubic_idle_restart_fix: bool,
 
     pmtud: bool,
     pmtud_max_probes: u8,
@@ -656,6 +657,7 @@ impl Config {
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
             enable_relaxed_loss_threshold: false,
+            enable_cubic_idle_restart_fix: true,
             pmtud: false,
             pmtud_max_probes: pmtud::MAX_PROBES_DEFAULT,
             hystart: true,
@@ -1120,6 +1122,17 @@ impl Config {
     /// The default value is false.
     pub fn set_enable_relaxed_loss_threshold(&mut self, enable: bool) {
         self.enable_relaxed_loss_threshold = enable;
+    }
+
+    /// Configure whether to enable the CUBIC idle restart fix.
+    ///
+    /// When enabled, the epoch shift on idle restart uses the later of
+    /// the last ACK time and last send time, avoiding an inflated delta
+    /// when bytes-in-flight transiently hits zero.
+    ///
+    /// The default value is `true`.
+    pub fn set_enable_cubic_idle_restart_fix(&mut self, enable: bool) {
+        self.enable_cubic_idle_restart_fix = enable;
     }
 
     /// Configures whether to enable HyStart++.
