@@ -2461,6 +2461,27 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
+    /// Configure whether to enable the CUBIC idle restart fix.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_enable_cubic_idle_restart_fix()`].
+    ///
+    /// [`Config::set_enable_cubic_idle_restart_fix()`]: struct.Config.html#method.set_enable_cubic_idle_restart_fix
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_enable_cubic_idle_restart_fix_in_handshake(
+        ssl: &mut boring::ssl::SslRef, enable: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.enable_cubic_idle_restart_fix = enable;
+
+        Ok(())
+    }
+
     /// Configures whether to enable HyStart++.
     ///
     /// This function can only be called inside one of BoringSSL's handshake
