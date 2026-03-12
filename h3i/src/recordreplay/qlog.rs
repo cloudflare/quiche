@@ -273,6 +273,8 @@ impl From<&Action> for QlogEvents {
                         serde_json::to_value(d).unwrap(),
                     WaitType::StreamEvent(event) =>
                         serde_json::to_value(event).unwrap(),
+                    d @ WaitType::CanOpenNumStreams(_) =>
+                        serde_json::to_value(d).unwrap(),
                 };
 
                 vec![QlogEvent::JsonEvent(qlog::events::JsonEvent {

@@ -186,6 +186,9 @@ fn make_quiche_config(
 
     config.set_max_connection_window(quic_settings.max_connection_window);
     config.set_max_stream_window(quic_settings.max_stream_window);
+    config.set_enable_send_streams_blocked(
+        quic_settings.enable_send_streams_blocked,
+    );
     config.grease(quic_settings.grease);
     config.set_max_amplification_factor(quic_settings.max_amplification_factor);
     config.set_send_capacity_factor(quic_settings.send_capacity_factor);
