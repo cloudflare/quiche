@@ -577,6 +577,8 @@ pub struct Config {
     initial_congestion_window_packets: usize,
     enable_relaxed_loss_threshold: bool,
     enable_cubic_idle_restart_fix: bool,
+    enable_send_streams_blocked_bidi: bool,
+    enable_send_streams_blocked_uni: bool,
 
     pmtud: bool,
     pmtud_max_probes: u8,
@@ -658,6 +660,8 @@ impl Config {
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
             enable_relaxed_loss_threshold: false,
             enable_cubic_idle_restart_fix: true,
+            enable_send_streams_blocked_bidi: false,
+            enable_send_streams_blocked_uni: false,
             pmtud: false,
             pmtud_max_probes: pmtud::MAX_PROBES_DEFAULT,
             hystart: true,
@@ -1135,6 +1139,28 @@ impl Config {
         self.enable_cubic_idle_restart_fix = enable;
     }
 
+    /// Configure whether to enable sending StreamBlockedBidi frames.
+    ///
+    /// StreamBlocked frames are an optional advisory signal in the QUIC
+    /// protocol which SHOULD be sent when the sender wishes to open a stream
+    /// but is unable to do so due to the maximum stream limit set by its peer.
+    ///
+    /// The default value is false.
+    pub fn set_enable_send_streams_blocked_bidi(&mut self, enable: bool) {
+        self.enable_send_streams_blocked_bidi = enable;
+    }
+
+    /// Configure whether to enable sending StreamBlockedUni frames.
+    ///
+    /// StreamBlocked frames are an optional advisory signal in the QUIC
+    /// protocol which SHOULD be sent when the sender wishes to open a stream
+    /// but is unable to do so due to the maximum stream limit set by its peer.
+    ///
+    /// The default value is false.
+    pub fn set_enable_send_streams_blocked_uni(&mut self, enable: bool) {
+        self.enable_send_streams_blocked_uni = enable;
+    }
+
     /// Configures whether to enable HyStart++.
     ///
     /// The default value is `true`.
@@ -1468,6 +1494,14 @@ where
 
     /// Whether to send GREASE.
     grease: bool,
+
+    /// Whether to send StreamsBlocked frames when bidirectional stream quota
+    /// exhausted.
+    enable_send_streams_blocked_bidi: bool,
+
+    /// Whether to send StreamsBlocked frames when unidirectional stream quota
+    /// exhausted.
+    enable_send_streams_blocked_uni: bool,
 
     /// TLS keylog writer.
     keylog: Option<Box<dyn std::io::Write + Send + Sync>>,
@@ -2137,6 +2171,12 @@ impl<F: BufFactory> Connection<F> {
             timed_out: false,
 
             grease: config.grease,
+
+            enable_send_streams_blocked_bidi: config
+                .enable_send_streams_blocked_bidi,
+
+            enable_send_streams_blocked_uni: config
+                .enable_send_streams_blocked_uni,
 
             keylog: None,
 
@@ -5788,13 +5828,17 @@ impl<F: BufFactory> Connection<F> {
                 // for the same limit.
                 if stream::is_local(stream_id, self.is_server) {
                     if stream::is_bidi(stream_id) {
-                        let limit = self.streams.peer_max_streams_bidi();
-                        self.streams_blocked_bidi_at =
-                            self.streams_blocked_bidi_at.max(Some(limit));
+                        if self.enable_send_streams_blocked_bidi {
+                            let limit = self.streams.peer_max_streams_bidi();
+                            self.streams_blocked_bidi_at =
+                                self.streams_blocked_bidi_at.max(Some(limit));
+                        }
                     } else {
-                        let limit = self.streams.peer_max_streams_uni();
-                        self.streams_blocked_uni_at =
-                            self.streams_blocked_uni_at.max(Some(limit));
+                        if self.enable_send_streams_blocked_uni {
+                            let limit = self.streams.peer_max_streams_uni();
+                            self.streams_blocked_uni_at =
+                                self.streams_blocked_uni_at.max(Some(limit));
+                        }
                     }
                 }
 
