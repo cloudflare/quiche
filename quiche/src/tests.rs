@@ -2440,7 +2440,10 @@ fn streams_blocked_bidi_sent(
     // Emit the client's outgoing flight and process it at the server.
     let flight = test_utils::emit_flight(&mut pipe.client);
     assert!(flight.is_ok());
-    assert_eq!(test_utils::process_flight(&mut pipe.server, flight.unwrap()), Err(Error::StreamLimit));
+    assert_eq!(
+        test_utils::process_flight(&mut pipe.server, flight.unwrap()),
+        Err(Error::StreamLimit)
+    );
     if enable_send_streams_blocked {
         assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 2);
         assert!(!pipe
@@ -2543,7 +2546,10 @@ fn streams_blocked_uni_sent(
     // Emit the client's outgoing flight and process it at the server.
     let flight = test_utils::emit_flight(&mut pipe.client);
     assert!(flight.is_ok());
-    assert_eq!(test_utils::process_flight(&mut pipe.server, flight.unwrap()), Err(Error::StreamLimit));
+    assert_eq!(
+        test_utils::process_flight(&mut pipe.server, flight.unwrap()),
+        Err(Error::StreamLimit)
+    );
     if enable_send_streams_blocked {
         assert_eq!(pipe.server.streams_blocked_uni_recv_count, 2);
         assert!(!pipe

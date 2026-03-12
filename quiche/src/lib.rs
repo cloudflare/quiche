@@ -1261,7 +1261,7 @@ pub enum TxBufferTrackingState {
 }
 
 /// Tracks if the connection hit the peer stream limit and which
-/// StreamsBlocked frames have been sent.
+/// STREAMS_BLOCKED frames have been sent.
 #[derive(Default)]
 pub struct StreamsBlockedState {
     /// The peer's max_streams limit at which we last became blocked on
@@ -1285,8 +1285,8 @@ impl StreamsBlockedState {
         self.blocked_at = self.blocked_at.max(Some(limit));
     }
 
-    /// Clear blocked_sent to force retransmission of lost the most recently
-    /// sent STREAMS_BLOCKED frame.
+    /// Clear blocked_sent to force retransmission of the most recently sent
+    /// STREAMS_BLOCKED frame.
     fn force_retransmit_sent_limit_eq(&mut self, limit: u64) {
         // Only clear blocked_sent if the lost frame had the most recently sent
         // limit.
@@ -1518,7 +1518,7 @@ where
     /// Whether to send GREASE.
     grease: bool,
 
-    /// Whether to send StreamsBlocked frames when bidi or uni stream quota
+    /// Whether to send STREAMS_BLOCKED frames when bidi or uni stream quota
     /// exhausted.
     enable_send_streams_blocked: bool,
 
@@ -1575,7 +1575,7 @@ where
     streams_blocked_uni_recv_count: u64,
 
     /// Tracks if the connection hit the peer's bidi or uni stream limit, and if
-    /// StreamsBlocked frames are pending transmission.
+    /// STREAMS_BLOCKED frames are pending transmission.
     streams_blocked_bidi_state: StreamsBlockedState,
     streams_blocked_uni_state: StreamsBlockedState,
 
@@ -2170,8 +2170,7 @@ impl<F: BufFactory> Connection<F> {
 
             grease: config.grease,
 
-            enable_send_streams_blocked: config
-                .enable_send_streams_blocked,
+            enable_send_streams_blocked: config.enable_send_streams_blocked,
 
             keylog: None,
 
@@ -4223,9 +4222,10 @@ impl<F: BufFactory> Connection<F> {
                     },
 
                     // Retransmit STREAMS_BLOCKED frames if the frame with the
-                    // most recent limit is lost.  These are
-                    // informational signals to the peer and must be reliably
-                    // delivered so the peer knows it should send MAX_STREAMS.
+                    // most recent limit is lost.  These are informational
+                    // signals to the peer, reliably sending them
+                    // ensures the signal is used consistently and helps
+                    // debugging.
                     frame::Frame::StreamsBlockedBidi { limit } => {
                         self.streams_blocked_bidi_state
                             .force_retransmit_sent_limit_eq(limit);
@@ -5806,7 +5806,9 @@ impl<F: BufFactory> Connection<F> {
                 // If the local endpoint has exhausted the peer's stream count
                 // limit, record the current limit so that a STREAMS_BLOCKED
                 // frame can be sent.
-                if self.enable_send_streams_blocked && stream::is_local(stream_id, self.is_server) {
+                if self.enable_send_streams_blocked &&
+                    stream::is_local(stream_id, self.is_server)
+                {
                     if stream::is_bidi(stream_id) {
                         let limit = self.streams.peer_max_streams_bidi();
                         self.streams_blocked_bidi_state.update_at(limit);
