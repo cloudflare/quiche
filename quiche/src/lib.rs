@@ -1596,14 +1596,6 @@ where
     streams_blocked_bidi_state: StreamsBlockedState,
     streams_blocked_uni_state: StreamsBlockedState,
 
-    /// The number of STREAMS_BLOCKED (bidi) frames sent because the local
-    /// endpoint hit the peer's bidirectional stream count limit.
-    streams_blocked_bidi_sent_count: u64,
-
-    /// The number of STREAMS_BLOCKED (uni) frames sent because the local
-    /// endpoint hit the peer's unidirectional stream count limit.
-    streams_blocked_uni_sent_count: u64,
-
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
 }
@@ -2232,10 +2224,7 @@ impl<F: BufFactory> Connection<F> {
             streams_blocked_uni_recv_count: 0,
 
             streams_blocked_bidi_state: Default::default(),
-            streams_blocked_bidi_sent_count: 0,
-
             streams_blocked_uni_state: Default::default(),
-            streams_blocked_uni_sent_count: 0,
 
             max_amplification_factor: config.max_amplification_factor,
         };
@@ -4701,9 +4690,6 @@ impl<F: BufFactory> Connection<F> {
                         // suppressed.
                         self.streams_blocked_bidi_state.blocked_sent =
                             Some(limit);
-                        self.streams_blocked_bidi_sent_count = self
-                            .streams_blocked_bidi_sent_count
-                            .saturating_add(1);
 
                         ack_eliciting = true;
                         in_flight = true;
@@ -4725,8 +4711,6 @@ impl<F: BufFactory> Connection<F> {
                         // that redundant frames for the same limit are
                         // suppressed.
                         self.streams_blocked_uni_state.blocked_sent = Some(limit);
-                        self.streams_blocked_uni_sent_count =
-                            self.streams_blocked_uni_sent_count.saturating_add(1);
 
                         ack_eliciting = true;
                         in_flight = true;
@@ -7653,8 +7637,6 @@ impl<F: BufFactory> Connection<F> {
             stream_data_blocked_recv_count: self.stream_data_blocked_recv_count,
             streams_blocked_bidi_recv_count: self.streams_blocked_bidi_recv_count,
             streams_blocked_uni_recv_count: self.streams_blocked_uni_recv_count,
-            streams_blocked_bidi_sent_count: self.streams_blocked_bidi_sent_count,
-            streams_blocked_uni_sent_count: self.streams_blocked_uni_sent_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
             tx_buffered_state: self.tx_buffered_state,
@@ -9241,14 +9223,6 @@ pub struct Stats {
     /// from the remote, indicating the peer is blocked on opening new
     /// unidirectional streams.
     pub streams_blocked_uni_recv_count: u64,
-
-    /// The number of STREAMS_BLOCKED (bidi) frames sent because the local
-    /// endpoint hit the peer's bidirectional stream count limit.
-    pub streams_blocked_bidi_sent_count: u64,
-
-    /// The number of STREAMS_BLOCKED (uni) frames sent because the local
-    /// endpoint hit the peer's unidirectional stream count limit.
-    pub streams_blocked_uni_sent_count: u64,
 
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
