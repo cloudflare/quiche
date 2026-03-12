@@ -249,6 +249,10 @@ void quiche_config_enable_hystart(quiche_config *config, bool v);
 // Configures whether to enable pacing (enabled by default).
 void quiche_config_enable_pacing(quiche_config *config, bool v);
 
+// Configures whether to enable the CUBIC idle restart fix (enabled by default).
+void quiche_config_set_enable_cubic_idle_restart_fix(quiche_config *config,
+                                                     bool v);
+
 // Configures max pacing rate to be used.
 void quiche_config_set_max_pacing_rate(quiche_config *config, uint64_t v);
 
