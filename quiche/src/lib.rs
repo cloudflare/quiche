@@ -1137,9 +1137,9 @@ impl Config {
         self.enable_cubic_idle_restart_fix = enable;
     }
 
-    /// Configure whether to enable sending StreamBlocked frames.
+    /// Configure whether to enable sending STREAMS_BLOCKED frames.
     ///
-    /// StreamBlocked frames are an optional advisory signal in the QUIC
+    /// STREAMS_BLOCKED frames are an optional advisory signal in the QUIC
     /// protocol which SHOULD be sent when the sender wishes to open a stream
     /// but is unable to do so due to the maximum stream limit set by its peer.
     ///
@@ -1263,19 +1263,19 @@ pub enum TxBufferTrackingState {
 /// Tracks if the connection hit the peer stream limit and which
 /// STREAMS_BLOCKED frames have been sent.
 #[derive(Default)]
-pub struct StreamsBlockedState {
+struct StreamsBlockedState {
     /// The peer's max_streams limit at which we last became blocked on
     /// opening new local streams, if any.
     blocked_at: Option<u64>,
 
     /// The stream limit sent on the most recently sent STREAMS_BLOCKED
-    /// frame. If != to blocked_at, the connection has pending StreamBlocked
+    /// frame. If != to blocked_at, the connection has pending STREAMS_BLOCKED
     /// frames to send.
     blocked_sent: Option<u64>,
 }
 
 impl StreamsBlockedState {
-    /// Returns true if there is a StreamBlocked frame that needs sending.
+    /// Returns true if there is a STREAMS_BLOCKED frame that needs sending.
     fn has_pending_stream_blocked_frame(&self) -> bool {
         self.blocked_sent < self.blocked_at
     }
