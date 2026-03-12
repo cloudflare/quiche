@@ -2356,7 +2356,7 @@ fn streams_blocked_bidi_sent(
     #[values(false, true)] enable_send_streams_blocked: bool,
 ) {
     let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
-    config.set_enable_send_streams_blocked_bidi(enable_send_streams_blocked);
+    config.set_enable_send_streams_blocked(enable_send_streams_blocked);
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -2463,7 +2463,7 @@ fn streams_blocked_uni_sent(
     #[values(false, true)] enable_send_streams_blocked: bool,
 ) {
     let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
-    config.set_enable_send_streams_blocked_uni(enable_send_streams_blocked);
+    config.set_enable_send_streams_blocked(enable_send_streams_blocked);
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -2567,7 +2567,7 @@ fn streams_blocked_bidi_retransmit(
     let mut buf = [0; 65535];
 
     let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
-    config.set_enable_send_streams_blocked_bidi(true);
+    config.set_enable_send_streams_blocked(true);
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -2654,7 +2654,7 @@ fn streams_blocked_uni_retransmit(
     let mut buf = [0; 65535];
 
     let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
-    config.set_enable_send_streams_blocked_uni(true);
+    config.set_enable_send_streams_blocked(true);
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
