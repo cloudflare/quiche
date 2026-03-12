@@ -162,7 +162,7 @@ fn on_packet_sent(
     // Don't adjust epoch or track send time for non-data packets
     // (e.g. ACKs). These have in_flight=true but size=0.
     // Skip all the following logic for these packets.
-    if sent_bytes == 0 {
+    if sent_bytes == 0 && r.enable_cubic_idle_restart_fix {
         return;
     }
 
@@ -178,7 +178,11 @@ fn on_packet_sent(
             // send, whichever is later. Using last_sent_time alone
             // would inflate the delta by a full RTT when cwnd is small
             // and bif transiently hits 0 between ACK and send.
-            let idle_start = cmp::max(cubic.last_ack_time, cubic.last_sent_time);
+            let idle_start = if r.enable_cubic_idle_restart_fix {
+                cmp::max(cubic.last_ack_time, cubic.last_sent_time)
+            } else {
+                cubic.last_sent_time
+            };
 
             if let Some(idle_start) = idle_start {
                 if idle_start < now {

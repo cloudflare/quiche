@@ -576,6 +576,7 @@ pub struct Config {
     custom_bbr_params: Option<BbrParams>,
     initial_congestion_window_packets: usize,
     enable_relaxed_loss_threshold: bool,
+    enable_cubic_idle_restart_fix: bool,
 
     pmtud: bool,
     pmtud_max_probes: u8,
@@ -656,6 +657,7 @@ impl Config {
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
             enable_relaxed_loss_threshold: false,
+            enable_cubic_idle_restart_fix: true,
             pmtud: false,
             pmtud_max_probes: pmtud::MAX_PROBES_DEFAULT,
             hystart: true,
@@ -1120,6 +1122,17 @@ impl Config {
     /// The default value is false.
     pub fn set_enable_relaxed_loss_threshold(&mut self, enable: bool) {
         self.enable_relaxed_loss_threshold = enable;
+    }
+
+    /// Configure whether to enable the CUBIC idle restart fix.
+    ///
+    /// When enabled, the epoch shift on idle restart uses the later of
+    /// the last ACK time and last send time, avoiding an inflated delta
+    /// when bytes-in-flight transiently hits zero.
+    ///
+    /// The default value is `true`.
+    pub fn set_enable_cubic_idle_restart_fix(&mut self, enable: bool) {
+        self.enable_cubic_idle_restart_fix = enable;
     }
 
     /// Configures whether to enable HyStart++.
@@ -2444,6 +2457,27 @@ impl<F: BufFactory> Connection<F> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
 
         ex_data.recovery_config.enable_relaxed_loss_threshold = enable;
+
+        Ok(())
+    }
+
+    /// Configure whether to enable the CUBIC idle restart fix.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_enable_cubic_idle_restart_fix()`].
+    ///
+    /// [`Config::set_enable_cubic_idle_restart_fix()`]: struct.Config.html#method.set_enable_cubic_idle_restart_fix
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_enable_cubic_idle_restart_fix_in_handshake(
+        ssl: &mut boring::ssl::SslRef, enable: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.enable_cubic_idle_restart_fix = enable;
 
         Ok(())
     }
