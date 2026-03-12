@@ -253,6 +253,31 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                 .expect("datagram extension not enabled by peer");
         },
 
+        Action::StreamLimitReached { stream_id } => {
+            log::info!("stream_limit_reached stream_id={stream_id}");
+
+            match conn.stream_send(*stream_id, &[], false) {
+                Err(quiche::Error::StreamLimit) => {
+                    log::info!(
+                        "stream_send on stream_id={stream_id} correctly \
+                         returned StreamLimit"
+                    );
+                },
+                Ok(_) => {
+                    log::error!(
+                        "stream_send on stream_id={stream_id} succeeded \
+                         unexpectedly; expected StreamLimit"
+                    );
+                },
+                Err(e) => {
+                    log::error!(
+                        "stream_send on stream_id={stream_id} returned \
+                         unexpected error: {e}; expected StreamLimit"
+                    );
+                },
+            }
+        },
+
         Action::ResetStream {
             stream_id,
             error_code,

@@ -103,6 +103,7 @@ fn create_config(args: &Config, should_log_keys: bool) -> quiche::Config {
 
     config.set_max_connection_window(args.max_window);
     config.set_max_stream_window(args.max_stream_window);
+    config.set_enable_send_streams_blocked(args.send_streams_blocked);
     config.grease(false);
 
     if args.enable_early_data {
@@ -390,6 +391,14 @@ pub fn connect_with_early_data(
                 wait_cleared = true;
             }
 
+            // Check whether a received MAX_STREAMS_BIDI frame has satisfied a
+            // PeerStreamsLeftBidi wait.
+            let before = waiting_for.is_empty();
+            waiting_for.check_peer_streams_left_bidi(&conn);
+            if !before && waiting_for.is_empty() {
+                wait_cleared = true;
+            }
+
             if client.streams.all_close_trigger_frames_seen() {
                 client.streams.close_due_to_trigger_frames(&mut conn);
             }
@@ -577,6 +586,14 @@ where
                         "waiting for {response:?} before executing more actions"
                     );
                     waiting_for.add_wait(response);
+                    return None;
+                },
+                WaitType::PeerStreamsLeftBidi(n) => {
+                    log::info!(
+                        "waiting for peer_streams_left_bidi >= {n} before \
+                         executing more actions"
+                    );
+                    waiting_for.set_peer_streams_left_bidi(*n);
                     return None;
                 },
             },

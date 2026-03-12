@@ -270,6 +270,8 @@ impl From<&Action> for QlogEvents {
                         serde_json::to_value(d).unwrap(),
                     WaitType::StreamEvent(event) =>
                         serde_json::to_value(event).unwrap(),
+                    d @ WaitType::PeerStreamsLeftBidi(_) =>
+                        serde_json::to_value(d).unwrap(),
                 };
 
                 vec![QlogEvent::JsonEvent(qlog::events::JsonEvent {
@@ -308,6 +310,15 @@ impl From<&Action> for QlogEvents {
                     data: Box::new(ev),
                     ex_data: BTreeMap::new(),
                 }]
+            },
+
+            Action::StreamLimitReached { stream_id } => {
+                vec![QlogEvent::JsonEvent(qlog::events::JsonEvent {
+                    time: 0.0,
+                    importance: qlog::events::EventImportance::Core,
+                    name: "h3i:stream_limit_reached".into(),
+                    data: json!({ "stream_id": stream_id }),
+                })]
             },
 
             Action::FlushPackets => {

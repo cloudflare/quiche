@@ -285,6 +285,12 @@ impl H3iDriver {
                     WaitType::StreamEvent(event) => {
                         self.waiting_for_responses.add_wait(event);
                     },
+                    WaitType::PeerStreamsLeftBidi(n) => {
+                        log::info!(
+                            "h3i: waiting for peer_streams_left_bidi >= {n}"
+                        );
+                        self.waiting_for_responses.set_peer_streams_left_bidi(*n);
+                    },
                 }
             } else {
                 break;
@@ -334,6 +340,9 @@ impl ApplicationOverQuic for H3iDriver {
             self.waiting_for_responses.remove_wait(event);
         }
 
+        self.waiting_for_responses
+            .check_peer_streams_left_bidi(qconn);
+
         Ok(())
     }
 
@@ -361,7 +370,8 @@ impl ApplicationOverQuic for H3iDriver {
                 Action::StopSending { .. } |
                 Action::OpenUniStream { .. } |
                 Action::ConnectionClose { .. } |
-                Action::SendHeadersFrame { .. } => {
+                Action::SendHeadersFrame { .. } |
+                Action::StreamLimitReached { .. } => {
                     if self.should_fire() {
                         // Reset the fire time such that the next action will
                         // still fire.

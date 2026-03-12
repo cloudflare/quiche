@@ -330,6 +330,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         enable_dgram,
         dgram_recv_queue_len,
         dgram_send_queue_len,
+        send_streams_blocked: true,
     };
 
     Ok(Config {

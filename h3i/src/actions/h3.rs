@@ -99,6 +99,16 @@ pub enum Action {
         error_code: u64,
     },
 
+    /// Attempt to create a stream by calling `stream_send`, expecting the
+    /// call to return [`quiche::Error::StreamLimit`].
+    ///
+    /// The stream ID to attempt is specified by `stream_id`. The action
+    /// succeeds (i.e. the test assertion passes) only when `stream_send`
+    /// returns `Err(StreamLimit)`; any other outcome is logged as an error.
+    StreamLimitReached {
+        stream_id: u64,
+    },
+
     /// Send a CONNECTION_CLOSE frame with the given [`ConnectionError`].
     ConnectionClose {
         error: ConnectionError,
@@ -127,6 +137,13 @@ pub enum WaitType {
     /// 1. The peer resets the specified stream.
     /// 2. The peer sends a `fin` over the specified stream
     StreamEvent(StreamEvent),
+
+    /// Wait until the peer has granted at least `n` more bidirectional streams
+    /// (i.e. until [`quiche::Connection::peer_streams_left_bidi`] >= `n`).
+    ///
+    /// This is satisfied as soon as the connection processes a
+    /// `MAX_STREAMS_BIDI` frame that raises the limit high enough.
+    PeerStreamsLeftBidi(u64),
 }
 
 impl From<WaitType> for Action {
@@ -161,22 +178,47 @@ pub enum StreamEventType {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct WaitingFor(HashMap<u64, Vec<StreamEvent>>);
+pub(crate) struct WaitingFor {
+    stream_events: HashMap<u64, Vec<StreamEvent>>,
+    peer_streams_left_bidi: Option<u64>,
+}
 
 impl WaitingFor {
     pub(crate) fn is_empty(&self) -> bool {
-        self.0.values().all(|v| v.is_empty())
+        self.stream_events.values().all(|v| v.is_empty())
+            && self.peer_streams_left_bidi.is_none()
     }
 
     pub(crate) fn add_wait(&mut self, stream_event: &StreamEvent) {
-        self.0
+        self.stream_events
             .entry(stream_event.stream_id)
             .or_default()
             .push(*stream_event);
     }
 
+    pub(crate) fn set_peer_streams_left_bidi(&mut self, n: u64) {
+        self.peer_streams_left_bidi = Some(n);
+    }
+
+    /// Check and clear the [`WaitType::PeerStreamsLeftBidi`] condition if
+    /// `conn` now reports enough available streams.
+    pub(crate) fn check_peer_streams_left_bidi(
+        &mut self, conn: &quiche::Connection,
+    ) {
+        if let Some(needed) = self.peer_streams_left_bidi {
+            if conn.peer_streams_left_bidi() >= needed {
+                log::info!(
+                    "peer_streams_left_bidi condition met \
+                     (needed={needed}, available={})",
+                    conn.peer_streams_left_bidi()
+                );
+                self.peer_streams_left_bidi = None;
+            }
+        }
+    }
+
     pub(crate) fn remove_wait(&mut self, stream_event: StreamEvent) {
-        if let Some(waits) = self.0.get_mut(&stream_event.stream_id) {
+        if let Some(waits) = self.stream_events.get_mut(&stream_event.stream_id) {
             let old_len = waits.len();
             waits.retain(|wait| wait != &stream_event);
             let new_len = waits.len();
@@ -188,7 +230,7 @@ impl WaitingFor {
     }
 
     pub(crate) fn clear_waits_on_stream(&mut self, stream_id: u64) {
-        if let Some(waits) = self.0.get_mut(&stream_id) {
+        if let Some(waits) = self.stream_events.get_mut(&stream_id) {
             if !waits.is_empty() {
                 log::info!("Clearing all waits for stream {stream_id}");
                 waits.clear();
