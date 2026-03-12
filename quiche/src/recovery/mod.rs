@@ -138,6 +138,7 @@ pub struct RecoveryConfig {
     pub max_pacing_rate: Option<u64>,
     pub initial_congestion_window_packets: usize,
     pub enable_relaxed_loss_threshold: bool,
+    pub disable_dynamic_loss_threshold: bool,
 }
 
 impl RecoveryConfig {
@@ -154,6 +155,7 @@ impl RecoveryConfig {
             initial_congestion_window_packets: config
                 .initial_congestion_window_packets,
             enable_relaxed_loss_threshold: config.enable_relaxed_loss_threshold,
+            disable_dynamic_loss_threshold: config.disable_dynamic_loss_threshold,
         }
     }
 }
