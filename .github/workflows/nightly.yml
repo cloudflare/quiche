@@ -41,6 +41,9 @@ jobs:
       - name: Run cargo test
         run: cargo test --verbose --all-targets --features=boringssl-boring-crate,${{ env.FEATURES }}
 
+      - name: Run cargo test with custom-client-dcid feature enabled
+        run: cargo test --verbose --all-targets --features=boringssl-boring-crate,custom-client-dcid,${{ env.FEATURES }}
+
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
