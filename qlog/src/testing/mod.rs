@@ -27,7 +27,6 @@
 //! Testing utilities for qlog.
 
 use crate::events::quic::PacketType;
-use crate::Configuration;
 use crate::PacketHeader;
 use crate::Trace;
 use crate::TraceSeq;
@@ -46,7 +45,6 @@ pub fn make_pkt_hdr(packet_type: PacketType) -> PacketHeader {
         Some(0),
         None,
         None,
-        None,
         Some(0x0000_0001),
         Some(&scid),
         Some(&dcid),
@@ -55,35 +53,29 @@ pub fn make_pkt_hdr(packet_type: PacketType) -> PacketHeader {
 
 pub fn make_trace() -> Trace {
     Trace::new(
-        VantagePoint {
+        Some("Quiche qlog trace".to_string()),
+        Some("Quiche qlog trace description".to_string()),
+        None,
+        Some(VantagePoint {
             name: None,
             ty: VantagePointType::Server,
             flow: None,
-        },
-        Some("Quiche qlog trace".to_string()),
-        Some("Quiche qlog trace description".to_string()),
-        Some(Configuration {
-            time_offset: Some(0.0),
-            original_uris: None,
         }),
-        None,
+        vec![],
     )
 }
 
 pub fn make_trace_seq() -> TraceSeq {
     TraceSeq::new(
-        VantagePoint {
+        Some("Quiche qlog trace".to_string()),
+        Some("Quiche qlog trace description".to_string()),
+        None,
+        Some(VantagePoint {
             name: None,
             ty: VantagePointType::Server,
             flow: None,
-        },
-        Some("Quiche qlog trace".to_string()),
-        Some("Quiche qlog trace description".to_string()),
-        Some(Configuration {
-            time_offset: Some(0.0),
-            original_uris: None,
         }),
-        None,
+        vec![],
     )
 }
 

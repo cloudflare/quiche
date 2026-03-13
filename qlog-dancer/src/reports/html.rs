@@ -428,15 +428,17 @@ pub fn event_list(log_file: &LogFileParseResult, config: &AppConfig) {
 
     for data in &log_file.data {
         match &data.raw {
-            crate::RawLogEvents::QlogJson { events: _ } =>
-                println!("Support for event list of contained qlog is TODO"),
+            crate::RawLogEvents::QlogJson { events: _ } => {
+                println!("Support for event list of contained qlog is TODO")
+            },
             crate::RawLogEvents::QlogJsonSeq { events } => {
                 let table = event_list_html_from_sqlog(events);
 
                 file.write_all(table.as_bytes()).unwrap();
             },
-            crate::RawLogEvents::Netlog =>
-                println!("Support for event list of netlog is TODO"),
+            crate::RawLogEvents::Netlog => {
+                println!("Support for event list of netlog is TODO")
+            },
         }
     }
 

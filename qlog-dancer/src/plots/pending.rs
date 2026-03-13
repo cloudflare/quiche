@@ -81,7 +81,10 @@ pub fn plot_pending(
 
     let mut series = vec![];
 
-    while x < x_max {
+    let total_reqs = ds.http_requests.values().len();
+
+    // Don't need to do any work if there are no requests.
+    while x < x_max && total_reqs > 0 {
         let mut pending = 0;
         let mut in_flight = 0;
 
@@ -123,6 +126,7 @@ pub fn plot_pending(
 
         y_max = y_max.max(pending + in_flight);
     }
+    println!("did {} iterations", x);
 
     // let size = ChartSize{ width: 1600, height: 600};
 
