@@ -233,9 +233,9 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
     s
 }
 
-pub fn sqlog_event_list(
+fn build_event_list(
     events: &[qlog::reader::Event],
-) -> tabled::builder::Builder {
+) -> Vec<PrintableEvent> {
     let mut pp = vec![];
 
     for event in events {
@@ -457,5 +457,26 @@ pub fn sqlog_event_list(
         }
     }
 
-    Table::builder(pp)
+    pp
+}
+
+pub fn sqlog_event_list(
+    events: &[qlog::reader::Event],
+) -> tabled::builder::Builder {
+    Table::builder(build_event_list(events))
+}
+
+pub fn print_sqlog_events(events: &[qlog::reader::Event]) {
+    let pp = build_event_list(events);
+    println!("Qlog events");
+    println!(
+        "{:>12} | {:<10} | {:<25} | {}",
+        "time", "category", "Type", "details"
+    );
+    for p in &pp {
+        println!(
+            "{:>12.3} | {:<10} | {:<25} | {}",
+            p.time, p.category, p.ty, p.details
+        );
+    }
 }
