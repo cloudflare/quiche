@@ -110,6 +110,10 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
     stream_parsers: &mut StreamParserMap,
 ) {
     match action {
+        Action::RunCallback { cb } => {
+            cb.run();
+        },
+
         Action::SendFrame {
             stream_id,
             fin_stream,

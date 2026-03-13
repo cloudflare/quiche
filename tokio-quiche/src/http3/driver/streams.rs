@@ -54,7 +54,7 @@ pub(crate) struct StreamCtx {
     /// Indicates the stream sent initial headers.
     pub(crate) initial_headers_sent: bool,
     /// First time that a HEADERS frame was not fully flushed.
-    pub(crate) first_full_headers_flush_fail_time: Option<Instant>,
+    first_full_headers_flush_fail_time: Option<Instant>,
     /// Indicates the stream received fin or reset. No more data will be
     /// received.
     pub(crate) fin_or_reset_recv: bool,
@@ -92,6 +92,37 @@ impl StreamCtx {
         (ctx, PollSender::new(backward_sender), forward_receiver)
     }
 
+    /// Signal that there was a headers flush attempt that failed due
+    /// to insufficient flow control or congestion control window.
+    pub(crate) fn full_headers_flush_blocked(&mut self) {
+        if self.first_full_headers_flush_fail_time.is_none() {
+            self.audit_stats.set_headers_pending_flush(true);
+            self.first_full_headers_flush_fail_time = Some(Instant::now());
+        }
+    }
+
+    /// Signal that there was a headers flush attempt was successful.
+    pub(crate) fn full_headers_flush_success(&mut self) {
+        // Clear headers_pending_flush since headers were successfully flushed.
+        self.audit_stats.set_headers_pending_flush(false);
+
+        self.maybe_update_header_flush_duration();
+    }
+
+    /// Signal that the headers flush was aborted due to stream being reset.
+    pub(crate) fn full_headers_flush_aborted(&mut self) {
+        self.maybe_update_header_flush_duration();
+    }
+
+    // Helper used to implment full_headers_flush_success and
+    // full_headers_flush_aborted
+    fn maybe_update_header_flush_duration(&mut self) {
+        if let Some(first) = self.first_full_headers_flush_fail_time.take() {
+            self.audit_stats
+                .add_header_flush_duration(Instant::now().duration_since(first));
+        }
+    }
+
     /// Creates a [Future] that resolves when `send` has capacity again.
     pub(crate) fn wait_for_send(&mut self, stream_id: u64) -> WaitForStream {
         WaitForStream::Upstream(WaitForUpstreamCapacity {
@@ -122,6 +153,7 @@ impl StreamCtx {
         self.audit_stats
             .set_recvd_stop_sending_error_code(wire_err_code as i64);
         self.fin_or_reset_sent = true;
+        self.full_headers_flush_aborted();
         // Drop any pending data and close the write side.
         // We can't accept additional frames
         self.queued_frame = None;
@@ -137,6 +169,7 @@ impl StreamCtx {
         self.audit_stats
             .set_recvd_reset_stream_error_code(wire_err_code as i64);
         self.fin_or_reset_recv = true;
+        self.full_headers_flush_aborted();
         self.send = None;
     }
 
@@ -145,6 +178,7 @@ impl StreamCtx {
         self.audit_stats
             .set_sent_reset_stream_error_code(wire_err_code as i64);
         self.fin_or_reset_sent = true;
+        self.full_headers_flush_aborted();
     }
 
     pub(crate) fn handle_sent_stop_sending(&mut self, wire_err_code: u64) {
@@ -155,6 +189,7 @@ impl StreamCtx {
         // must still send a fin or reset_stream with its final size, we don't
         // need to read it from the stream. Quiche will take care of that.
         self.fin_or_reset_recv = true;
+        self.full_headers_flush_aborted();
         self.send = None;
     }
 

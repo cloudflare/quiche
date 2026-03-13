@@ -43,7 +43,6 @@ use std::error::Error;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::time::Instant;
 
 use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
@@ -728,18 +727,11 @@ impl<H: DriverHooks> H3Driver<H> {
                 };
 
                 if let Err(h3::Error::StreamBlocked) = res {
-                    ctx.first_full_headers_flush_fail_time
-                        .get_or_insert(Instant::now());
+                    ctx.full_headers_flush_blocked();
                 }
 
                 if res.is_ok() {
-                    if let Some(first) =
-                        ctx.first_full_headers_flush_fail_time.take()
-                    {
-                        ctx.audit_stats.add_header_flush_duration(
-                            Instant::now().duration_since(first),
-                        );
-                    }
+                    ctx.full_headers_flush_success();
                 }
 
                 res
@@ -1318,10 +1310,13 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
 
 impl<H: DriverHooks> Drop for H3Driver<H> {
     fn drop(&mut self) {
-        for stream in self.stream_map.values() {
+        for stream in self.stream_map.values_mut() {
             stream
                 .audit_stats
                 .set_recvd_stream_fin(StreamClosureKind::Implicit);
+
+            // Update stats if there were pending header sends on this stream.
+            stream.full_headers_flush_aborted();
         }
     }
 }
