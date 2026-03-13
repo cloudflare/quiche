@@ -282,9 +282,9 @@ impl From<&Action> for QlogEvents {
 
             Action::ConnectionClose { error } => {
                 let error_space = if error.is_app {
-                    ErrorSpace::ApplicationError
+                    ErrorSpace::Application
                 } else {
-                    ErrorSpace::TransportError
+                    ErrorSpace::Transport
                 };
 
                 let reason = if error.reason.is_empty() {
@@ -409,7 +409,7 @@ impl From<&PacketSent> for H3Actions {
                             error_space.as_ref().expect(
                                 "invalid CC frame in qlog input, no error space"
                             ),
-                            ErrorSpace::ApplicationError
+                            ErrorSpace::Application
                         );
 
                         actions.push(Action::ConnectionClose {
