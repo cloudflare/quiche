@@ -185,8 +185,8 @@ pub(crate) struct WaitingFor {
 
 impl WaitingFor {
     pub(crate) fn is_empty(&self) -> bool {
-        self.stream_events.values().all(|v| v.is_empty())
-            && self.peer_streams_left_bidi.is_none()
+        self.stream_events.values().all(|v| v.is_empty()) &&
+            self.peer_streams_left_bidi.is_none()
     }
 
     pub(crate) fn add_wait(&mut self, stream_event: &StreamEvent) {

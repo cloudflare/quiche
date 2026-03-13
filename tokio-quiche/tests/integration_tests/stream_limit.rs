@@ -114,7 +114,7 @@ async fn test_bidi_stream_limit_reached() -> QuicResult<()> {
         let stream_id = i * 4;
         actions.push(Action::Wait {
             wait_type: WaitType::StreamEvent(StreamEvent {
-                stream_id: stream_id,
+                stream_id,
                 event_type: StreamEventType::Finished,
             }),
         });
