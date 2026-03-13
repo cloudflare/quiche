@@ -2345,6 +2345,381 @@ fn streams_blocked_uni_stat(
     assert_eq!(pipe.server.streams_blocked_uni_recv_count, 2);
 }
 
+/// Tests that a STREAMS_BLOCKED (bidi) frame is sent when the client tries to
+/// open a new bidirectional stream beyond the server's max_streams_bidi limit,
+/// that duplicate frames for the same limit are suppressed, and that a fresh
+/// frame is sent once the peer raises the limit and the endpoint becomes
+/// blocked again at the new, higher limit.
+#[rstest]
+fn streams_blocked_bidi_sent(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] enable_send_streams_blocked: bool,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_enable_send_streams_blocked(enable_send_streams_blocked);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // The default config sets initial_max_streams_bidi = 3 for the server,
+    // so the client may open streams 0, 4, 8 (sequence 0, 1, 2).
+    // Trying to open stream 12 (sequence 3) must be rejected.
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+
+    // Attempting to open the 4th bidi stream should return StreamLimit and
+    // trigger a STREAMS_BLOCKED frame.
+    assert_eq!(
+        pipe.client.stream_send(12, b"a", false),
+        Err(Error::StreamLimit)
+    );
+
+    // Before advancing, the blocked state should be set but no frame sent yet.
+    if enable_send_streams_blocked {
+        assert!(pipe
+            .client
+            .streams_blocked_bidi_state
+            .has_pending_stream_blocked_frame());
+    } else {
+        assert!(!pipe
+            .client
+            .streams_blocked_bidi_state
+            .has_pending_stream_blocked_frame());
+    }
+
+    // Advance so the client flushes its pending frames to the server.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    if enable_send_streams_blocked {
+        // The client should have sent one STREAMS_BLOCKED (bidi) frame.
+        assert!(!pipe
+            .client
+            .streams_blocked_bidi_state
+            .has_pending_stream_blocked_frame());
+
+        // The server must have received our STREAMS_BLOCKED (bidi) frame.
+        assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 1);
+    } else {
+        // Frames not sent when feature disabled.
+        assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 0);
+    }
+
+    // A second attempt at the same stream must NOT produce another frame —
+    // the peer has already been notified about this limit.
+    assert_eq!(
+        pipe.client.stream_send(12, b"a", false),
+        Err(Error::StreamLimit)
+    );
+    if enable_send_streams_blocked {
+        assert_eq!(pipe.advance(), Ok(()));
+        assert!(!pipe
+            .client
+            .streams_blocked_bidi_state
+            .has_pending_stream_blocked_frame());
+    }
+
+    // Simulate the peer raising the bidi stream limit to 4. The client can
+    // now open stream 12 (sequence 3) but will be blocked at stream 16
+    // (sequence 4 > new limit of 4). That is a new limit, so a fresh
+    // STREAMS_BLOCKED frame must be armed and subsequently sent.
+    pipe.client.streams.update_peer_max_streams_bidi(4);
+    assert_eq!(pipe.client.stream_send(12, b"a", false), Ok(1));
+    assert_eq!(
+        pipe.client.stream_send(16, b"a", false),
+        Err(Error::StreamLimit)
+    );
+
+    if enable_send_streams_blocked {
+        // The blocked flag must be set for the new limit.
+        assert!(pipe
+            .client
+            .streams_blocked_bidi_state
+            .has_pending_stream_blocked_frame());
+    }
+
+    // Emit the client's outgoing flight and process it at the server.
+    let flight = test_utils::emit_flight(&mut pipe.client);
+    assert!(flight.is_ok());
+    assert_eq!(
+        test_utils::process_flight(&mut pipe.server, flight.unwrap()),
+        Err(Error::StreamLimit)
+    );
+    if enable_send_streams_blocked {
+        assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 2);
+        assert!(!pipe
+            .client
+            .streams_blocked_bidi_state
+            .has_pending_stream_blocked_frame());
+    } else {
+        assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 0);
+    }
+}
+
+/// Tests that a STREAMS_BLOCKED (uni) frame is sent when the client tries to
+/// open a new unidirectional stream beyond the server's max_streams_uni limit,
+/// that duplicate frames for the same limit are suppressed, and that a fresh
+/// frame is sent once the peer raises the limit and the endpoint becomes
+/// blocked again at the new, higher limit.
+#[rstest]
+fn streams_blocked_uni_sent(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] enable_send_streams_blocked: bool,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_enable_send_streams_blocked(enable_send_streams_blocked);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // The default config sets initial_max_streams_uni = 3 for the server,
+    // so the client may open streams 2, 6, 10 (sequence 0, 1, 2).
+    // Trying to open stream 14 (sequence 3) must be rejected.
+    assert_eq!(pipe.client.stream_send(2, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(6, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(10, b"a", false), Ok(1));
+
+    // Attempting to open the 4th uni stream should return StreamLimit and
+    // trigger a STREAMS_BLOCKED frame.
+    assert_eq!(
+        pipe.client.stream_send(14, b"a", false),
+        Err(Error::StreamLimit)
+    );
+
+    // Before advancing, the blocked state should be set but no frame sent yet.
+    if enable_send_streams_blocked {
+        assert!(pipe
+            .client
+            .streams_blocked_uni_state
+            .has_pending_stream_blocked_frame());
+    } else {
+        assert!(!pipe
+            .client
+            .streams_blocked_uni_state
+            .has_pending_stream_blocked_frame());
+    }
+
+    // Advance so the client flushes its pending frames to the server.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // The client should have sent one STREAMS_BLOCKED (uni) frame.
+    if enable_send_streams_blocked {
+        assert!(!pipe
+            .client
+            .streams_blocked_uni_state
+            .has_pending_stream_blocked_frame());
+
+        // The server must have received our STREAMS_BLOCKED (uni) frame.
+        assert_eq!(pipe.server.streams_blocked_uni_recv_count, 1);
+    } else {
+        // Frame not sent when feature disabled.
+        assert_eq!(pipe.server.streams_blocked_uni_recv_count, 0);
+    }
+
+    // A second attempt at the same stream must NOT produce another frame —
+    // the peer has already been notified about this limit.
+    assert_eq!(
+        pipe.client.stream_send(14, b"a", false),
+        Err(Error::StreamLimit)
+    );
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(
+        pipe.server.streams_blocked_uni_recv_count,
+        if enable_send_streams_blocked { 1 } else { 0 }
+    );
+
+    // Simulate the peer raising the uni stream limit to 4. The client can
+    // now open stream 14 (sequence 3) but will be blocked at stream 18
+    // (sequence 4 > new limit of 4). That is a new limit, so a fresh
+    // STREAMS_BLOCKED frame must be armed and subsequently sent.
+    pipe.client.streams.update_peer_max_streams_uni(4);
+    assert_eq!(pipe.client.stream_send(14, b"a", false), Ok(1));
+    assert_eq!(
+        pipe.client.stream_send(18, b"a", false),
+        Err(Error::StreamLimit)
+    );
+    if enable_send_streams_blocked {
+        // The blocked flag must be set for the new limit.
+        assert!(pipe
+            .client
+            .streams_blocked_uni_state
+            .has_pending_stream_blocked_frame());
+    }
+    // Emit the client's outgoing flight and process it at the server.
+    let flight = test_utils::emit_flight(&mut pipe.client);
+    assert!(flight.is_ok());
+    assert_eq!(
+        test_utils::process_flight(&mut pipe.server, flight.unwrap()),
+        Err(Error::StreamLimit)
+    );
+    if enable_send_streams_blocked {
+        assert_eq!(pipe.server.streams_blocked_uni_recv_count, 2);
+        assert!(!pipe
+            .client
+            .streams_blocked_uni_state
+            .has_pending_stream_blocked_frame());
+    } else {
+        assert_eq!(pipe.server.streams_blocked_uni_recv_count, 0);
+    }
+}
+
+/// Tests that a lost STREAMS_BLOCKED (bidi) frame is retransmitted.
+///
+/// When the packet carrying the frame is declared lost via the PTO mechanism,
+/// `streams_blocked_bidi_state` must be notified so that the same limit can
+/// be sent again.  The server must ultimately receive the frame.
+#[rstest]
+fn streams_blocked_bidi_retransmit(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_enable_send_streams_blocked(true);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Exhaust the server's initial bidi stream limit (3) so the next attempt
+    // returns StreamLimit and arms a STREAMS_BLOCKED frame.
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+    assert_eq!(
+        pipe.client.stream_send(12, b"a", false),
+        Err(Error::StreamLimit)
+    );
+
+    // Frame is armed but not yet sent.
+    assert!(pipe
+        .client
+        .streams_blocked_bidi_state
+        .has_pending_stream_blocked_frame());
+
+    // Emit the client's flight (stream data + STREAMS_BLOCKED) without
+    // delivering it to the server — the packet is "lost" from the server's
+    // perspective.
+    assert!(test_utils::emit_flight(&mut pipe.client).is_ok());
+
+    // After emission streams_blocked_bidi_state is updated and the sent counter
+    // advances.
+    assert!(!pipe
+        .client
+        .streams_blocked_bidi_state
+        .has_pending_stream_blocked_frame());
+
+    // The server has not received anything yet.
+    assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 0);
+
+    // Trigger loss detection
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
+
+    // Trigger the lost-frames processing by calling send().  The loss handler
+    // is invoked at the start of each send_on_path() call to process any frames
+    // added to lost_frames by ack-based loss detection.
+    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+
+    // After the retransmit send the sequence is:
+    //   1. loss handler: clears `streams_blocked_bidi_state.blocked_sent` to
+    //      trigger retransmission
+    //   2. emit path:    sees
+    //      `streams_blocked_bidi_state.has_pending_stream_blocked_frame()`, emits
+    //      frame, increments sent_count → 2
+    assert!(!pipe
+        .client
+        .streams_blocked_bidi_state
+        .has_pending_stream_blocked_frame());
+
+    // The server has not received anything yet.
+    assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 0);
+
+    // The PTO probe carries the retransmitted STREAMS_BLOCKED frame.
+    // Deliver it to the server.
+    let server_path = &pipe.server.paths.get_active().unwrap();
+    let info = RecvInfo {
+        to: server_path.local_addr(),
+        from: server_path.peer_addr(),
+    };
+    pipe.server.recv(&mut buf[..len], info).unwrap();
+
+    // The server must have received the retransmitted STREAMS_BLOCKED frame.
+    assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 1);
+    let _ = send_info;
+}
+
+/// Tests that a lost STREAMS_BLOCKED (uni) frame is retransmitted.
+///
+/// When the packet carrying the frame is declared lost via the PTO mechanism,
+/// `streams_blocked_bidi_state` must be notified so that the same limit can
+/// be sent again.  The server must ultimately receive the frame.
+#[rstest]
+fn streams_blocked_uni_retransmit(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_enable_send_streams_blocked(true);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Exhaust the server's initial uni stream limit (3) so the next attempt
+    // returns StreamLimit and arms a STREAMS_BLOCKED frame.
+    assert_eq!(pipe.client.stream_send(2, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(6, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(10, b"a", false), Ok(1));
+    assert_eq!(
+        pipe.client.stream_send(14, b"a", false),
+        Err(Error::StreamLimit)
+    );
+
+    // Frame is armed but not yet sent.
+    assert!(pipe
+        .client
+        .streams_blocked_uni_state
+        .has_pending_stream_blocked_frame());
+
+    // Emit the client's flight (stream data + STREAMS_BLOCKED) without
+    // delivering it to the server — the packet is "lost" from the server's
+    // perspective.
+    assert!(test_utils::emit_flight(&mut pipe.client).is_ok());
+
+    // After emission the pending slot is cleared and the sent counter advances.
+    assert!(!pipe
+        .client
+        .streams_blocked_uni_state
+        .has_pending_stream_blocked_frame());
+
+    // The server has not received anything yet.
+    assert_eq!(pipe.server.streams_blocked_uni_recv_count, 0);
+
+    // Trigger loss detection
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
+
+    // Trigger the lost-frames processing by calling send().  The loss handler
+    // is invoked at the start of each send_on_path() call to process any frames
+    // added to lost_frames by ack-based loss detection.
+    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+
+    assert!(!pipe
+        .client
+        .streams_blocked_uni_state
+        .has_pending_stream_blocked_frame());
+
+    // The server has not received anything yet.
+    assert_eq!(pipe.server.streams_blocked_uni_recv_count, 0);
+
+    // Deliver the PTO probe (which carries the retransmitted STREAMS_BLOCKED
+    // frame) to the server.
+    let server_path = &pipe.server.paths.get_active().unwrap();
+    let info = RecvInfo {
+        to: server_path.local_addr(),
+        from: server_path.peer_addr(),
+    };
+    pipe.server.recv(&mut buf[..len], info).unwrap();
+
+    // The server must have received the retransmitted STREAMS_BLOCKED frame.
+    assert_eq!(pipe.server.streams_blocked_uni_recv_count, 1);
+    let _ = send_info;
+}
+
 #[rstest]
 fn stream_data_overlap(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
