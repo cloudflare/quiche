@@ -59,13 +59,13 @@ fn stream_ids(event: &Event) -> TypedArray<'_, i64> {
                     }
                 }
             },
-            EventData::H3StreamTypeSet(v) => {
+            EventData::Http3StreamTypeSet(v) => {
                 ids.push(v.stream_id as i64);
             },
-            EventData::H3FrameCreated(v) => {
+            EventData::Http3FrameCreated(v) => {
                 ids.push(v.stream_id as i64);
             },
-            EventData::H3FrameParsed(v) => {
+            EventData::Http3FrameParsed(v) => {
                 ids.push(v.stream_id as i64);
             },
 

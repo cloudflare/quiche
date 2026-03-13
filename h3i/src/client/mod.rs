@@ -53,7 +53,7 @@ use crate::frame_parser::FrameParser;
 use crate::frame_parser::InterruptCause;
 use crate::recordreplay::qlog::QlogEvent;
 use crate::recordreplay::qlog::*;
-use qlog::events::http3::H3FrameParsed;
+use qlog::events::http3::FrameParsed;
 use qlog::events::http3::Http3Frame;
 use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
@@ -73,7 +73,7 @@ fn handle_qlog(
     stream_id: u64,
 ) {
     if let Some(s) = qlog_streamer {
-        let ev_data = EventData::H3FrameParsed(H3FrameParsed {
+        let ev_data = EventData::Http3FrameParsed(FrameParsed {
             stream_id,
             frame: qlog_frame,
             ..Default::default()
