@@ -310,6 +310,7 @@ where
 
             let incoming_recv = &mut ctx.incoming_pkt_receiver;
             let application = &mut ctx.application;
+
             select! {
                 biased;
                 () = &mut sleep => {
@@ -326,10 +327,14 @@ where
                     sleep.as_mut().reset((now + DEFAULT_SLEEP).into());
                 }
                 Some(pkt) = incoming_recv.recv() => ctx.in_pkt = Some(pkt),
-                // TODO(erittenhouse): would be nice to decouple wait_for_data from the
-                // application, but wait_for_quiche relies on IOW methods, so we can't write a
-                // default implementation for ConnectionStage
-                status = self.wait_for_data_or_handshake(qconn, application) => status?,
+                directive = self.wait_for_data_or_handshake(qconn, application) => {
+                    match directive? {
+                        WaitForDataOrHandshakeDirective::Flush => {
+                            self.flush_buffer_to_socket(application.buffer()).await;
+                        }
+                        WaitForDataOrHandshakeDirective::Noop => {}
+                    }
+                },
             };
 
             if let ControlFlow::Break(reason) = self.conn_stage.post_wait(qconn) {
@@ -689,12 +694,18 @@ where
         Ok(())
     }
 
-    /// When a connection is established, process application data, if not the
-    /// task is probably polled following a wakeup from boring, so we check
-    /// if quiche has any handshake packets to send.
+    // When a connection is established, process application data, if not the task
+    // is probably polled following a wakeup from boring, so we check if quiche
+    // has any handshake packets to send.
+    //
+    // Returns Ok(true) if a subsequent flush is required
+    //
+    // TODO(erittenhouse): would be nice to decouple wait_for_data from the
+    // application, but wait_for_quiche relies on IOW methods, so we can't write a
+    // default implementation for ConnectionStage
     async fn wait_for_data_or_handshake<A: ApplicationOverQuic>(
         &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
-    ) -> QuicResult<()> {
+    ) -> QuicResult<WaitForDataOrHandshakeDirective> {
         if quic_application.should_act() {
             // Poll the application to make progress.
             //
@@ -705,14 +716,20 @@ where
             // still in progress but we have 0-RTT keys to process early data.
             // This means TLS callbacks might only be polled on the next timeout
             // or when a packet is received from the peer.
-            quic_application.wait_for_data(qconn).await
+            quic_application.wait_for_data(qconn).await?;
+            Ok(WaitForDataOrHandshakeDirective::Noop)
         } else {
             // Poll quiche to make progress on handshake callbacks.
-            self.wait_for_quiche(qconn, quic_application).await
+            self.wait_for_quiche(qconn, quic_application.buffer())
+                .await?;
+            Ok(WaitForDataOrHandshakeDirective::Flush)
         }
     }
 
-    /// Check if Quiche has any packets to send and flush them to socket.
+    /// Check if Quiche has any packets to send
+    ///
+    /// If yes: fills buffer and updates self.write_state.bytes_written
+    /// If no: Poll::Pending
     ///
     /// # Example
     ///
@@ -720,12 +737,12 @@ where
     /// handshake. Each call to `gather_data_from_quiche_conn` attempts to
     /// progress the handshake via a call to `quiche::Connection.send()` -
     /// once one of the `gather_data_from_quiche_conn()` calls writes to the
-    /// send buffer, we flush it to the network socket.
-    async fn wait_for_quiche<App: ApplicationOverQuic>(
-        &mut self, qconn: &mut QuicheConnection, app: &mut App,
+    /// send buffer, we signal to the caller which has to take care of flushing
+    async fn wait_for_quiche(
+        &mut self, qconn: &mut QuicheConnection, buffer: &mut [u8],
     ) -> QuicResult<()> {
-        let populate_send_buf = std::future::poll_fn(|_| {
-            match self.gather_data_from_quiche_conn(qconn, app.buffer()) {
+        std::future::poll_fn(|_| {
+            match self.gather_data_from_quiche_conn(qconn, buffer) {
                 Ok(bytes_written) => {
                     // We need to avoid consecutive calls to gather(), which write
                     // data to the buffer, without a flush().
@@ -742,16 +759,17 @@ where
                 _ => Poll::Ready(Err(quiche::Error::TlsFail)),
             }
         })
-        .await;
-
-        if populate_send_buf.is_err() {
-            return Err(Box::new(quiche::Error::TlsFail));
-        }
-
-        self.flush_buffer_to_socket(app.buffer()).await;
-
+        .await?;
         Ok(())
     }
+}
+
+/// Whether caller of [`wait_for_data_or_handshake`] is required to
+/// call [`flush_buffer_to_socket`]
+#[must_use]
+enum WaitForDataOrHandshakeDirective {
+    Noop,
+    Flush,
 }
 
 pub struct Running<Tx, M, A> {
