@@ -271,7 +271,7 @@ fn fake_packet_header() -> PacketHeader {
 }
 
 fn fake_packet_sent(frames: Option<SmallVec<[QuicFrame; 1]>>) -> EventData {
-    EventData::PacketSent(PacketSent {
+    EventData::QuicPacketSent(PacketSent {
         header: fake_packet_header(),
         frames,
         ..Default::default()

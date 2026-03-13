@@ -1464,8 +1464,10 @@ impl Connection {
             let qlog_headers = headers
                 .iter()
                 .map(|h| qlog::events::http3::HttpHeader {
-                    name: String::from_utf8_lossy(h.name()).into_owned(),
-                    value: String::from_utf8_lossy(h.value()).into_owned(),
+                    name: Some(String::from_utf8_lossy(h.name()).into_owned()),
+                    name_bytes: None,
+                    value: Some(String::from_utf8_lossy(h.value()).into_owned()),
+                    value_bytes: None,
                 })
                 .collect();
 
@@ -2196,7 +2198,7 @@ impl Connection {
         qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
             let ev_data = EventData::Http3StreamTypeSet(StreamTypeSet {
                 stream_id,
-                owner: Some(Initiator::Local),
+                initiator: Some(Initiator::Local),
                 stream_type: StreamType::QpackEncode,
                 ..Default::default()
             });
@@ -2218,7 +2220,7 @@ impl Connection {
         qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
             let ev_data = EventData::Http3StreamTypeSet(StreamTypeSet {
                 stream_id,
-                owner: Some(Initiator::Local),
+                initiator: Some(Initiator::Local),
                 stream_type: StreamType::QpackDecode,
                 ..Default::default()
             });
@@ -2336,9 +2338,9 @@ impl Connection {
                 qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
                     let ev_data = EventData::Http3StreamTypeSet(StreamTypeSet {
                         stream_id,
-                        owner: Some(Initiator::Local),
+                        initiator: Some(Initiator::Local),
                         stream_type: StreamType::Unknown,
-                        stream_type_value: Some(ty),
+                        stream_type_bytes: Some(ty),
                         ..Default::default()
                     });
 
@@ -2383,7 +2385,7 @@ impl Connection {
         qlog_with_type!(QLOG_STREAM_TYPE_SET, conn.qlog, q, {
             let ev_data = EventData::Http3StreamTypeSet(StreamTypeSet {
                 stream_id,
-                owner: Some(Initiator::Local),
+                initiator: Some(Initiator::Local),
                 stream_type: StreamType::Control,
                 ..Default::default()
             });
@@ -2506,9 +2508,9 @@ impl Connection {
                         let ev_data =
                             EventData::Http3StreamTypeSet(StreamTypeSet {
                                 stream_id,
-                                owner: Some(Initiator::Remote),
+                                initiator: Some(Initiator::Remote),
                                 stream_type: ty.to_qlog(),
-                                stream_type_value: ty_val,
+                                stream_type_bytes: ty_val,
                                 ..Default::default()
                             });
 
@@ -2922,9 +2924,14 @@ impl Connection {
                     let qlog_headers = headers
                         .iter()
                         .map(|h| qlog::events::http3::HttpHeader {
-                            name: String::from_utf8_lossy(h.name()).into_owned(),
-                            value: String::from_utf8_lossy(h.value())
-                                .into_owned(),
+                            name: Some(
+                                String::from_utf8_lossy(h.name()).into_owned(),
+                            ),
+                            name_bytes: None,
+                            value: Some(
+                                String::from_utf8_lossy(h.value()).into_owned(),
+                            ),
+                            value_bytes: None,
                         })
                         .collect();
 

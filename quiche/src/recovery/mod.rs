@@ -340,7 +340,7 @@ impl Recovery {
         }
 
         if let Some(cc_state) = self.get_updated_qlog_cc_state(now) {
-            let ev_data = EventData::CongestionStateUpdated(
+            let ev_data = EventData::QuicCongestionStateUpdated(
                 qlog::events::quic::CongestionStateUpdated {
                     old: None,
                     new: cc_state.to_string(),
@@ -678,8 +678,8 @@ impl QlogMetrics {
         }
 
         if emit_event {
-            return Some(EventData::MetricsUpdated(
-                qlog::events::quic::MetricsUpdated {
+            return Some(EventData::QuicMetricsUpdated(
+                qlog::events::quic::RecoveryMetricsUpdated {
                     min_rtt: new_min_rtt,
                     smoothed_rtt: new_smoothed_rtt,
                     latest_rtt: new_latest_rtt,
