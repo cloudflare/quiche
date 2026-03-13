@@ -436,17 +436,17 @@ impl From<&EventData> for EventType {
                     RecoveryEventType::MarkedForRetransmit,
                 ),
 
-            EventData::H3ParametersSet { .. } =>
+            EventData::Http3ParametersSet { .. } =>
                 EventType::Http3EventType(Http3EventType::ParametersSet),
-            EventData::H3ParametersRestored { .. } =>
+            EventData::Http3ParametersRestored { .. } =>
                 EventType::Http3EventType(Http3EventType::ParametersRestored),
-            EventData::H3StreamTypeSet { .. } =>
+            EventData::Http3StreamTypeSet { .. } =>
                 EventType::Http3EventType(Http3EventType::StreamTypeSet),
-            EventData::H3FrameCreated { .. } =>
+            EventData::Http3FrameCreated { .. } =>
                 EventType::Http3EventType(Http3EventType::FrameCreated),
-            EventData::H3FrameParsed { .. } =>
+            EventData::Http3FrameParsed { .. } =>
                 EventType::Http3EventType(Http3EventType::FrameParsed),
-            EventData::H3PushResolved { .. } =>
+            EventData::Http3PushResolved { .. } =>
                 EventType::Http3EventType(Http3EventType::PushResolved),
 
             EventData::ConnectionError { .. } =>
@@ -585,22 +585,22 @@ pub enum EventData {
 
     // HTTP/3
     #[serde(rename = "http:parameters_set")]
-    H3ParametersSet(http3::H3ParametersSet),
+    Http3ParametersSet(http3::ParametersSet),
 
     #[serde(rename = "http:parameters_restored")]
-    H3ParametersRestored(http3::H3ParametersRestored),
+    Http3ParametersRestored(http3::ParametersRestored),
 
     #[serde(rename = "http:stream_type_set")]
-    H3StreamTypeSet(http3::H3StreamTypeSet),
+    Http3StreamTypeSet(http3::StreamTypeSet),
 
     #[serde(rename = "http:frame_created")]
-    H3FrameCreated(http3::H3FrameCreated),
+    Http3FrameCreated(http3::FrameCreated),
 
     #[serde(rename = "http:frame_parsed")]
-    H3FrameParsed(http3::H3FrameParsed),
+    Http3FrameParsed(http3::FrameParsed),
 
     #[serde(rename = "http:push_resolved")]
-    H3PushResolved(http3::H3PushResolved),
+    Http3PushResolved(http3::PushResolved),
 
     // Generic
     #[serde(rename = "generic:connection_error")]
