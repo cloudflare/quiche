@@ -234,6 +234,48 @@ pub extern "C" fn quiche_h3_send_request(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_h3_reserve_request_stream(
+    conn: &mut h3::Connection, quic_conn: &mut Connection
+) -> i64 {
+    match conn.reserve_request_stream(quic_conn) {
+        Ok(v) => v as i64,
+
+        Err(e) => e.to_c() as i64,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_h3_stream_headers(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
+    headers: *const Header, headers_len: size_t, is_trailer_section: bool,
+    fin: bool,
+) -> c_int {
+    let headers = headers_from_ptr(headers, headers_len);
+
+    match conn.stream_headers(
+        quic_conn,
+        stream_id,
+        &headers,
+        is_trailer_section,
+        fin,
+    ) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_h3_continue_partial_headers(
+    conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
+) -> c_int {
+    match conn.continue_partial_headers(quic_conn, stream_id) {
+        Ok(_) => 0,
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_h3_send_response(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
     headers: *const Header, headers_len: size_t, fin: bool,
