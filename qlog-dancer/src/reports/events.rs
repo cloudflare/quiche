@@ -418,17 +418,17 @@ pub fn sqlog_event_list(
                         );
                         printyo!("pacing_rate", v.pacing_rate, p.details);
                     },
-                    EventData::H3StreamTypeSet(ev) => {
+                    EventData::Http3StreamTypeSet(ev) => {
                         printy!("id", &ev.stream_id, p.details);
                         printyo_json!("owner", &ev.owner, p.details);
                         printy_json!("ty", &ev.stream_type, p.details);
                     },
-                    EventData::H3FrameCreated(v) => {
+                    EventData::Http3FrameCreated(v) => {
                         printy!("id", v.stream_id, p.details);
                         printyo!("len", v.length, p.details);
                         p.details += &http_frame_to_string(&v.frame);
                     },
-                    EventData::H3FrameParsed(v) => {
+                    EventData::Http3FrameParsed(v) => {
                         printy!("id", v.stream_id, p.details);
                         printyo!("len", v.length, p.details);
                         p.details += &http_frame_to_string(&v.frame);

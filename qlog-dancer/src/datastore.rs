@@ -1113,14 +1113,14 @@ impl Datastore {
             EventData::CongestionStateUpdated(v) =>
                 self.consume_qlog_congestion_state_updated(v, ev_time),
 
-            EventData::H3FrameCreated(v) => match self.vantage_point {
+            EventData::Http3FrameCreated(v) => match self.vantage_point {
                 VantagePoint::Client =>
                     self.consume_qlog_h3_frame_created_client(v, ev_time),
                 VantagePoint::Server =>
                     self.consume_qlog_h3_frame_created_server(v, ev_time),
             },
 
-            EventData::H3FrameParsed(v) => match self.vantage_point {
+            EventData::Http3FrameParsed(v) => match self.vantage_point {
                 VantagePoint::Client =>
                     self.consume_qlog_h3_frame_parsed_client(v, ev_time),
                 VantagePoint::Server =>
@@ -1541,7 +1541,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_created_client(
-        &mut self, fc: &qlog::events::http3::H3FrameCreated, ev_time: f64,
+        &mut self, fc: &qlog::events::http3::FrameCreated, ev_time: f64,
     ) {
         match &fc.frame {
             Http3Frame::Headers { headers } => {
@@ -1580,7 +1580,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_created_server(
-        &mut self, fc: &qlog::events::http3::H3FrameCreated, ev_time: f64,
+        &mut self, fc: &qlog::events::http3::FrameCreated, ev_time: f64,
     ) {
         match &fc.frame {
             Http3Frame::Headers { headers } => {
@@ -1610,7 +1610,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_parsed_client(
-        &mut self, fp: &qlog::events::http3::H3FrameParsed, ev_time: f64,
+        &mut self, fp: &qlog::events::http3::FrameParsed, ev_time: f64,
     ) {
         match &fp.frame {
             Http3Frame::Headers { headers } => {
@@ -1647,7 +1647,7 @@ impl Datastore {
     }
 
     fn consume_qlog_h3_frame_parsed_server(
-        &mut self, fp: &qlog::events::http3::H3FrameParsed, ev_time: f64,
+        &mut self, fp: &qlog::events::http3::FrameParsed, ev_time: f64,
     ) {
         match &fp.frame {
             Http3Frame::Headers { headers } => {
