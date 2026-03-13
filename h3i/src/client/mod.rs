@@ -36,7 +36,9 @@ pub mod connection_summary;
 pub mod sync_client;
 
 use connection_summary::*;
+use qlog::events::http3::FrameParsed;
 use qlog::events::http3::HttpHeader;
+use quiche::ConnectionError;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -54,7 +56,6 @@ use crate::frame_parser::FrameParser;
 use crate::frame_parser::InterruptCause;
 use crate::recordreplay::qlog::QlogEvent;
 use crate::recordreplay::qlog::*;
-use qlog::events::http3::FrameParsed;
 use qlog::events::http3::Http3Frame;
 use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
@@ -64,7 +65,6 @@ use crate::quiche;
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
 use quiche::h3::NameValue;
-use quiche::ConnectionError;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 const QUIC_VERSION: u32 = 1;
@@ -171,8 +171,10 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                     match event {
                         QlogEvent::Event { data, ex_data } => {
                             // skip dummy packet
-                            if matches!(data.as_ref(), EventData::PacketSent(..))
-                            {
+                            if matches!(
+                                data.as_ref(),
+                                EventData::QuicPacketSent(..)
+                            ) {
                                 continue;
                             }
 
@@ -221,8 +223,10 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                     match event {
                         QlogEvent::Event { data, ex_data } => {
                             // skip dummy packet
-                            if matches!(data.as_ref(), EventData::PacketSent(..))
-                            {
+                            if matches!(
+                                data.as_ref(),
+                                EventData::QuicPacketSent(..)
+                            ) {
                                 continue;
                             }
 
@@ -503,8 +507,10 @@ fn handle_response_frame<C: Client>(
                 .headers()
                 .iter()
                 .map(|h| qlog::events::http3::HttpHeader {
-                    name: String::from_utf8_lossy(h.name()).into_owned(),
-                    value: String::from_utf8_lossy(h.value()).into_owned(),
+                    name: Some(String::from_utf8_lossy(h.name()).into_owned()),
+                    name_bytes: None,
+                    value: Some(String::from_utf8_lossy(h.value()).into_owned()),
+                    value_bytes: None,
                 })
                 .collect();
 

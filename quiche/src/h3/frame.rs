@@ -363,42 +363,50 @@ impl Frame {
 
                 if let Some(v) = max_field_section_size {
                     settings.push(qlog::events::http3::Setting {
-                        name: "MAX_FIELD_SECTION_SIZE".to_string(),
+                        name: Some("MAX_FIELD_SECTION_SIZE".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = qpack_max_table_capacity {
                     settings.push(qlog::events::http3::Setting {
-                        name: "QPACK_MAX_TABLE_CAPACITY".to_string(),
+                        name: Some("QPACK_MAX_TABLE_CAPACITY".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = qpack_blocked_streams {
                     settings.push(qlog::events::http3::Setting {
-                        name: "QPACK_BLOCKED_STREAMS".to_string(),
+                        name: Some("QPACK_BLOCKED_STREAMS".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = connect_protocol_enabled {
                     settings.push(qlog::events::http3::Setting {
-                        name: "SETTINGS_ENABLE_CONNECT_PROTOCOL".to_string(),
+                        name: Some(
+                            "SETTINGS_ENABLE_CONNECT_PROTOCOL".to_string(),
+                        ),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = h3_datagram {
                     settings.push(qlog::events::http3::Setting {
-                        name: "H3_DATAGRAM".to_string(),
+                        name: Some("H3_DATAGRAM".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some((k, v)) = grease {
                     settings.push(qlog::events::http3::Setting {
-                        name: k.to_string(),
+                        name: Some(k.to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
@@ -406,7 +414,8 @@ impl Frame {
                 if let Some(additional_settings) = additional_settings {
                     for (k, v) in additional_settings {
                         settings.push(qlog::events::http3::Setting {
-                            name: k.to_string(),
+                            name: Some(k.to_string()),
+                            name_bytes: None,
                             value: *v,
                         });
                     }

@@ -116,8 +116,14 @@ impl From<&Action> for QlogEvents {
                 let qlog_headers = headers
                     .iter()
                     .map(|h| qlog::events::http3::HttpHeader {
-                        name: String::from_utf8_lossy(h.name()).into_owned(),
-                        value: String::from_utf8_lossy(h.value()).into_owned(),
+                        name: Some(
+                            String::from_utf8_lossy(h.name()).into_owned(),
+                        ),
+                        name_bytes: None,
+                        value: Some(
+                            String::from_utf8_lossy(h.value()).into_owned(),
+                        ),
+                        value_bytes: None,
                     })
                     .collect();
 
@@ -173,10 +179,10 @@ impl From<&Action> for QlogEvents {
                     };
 
                 let stream_ev = EventData::Http3StreamTypeSet(StreamTypeSet {
-                    owner: Some(Initiator::Local),
+                    initiator: Some(Initiator::Local),
                     stream_id: *stream_id,
                     stream_type: ty,
-                    stream_type_value: ty_val,
+                    stream_type_bytes: ty_val,
                     ..Default::default()
                 });
                 let mut ex = BTreeMap::new();
@@ -202,10 +208,9 @@ impl From<&Action> for QlogEvents {
                     stream_id: *stream_id,
                     fin: Some(*fin_stream),
                     // ignore offset
-                    offset: 0,
-                    length: len,
+                    offset: None,
                     raw: Some(RawInfo {
-                        length: Some(len),
+                        length: None,
                         payload_length: Some(len),
                         data: String::from_utf8(bytes.clone()).ok()
                     })
@@ -220,8 +225,11 @@ impl From<&Action> for QlogEvents {
             Action::SendDatagram { payload } => {
                 let len = payload.len() as u64;
                 let ev = fake_packet_sent(Some(smallvec![QuicFrame::Datagram {
-                    length: len,
-                    raw: String::from_utf8(payload.clone()).ok()
+                    raw: Some(RawInfo {
+                        length: None,
+                        payload_length: Some(len),
+                        data: String::from_utf8(payload.clone()).ok()
+                    })
                 }]));
 
                 vec![QlogEvent::Event {
@@ -237,10 +245,10 @@ impl From<&Action> for QlogEvents {
                 let ev =
                     fake_packet_sent(Some(smallvec![QuicFrame::ResetStream {
                         stream_id: *stream_id,
-                        error_code: *error_code,
+                        error: qlog::events::ApplicationError::Unknown,
+                        error_code: Some(*error_code),
                         final_size: 0,
-                        length: None,
-                        payload_length: None
+                        raw: None,
                     }]));
                 vec![QlogEvent::Event {
                     data: Box::new(ev),
@@ -255,9 +263,9 @@ impl From<&Action> for QlogEvents {
                 let ev =
                     fake_packet_sent(Some(smallvec![QuicFrame::StopSending {
                         stream_id: *stream_id,
-                        error_code: *error_code,
-                        length: None,
-                        payload_length: None
+                        error: qlog::events::ApplicationError::Unknown,
+                        error_code: Some(*error_code),
+                        raw: None,
                     }]));
                 vec![QlogEvent::Event {
                     data: Box::new(ev),
@@ -301,10 +309,10 @@ impl From<&Action> for QlogEvents {
                 let ev = fake_packet_sent(Some(smallvec![
                     QuicFrame::ConnectionClose {
                         error_space: Some(error_space),
+                        error: None,
                         error_code: Some(error.error_code),
-                        // https://github.com/cloudflare/quiche/issues/1731
-                        error_code_value: None,
                         reason,
+                        reason_bytes: None,
                         trigger_frame_type: None
                     }
                 ]));
@@ -325,7 +333,7 @@ impl From<&Action> for QlogEvents {
 pub fn actions_from_qlog(event: Event, host_override: Option<&str>) -> H3Actions {
     let mut actions = vec![];
     match &event.data {
-        EventData::PacketSent(ps) => {
+        EventData::QuicPacketSent(ps) => {
             let packet_actions: H3Actions = ps.into();
             actions.extend(packet_actions.0);
         },
@@ -392,7 +400,7 @@ impl From<&PacketSent> for H3Actions {
                         ..
                     } => actions.push(Action::ResetStream {
                         stream_id: *stream_id,
-                        error_code: *error_code,
+                        error_code: error_code.unwrap_or_default(),
                     }),
 
                     QuicFrame::StopSending {
@@ -401,7 +409,7 @@ impl From<&PacketSent> for H3Actions {
                         ..
                     } => actions.push(Action::StopSending {
                         stream_id: *stream_id,
-                        error_code: *error_code,
+                        error_code: error_code.unwrap_or_default(),
                     }),
 
                     QuicFrame::ConnectionClose {
@@ -446,7 +454,12 @@ impl From<&PacketSent> for H3Actions {
 
                     QuicFrame::Datagram { raw, .. } => {
                         actions.push(Action::SendDatagram {
-                            payload: raw.clone().unwrap_or_default().into(),
+                            payload: raw
+                                .clone()
+                                .unwrap_or_default()
+                                .data
+                                .unwrap_or_default()
+                                .into(),
                         });
                     },
                     _ => (),
@@ -461,15 +474,18 @@ impl From<&PacketSent> for H3Actions {
 fn map_header(
     hdr: &HttpHeader, host_override: Option<&str>,
 ) -> quiche::h3::Header {
-    if hdr.name.eq_ignore_ascii_case(":authority") ||
-        hdr.name.eq_ignore_ascii_case("host")
+    let name = hdr.name.as_deref().unwrap_or("");
+    let value = hdr.value.as_deref().unwrap_or("");
+
+    if name.eq_ignore_ascii_case(":authority") ||
+        name.eq_ignore_ascii_case("host")
     {
         if let Some(host) = host_override {
-            return quiche::h3::Header::new(hdr.name.as_bytes(), host.as_bytes());
+            return quiche::h3::Header::new(name.as_bytes(), host.as_bytes());
         }
     }
 
-    quiche::h3::Header::new(hdr.name.as_bytes(), hdr.value.as_bytes())
+    quiche::h3::Header::new(name.as_bytes(), value.as_bytes())
 }
 
 impl From<H3FrameCreatedEx> for Action {
@@ -494,7 +510,8 @@ impl From<H3FrameCreatedEx> for Action {
                 // This is ugly but it reflects ambiguity in the qlog
                 // specs.
                 for s in settings {
-                    match s.name.as_str() {
+                    let name = s.name.as_deref().unwrap_or("");
+                    match name {
                         "MAX_FIELD_SECTION_SIZE" =>
                             raw_settings.push((0x6, s.value)),
                         "QPACK_MAX_TABLE_CAPACITY" =>
@@ -506,7 +523,10 @@ impl From<H3FrameCreatedEx> for Action {
                         "H3_DATAGRAM" => raw_settings.push((0x33, s.value)),
 
                         _ =>
-                            if let Ok(ty) = s.name.parse::<u64>() {
+                            if let Some(ty) = s.name_bytes {
+                                raw_settings.push((ty, s.value));
+                                additional_settings.push((ty, s.value));
+                            } else if let Ok(ty) = name.parse::<u64>() {
                                 raw_settings.push((ty, s.value));
                                 additional_settings.push((ty, s.value));
                             },
@@ -603,7 +623,7 @@ fn from_qlog_stream_type_set(
         qlog::events::http3::StreamType::QpackEncode => Some(0x2),
         qlog::events::http3::StreamType::QpackDecode => Some(0x3),
         qlog::events::http3::StreamType::Reserved |
-        qlog::events::http3::StreamType::Unknown => st.stream_type_value,
+        qlog::events::http3::StreamType::Unknown => st.stream_type_bytes,
         _ => None,
     };
 
@@ -715,7 +735,7 @@ mod tests {
 
     #[test]
     fn deser_http_headers_to_action() {
-        let serialized = r#"{"time":0.074725,"name":"http:frame_created","data":{"stream_id":0,"frame":{"frame_type":"headers","headers":[{"name":":method","value":"GET"},{"name":":authority","value":"example.net"},{"name":":path","value":"/"},{"name":":scheme","value":"https"}]}},"fin_stream":true}"#;
+        let serialized = r#"{"time":0.074725,"name":"http3:frame_created","data":{"stream_id":0,"frame":{"frame_type":"headers","headers":[{"name":":method","value":"GET"},{"name":":authority","value":"example.net"},{"name":":path","value":"/"},{"name":":scheme","value":"https"}]}},"fin_stream":true}"#;
         let deserialized = serde_json::from_str::<Event>(serialized).unwrap();
         let actions = actions_from_qlog(deserialized, None);
         assert!(actions.0.len() == 1);
@@ -742,7 +762,7 @@ mod tests {
 
     #[test]
     fn deser_http_headers_host_overrid_to_action() {
-        let serialized = r#"{"time":0.074725,"name":"http:frame_created","data":{"stream_id":0,"frame":{"frame_type":"headers","headers":[{"name":":method","value":"GET"},{"name":":authority","value":"bla.com"},{"name":":path","value":"/"},{"name":":scheme","value":"https"}]}},"fin_stream":true}"#;
+        let serialized = r#"{"time":0.074725,"name":"http3:frame_created","data":{"stream_id":0,"frame":{"frame_type":"headers","headers":[{"name":":method","value":"GET"},{"name":":authority","value":"bla.com"},{"name":":path","value":"/"},{"name":":scheme","value":"https"}]}},"fin_stream":true}"#;
         let deserialized = serde_json::from_str::<Event>(serialized).unwrap();
         let actions = actions_from_qlog(deserialized, Some("example.org"));
         assert!(actions.0.len() == 1);
@@ -769,7 +789,7 @@ mod tests {
 
     #[test]
     fn deser_http_headers_literal_to_action() {
-        let serialized = r#"{"time":0.074725,"name":"http:frame_created","data":{"stream_id":0,"frame":{"frame_type":"headers","headers":[{"name":":method","value":"GET"},{"name":":authority","value":"bla.com"},{"name":":path","value":"/"},{"name":":scheme","value":"https"},{"name":"Foo","value":"bar"}]}},"fin_stream":true,"literal_headers":true}"#;
+        let serialized = r#"{"time":0.074725,"name":"http3:frame_created","data":{"stream_id":0,"frame":{"frame_type":"headers","headers":[{"name":":method","value":"GET"},{"name":":authority","value":"bla.com"},{"name":":path","value":"/"},{"name":":scheme","value":"https"},{"name":"Foo","value":"bar"}]}},"fin_stream":true,"literal_headers":true}"#;
         let deserialized = serde_json::from_str::<Event>(serialized).unwrap();
         let actions = actions_from_qlog(deserialized, None);
         assert!(actions.0.len() == 1);

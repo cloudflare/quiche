@@ -321,7 +321,13 @@ fn print_tx_stream_frames(data_store: &Datastore) {
     } else {
         for entry in &data_store.sent_stream_frames {
             let total = match entry.1.last() {
-                Some((_, QuicFrame::Stream { offset, length, .. })) => {
+                Some((_, QuicFrame::Stream { offset, raw, .. })) => {
+                    let offset = offset.unwrap_or_default();
+                    let length = raw
+                        .clone()
+                        .unwrap_or_default()
+                        .payload_length
+                        .unwrap_or_default();
                     format!("{}", offset + length)
                 },
 
