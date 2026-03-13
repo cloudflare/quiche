@@ -85,7 +85,7 @@ pub fn draw_rtt_plot<'a, DB: DrawingBackend + 'a>(
     let mut chart = builder
         .build_cartesian_2d(
             axis.x.range(),
-            0.0..(ss.y_max_rtt_plot + ss.y_max_rtt_plot / 10.0),
+            0.0f32..(ss.y_max_rtt_plot + ss.y_max_rtt_plot / 10.0),
         )
         .unwrap();
 
@@ -118,7 +118,7 @@ pub fn draw_rtt_plot<'a, DB: DrawingBackend + 'a>(
 #[cfg(target_arch = "wasm32")]
 pub fn plot_rtt_plot<'a>(
     params: &PlotParameters, ss: &SeriesStore, canvas_id: &str,
-) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf64, RangedCoordf64>>
+) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf64, RangedCoordf32>>
 {
     let root =
         make_chart_canvas_area(&canvas_id, params.colors, params.chart_margin);

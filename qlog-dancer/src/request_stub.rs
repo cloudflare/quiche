@@ -326,8 +326,8 @@ impl tabled::Tabled for HttpRequestStub {
 
 pub fn find_header_value(hdrs: &[HttpHeader], name: &str) -> Option<String> {
     hdrs.iter()
-        .find(|&h| h.name == name)
-        .map(|h| h.value.clone())
+        .find(|&h| h.name.as_deref() == Some(name))
+        .and_then(|h| h.value.clone())
 }
 
 impl HttpRequestStub {
