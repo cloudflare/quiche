@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ApplicationErrorCode","ConnectionErrorCode","CryptoError","DataRecipient","EventCategory","EventData","EventImportance","EventType","GenericEventType","TimeFormat"],"mod":["connectivity","http3","quic","security"],"struct":["Event","JsonEvent","RawInfo"],"trait":["Eventable"],"type":["ExData"]};
