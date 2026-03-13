@@ -114,7 +114,7 @@ cargo test --doc --features=async,ffi,qlog --workspace          # doc tests (sep
 
 # Lint
 cargo clippy --features=boringssl-vendored --workspace -- -D warnings
-cargo fmt -- --check                                  # nightly only
+cargo +nightly fmt -- --check                                  
 
 # Fuzz
 cargo fuzz run packet_recv_client -- -runs=1
