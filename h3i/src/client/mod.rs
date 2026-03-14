@@ -264,13 +264,13 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                     );
                 },
                 Ok(_) => {
-                    log::error!(
+                    panic!(
                         "stream_send on stream_id={stream_id} succeeded \
                          unexpectedly; expected StreamLimit"
                     );
                 },
                 Err(e) => {
-                    log::error!(
+                    panic!(
                         "stream_send on stream_id={stream_id} returned \
                          unexpected error: {e}; expected StreamLimit"
                     );

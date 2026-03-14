@@ -104,7 +104,7 @@ pub enum Action {
     ///
     /// The stream ID to attempt is specified by `stream_id`. The action
     /// succeeds (i.e. the test assertion passes) only when `stream_send`
-    /// returns `Err(StreamLimit)`; any other outcome is logged as an error.
+    /// returns `Err(StreamLimit)`; any other outcome triggers a panic.
     StreamLimitReached {
         stream_id: u64,
     },
