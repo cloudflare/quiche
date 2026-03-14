@@ -114,7 +114,7 @@ const AUTO_PICK: &str = "autopick StreamID";
 const PUSH_ID_PROMPT: &str = "push ID:";
 
 enum PromptOutcome {
-    Action(Action),
+    Action(Box<Action>),
     Repeat,
     Commit,
     Clear,
@@ -174,7 +174,8 @@ impl Prompter {
             STREAM_BYTES => prompt_stream_bytes(),
             DATAGRAM_QUARTER_STREAM_ID | DATAGRAM_RAW_PAYLOAD =>
                 prompt_send_datagram(action == DATAGRAM_QUARTER_STREAM_ID),
-            FLUSH_PACKETS => return PromptOutcome::Action(Action::FlushPackets),
+            FLUSH_PACKETS =>
+                return PromptOutcome::Action(Box::new(Action::FlushPackets)),
             COMMIT => return PromptOutcome::Commit,
             WAIT => prompt_wait(),
             QUIT => return PromptOutcome::Clear,
@@ -186,7 +187,7 @@ impl Prompter {
         };
 
         match res {
-            Ok(action) => PromptOutcome::Action(action),
+            Ok(action) => PromptOutcome::Action(Box::new(action)),
             Err(e) =>
                 if handle_action_loop_error(e) {
                     PromptOutcome::Commit
@@ -220,7 +221,7 @@ impl Prompter {
             };
 
             match self.handle_action(&action) {
-                PromptOutcome::Action(action) => actions.push(action),
+                PromptOutcome::Action(action) => actions.push(*action),
                 PromptOutcome::Repeat => continue,
                 PromptOutcome::Commit => return actions,
                 PromptOutcome::Clear => return vec![],
@@ -358,6 +359,7 @@ fn prompt_data() -> InquireResult<Action> {
         frame: quiche::h3::frame::Frame::Data {
             payload: payload.into(),
         },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -373,6 +375,7 @@ fn prompt_max_push_id() -> InquireResult<Action> {
         stream_id,
         fin_stream,
         frame: quiche::h3::frame::Frame::MaxPushId { push_id },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -388,6 +391,7 @@ fn prompt_cancel_push() -> InquireResult<Action> {
         stream_id,
         fin_stream,
         frame: quiche::h3::frame::Frame::CancelPush { push_id },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -403,6 +407,7 @@ fn prompt_goaway() -> InquireResult<Action> {
         stream_id,
         fin_stream,
         frame: quiche::h3::frame::Frame::GoAway { id },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -424,6 +429,7 @@ fn prompt_grease() -> InquireResult<Action> {
             raw_type,
             payload: payload.into(),
         },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -446,6 +452,7 @@ fn prompt_extension() -> InquireResult<Action> {
             raw_type,
             payload: payload.into(),
         },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -476,6 +483,7 @@ pub fn prompt_stream_bytes() -> InquireResult<Action> {
         stream_id,
         fin_stream,
         bytes: bytes.as_bytes().to_vec(),
+        expected_result: Default::default(),
     })
 }
 
