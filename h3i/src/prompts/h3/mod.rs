@@ -98,6 +98,7 @@ const CONNECTION_CLOSE: &str = "connection_close";
 const STREAM_BYTES: &str = "stream_bytes";
 const DATAGRAM_QUARTER_STREAM_ID: &str = "datagram_quarter_stream_id";
 const DATAGRAM_RAW_PAYLOAD: &str = "datagram_raw_payload";
+const STREAM_LIMIT_REACHED: &str = "stream_limit_reached";
 
 const COMMIT: &str = "commit";
 const FLUSH_PACKETS: &str = "flush_packets";
@@ -174,6 +175,7 @@ impl Prompter {
             STREAM_BYTES => prompt_stream_bytes(),
             DATAGRAM_QUARTER_STREAM_ID | DATAGRAM_RAW_PAYLOAD =>
                 prompt_send_datagram(action == DATAGRAM_QUARTER_STREAM_ID),
+            STREAM_LIMIT_REACHED => prompt_stream_limit_reached(),
             FLUSH_PACKETS => return PromptOutcome::Action(Action::FlushPackets),
             COMMIT => return PromptOutcome::Commit,
             WAIT => prompt_wait(),
@@ -275,6 +277,7 @@ fn action_suggester(val: &str) -> SuggestionResult<Vec<String>> {
         STREAM_BYTES,
         DATAGRAM_QUARTER_STREAM_ID,
         DATAGRAM_RAW_PAYLOAD,
+        STREAM_LIMIT_REACHED,
         FLUSH_PACKETS,
         COMMIT,
         WAIT,
@@ -477,6 +480,12 @@ pub fn prompt_stream_bytes() -> InquireResult<Action> {
         fin_stream,
         bytes: bytes.as_bytes().to_vec(),
     })
+}
+
+fn prompt_stream_limit_reached() -> InquireResult<Action> {
+    let stream_id = h3::prompt_stream_id()?;
+
+    Ok(Action::StreamLimitReached { stream_id })
 }
 
 pub fn prompt_send_datagram(with_quarter_stream: bool) -> InquireResult<Action> {

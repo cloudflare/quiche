@@ -71,6 +71,9 @@ pub struct Config {
     pub dgram_recv_queue_len: usize,
     /// Datagram send queue length.
     pub dgram_send_queue_len: usize,
+    /// Whether to send STREAMS_BLOCKED frames when the peer's bidirectional
+    /// stream limit is reached.
+    pub send_streams_blocked: bool,
 }
 
 impl Config {
@@ -158,6 +161,15 @@ impl Config {
         self
     }
 
+    /// Enable sending [`quiche::frame::Frame::StreamsBlocked`] frames when the
+    /// peer's bidirectional stream limit is reached.
+    pub fn with_send_streams_blocked(
+        mut self, send_streams_blocked: bool,
+    ) -> Self {
+        self.send_streams_blocked = send_streams_blocked;
+        self
+    }
+
     pub fn with_dgram_recv_queue_len(
         mut self, dgram_recv_queue_len: usize,
     ) -> Self {
@@ -200,6 +212,7 @@ impl Config {
             enable_dgram: self.enable_dgram,
             dgram_recv_queue_len: self.dgram_recv_queue_len,
             dgram_send_queue_len: self.dgram_send_queue_len,
+            send_streams_blocked: self.send_streams_blocked,
         })
     }
 }
@@ -227,6 +240,7 @@ impl Default for Config {
             enable_dgram: true,
             dgram_recv_queue_len: 65536,
             dgram_send_queue_len: 65536,
+            send_streams_blocked: false,
         }
     }
 }
