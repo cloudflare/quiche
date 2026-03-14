@@ -135,6 +135,7 @@ fn create_config(args: &H3iConfig) -> QuicSettings {
     quic_settings.active_connection_id_limit = 0;
     quic_settings.max_connection_window = args.max_window;
     quic_settings.max_stream_window = args.max_stream_window;
+    quic_settings.enable_send_streams_blocked = args.send_streams_blocked;
     quic_settings.grease = false;
 
     quic_settings.capture_quiche_logs = true;
