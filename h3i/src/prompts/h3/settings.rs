@@ -63,6 +63,7 @@ pub fn prompt_settings() -> InquireResult<Action> {
             raw: None,
             additional_settings: Some(settings),
         },
+        expected_result: Default::default(),
     };
 
     Ok(action)

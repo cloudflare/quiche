@@ -358,6 +358,7 @@ fn prompt_data() -> InquireResult<Action> {
         frame: quiche::h3::frame::Frame::Data {
             payload: payload.into(),
         },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -373,6 +374,7 @@ fn prompt_max_push_id() -> InquireResult<Action> {
         stream_id,
         fin_stream,
         frame: quiche::h3::frame::Frame::MaxPushId { push_id },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -388,6 +390,7 @@ fn prompt_cancel_push() -> InquireResult<Action> {
         stream_id,
         fin_stream,
         frame: quiche::h3::frame::Frame::CancelPush { push_id },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -403,6 +406,7 @@ fn prompt_goaway() -> InquireResult<Action> {
         stream_id,
         fin_stream,
         frame: quiche::h3::frame::Frame::GoAway { id },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -424,6 +428,7 @@ fn prompt_grease() -> InquireResult<Action> {
             raw_type,
             payload: payload.into(),
         },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -446,6 +451,7 @@ fn prompt_extension() -> InquireResult<Action> {
             raw_type,
             payload: payload.into(),
         },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -476,6 +482,7 @@ pub fn prompt_stream_bytes() -> InquireResult<Action> {
         stream_id,
         fin_stream,
         bytes: bytes.as_bytes().to_vec(),
+        expected_result: Default::default(),
     })
 }
 
