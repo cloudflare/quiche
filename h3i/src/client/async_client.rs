@@ -291,7 +291,7 @@ impl H3iDriver {
                             "h3i: waiting for peer_streams_left_bidi >= {required_streams:?}"
                         );
                         self.waiting_for_responses
-                            .set_required_stream_quota(required_streams);
+                            .set_required_stream_quota(*required_streams);
                     },
                 }
             } else {
