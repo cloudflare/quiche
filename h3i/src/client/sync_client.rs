@@ -391,10 +391,9 @@ pub fn connect_with_early_data(
                 wait_cleared = true;
             }
 
-            // Check whether a received MAX_STREAMS_BIDI frame has satisfied a
-            // PeerStreamsLeftBidi wait.
+            // Check if a CanOpenNumStreams wait is satisfied.
             let before = waiting_for.is_empty();
-            waiting_for.check_peer_streams_left_bidi(&conn);
+            waiting_for.check_can_open_num_streams(&conn);
             if !before && waiting_for.is_empty() {
                 wait_cleared = true;
             }
@@ -588,12 +587,11 @@ where
                     waiting_for.add_wait(response);
                     return None;
                 },
-                WaitType::PeerStreamsLeftBidi(n) => {
+                WaitType::CanOpenNumStreams(required_streams) => {
                     log::info!(
-                        "waiting for peer_streams_left_bidi >= {n} before \
-                         executing more actions"
+                        "h3i: waiting for peer_streams_left_bidi >= {required_streams:?}"
                     );
-                    waiting_for.set_peer_streams_left_bidi(*n);
+                    waiting_for.set_required_stream_quota(*required_streams);
                     return None;
                 },
             },

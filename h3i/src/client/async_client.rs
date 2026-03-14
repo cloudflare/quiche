@@ -286,11 +286,12 @@ impl H3iDriver {
                     WaitType::StreamEvent(event) => {
                         self.waiting_for_responses.add_wait(event);
                     },
-                    WaitType::PeerStreamsLeftBidi(n) => {
+                    WaitType::CanOpenNumStreams(required_streams) => {
                         log::info!(
-                            "h3i: waiting for peer_streams_left_bidi >= {n}"
+                            "h3i: waiting for peer_streams_left_bidi >= {required_streams:?}"
                         );
-                        self.waiting_for_responses.set_peer_streams_left_bidi(*n);
+                        self.waiting_for_responses
+                            .set_required_stream_quota(required_streams);
                     },
                 }
             } else {
@@ -341,8 +342,7 @@ impl ApplicationOverQuic for H3iDriver {
             self.waiting_for_responses.remove_wait(event);
         }
 
-        self.waiting_for_responses
-            .check_peer_streams_left_bidi(qconn);
+        self.waiting_for_responses.check_can_open_num_streams(qconn);
 
         Ok(())
     }

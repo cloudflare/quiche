@@ -138,12 +138,18 @@ pub enum WaitType {
     /// 2. The peer sends a `fin` over the specified stream
     StreamEvent(StreamEvent),
 
-    /// Wait until the peer has granted at least `n` more bidirectional streams
-    /// (i.e. until [`quiche::Connection::peer_streams_left_bidi`] >= `n`).
+    /// Wait until the peer has updated MAX_STREAMS to allow creation
+    /// of the required additional streams.
     ///
-    /// This is satisfied as soon as the connection processes a
-    /// `MAX_STREAMS_BIDI` frame that raises the limit high enough.
-    PeerStreamsLeftBidi(u64),
+    /// Typically requires processing of a MAX_STREAMS frame sent by
+    /// the peer.  The peer may decide to send MAX_STREAMS updates as
+    /// the number of active streams changes due to stream termination
+    /// or stream creation. Typical goals being:
+    /// - Limit the number of active streams to the configured limit.
+    /// - Ensure that available quota is non-zero when number of active streams
+    ///   is below the configured limit.
+    /// - Minimize the number of MAX_STREAM updates sent.
+    CanOpenNumStreams(RequiredStreamsQuota),
 }
 
 impl From<WaitType> for Action {
@@ -164,6 +170,17 @@ pub struct StreamEvent {
     pub event_type: StreamEventType,
 }
 
+/// A check for stream creation quota which will terminate the wait period.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename = "snake_case")]
+pub struct RequiredStreamsQuota {
+    /// Required stream quota
+    pub num: u64,
+
+    /// True for bidirectional streams, false for unidirectional streams
+    pub bidi: bool,
+}
+
 /// Response that can terminate a wait period.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -180,13 +197,13 @@ pub enum StreamEventType {
 #[derive(Debug, Default)]
 pub(crate) struct WaitingFor {
     stream_events: HashMap<u64, Vec<StreamEvent>>,
-    peer_streams_left_bidi: Option<u64>,
+    required_stream_quota: Option<RequiredStreamsQuota>,
 }
 
 impl WaitingFor {
     pub(crate) fn is_empty(&self) -> bool {
         self.stream_events.values().all(|v| v.is_empty()) &&
-            self.peer_streams_left_bidi.is_none()
+            self.required_stream_quota.is_none()
     }
 
     pub(crate) fn add_wait(&mut self, stream_event: &StreamEvent) {
@@ -196,23 +213,32 @@ impl WaitingFor {
             .push(*stream_event);
     }
 
-    pub(crate) fn set_peer_streams_left_bidi(&mut self, n: u64) {
-        self.peer_streams_left_bidi = Some(n);
+    pub(crate) fn set_required_stream_quota(
+        &mut self, required: RequiredStreamsQuota,
+    ) {
+        self.required_stream_quota = Some(required);
     }
 
-    /// Check and clear the [`WaitType::PeerStreamsLeftBidi`] condition if
+    /// Check and clear the [`WaitType::CanOpenNumStreams`] condition if
     /// `conn` now reports enough available streams.
-    pub(crate) fn check_peer_streams_left_bidi(
+    pub(crate) fn check_can_open_num_streams(
         &mut self, conn: &quiche::Connection,
     ) {
-        if let Some(needed) = self.peer_streams_left_bidi {
-            if conn.peer_streams_left_bidi() >= needed {
+        if let Some(streams_required) = self.required_stream_quota {
+            let available_streams = if streams_required.bidi {
+                conn.peer_streams_left_bidi()
+            } else {
+                conn.peer_streams_left_uni()
+            };
+            if available_streams >= streams_required.num {
                 log::info!(
-                    "peer_streams_left_bidi condition met \
-                     (needed={needed}, available={})",
-                    conn.peer_streams_left_bidi()
+                    "required_stream_quota condition met \
+                     (needed={}, available={}, bidi={})",
+                    streams_required.num,
+                    available_streams,
+                    streams_required.bidi,
                 );
-                self.peer_streams_left_bidi = None;
+                self.required_stream_quota = None;
             }
         }
     }

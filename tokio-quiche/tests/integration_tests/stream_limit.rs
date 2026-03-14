@@ -37,6 +37,7 @@ use tokio_quiche::quic::QuicConnectionStats;
 
 use h3i::actions::h3::send_headers_frame;
 use h3i::actions::h3::Action;
+use h3i::actions::h3::RequiredStreamsQuota;
 use h3i::actions::h3::StreamEvent;
 use h3i::actions::h3::StreamEventType;
 use h3i::actions::h3::WaitType;
@@ -99,7 +100,10 @@ async fn test_bidi_stream_limit_reached() -> QuicResult<()> {
     // MAX_STREAMS_BIDI frame that the client has received and applied.
     // peer_streams_left_bidi >= 1 is only true after all of that has happened.
     actions.push(Action::Wait {
-        wait_type: WaitType::PeerStreamsLeftBidi(1),
+        wait_type: WaitType::CanOpenNumStreams(RequiredStreamsQuota {
+            num: 1,
+            bidi: true,
+        }),
     });
     // Attempt to create the stream that previously blocked. It should succeed
     // since the server sent a MAX_STREAMS update after streams 0 and 4 closed.
