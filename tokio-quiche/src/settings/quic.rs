@@ -258,6 +258,13 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_max_stream_window")]
     pub max_stream_window: u64,
 
+    /// If true, send an advisory STREAMS_BLOCKED frame when the
+    /// application's local stream creation attempts fail due to the
+    /// peer advertised MAX_STREAMS limit.
+    ///
+    /// Defaults to false.
+    pub enable_send_streams_blocked: bool,
+
     /// Configures whether to send GREASE values.
     ///
     /// Defaults to true.
