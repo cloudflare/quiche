@@ -1745,12 +1745,13 @@ pub fn connect_with_buffer_factory<F: BufFactory>(
 
 /// Creates a new client-side connection, with a custom buffer generation
 /// method using the given dcid initially.
-/// Be aware the RFC places requirements for unpredictability and length
-/// on the client DCID field.
-/// [`RFC9000`]:  https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
+/// Be aware the [RFC9000, Section 7.2.3] places requirements for
+/// unpredictability and length on the client DCID field.
 ///
 /// The buffers generated can be anything that can be drereferenced as a byte
 /// slice. See [`connect`] and [`BufFactory`] for more info.
+///
+/// [RFC9000, Section 7.2.3]: https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
 #[cfg(feature = "custom-client-dcid")]
 #[cfg_attr(docsrs, doc(cfg(feature = "custom-client-dcid")))]
 pub fn connect_with_dcid_and_buffer_factory<F: BufFactory>(
