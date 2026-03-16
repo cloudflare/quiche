@@ -86,6 +86,7 @@ impl From<&Action> for QlogEvents {
                 stream_id,
                 fin_stream,
                 frame,
+                ..
             } => {
                 let frame_ev = EventData::Http3FrameCreated(FrameCreated {
                     stream_id: *stream_id,
@@ -150,6 +151,7 @@ impl From<&Action> for QlogEvents {
                 stream_id,
                 fin_stream,
                 stream_type,
+                ..
             } => {
                 let ty = match *stream_type {
                     HTTP3_CONTROL_STREAM_TYPE_ID =>
@@ -193,6 +195,7 @@ impl From<&Action> for QlogEvents {
                 stream_id,
                 fin_stream,
                 bytes,
+                ..
             } => {
                 let len = bytes.len() as u64;
                 let ev = fake_packet_sent(Some(smallvec![QuicFrame::Stream {
@@ -434,6 +437,7 @@ impl From<&PacketSent> for H3Actions {
                                 stream_id: *stream_id,
                                 fin_stream: true,
                                 bytes: vec![],
+                                expected_result: Default::default(),
                             });
                         }
                     },
@@ -520,6 +524,7 @@ impl From<H3FrameCreatedEx> for Action {
                         raw: Some(raw_settings),
                         additional_settings: Some(additional_settings),
                     },
+                    expected_result: Default::default(),
                 }
             },
 
@@ -548,6 +553,7 @@ impl From<H3FrameCreatedEx> for Action {
                     literal_headers,
                     headers: hdrs,
                     frame: Frame::Headers { header_block },
+                    expected_result: Default::default(),
                 }
             },
 
@@ -566,6 +572,7 @@ impl From<H3FrameCreatedEx> for Action {
                     stream_id,
                     fin_stream,
                     frame: Frame::Data { payload },
+                    expected_result: Default::default(),
                 }
             },
 
@@ -573,6 +580,7 @@ impl From<H3FrameCreatedEx> for Action {
                 stream_id,
                 fin_stream,
                 frame: Frame::GoAway { id: *id },
+                expected_result: Default::default(),
             },
 
             _ => unimplemented!(),
@@ -602,6 +610,7 @@ fn from_qlog_stream_type_set(
             stream_id: st.stream_id,
             fin_stream,
             stream_type: ty,
+            expected_result: Default::default(),
         })
     }
 
@@ -723,6 +732,7 @@ mod tests {
             literal_headers: false,
             headers,
             frame,
+            expected_result: Default::default(),
         };
 
         assert_eq!(actions.0[0], expected);
@@ -749,6 +759,7 @@ mod tests {
             literal_headers: false,
             headers,
             frame,
+            expected_result: Default::default(),
         };
 
         assert_eq!(actions.0[0], expected);
@@ -776,6 +787,7 @@ mod tests {
             literal_headers: true,
             headers,
             frame,
+            expected_result: Default::default(),
         };
 
         assert_eq!(actions.0[0], expected);

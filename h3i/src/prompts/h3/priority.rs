@@ -63,6 +63,7 @@ pub fn prompt_priority() -> InquireResult<Action> {
         stream_id,
         fin_stream,
         frame,
+        expected_result: Default::default(),
     };
 
     Ok(action)

@@ -44,6 +44,18 @@ use serde_with::serde_as;
 use crate::encode_header_block;
 use crate::encode_header_block_literal;
 
+/// Expected result from a stream_send operation.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ExpectedStreamSendResult {
+    /// Expect success with any number of bytes written.
+    #[default]
+    Ok,
+    /// Expect success with exactly the specified number of bytes written.
+    OkExact(usize),
+    /// Expect the operation to fail with the specified error.
+    Error(quiche::Error),
+}
+
 /// An action which the HTTP/3 client should take.
 ///
 /// The client iterates over a vector of said actions, executing each one
@@ -57,6 +69,7 @@ pub enum Action {
         stream_id: u64,
         fin_stream: bool,
         frame: Frame,
+        expected_result: ExpectedStreamSendResult,
     },
 
     /// Send a HEADERS frame over a stream.
@@ -66,6 +79,7 @@ pub enum Action {
         literal_headers: bool,
         headers: Vec<Header>,
         frame: Frame,
+        expected_result: ExpectedStreamSendResult,
     },
 
     /// Send arbitrary bytes over a stream.
@@ -73,6 +87,7 @@ pub enum Action {
         stream_id: u64,
         fin_stream: bool,
         bytes: Vec<u8>,
+        expected_result: ExpectedStreamSendResult,
     },
 
     /// Send a DATAGRAM frame.
@@ -85,6 +100,7 @@ pub enum Action {
         stream_id: u64,
         fin_stream: bool,
         stream_type: u64,
+        expected_result: ExpectedStreamSendResult,
     },
 
     /// Send a RESET_STREAM frame with the given error code.
@@ -210,6 +226,25 @@ pub fn send_headers_frame(
         headers,
         literal_headers: false,
         frame: Frame::Headers { header_block },
+        expected_result: ExpectedStreamSendResult::Ok,
+    }
+}
+
+/// Convenience to convert between header-related data and a
+/// [Action::SendHeadersFrame].
+pub fn send_headers_frame_with_expected_result(
+    stream_id: u64, fin_stream: bool, headers: Vec<Header>,
+    expected_result: ExpectedStreamSendResult,
+) -> Action {
+    let header_block = encode_header_block(&headers).unwrap();
+
+    Action::SendHeadersFrame {
+        stream_id,
+        fin_stream,
+        headers,
+        literal_headers: false,
+        frame: Frame::Headers { header_block },
+        expected_result,
     }
 }
 
@@ -228,5 +263,26 @@ pub fn send_headers_frame_literal(
         headers,
         literal_headers: true,
         frame: Frame::Headers { header_block },
+        expected_result: ExpectedStreamSendResult::Ok,
+    }
+}
+
+/// Convenience to convert between header-related data and a
+/// [Action::SendHeadersFrame]. Unlike [`send_headers_frame`],
+/// this version encodes the headers literally as they are provided,
+/// not converting the header names to lower-case.
+pub fn send_headers_frame_literal_with_expected_result(
+    stream_id: u64, fin_stream: bool, headers: Vec<Header>,
+    expected_result: ExpectedStreamSendResult,
+) -> Action {
+    let header_block = encode_header_block_literal(&headers).unwrap();
+
+    Action::SendHeadersFrame {
+        stream_id,
+        fin_stream,
+        headers,
+        literal_headers: true,
+        frame: Frame::Headers { header_block },
+        expected_result,
     }
 }

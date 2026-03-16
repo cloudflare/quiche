@@ -43,6 +43,7 @@ use std::net::SocketAddr;
 use std::time::Instant;
 
 use crate::actions::h3::Action;
+use crate::actions::h3::ExpectedStreamSendResult;
 use crate::actions::h3::StreamEvent;
 use crate::actions::h3::StreamEventType;
 use crate::config::Config;
@@ -105,6 +106,48 @@ pub(crate) trait Client {
 
 pub(crate) type StreamParserMap = HashMap<u64, FrameParser>;
 
+fn validate_stream_send_result(
+    result: quiche::Result<usize>, expected: &ExpectedStreamSendResult,
+    stream_id: u64,
+) {
+    match expected {
+        ExpectedStreamSendResult::Ok => {
+            result.unwrap_or_else(|err| {
+                panic!(
+                    "Expected stream_send on stream {} to succeed, but got: {:?}",
+                    stream_id, err
+                )
+            });
+        },
+        ExpectedStreamSendResult::OkExact(expected_bytes) => {
+            match result {
+                Ok(actual_bytes) if actual_bytes == *expected_bytes => {},
+                Ok(actual_bytes) => panic!(
+                    "Expected stream_send on stream {} to write {} bytes, got {}",
+                    stream_id, expected_bytes, actual_bytes
+                ),
+                Err(err) => panic!(
+                    "Expected stream_send on stream {} to write {} bytes, got error: {:?}",
+                    stream_id, expected_bytes, err
+                ),
+            }
+        },
+        ExpectedStreamSendResult::Error(expected_err) => {
+            match result {
+                Ok(written) => panic!(
+                    "Expected stream_send on stream {} to fail with {:?}, but wrote {} bytes",
+                    stream_id, expected_err, written
+                ),
+                Err(actual_err) if &actual_err == expected_err => {},
+                Err(actual_err) => panic!(
+                    "Expected stream_send on stream {} to fail with {:?}, got {:?}",
+                    stream_id, expected_err, actual_err
+                ),
+            }
+        },
+    }
+}
+
 pub(crate) fn execute_action<F: quiche::BufFactory>(
     action: &Action, conn: &mut quiche::Connection<F>,
     stream_parsers: &mut StreamParserMap,
@@ -114,6 +157,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
             stream_id,
             fin_stream,
             frame,
+            expected_result,
         } => {
             log::info!("frame tx id={stream_id} frame={frame:?}");
 
@@ -148,11 +192,9 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
             }
             let len = frame.to_bytes(&mut b).unwrap();
 
-            // TODO - pass errors here to the connectionsummary, which means we
-            // can't initialize it when the connection's been shut
-            // down
-            conn.stream_send(*stream_id, &d[..len], *fin_stream)
-                .unwrap();
+            // TODO - consider storying result in ConnectionSummary too.
+            let result = conn.stream_send(*stream_id, &d[..len], *fin_stream);
+            validate_stream_send_result(result, expected_result, *stream_id);
 
             stream_parsers
                 .entry(*stream_id)
@@ -164,6 +206,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
             fin_stream,
             headers,
             frame,
+            expected_result,
             ..
         } => {
             log::info!("headers frame tx stream={stream_id} hdrs={headers:?}");
@@ -198,8 +241,8 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                 }
             }
             let len = frame.to_bytes(&mut b).unwrap();
-            conn.stream_send(*stream_id, &d[..len], *fin_stream)
-                .unwrap();
+            let result = conn.stream_send(*stream_id, &d[..len], *fin_stream);
+            validate_stream_send_result(result, expected_result, *stream_id);
 
             stream_parsers
                 .entry(*stream_id)
@@ -210,6 +253,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
             stream_id,
             fin_stream,
             stream_type,
+            expected_result,
         } => {
             log::info!(
                 "open uni stream_id={stream_id} ty={stream_type} fin={fin_stream}"
@@ -220,8 +264,8 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
             b.put_varint(*stream_type).unwrap();
             let off = b.off();
 
-            conn.stream_send(*stream_id, &d[..off], *fin_stream)
-                .unwrap();
+            let result = conn.stream_send(*stream_id, &d[..off], *fin_stream);
+            validate_stream_send_result(result, expected_result, *stream_id);
 
             stream_parsers
                 .entry(*stream_id)
@@ -232,6 +276,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
             stream_id,
             bytes,
             fin_stream,
+            expected_result,
         } => {
             log::info!(
                 "stream bytes tx id={} len={} fin={}",
@@ -239,7 +284,8 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                 bytes.len(),
                 fin_stream
             );
-            conn.stream_send(*stream_id, bytes, *fin_stream).unwrap();
+            let result = conn.stream_send(*stream_id, bytes, *fin_stream);
+            validate_stream_send_result(result, expected_result, *stream_id);
 
             stream_parsers
                 .entry(*stream_id)

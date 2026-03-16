@@ -86,6 +86,7 @@
 //!            headers,
 //!            frame: Frame::Headers { header_block },
 //!            literal_headers: false,
+//!            expected_result: Default::default(),
 //!        },
 //!        Action::SendFrame {
 //!            stream_id: STREAM_ID,
@@ -96,6 +97,7 @@
 //!                // server: https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3
 //!                payload: b"test".to_vec(),
 //!            },
+//!            expected_result: Default::default(),
 //!        },
 //!        Action::Wait {
 //!            wait_type: WaitType::StreamEvent(StreamEvent {
