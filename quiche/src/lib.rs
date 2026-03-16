@@ -425,7 +425,6 @@ use crate::recovery::RecoveryOps;
 use crate::recovery::ReleaseDecision;
 
 use crate::stream::RecvAction;
-use crate::stream::StreamPriorityKey;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -5160,7 +5159,7 @@ impl<F: BufFactory> Connection<F> {
                 } else if stream.incremental {
                     // Cycle the incremental stream to the back of the queue
                     // for round-robin scheduling.
-                    self.streams.cycle_flushable(stream_id);
+                    self.streams.cycle_priority(stream_id);
                 }
 
                 #[cfg(feature = "fuzzing")]
@@ -5681,9 +5680,9 @@ impl<F: BufFactory> Connection<F> {
         });
 
         if priority_key.incremental && readable {
-            // Shuffle the incremental stream to the back of the queue.
-            self.streams.remove_readable(&priority_key);
-            self.streams.insert_readable(&priority_key);
+            // Cycle the incremental stream to the back of the queue
+            // for round-robin scheduling.
+            self.streams.cycle_priority(stream_id);
         }
 
         Ok((read, fin))
@@ -5970,9 +5969,9 @@ impl<F: BufFactory> Connection<F> {
         }
 
         if incremental && writable {
-            // Shuffle the incremental stream to the back of the queue.
-            self.streams.remove_writable(&priority_key);
-            self.streams.insert_writable(&priority_key);
+            // Cycle the incremental stream to the back of the queue
+            // for round-robin scheduling.
+            self.streams.cycle_priority(stream_id);
         }
 
         Ok(ret)
@@ -5991,39 +5990,15 @@ impl<F: BufFactory> Connection<F> {
     ) -> Result<()> {
         // Get existing stream or create a new one, but if the stream
         // has already been closed and collected, ignore the prioritization.
-        let stream = match self.get_or_create_stream(stream_id, true) {
-            Ok(v) => v,
+        match self.get_or_create_stream(stream_id, true) {
+            Ok(_) => (),
 
             Err(Error::Done) => return Ok(()),
 
             Err(e) => return Err(e),
         };
 
-        if stream.urgency == urgency && stream.incremental == incremental {
-            return Ok(());
-        }
-
-        stream.urgency = urgency;
-        stream.incremental = incremental;
-
-        let old_priority_key = Arc::clone(&stream.priority_key);
-
-        let sequence = self.streams.next_sequence();
-
-        let stream = self.streams.get_mut(stream_id).unwrap();
-
-        let new_priority_key = Arc::new(StreamPriorityKey {
-            urgency,
-            incremental,
-            id: stream_id,
-            sequence,
-            ..Default::default()
-        });
-
-        stream.priority_key = Arc::clone(&new_priority_key);
-
-        self.streams
-            .update_priority(&old_priority_key, &new_priority_key);
+        self.streams.set_priority(stream_id, urgency, incremental);
 
         Ok(())
     }
@@ -6214,17 +6189,17 @@ impl<F: BufFactory> Connection<F> {
         stream.is_readable()
     }
 
-    /// Cycles a readable stream to the back of the priority queue.
+    /// Cycles a stream to the back of all priority queues it belongs to.
     ///
-    /// This is used for round-robin scheduling of readable streams. After
-    /// processing data from a stream, calling this method moves it to the
-    /// back of its priority group, giving other streams a chance to be
-    /// processed.
+    /// This is used for round-robin scheduling. After processing data from a
+    /// stream, calling this method bumps its sequence number and moves it to
+    /// the back of its priority group in all queues (readable, writable,
+    /// flushable), giving other streams a chance.
     ///
     /// Returns `true` if the stream was successfully cycled, `false` if the
-    /// stream doesn't exist or isn't in the readable set.
-    pub(crate) fn cycle_readable(&mut self, stream_id: u64) -> bool {
-        self.streams.cycle_readable(stream_id)
+    /// stream doesn't exist.
+    pub(crate) fn cycle_priority(&mut self, stream_id: u64) -> bool {
+        self.streams.cycle_priority(stream_id)
     }
 
     /// Returns the next stream that can be written to.

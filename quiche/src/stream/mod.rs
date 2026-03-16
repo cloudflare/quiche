@@ -241,12 +241,6 @@ impl<F: BufFactory> StreamMap<F> {
         self.streams.get_mut(&id)
     }
 
-    /// Returns the next sequence number for priority ordering.
-    pub fn next_sequence(&mut self) -> u64 {
-        self.sequence_counter = self.sequence_counter.wrapping_add(1);
-        self.sequence_counter
-    }
-
     /// Returns the mutable stream with the given ID if it exists, or creates
     /// a new one otherwise.
     ///
@@ -472,90 +466,6 @@ impl<F: BufFactory> StreamMap<F> {
         self.flushable.front().clone_pointer()
     }
 
-    /// Cycles an incremental stream to the back of the flushable queue.
-    ///
-    /// This is used for round-robin scheduling: after sending data from an
-    /// incremental stream, it should be moved to the back of its priority
-    /// group to give other streams a chance.
-    ///
-    /// Returns `true` if the stream was successfully cycled.
-    pub fn cycle_flushable(&mut self, stream_id: u64) -> bool {
-        let stream = match self.streams.get_mut(&stream_id) {
-            Some(s) => s,
-            None => return false,
-        };
-
-        let old_priority_key = Arc::clone(&stream.priority_key);
-
-        // Only cycle if currently in the flushable set
-        if !old_priority_key.flushable.is_linked() {
-            return false;
-        }
-
-        // Bump the global sequence counter
-        self.sequence_counter = self.sequence_counter.wrapping_add(1);
-
-        // Create a new priority key with the updated sequence
-        let new_priority_key = Arc::new(StreamPriorityKey {
-            urgency: stream.urgency,
-            incremental: stream.incremental,
-            id: stream_id,
-            sequence: self.sequence_counter,
-            ..Default::default()
-        });
-
-        // Replace the stream's priority key
-        stream.priority_key = Arc::clone(&new_priority_key);
-
-        // Remove from flushable with old key and re-insert with new key
-        self.remove_flushable(&old_priority_key);
-        self.flushable.insert(new_priority_key);
-
-        true
-    }
-
-    /// Cycles a readable stream to the back of the queue.
-    ///
-    /// This is used for round-robin scheduling: after processing some data from
-    /// a stream, it can be moved to the back of its priority group to give
-    /// other streams a chance of being read.
-    ///
-    /// Returns `true` if the stream was successfully cycled.
-    pub fn cycle_readable(&mut self, stream_id: u64) -> bool {
-        let stream = match self.streams.get_mut(&stream_id) {
-            Some(s) => s,
-            None => return false,
-        };
-
-        let old_priority_key = Arc::clone(&stream.priority_key);
-
-        // Only cycle if currently in the readable set
-        if !old_priority_key.readable.is_linked() {
-            return false;
-        }
-
-        // Bump the global sequence counter
-        self.sequence_counter = self.sequence_counter.wrapping_add(1);
-
-        // Create a new priority key with the updated sequence
-        let new_priority_key = Arc::new(StreamPriorityKey {
-            urgency: stream.urgency,
-            incremental: stream.incremental,
-            id: stream_id,
-            sequence: self.sequence_counter,
-            ..Default::default()
-        });
-
-        // Replace the stream's priority key
-        stream.priority_key = Arc::clone(&new_priority_key);
-
-        // Remove from readable with old key and re-insert with new key
-        self.remove_readable(&old_priority_key);
-        self.readable.insert(new_priority_key);
-
-        true
-    }
-
     /// Updates the priorities of a stream.
     pub fn update_priority(
         &mut self, old: &Arc<StreamPriorityKey>, new: &Arc<StreamPriorityKey>,
@@ -583,7 +493,6 @@ impl<F: BufFactory> StreamMap<F> {
     /// round-robin scheduling of incremental streams.
     ///
     /// Returns `true` if the stream was found and cycled.
-    #[cfg(test)]
     pub fn cycle_priority(&mut self, stream_id: u64) -> bool {
         let stream = match self.streams.get_mut(&stream_id) {
             Some(s) => s,
@@ -618,7 +527,6 @@ impl<F: BufFactory> StreamMap<F> {
     /// The stream is placed at the back of its new priority group by assigning
     /// a new sequence number. Returns `true` if the stream was found and
     /// updated.
-    #[cfg(test)]
     pub fn set_priority(
         &mut self, stream_id: u64, urgency: u8, incremental: bool,
     ) -> bool {
@@ -2465,10 +2373,10 @@ mod tests {
         }
     }
 
-    /// Tests that cycle_flushable actually moves incremental streams to the
+    /// Tests that cycle_priority actually moves incremental streams to the
     /// back of the queue for round-robin scheduling.
     #[test]
-    fn round_robin_cycle_flushable() {
+    fn round_robin_cycle_priority() {
         let local_tp = crate::TransportParams::default();
         let peer_tp = crate::TransportParams {
             initial_max_stream_data_bidi_local: 100,
@@ -2509,22 +2417,143 @@ mod tests {
         assert_eq!(order1, vec![4, 8, 12]);
 
         // Cycle stream 4 - should move to back
-        assert!(streams.cycle_flushable(4));
+        assert!(streams.cycle_priority(4));
         let order2 = get_flushable_order(&streams);
         assert_eq!(order2, vec![8, 12, 4]);
 
         // Cycle stream 8 - should move to back
-        assert!(streams.cycle_flushable(8));
+        assert!(streams.cycle_priority(8));
         let order3 = get_flushable_order(&streams);
         assert_eq!(order3, vec![12, 4, 8]);
 
         // Cycle stream 12 - should move to back
-        assert!(streams.cycle_flushable(12));
+        assert!(streams.cycle_priority(12));
         let order4 = get_flushable_order(&streams);
         assert_eq!(order4, vec![4, 8, 12]);
 
         // Full cycle returns to original relative order
         // (but with new sequence numbers)
+    }
+
+    /// Tests that cycle_priority updates ALL trees a stream belongs to,
+    /// not just one. A stream can be in flushable, readable, and writable
+    /// simultaneously — cycling must move it to the back in all of them.
+    #[test]
+    fn cycle_priority_updates_all_trees() {
+        let local_tp = crate::TransportParams::default();
+        let peer_tp = crate::TransportParams {
+            initial_max_stream_data_bidi_local: 100,
+            initial_max_stream_data_uni: 100,
+            ..Default::default()
+        };
+
+        let mut streams: StreamMap = StreamMap::new(100, 100, 100);
+
+        // Create 3 incremental streams
+        for id in [4, 8, 12] {
+            streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .unwrap();
+            streams
+                .get_mut(id)
+                .unwrap()
+                .send
+                .write(b"data", false)
+                .unwrap();
+            let priority_key = Arc::clone(&streams.get(id).unwrap().priority_key);
+            streams.insert_flushable(&priority_key);
+            streams.insert_readable(&priority_key);
+            streams.insert_writable(&priority_key);
+        }
+
+        let flushable_order = |s: &StreamMap| -> Vec<u64> {
+            let mut v = Vec::new();
+            let mut c = s.flushable.front();
+            while let Some(k) = c.get() {
+                v.push(k.id);
+                c.move_next();
+            }
+            v
+        };
+        let readable_order = |s: &StreamMap| -> Vec<u64> {
+            let mut v = Vec::new();
+            let mut c = s.readable.front();
+            while let Some(k) = c.get() {
+                v.push(k.id);
+                c.move_next();
+            }
+            v
+        };
+        let writable_order = |s: &StreamMap| -> Vec<u64> {
+            let mut v = Vec::new();
+            let mut c = s.writable.front();
+            while let Some(k) = c.get() {
+                v.push(k.id);
+                c.move_next();
+            }
+            v
+        };
+
+        // All three trees start with the same order
+        assert_eq!(flushable_order(&streams), vec![4, 8, 12]);
+        assert_eq!(readable_order(&streams), vec![4, 8, 12]);
+        assert_eq!(writable_order(&streams), vec![4, 8, 12]);
+
+        // Cycle stream 4 — must move to back in ALL trees
+        assert!(streams.cycle_priority(4));
+        assert_eq!(flushable_order(&streams), vec![8, 12, 4]);
+        assert_eq!(readable_order(&streams), vec![8, 12, 4]);
+        assert_eq!(writable_order(&streams), vec![8, 12, 4]);
+
+        // Cycle stream 8 — verify all trees update together
+        assert!(streams.cycle_priority(8));
+        assert_eq!(flushable_order(&streams), vec![12, 4, 8]);
+        assert_eq!(readable_order(&streams), vec![12, 4, 8]);
+        assert_eq!(writable_order(&streams), vec![12, 4, 8]);
+    }
+
+    /// Tests that cycle_priority only affects trees the stream is actually
+    /// linked in, and does not create phantom entries in unlinked trees.
+    #[test]
+    fn cycle_priority_no_phantom_entries() {
+        let local_tp = crate::TransportParams::default();
+        let peer_tp = crate::TransportParams {
+            initial_max_stream_data_bidi_local: 100,
+            initial_max_stream_data_uni: 100,
+            ..Default::default()
+        };
+
+        let mut streams: StreamMap = StreamMap::new(100, 100, 100);
+
+        // Create a stream and put it ONLY in the flushable tree.
+        // Note: get_or_create may auto-insert into writable, so remove it.
+        streams
+            .get_or_create(4, &local_tp, &peer_tp, false, true)
+            .unwrap();
+        streams
+            .get_mut(4)
+            .unwrap()
+            .send
+            .write(b"data", false)
+            .unwrap();
+        let priority_key = Arc::clone(&streams.get(4).unwrap().priority_key);
+        streams.remove_writable(&priority_key);
+        streams.insert_flushable(&priority_key);
+
+        // Only flushable should have the stream
+        assert!(streams.readable().next().is_none());
+        assert!(streams.writable().next().is_none());
+        assert_eq!(streams.peek_flushable().unwrap().id, 4);
+
+        // Cycle the stream
+        assert!(streams.cycle_priority(4));
+
+        // Readable and writable should STILL be empty — no phantom entries
+        assert!(streams.readable().next().is_none());
+        assert!(streams.writable().next().is_none());
+
+        // Flushable should still have the stream
+        assert_eq!(streams.peek_flushable().unwrap().id, 4);
     }
 }
 

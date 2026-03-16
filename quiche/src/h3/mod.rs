@@ -2055,7 +2055,7 @@ impl Connection {
                 // Cycle the stream after returning Headers to enable
                 // round-robin "skim" behavior across multiple streams.
                 if matches!(ev.1, Event::Headers { .. }) {
-                    conn.cycle_readable(ev.0);
+                    conn.cycle_priority(ev.0);
                 }
                 return Ok(ev);
             }
