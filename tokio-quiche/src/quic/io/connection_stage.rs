@@ -122,9 +122,9 @@ impl ConnectionStage for Handshake {
         &mut self, qconn: &mut QuicheConnection,
         _ctx: &mut ConnectionStageContext<A>,
     ) -> ControlFlow<QuicResult<()>> {
-        // Transition to RunningApplication if we have 1-RTT keys (handshake is
-        // complete) or if we have 0-RTT keys (in early data).
-        if qconn.is_established() || qconn.is_in_early_data() {
+        // Transition to RunningApplication only after the QUIC handshake is
+        // complete (1-RTT keys are available).
+        if qconn.is_established() {
             ControlFlow::Break(Ok(()))
         } else {
             ControlFlow::Continue(())
