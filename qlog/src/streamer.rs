@@ -30,6 +30,22 @@ use crate::events::EventType;
 use crate::events::Eventable;
 use crate::events::ExData;
 
+/// Multiplier for rounding qlog event time values to at most 6 decimal places.
+/// Since event times are in milliseconds, this provides microsecond precision.
+const TIME_PRECISION_MULTIPLIER: f64 = 1e6;
+
+/// Computes elapsed time in milliseconds since `start`, rounded to 6 decimal
+/// places. In test builds, always returns 0.0 for deterministic output.
+fn elapsed_millis(start: std::time::Instant, now: std::time::Instant) -> f64 {
+    let dur = if cfg!(test) {
+        std::time::Duration::from_secs(0)
+    } else {
+        now.duration_since(start)
+    };
+    let ms = dur.as_secs_f64() * 1000.0;
+    (ms * TIME_PRECISION_MULTIPLIER).round() / TIME_PRECISION_MULTIPLIER
+}
+
 /// A helper object specialized for streaming JSON-serialized qlog to a
 /// [`Write`] trait.
 ///
@@ -182,14 +198,7 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        let dur = if cfg!(test) {
-            std::time::Duration::from_secs(0)
-        } else {
-            now.duration_since(self.start_time)
-        };
-
-        let rel_time = dur.as_secs_f64() * 1000.0;
-        event.set_time(rel_time);
+        event.set_time(elapsed_millis(self.start_time, now));
 
         if pretty {
             self.add_event_pretty(event)
@@ -283,14 +292,11 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        let dur = if cfg!(test) {
-            std::time::Duration::from_secs(0)
-        } else {
-            now.duration_since(self.start_time)
-        };
-
-        let rel_time = dur.as_secs_f64() * 1000.0;
-        let event = Event::with_time_ex(rel_time, event_data, ex_data);
+        let event = Event::with_time_ex(
+            elapsed_millis(self.start_time, now),
+            event_data,
+            ex_data,
+        );
 
         if pretty {
             self.add_event_pretty(event)
