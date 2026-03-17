@@ -56,10 +56,19 @@ async fn main() {
     let socket = UdpSocket::bind(&args.address)
         .await
         .expect("UDP socket should be bindable");
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.qlog_dir = std::env::var("QLOGDIR").ok();
+    quic_settings.cc_algorithm = args.cc_algorithm.clone();
+    quic_settings.initial_congestion_window_packets = args.initial_cwnd_packets;
+    quic_settings.enable_hystart = !args.disable_hystart;
+    quic_settings.enable_pacing = args.enable_pacing;
+    quic_settings.max_pacing_rate =
+        (args.max_pacing_rate > 0).then_some(args.max_pacing_rate);
+
     let mut listeners = listen(
         [socket],
         ConnectionParams::new_server(
-            QuicSettings::default(),
+            quic_settings,
             TlsCertificatePaths {
                 cert: &args.tls_cert_path,
                 private_key: &args.tls_private_key_path,
