@@ -2743,6 +2743,25 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
+    /// Sets the `use_initial_max_data_as_flow_control_win` flag during SSL
+    /// handshake.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Connection::enable_use_initial_max_data_as_flow_control_win()`].
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_use_initial_max_data_as_flow_control_win_in_handshake(
+        ssl: &mut boring::ssl::SslRef,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.use_initial_max_data_as_flow_control_win = true;
+        Ok(())
+    }
+
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
@@ -7812,6 +7831,8 @@ impl<F: BufFactory> Connection<F> {
             pmtud: None,
 
             is_server: self.is_server,
+
+            use_initial_max_data_as_flow_control_win: false,
         };
 
         if self.handshake_completed {
@@ -7861,6 +7882,10 @@ impl<F: BufFactory> Connection<F> {
                         self.local_transport_params =
                             ex_data.local_transport_params;
                     }
+                }
+
+                if ex_data.use_initial_max_data_as_flow_control_win {
+                    self.enable_use_initial_max_data_as_flow_control_win();
                 }
 
                 // Try to parse transport parameters as soon as the first flight
@@ -7928,6 +7953,19 @@ impl<F: BufFactory> Connection<F> {
         }
 
         Ok(())
+    }
+
+    /// Use the value of the intial max_data / initial stream max_data setting
+    /// as the initial flow control window for the connection and streams.
+    /// The connection-level flow control window will only be changed if it
+    /// hasn't been auto tuned yet. For streams: only newly created streams
+    /// receive the new setting.
+    pub(crate) fn enable_use_initial_max_data_as_flow_control_win(&mut self) {
+        self.flow_control.set_window_if_not_tuned_yet(
+            self.local_transport_params.initial_max_data,
+        );
+        self.streams
+            .set_use_initial_max_data_as_flow_control_win(true);
     }
 
     /// Selects the packet type for the next outgoing packet.
