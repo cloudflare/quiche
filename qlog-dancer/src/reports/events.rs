@@ -25,6 +25,9 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use qlog::events::http3::Http3Frame;
+use qlog::events::moqt::MOQTByteString;
+use qlog::events::moqt::MOQTControlMessage;
+use qlog::events::moqt::MOQTParameter;
 use qlog::events::quic::AckedRanges;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
@@ -230,6 +233,429 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
         Http3Frame::Unknown { frame_type_value, .. } => {
             s += &format!(" UNKNOWN {{ty={frame_type_value}}}");
         }
+    }
+
+    s
+}
+
+fn params_to_string(parameters: &Option<Vec<MOQTParameter>>) -> String {
+    let mut s = String::new();
+    if let Some(params) = parameters {
+        for p in params {
+            match p {
+                MOQTParameter::AuthorizationToken {
+                    alias_type,
+                    token_alias,
+                    token_type,
+                    token_value,
+                } => {
+                    printy!("alias_type", alias_type, s);
+                    printyo!("token_alias", token_alias, s);
+                    printyo!("token_type", token_type, s);
+                    printyo_json!("token_value", token_value, s);
+                },
+                MOQTParameter::DeliveryTimeout { value } => {
+                    printy!("delivery_timeout", value, s)
+                },
+                MOQTParameter::MaxCacheDuration { value } => {
+                    printy!("max_cache_duration", value, s)
+                },
+                MOQTParameter::PublisherPriority { value } => {
+                    printy!("publisher_priority", value, s)
+                },
+                MOQTParameter::SubscriberPriority { value } => {
+                    printy!("subscriber_priority", value, s)
+                },
+                MOQTParameter::GroupOrder { value } => {
+                    printy!("group_order", value, s)
+                },
+                MOQTParameter::SubscriptionFilter { value } => {
+                    printy_json!("subscription_filter", value, s)
+                },
+                MOQTParameter::Expires { value } => printy!("expires", value, s),
+                MOQTParameter::LargestObject { value } => {
+                    printy_json!("largest_object", value, s)
+                },
+                MOQTParameter::Forward { value } => printy!("forward", value, s),
+                MOQTParameter::DynamicGroups { value } => {
+                    printy!("dynamic_groups", value, s)
+                },
+                MOQTParameter::NewGroupRequest { value } => {
+                    printy!("new_group_request", value, s)
+                },
+                MOQTParameter::Unknown {
+                    name_bytes,
+                    length,
+                    value,
+                    value_bytes,
+                } => {
+                    printy!("name_bytes", name_bytes, s);
+                    printyo!("len", length, s);
+                    printyo!("value", value, s);
+                    printyo_json!("value_bytes", value_bytes, s);
+                },
+            }
+        }
+    }
+    s
+}
+
+fn moqt_track_namespace_to_string(track_namespace: &[MOQTByteString]) -> String {
+    let mut s = String::new();
+    s += "track_namespace=[";
+    for tn in track_namespace {
+        printyo!("value", &tn.value, s);
+        printyo!("value_bytes", &tn.value_bytes, s);
+    }
+    s += "], ";
+    s
+}
+
+fn setup_params_to_string(
+    setup_parameters: &Option<Vec<qlog::events::moqt::MOQTSetupParameter>>,
+) -> String {
+    use qlog::events::moqt::MOQTSetupParameter;
+    let mut s = String::new();
+    if let Some(params) = setup_parameters {
+        for p in params {
+            match p {
+                MOQTSetupParameter::Path { value } => printy!("path", value, s),
+                MOQTSetupParameter::MaxRequestId { value } => {
+                    printy!("max_request_id", value, s)
+                },
+                MOQTSetupParameter::Authority { value } => {
+                    printy!("authority", value, s)
+                },
+                MOQTSetupParameter::MaxAuthTokenCacheSize { value } => {
+                    printy!("max_auth_token_cache_size", value, s)
+                },
+                MOQTSetupParameter::AuthorizationToken {
+                    alias_type,
+                    token_alias,
+                    token_type,
+                    token_value,
+                } => {
+                    printy_json!("alias_type", alias_type, s);
+                    printyo!("token_alias", token_alias, s);
+                    printyo!("token_type", token_type, s);
+                    printyo_json!("token_value", token_value, s);
+                },
+                MOQTSetupParameter::Implementation { value } => {
+                    printy!("implementation", value, s)
+                },
+                MOQTSetupParameter::Unknown {
+                    name_bytes,
+                    length,
+                    value,
+                    value_bytes,
+                } => {
+                    printy!("name_bytes", name_bytes, s);
+                    printyo!("len", length, s);
+                    printyo!("value", value, s);
+                    printyo_json!("value_bytes", value_bytes, s);
+                },
+            }
+        }
+    }
+    s
+}
+
+fn moq_control_message_to_string(message: &MOQTControlMessage) -> String {
+    let mut s = String::new();
+
+    match message {
+        MOQTControlMessage::ClientSetup {
+            number_of_parameters,
+            setup_parameters,
+        } => {
+            s += "CLIENT_SETUP {";
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "setup_parameters=[";
+            s += &setup_params_to_string(setup_parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::ServerSetup {
+            number_of_parameters,
+            setup_parameters,
+        } => {
+            s += "SERVER_SETUP {";
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "setup_parameters=[";
+            s += &setup_params_to_string(setup_parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::Goaway { new_session_uri } => {
+            s += "GOAWAY {";
+            printy_json!("new_session_uri", new_session_uri, s);
+            s += "}";
+        },
+        MOQTControlMessage::Subscribe {
+            request_id,
+            track_alias,
+            track_namespace,
+            track_name,
+            number_of_parameters,
+            parameters,
+        } => {
+            s += "SUBSCRIBE {";
+            printy!("request_id", request_id, s);
+            printy!("track_alias", track_alias, s);
+            s += &moqt_track_namespace_to_string(track_namespace);
+            printyo!("track_name", &track_name.value, s);
+            printyo!("track_name_bytes", &track_name.value_bytes, s);
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "parameters=[";
+            s += &params_to_string(parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::RequestUpdate {
+            request_id,
+            number_of_parameters,
+            parameters,
+        } => {
+            s += "REQUEST_UPDATE {";
+            printy!("request_id", request_id, s);
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "parameters=[";
+            s += &params_to_string(parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::Unsubscribe { request_id } => {
+            s += &format!("UNSUBSCRIBE {{request_id={request_id}}}");
+        },
+        MOQTControlMessage::Fetch {
+            request_id,
+            track_namespace,
+            track_name,
+            fetch_type,
+            start_location,
+            end_location,
+            joining_request_id,
+            number_of_parameters,
+            parameters,
+        } => {
+            s += "FETCH {";
+            printy!("request_id", request_id, s);
+            s += &moqt_track_namespace_to_string(track_namespace);
+            printyo!("track_name", &track_name.value, s);
+            printyo!("track_name_bytes", &track_name.value_bytes, s);
+            printyo_json!("fetch_type", fetch_type, s);
+            printyo_json!("start_location", start_location, s);
+            printyo_json!("end_location", end_location, s);
+            printyo!("joining_request_id", joining_request_id, s);
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "parameters=[";
+            s += &params_to_string(parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::FetchCancel { request_id } => {
+            s += &format!("FETCH_CANCEL {{request_id={request_id}}}");
+        },
+        MOQTControlMessage::SubscribeNamespace {
+            track_namespace_prefix,
+            number_of_parameters,
+            parameters,
+        } => {
+            s += "SUBSCRIBE_NAMESPACE {";
+            s += "track_namespace_prefix=[";
+            for tn in track_namespace_prefix {
+                printyo!("value", &tn.value, s);
+                printyo!("value_bytes", &tn.value_bytes, s);
+            }
+            s += "], ";
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "parameters=[";
+            s += &params_to_string(parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::SubscribeOk {
+            request_id,
+            track_alias,
+            number_of_parameters,
+            parameters,
+        } => {
+            s += "SUBSCRIBE_OK {";
+            printy!("request_id", request_id, s);
+            printy!("track_alias", track_alias, s);
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "parameters=[";
+            s += &params_to_string(parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::RequestError {
+            request_id,
+            error_code,
+            reason,
+        } => {
+            s += "REQUEST_ERROR {";
+            printy!("request_id", request_id, s);
+            printy!("error_code", error_code, s);
+            if let Some(r) = reason {
+                printyo!("reason", &r.value, s);
+                printyo!("reason_bytes", &r.value_bytes, s);
+            }
+            s += "}";
+        },
+        MOQTControlMessage::FetchOk {
+            request_id,
+            end_location,
+            number_of_parameters,
+            parameters,
+        } => {
+            s += "FETCH_OK {";
+            printy!("request_id", request_id, s);
+            printyo_json!("end_location", end_location, s);
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "parameters=[";
+            s += &params_to_string(parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::PublishDone {
+            track_alias,
+            status_code,
+            reason,
+        } => {
+            s += "PUBLISH_DONE {";
+            printy!("track_alias", track_alias, s);
+            printy!("status_code", status_code, s);
+            if let Some(r) = reason {
+                printyo!("reason", &r.value, s);
+                printyo!("reason_bytes", &r.value_bytes, s);
+            }
+            s += "}";
+        },
+        MOQTControlMessage::MaxRequestId { request_id } => {
+            s += &format!("MAX_REQUEST_ID {{request_id={request_id}}}");
+        },
+        MOQTControlMessage::RequestsBlocked { maximum_request_id } => {
+            s += &format!(
+                "REQUESTS_BLOCKED {{maximum_request_id={maximum_request_id}}}"
+            );
+        },
+        MOQTControlMessage::Publish {
+            track_namespace,
+            track_name,
+            track_alias,
+            number_of_parameters,
+            parameters,
+        } => {
+            s += "PUBLISH {";
+            s += &moqt_track_namespace_to_string(track_namespace);
+            printyo!("track_name", &track_name.value, s);
+            printyo!("track_name_bytes", &track_name.value_bytes, s);
+            printy!("track_alias", track_alias, s);
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "parameters=[";
+            s += &params_to_string(parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::PublishOk {
+            track_namespace,
+            track_name,
+            track_alias,
+        } => {
+            s += "PUBLISH_OK {";
+            s += &moqt_track_namespace_to_string(track_namespace);
+            printyo!("track_name", &track_name.value, s);
+            printyo!("track_name_bytes", &track_name.value_bytes, s);
+            printy!("track_alias", track_alias, s);
+            s += "}";
+        },
+        MOQTControlMessage::PublishNamespace {
+            track_namespace_prefix,
+            number_of_parameters,
+            parameters,
+        } => {
+            s += "PUBLISH_NAMESPACE {";
+            s += "track_namespace_prefix=[";
+            for tn in track_namespace_prefix {
+                printyo!("value", &tn.value, s);
+                printyo!("value_bytes", &tn.value_bytes, s);
+            }
+            s += "], ";
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "parameters=[";
+            s += &params_to_string(parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::Namespace {
+            track_namespace_suffix,
+            track_name,
+            track_alias,
+            number_of_parameters,
+            parameters,
+        } => {
+            s += "NAMESPACE {";
+            s += "track_namespace_suffix=[";
+            for tn in track_namespace_suffix {
+                printyo!("value", &tn.value, s);
+                printyo!("value_bytes", &tn.value_bytes, s);
+            }
+            s += "], ";
+            printyo!("track_name", &track_name.value, s);
+            printyo!("track_name_bytes", &track_name.value_bytes, s);
+            printy!("track_alias", track_alias, s);
+            printy!("number_of_parameters", number_of_parameters, s);
+            s += "parameters=[";
+            s += &params_to_string(parameters);
+            s += "]}";
+        },
+        MOQTControlMessage::PublishNamespaceDone {
+            track_namespace_prefix,
+            status_code,
+            reason,
+        } => {
+            s += "PUBLISH_NAMESPACE_DONE {";
+            s += "track_namespace_prefix=[";
+            for tn in track_namespace_prefix {
+                printyo!("value", &tn.value, s);
+                printyo!("value_bytes", &tn.value_bytes, s);
+            }
+            s += "], ";
+            printy!("status_code", status_code, s);
+            if let Some(r) = reason {
+                printyo!("reason", &r.value, s);
+                printyo!("reason_bytes", &r.value_bytes, s);
+            }
+            s += "}";
+        },
+        MOQTControlMessage::NamespaceDone => {
+            s += "NAMESPACE_DONE";
+        },
+        MOQTControlMessage::PublishNamespaceCancel {
+            track_namespace_prefix,
+            error_code,
+            reason,
+        } => {
+            s += "PUBLISH_NAMESPACE_CANCEL {";
+            s += "track_namespace_prefix=[";
+            for tn in track_namespace_prefix {
+                printyo!("value", &tn.value, s);
+                printyo!("value_bytes", &tn.value_bytes, s);
+            }
+            s += "], ";
+            printy!("error_code", error_code, s);
+            if let Some(r) = reason {
+                printyo!("reason", &r.value, s);
+                printyo!("reason_bytes", &r.value_bytes, s);
+            }
+            s += "}";
+        },
+        MOQTControlMessage::TrackStatus {
+            track_namespace,
+            track_name,
+            status_code,
+            last_location,
+        } => {
+            s += "TRACK_STATUS {";
+            s += &moqt_track_namespace_to_string(track_namespace);
+            printyo!("track_name", &track_name.value, s);
+            printyo!("track_name_bytes", &track_name.value_bytes, s);
+            printy!("status_code", status_code, s);
+            printyo_json!("last_location", last_location, s);
+            s += "}";
+        },
+        MOQTControlMessage::Unknown => s += "UNKNOWN",
     }
 
     s
@@ -441,6 +867,113 @@ pub fn sqlog_event_list(
                         printy!("id", v.stream_id, p.details);
                         printyo!("len", v.length, p.details);
                         p.details += &http_frame_to_string(&v.frame);
+                    },
+                    EventData::MOQTControlMessageCreated(v) => {
+                        printy!("id", v.stream_id, p.details);
+                        p.details += &moq_control_message_to_string(&v.message);
+                        printyo_json!("raw", &v.raw, p.details);
+                    },
+                    EventData::MOQTControlMessageParsed(v) => {
+                        printy!("id", v.stream_id, p.details);
+                        p.details += &moq_control_message_to_string(&v.message);
+                        printyo_json!("raw", &v.raw, p.details);
+                    },
+                    EventData::MOQTStreamTypeSet(v) => {
+                        printyo_json!("owner", &v.owner, p.details);
+                        printy!("id", v.stream_id, p.details);
+                        printy_json!("ty", &v.stream_type, p.details);
+                    },
+                    EventData::MOQTSubgroupHeaderCreated(v) => {
+                        printy!("stream_id", v.stream_id, p.details);
+                        printy!("track_alias", v.track_alias, p.details);
+                        printy!("group_id", v.group_id, p.details);
+                        printy!(
+                            "subgroup_id_mode",
+                            v.subgroup_id_mode,
+                            p.details
+                        );
+                        printyo!("subgroup_id", v.subgroup_id, p.details);
+                        printyo!(
+                            "publisher_priority",
+                            v.publisher_priority,
+                            p.details
+                        );
+                        printy!(
+                            "contains_end_of_group",
+                            v.contains_end_of_group,
+                            p.details
+                        );
+                        printy!(
+                            "extensions_present",
+                            v.extensions_present,
+                            p.details
+                        );
+                    },
+                    EventData::MOQTSubgroupHeaderParsed(v) => {
+                        printy!("stream_id", v.stream_id, p.details);
+                        printy!("track_alias", v.track_alias, p.details);
+                        printy!("group_id", v.group_id, p.details);
+                        printy!(
+                            "subgroup_id_mode",
+                            v.subgroup_id_mode,
+                            p.details
+                        );
+                        printyo!("subgroup_id", v.subgroup_id, p.details);
+                        printyo!(
+                            "publisher_priority",
+                            v.publisher_priority,
+                            p.details
+                        );
+                        printy!(
+                            "contains_end_of_group",
+                            v.contains_end_of_group,
+                            p.details
+                        );
+                        printy!(
+                            "extensions_present",
+                            v.extensions_present,
+                            p.details
+                        );
+                    },
+                    EventData::MOQTSubgroupObjectCreated(v) => {
+                        printy!("stream_id", v.stream_id, p.details);
+                        printy!("object_id_delta", v.object_id_delta, p.details);
+                        printyo_json!(
+                            "extension_headers",
+                            &v.extension_headers,
+                            p.details
+                        );
+                        printy!(
+                            "object_payload_length",
+                            v.object_payload_length,
+                            p.details
+                        );
+                        printyo!("object_status", v.object_status, p.details);
+                        printyo_json!(
+                            "object_payload",
+                            &v.object_payload,
+                            p.details
+                        );
+                    },
+                    EventData::MOQTSubgroupObjectParsed(v) => {
+                        printy!("stream_id", v.stream_id, p.details);
+                        printy!("object_id_delta", v.object_id_delta, p.details);
+                        printyo_json!(
+                            "extension_headers",
+                            &v.extension_headers,
+                            p.details
+                        );
+                        printy!(
+                            "object_payload_length",
+                            v.object_payload_length,
+                            p.details
+                        );
+                        printyo!("object_status", v.object_status, p.details);
+                        printyo_json!(
+                            "object_payload",
+                            &v.object_payload,
+                            p.details
+                        );
                     },
 
                     _ => {
