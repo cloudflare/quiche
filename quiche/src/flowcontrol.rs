@@ -115,11 +115,19 @@ impl FlowControl {
     pub fn autotune_window(&mut self, now: Instant, rtt: Duration) {
         if let Some(last_update) = self.last_update {
             if now - last_update < rtt * WINDOW_TRIGGER_FACTOR {
-                self.window = std::cmp::min(
-                    self.window * WINDOW_INCREASE_FACTOR,
-                    self.max_window,
-                );
+                self.set_window(self.window * WINDOW_INCREASE_FACTOR);
             }
+        }
+    }
+
+    fn set_window(&mut self, window: u64) {
+        self.window = std::cmp::min(window, self.max_window);
+    }
+
+    /// If the current window has not yet been updated by `autotune_window`
+    pub fn set_window_if_not_tuned_yet(&mut self, window: u64) {
+        if self.last_update.is_none() {
+            self.set_window(window);
         }
     }
 
@@ -128,7 +136,7 @@ impl FlowControl {
     pub fn ensure_window_lower_bound(&mut self, min_window: u64) {
         if min_window > self.window {
             // ... we still need to clamp to `max_window`
-            self.window = std::cmp::min(min_window, self.max_window);
+            self.set_window(min_window);
         }
     }
 }
