@@ -2,6 +2,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use quiche::h3::NameValue;
+use quiche::EventLoopIteration;
 
 pub struct PktsData<'a> {
     pub data: &'a [u8],
@@ -92,7 +93,7 @@ pub fn server_process(
     h3_conn: &mut Option<quiche::h3::Connection>, info: quiche::RecvInfo,
 ) {
     let mut buf = pkt.to_vec();
-    conn.recv(&mut buf, info).ok();
+    conn.recv(&EventLoopIteration::new(), &mut buf, info).ok();
 
     if (conn.is_in_early_data() || conn.is_established()) && h3_conn.is_none() {
         let h3_config = quiche::h3::Config::new().unwrap();
@@ -168,5 +169,5 @@ pub fn server_process(
     }
 
     let mut out_buf = [0; 1500];
-    while conn.send(&mut out_buf).is_ok() {}
+    while conn.send(&EventLoopIteration::new(), &mut out_buf).is_ok() {}
 }

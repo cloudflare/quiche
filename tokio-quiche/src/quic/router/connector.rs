@@ -37,6 +37,7 @@ use datagram_socket::MaybeConnectedSocket;
 use datagram_socket::MAX_DATAGRAM_SIZE;
 use foundations::telemetry::log;
 use quiche::ConnectionId;
+use quiche::EventLoopIteration;
 use quiche::Header;
 use tokio_util::time::delay_queue::Key;
 use tokio_util::time::DelayQueue;
@@ -115,9 +116,9 @@ where
     ///
     /// This sends any pending packets and arms the connection's timeout timer.
     fn set_connection_to_pending(
-        &mut self, mut conn: QuicheConnection,
+        &mut self, iteration: &EventLoopIteration, mut conn: QuicheConnection,
     ) -> io::Result<()> {
-        simple_conn_send(&self.socket_tx, &mut conn)?;
+        simple_conn_send(iteration, &self.socket_tx, &mut conn)?;
 
         let timeout_key = conn.timeout_instant().map(|instant| {
             self.timeout_queue
@@ -138,7 +139,8 @@ where
     ///
     /// If the connection is pending, we return it
     fn on_incoming(
-        &mut self, mut incoming: Incoming, hdr: Header<'static>,
+        &mut self, iteration: &EventLoopIteration, mut incoming: Incoming,
+        hdr: Header<'static>,
     ) -> io::Result<Option<NewConnection>> {
         let Some(PendingConnection {
             mut conn,
@@ -158,11 +160,11 @@ where
         if let Some(gro) = incoming.gro {
             for dgram in incoming.buf.chunks_mut(gro as usize) {
                 // Log error here if recv fails
-                let _ = conn.recv(dgram, recv_info);
+                let _ = conn.recv(iteration, dgram, recv_info);
             }
         } else {
             // Log error here if recv fails
-            let _ = conn.recv(&mut incoming.buf, recv_info);
+            let _ = conn.recv(iteration, &mut incoming.buf, recv_info);
         }
 
         // disarm the timer since we're either going to immediately rearm it or
@@ -191,14 +193,17 @@ where
                 format!("connection {scid:?} timed out"),
             ))
         } else {
-            self.set_connection_to_pending(conn).map(|()| None)
+            self.set_connection_to_pending(iteration, conn)
+                .map(|()| None)
         }
     }
 
     /// [`ClientConnector::on_timeout`] runs [`quiche::Connection::on_timeout`]
     /// for a pending connection. If the connection is closed, this sends an
     /// error upstream.
-    fn on_timeout(&mut self, scid: ConnectionId<'static>) -> io::Result<()> {
+    fn on_timeout(
+        &mut self, iteration: &EventLoopIteration, scid: ConnectionId<'static>,
+    ) -> io::Result<()> {
         log::debug!("connection timedout"; "scid" => ?scid);
 
         let Some(mut pending) =
@@ -208,7 +213,7 @@ where
             return Ok(());
         };
 
-        pending.conn.on_timeout();
+        pending.conn.on_timeout(iteration);
 
         if pending.conn.is_closed() {
             log::error!("pending connection closed on_timeout"; "scid" => ?scid);
@@ -219,20 +224,22 @@ where
             ));
         }
 
-        self.set_connection_to_pending(pending.conn)
+        self.set_connection_to_pending(iteration, pending.conn)
     }
 
     /// [`ClientConnector::update`] handles expired pending connections and
     /// checks starts the inner connection if not started yet.
-    fn update(&mut self, cx: &mut Context) -> io::Result<()> {
+    fn update(
+        &mut self, iteration: &EventLoopIteration, cx: &mut Context,
+    ) -> io::Result<()> {
         while let Poll::Ready(Some(expired)) = self.timeout_queue.poll_expired(cx)
         {
             let scid = expired.into_inner();
-            self.on_timeout(scid)?;
+            self.on_timeout(iteration, scid)?;
         }
 
         if let Some(conn) = self.connection.take_if_queued() {
-            self.set_connection_to_pending(conn)?;
+            self.set_connection_to_pending(iteration, conn)?;
         }
 
         Ok(())
@@ -243,15 +250,17 @@ impl<Tx> InitialPacketHandler for ClientConnector<Tx>
 where
     Tx: DatagramSocketSend + Send + 'static,
 {
-    fn update(&mut self, ctx: &mut Context<'_>) -> io::Result<()> {
-        ClientConnector::update(self, ctx)
+    fn update(
+        &mut self, iteration: &EventLoopIteration, ctx: &mut Context<'_>,
+    ) -> io::Result<()> {
+        ClientConnector::update(self, iteration, ctx)
     }
 
     fn handle_initials(
-        &mut self, incoming: Incoming, hdr: Header<'static>,
-        _: &mut quiche::Config,
+        &mut self, iteration: &EventLoopIteration, incoming: Incoming,
+        hdr: Header<'static>, _: &mut quiche::Config,
     ) -> io::Result<Option<NewConnection>> {
-        self.on_incoming(incoming, hdr)
+        self.on_incoming(iteration, incoming, hdr)
     }
 }
 
@@ -261,7 +270,8 @@ where
 /// the [`crate::quic::io::worker::IoWorker`] will take over sending and
 /// receiving.
 fn simple_conn_send<Tx: DatagramSocketSend + Send + Sync + 'static>(
-    socket_tx: &MaybeConnectedSocket<Arc<Tx>>, conn: &mut QuicheConnection,
+    iteration: &EventLoopIteration, socket_tx: &MaybeConnectedSocket<Arc<Tx>>,
+    conn: &mut QuicheConnection,
 ) -> io::Result<()> {
     let scid = conn.source_id().into_owned();
     log::debug!("sending client Initials to peer"; "scid" => ?scid);
@@ -269,7 +279,7 @@ fn simple_conn_send<Tx: DatagramSocketSend + Send + Sync + 'static>(
     loop {
         let scid = scid.clone();
         let mut buf = [0; MAX_DATAGRAM_SIZE];
-        let send_res = conn.send(&mut buf);
+        let send_res = conn.send(iteration, &mut buf);
 
         let socket_clone = socket_tx.clone();
         match send_res {

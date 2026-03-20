@@ -39,6 +39,7 @@ use h3i::actions::h3::send_headers_frame;
 use h3i::actions::h3::Action;
 use h3i::actions::h3::WaitType;
 use h3i::quiche::ConnectionError;
+use h3i::quiche::EventLoopIteration;
 use h3i::quiche::{
     self,
 };
@@ -174,7 +175,9 @@ async fn test_handshake_timeout_with_one_client_flight() {
 
     // Send first Initial packet
     let mut out = [0; 65535];
-    let (write, _) = quiche_conn.send(&mut out).expect("initial send failed");
+    let (write, _) = quiche_conn
+        .send(&EventLoopIteration::new(), &mut out)
+        .expect("initial send failed");
     socket.send(&out[..write]).await.unwrap();
 
     // Receive Retry packet
@@ -183,10 +186,13 @@ async fn test_handshake_timeout_with_one_client_flight() {
         from,
         to: socket.local_addr().unwrap(),
     };
-    let _ = quiche_conn.recv(&mut out[..len], recv_info);
+    let _ =
+        quiche_conn.recv(&EventLoopIteration::new(), &mut out[..len], recv_info);
 
     // Send second Initial packet, which will spawn the TQ Handshake IOW
-    let (written, _) = quiche_conn.send(&mut out).unwrap();
+    let (written, _) = quiche_conn
+        .send(&EventLoopIteration::new(), &mut out)
+        .unwrap();
     socket.send(&out[..written]).await.unwrap();
 
     let err = timeout(
@@ -199,7 +205,11 @@ async fn test_handshake_timeout_with_one_client_flight() {
                     from,
                     to: socket.local_addr().unwrap(),
                 };
-                let _ = quiche_conn.recv(&mut out[..len], recv_info);
+                let _ = quiche_conn.recv(
+                    &EventLoopIteration::new(),
+                    &mut out[..len],
+                    recv_info,
+                );
 
                 if let Some(e) = quiche_conn.peer_error().cloned() {
                     return e;

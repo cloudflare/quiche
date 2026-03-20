@@ -31,6 +31,8 @@ use std::net;
 
 use std::collections::HashMap;
 
+use quiche::EventLoopIteration;
+
 use ring::rand::*;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
@@ -122,6 +124,8 @@ fn main() {
 
         poll.poll(&mut events, timeout).unwrap();
 
+        let iteration = EventLoopIteration::new();
+
         // Read incoming UDP packets from the socket and feed them to quiche,
         // until there are no more packets to read.
         'read: loop {
@@ -131,7 +135,9 @@ fn main() {
             if events.is_empty() {
                 debug!("timed out");
 
-                clients.values_mut().for_each(|c| c.conn.on_timeout());
+                clients
+                    .values_mut()
+                    .for_each(|c| c.conn.on_timeout(&iteration));
 
                 break 'read;
             }
@@ -292,7 +298,7 @@ fn main() {
             };
 
             // Process potentially coalesced packets.
-            let read = match client.conn.recv(pkt_buf, recv_info) {
+            let read = match client.conn.recv(&iteration, pkt_buf, recv_info) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -341,7 +347,10 @@ fn main() {
         // packets to be sent.
         for client in clients.values_mut() {
             loop {
-                let (write, send_info) = match client.conn.send(&mut out) {
+                let (write, send_info) = match client
+                    .conn
+                    .send(&iteration, &mut out)
+                {
                     Ok(v) => v,
 
                     Err(quiche::Error::Done) => {

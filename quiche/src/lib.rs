@@ -124,7 +124,7 @@
 //!
 //!     let recv_info = quiche::RecvInfo { from, to };
 //!
-//!     let read = match conn.recv(&mut buf[..read], recv_info) {
+//!     let read = match conn.recv(&quiche::EventLoopIteration::new(), &mut buf[..read], recv_info) {
 //!         Ok(v) => v,
 //!
 //!         Err(quiche::Error::Done) => {
@@ -159,7 +159,7 @@
 //! # let local = "127.0.0.1:4321".parse().unwrap();
 //! # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
 //! loop {
-//!     let (write, send_info) = match conn.send(&mut out) {
+//!     let (write, send_info) = match conn.send(&quiche::EventLoopIteration::new(), &mut out) {
 //!         Ok(v) => v,
 //!
 //!         Err(quiche::Error::Done) => {
@@ -210,11 +210,12 @@
 //! # let local = "127.0.0.1:4321".parse().unwrap();
 //! # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
 //! // Timeout expired, handle it.
-//! conn.on_timeout();
+//! let iteration = quiche::EventLoopIteration::new();
+//! conn.on_timeout(&iteration);
 //!
 //! // Send more packets as needed after timeout.
 //! loop {
-//!     let (write, send_info) = match conn.send(&mut out) {
+//!     let (write, send_info) = match conn.send(&iteration, &mut out) {
 //!         Ok(v) => v,
 //!
 //!         Err(quiche::Error::Done) => {
@@ -1936,6 +1937,37 @@ struct QlogInfo {
     level: EventImportance,
 }
 
+/// Information about the current iteration of the event loop.
+///
+/// Callers create one instance per event loop iteration and pass it to
+/// [`Connection`] methods such as [`recv`], [`send`], [`send_on_path`], and
+/// [`on_timeout`]. This allows the methods to share a single timestamp for
+/// the iteration rather than each calling [`Instant::now`] independently.
+///
+/// [`recv`]: Connection::recv
+/// [`send`]: Connection::send
+/// [`send_on_path`]: Connection::send_on_path
+/// [`on_timeout`]: Connection::on_timeout
+pub struct EventLoopIteration {
+    /// The time at which this event loop iteration started.
+    now: Instant,
+}
+
+#[allow(clippy::new_without_default)]
+impl EventLoopIteration {
+    /// Creates a new [`EventLoopIteration`], capturing the current time.
+    pub fn new() -> Self {
+        Self {
+            now: Instant::now(),
+        }
+    }
+
+    /// Returns the time at which this event loop iteration started.
+    pub fn now(&self) -> Instant {
+        self.now
+    }
+}
+
 #[cfg(feature = "qlog")]
 impl Default for QlogInfo {
     fn default() -> Self {
@@ -2774,7 +2806,7 @@ impl<F: BufFactory> Connection<F> {
     ///         to: local,
     ///     };
     ///
-    ///     let read = match conn.recv(&mut buf[..read], recv_info) {
+    ///     let read = match conn.recv(&quiche::EventLoopIteration::new(), &mut buf[..read], recv_info) {
     ///         Ok(v) => v,
     ///
     ///         Err(e) => {
@@ -2785,7 +2817,9 @@ impl<F: BufFactory> Connection<F> {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn recv(&mut self, buf: &mut [u8], info: RecvInfo) -> Result<usize> {
+    pub fn recv(
+        &mut self, iteration: &EventLoopIteration, buf: &mut [u8], info: RecvInfo,
+    ) -> Result<usize> {
         let len = buf.len();
 
         if len == 0 {
@@ -2829,6 +2863,7 @@ impl<F: BufFactory> Connection<F> {
         // Process coalesced packets.
         while left > 0 {
             let read = match self.recv_single(
+                iteration,
                 &mut buf[len - left..len],
                 &info,
                 recv_pid,
@@ -2862,12 +2897,14 @@ impl<F: BufFactory> Connection<F> {
         // Even though the packet was previously "accepted", it
         // should be safe to forward the error, as it also comes
         // from the `recv()` method.
-        self.process_undecrypted_0rtt_packets()?;
+        self.process_undecrypted_0rtt_packets(iteration)?;
 
         Ok(done)
     }
 
-    fn process_undecrypted_0rtt_packets(&mut self) -> Result<()> {
+    fn process_undecrypted_0rtt_packets(
+        &mut self, iteration: &EventLoopIteration,
+    ) -> Result<()> {
         // Process previously undecryptable 0-RTT packets if the decryption key
         // is now available.
         if self.crypto_ctx[packet::Epoch::Application]
@@ -2876,7 +2913,7 @@ impl<F: BufFactory> Connection<F> {
         {
             while let Some((mut pkt, info)) = self.undecryptable_pkts.pop_front()
             {
-                if let Err(e) = self.recv(&mut pkt, info) {
+                if let Err(e) = self.recv(iteration, &mut pkt, info) {
                     self.undecryptable_pkts.clear();
 
                     return Err(e);
@@ -2926,9 +2963,10 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     fn recv_single(
-        &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
+        &mut self, iteration: &EventLoopIteration, buf: &mut [u8],
+        info: &RecvInfo, recv_pid: Option<usize>,
     ) -> Result<usize> {
-        let now = Instant::now();
+        let now = iteration.now();
 
         if buf.is_empty() {
             return Err(Error::Done);
@@ -3812,7 +3850,7 @@ impl<F: BufFactory> Connection<F> {
     /// # let local = socket.local_addr().unwrap();
     /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
     /// loop {
-    ///     let (write, send_info) = match conn.send(&mut out) {
+    ///     let (write, send_info) = match conn.send(&quiche::EventLoopIteration::new(), &mut out) {
     ///         Ok(v) => v,
     ///
     ///         Err(quiche::Error::Done) => {
@@ -3830,8 +3868,10 @@ impl<F: BufFactory> Connection<F> {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
-    pub fn send(&mut self, out: &mut [u8]) -> Result<(usize, SendInfo)> {
-        self.send_on_path(out, None, None)
+    pub fn send(
+        &mut self, iteration: &EventLoopIteration, out: &mut [u8],
+    ) -> Result<(usize, SendInfo)> {
+        self.send_on_path(iteration, out, None, None)
     }
 
     /// Writes a single QUIC packet to be sent to the peer from the specified
@@ -3899,7 +3939,7 @@ impl<F: BufFactory> Connection<F> {
     /// # let local = socket.local_addr().unwrap();
     /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
     /// loop {
-    ///     let (write, send_info) = match conn.send_on_path(&mut out, Some(local), Some(peer)) {
+    ///     let (write, send_info) = match conn.send_on_path(&quiche::EventLoopIteration::new(), &mut out, Some(local), Some(peer)) {
     ///         Ok(v) => v,
     ///
     ///         Err(quiche::Error::Done) => {
@@ -3918,8 +3958,8 @@ impl<F: BufFactory> Connection<F> {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn send_on_path(
-        &mut self, out: &mut [u8], from: Option<SocketAddr>,
-        to: Option<SocketAddr>,
+        &mut self, iteration: &EventLoopIteration, out: &mut [u8],
+        from: Option<SocketAddr>, to: Option<SocketAddr>,
     ) -> Result<(usize, SendInfo)> {
         if out.is_empty() {
             return Err(Error::BufferTooShort);
@@ -3929,7 +3969,7 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        let now = Instant::now();
+        let now = iteration.now();
 
         if self.local_error.is_none() {
             self.do_handshake(now)?;
@@ -3941,7 +3981,7 @@ impl<F: BufFactory> Connection<F> {
         //
         // We simply fall-through to sending packets, which should
         // take care of terminating the connection as needed.
-        let _ = self.process_undecrypted_0rtt_packets();
+        let _ = self.process_undecrypted_0rtt_packets(iteration);
 
         // There's no point in trying to send a packet if the Initial secrets
         // have not been derived yet, so return early.
@@ -6857,8 +6897,8 @@ impl<F: BufFactory> Connection<F> {
     /// Processes a timeout event.
     ///
     /// If no timeout has occurred it does nothing.
-    pub fn on_timeout(&mut self) {
-        let now = Instant::now();
+    pub fn on_timeout(&mut self, iteration: &EventLoopIteration) {
+        let now = iteration.now();
 
         if let Some(draining_timer) = self.draining_timer {
             if draining_timer <= now {
@@ -7273,7 +7313,7 @@ impl<F: BufFactory> Connection<F> {
     /// for dest in conn.paths_iter(local) {
     ///     loop {
     ///         let (write, send_info) =
-    ///             match conn.send_on_path(&mut out, Some(local), Some(dest)) {
+    ///             match conn.send_on_path(&quiche::EventLoopIteration::new(), &mut out, Some(local), Some(dest)) {
     ///                 Ok(v) => v,
     ///
     ///                 Err(quiche::Error::Done) => {

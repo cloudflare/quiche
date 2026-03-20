@@ -60,6 +60,7 @@ use datagram_socket::QuicAuditStats;
 use foundations::telemetry::log;
 use quiche::ConnectionId;
 use quiche::Error as QuicheError;
+use quiche::EventLoopIteration;
 use quiche::SendInfo;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -223,7 +224,18 @@ where
         tokio::pin!(sleep);
 
         loop {
-            let now = Instant::now();
+            let iteration = EventLoopIteration::new();
+            let now = iteration.now();
+
+            if let Some(deadline) = current_deadline {
+                if deadline <= now {
+                    qconn.on_timeout(&iteration);
+
+                    self.write_state.next_release_time = None;
+                    current_deadline = None;
+                    sleep.as_mut().reset((now + DEFAULT_SLEEP).into());
+                }
+            }
 
             self.write_state.has_pending_data = true;
 
@@ -240,7 +252,7 @@ where
                     .take()
                     .or_else(|| ctx.incoming_pkt_receiver.try_recv().ok())
                 {
-                    self.process_incoming(qconn, pkt)?;
+                    self.process_incoming(&iteration, qconn, pkt)?;
                     did_recv = true;
                 }
 
@@ -261,7 +273,11 @@ where
                 while self.write_state.has_pending_data &&
                     packets_sent < CHECK_INCOMING_QUEUE_RATIO
                 {
-                    self.gather_data_from_quiche_conn(qconn, ctx.buffer())?;
+                    self.gather_data_from_quiche_conn(
+                        &iteration,
+                        qconn,
+                        ctx.buffer(),
+                    )?;
 
                     // Break if the connection is closed
                     if qconn.is_closed() {
@@ -313,21 +329,10 @@ where
 
             select! {
                 biased;
-                () = &mut sleep => {
-                    // It's very important that we keep the timeout arm at the top of this loop so
-                    // that we poll it every time we need to. Since this is a biased `select!`, if
-                    // we put this behind another arm, we could theoretically starve the sleep arm
-                    // and hang connections.
-                    //
-                    // See https://docs.rs/tokio/latest/tokio/macro.select.html#fairness for more
-                    qconn.on_timeout();
-
-                    self.write_state.next_release_time = None;
-                    current_deadline = None;
-                    sleep.as_mut().reset((now + DEFAULT_SLEEP).into());
-                }
+                // The sleep branch will be handled by the current_deadline and on_timeout check on the next iteration of the loop.
+                () = &mut sleep => (),
                 Some(pkt) = incoming_recv.recv() => ctx.in_pkt = Some(pkt),
-                directive = self.wait_for_data_or_handshake(qconn, application) => {
+                directive = self.wait_for_data_or_handshake(&iteration, qconn, application) => {
                     match directive? {
                         WaitForDataOrHandshakeDirective::Flush => {
                             self.flush_buffer_to_socket(application.buffer()).await;
@@ -357,7 +362,8 @@ where
     }
 
     fn gather_data_from_quiche_conn(
-        &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
+        &mut self, iteration: &EventLoopIteration, qconn: &mut QuicheConnection,
+        send_buf: &mut [u8],
     ) -> QuicResult<usize> {
         let mut segment_size = None;
         let mut send_info = None;
@@ -367,7 +373,7 @@ where
 
         self.write_state.selected_path = None;
 
-        let now = Instant::now();
+        let now = iteration.now();
 
         let send_buf = {
             let trunc = UDP_MAX_GSO_PACKET_SIZE.min(send_buf.len());
@@ -405,6 +411,7 @@ where
 
         let buffer_write_outcome = loop {
             let outcome = self.write_packet_to_buffer(
+                iteration,
                 qconn,
                 send_buf,
                 &mut send_info,
@@ -555,8 +562,9 @@ where
     }
 
     fn write_packet_to_buffer(
-        &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
-        send_info: &mut Option<SendInfo>, segment_size: Option<usize>,
+        &mut self, iteration: &EventLoopIteration, qconn: &mut QuicheConnection,
+        send_buf: &mut [u8], send_info: &mut Option<SendInfo>,
+        segment_size: Option<usize>,
     ) -> QuicResult<usize> {
         let mut send_buf = &mut send_buf[self.write_state.bytes_written..];
         if send_buf.len() > segment_size.unwrap_or(usize::MAX) {
@@ -577,7 +585,7 @@ where
         // apply to the whole GSO buffer.
         let (from, to) = self.select_path(qconn).unzip();
 
-        match qconn.send_on_path(send_buf, from, to) {
+        match qconn.send_on_path(iteration, send_buf, from, to) {
             Ok((packet_size, info)) => {
                 let _ = send_info.get_or_insert(info);
 
@@ -676,7 +684,8 @@ where
 
     /// Process the incoming packet
     fn process_incoming(
-        &mut self, qconn: &mut QuicheConnection, mut pkt: Incoming,
+        &mut self, iteration: &EventLoopIteration, qconn: &mut QuicheConnection,
+        mut pkt: Incoming,
     ) -> QuicResult<()> {
         let recv_info = quiche::RecvInfo {
             from: pkt.peer_addr,
@@ -685,10 +694,10 @@ where
 
         if let Some(gro) = pkt.gro {
             for dgram in pkt.buf.chunks_mut(gro as usize) {
-                qconn.recv(dgram, recv_info)?;
+                qconn.recv(iteration, dgram, recv_info)?;
             }
         } else {
-            qconn.recv(&mut pkt.buf, recv_info)?;
+            qconn.recv(iteration, &mut pkt.buf, recv_info)?;
         }
 
         Ok(())
@@ -702,7 +711,8 @@ where
     // application, but wait_for_quiche relies on IOW methods, so we can't write a
     // default implementation for ConnectionStage
     async fn wait_for_data_or_handshake<A: ApplicationOverQuic>(
-        &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
+        &mut self, iteration: &EventLoopIteration, qconn: &mut QuicheConnection,
+        quic_application: &mut A,
     ) -> QuicResult<WaitForDataOrHandshakeDirective> {
         if quic_application.should_act() {
             // Poll the application to make progress.
@@ -718,7 +728,7 @@ where
             Ok(WaitForDataOrHandshakeDirective::Noop)
         } else {
             // Poll quiche to make progress on handshake callbacks.
-            self.wait_for_quiche(qconn, quic_application.buffer())
+            self.wait_for_quiche(iteration, qconn, quic_application.buffer())
                 .await?;
             Ok(WaitForDataOrHandshakeDirective::Flush)
         }
@@ -737,10 +747,11 @@ where
     /// once one of the `gather_data_from_quiche_conn()` calls writes to the
     /// send buffer, we signal to the caller which has to take care of flushing
     async fn wait_for_quiche(
-        &mut self, qconn: &mut QuicheConnection, buffer: &mut [u8],
+        &mut self, iteration: &EventLoopIteration, qconn: &mut QuicheConnection,
+        buffer: &mut [u8],
     ) -> QuicResult<()> {
         std::future::poll_fn(|_| {
-            match self.gather_data_from_quiche_conn(qconn, buffer) {
+            match self.gather_data_from_quiche_conn(iteration, qconn, buffer) {
                 Ok(bytes_written) => {
                     // We need to avoid consecutive calls to gather(), which write
                     // data to the buffer, without a flush().
@@ -943,6 +954,8 @@ where
         mut self, qconn: &mut QuicheConnection,
         ctx: &mut ConnectionStageContext<A>,
     ) {
+        let iteration = EventLoopIteration::new();
+
         if self.conn_stage.work_loop_result.is_ok() &&
             self.bw_estimator.max_bandwidth > 0
         {
@@ -969,7 +982,8 @@ where
         // send (ignoring flow/congestion control constraints). We should
         // guarantee that it gets sent by doublechecking the
         // gathered/flushed byte totals and retry if they don't match.
-        let _ = self.gather_data_from_quiche_conn(qconn, ctx.buffer());
+        let _ =
+            self.gather_data_from_quiche_conn(&iteration, qconn, ctx.buffer());
         self.flush_buffer_to_socket(ctx.buffer()).await;
 
         *ctx.stats.lock().unwrap() = QuicConnectionStats::from_conn(qconn);

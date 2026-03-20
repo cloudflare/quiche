@@ -43,6 +43,8 @@ use std::cell::RefCell;
 
 use ring::rand::*;
 
+use quiche::EventLoopIteration;
+
 use quiche_apps::args::*;
 
 use quiche_apps::common::*;
@@ -198,6 +200,8 @@ fn main() {
             }
         }
 
+        let iteration = EventLoopIteration::new();
+
         // Read incoming UDP packets from the socket and feed them to quiche,
         // until there are no more packets to read.
         'read: loop {
@@ -207,7 +211,9 @@ fn main() {
             if events.is_empty() && !continue_write {
                 trace!("timed out");
 
-                clients.values_mut().for_each(|c| c.conn.on_timeout());
+                clients
+                    .values_mut()
+                    .for_each(|c| c.conn.on_timeout(&iteration));
 
                 break 'read;
             }
@@ -425,7 +431,7 @@ fn main() {
             };
 
             // Process potentially coalesced packets.
-            let read = match client.conn.recv(pkt_buf, recv_info) {
+            let read = match client.conn.recv(&iteration, pkt_buf, recv_info) {
                 Ok(v) => v,
 
                 Err(e) => {
@@ -561,7 +567,7 @@ fn main() {
             while total_write < max_send_burst {
                 let (write, send_info) = match client
                     .conn
-                    .send(&mut out[total_write..max_send_burst])
+                    .send(&iteration, &mut out[total_write..max_send_burst])
                 {
                     Ok(v) => v,
 
