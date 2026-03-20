@@ -27,6 +27,8 @@
 use crate::args::*;
 use crate::common::*;
 
+use quiche::EventLoopIteration;
+
 use std::io::prelude::*;
 
 use std::rc::Rc;
@@ -226,7 +228,9 @@ pub fn connect(
         scid,
     );
 
-    let (write, send_info) = conn.send(&mut out).expect("initial send failed");
+    let (write, send_info) = conn
+        .send(&EventLoopIteration::new(), &mut out)
+        .expect("initial send failed");
 
     while let Err(e) = socket.send_to(&out[..write], send_info.to) {
         if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -256,13 +260,15 @@ pub fn connect(
             poll.poll(&mut events, conn.timeout()).unwrap();
         }
 
+        let iteration = EventLoopIteration::new();
+
         // If the event loop reported no events, it means that the timeout
         // has expired, so handle it without attempting to read packets. We
         // will then proceed with the send loop.
         if events.is_empty() {
             trace!("timed out");
 
-            conn.on_timeout();
+            conn.on_timeout(&iteration);
         }
 
         // Read incoming UDP packets from the socket and feed them to quiche,
@@ -314,7 +320,8 @@ pub fn connect(
                 };
 
                 // Process potentially coalesced packets.
-                let read = match conn.recv(&mut buf[..len], recv_info) {
+                let read = match conn.recv(&iteration, &mut buf[..len], recv_info)
+                {
                     Ok(v) => v,
 
                     Err(e) => {
@@ -498,6 +505,7 @@ pub fn connect(
             for peer_addr in conn.paths_iter(local_addr) {
                 loop {
                     let (write, send_info) = match conn.send_on_path(
+                        &iteration,
                         &mut out,
                         Some(local_addr),
                         Some(peer_addr),

@@ -343,7 +343,7 @@ impl<F: BufFactory> Pipe<F> {
             from: server_path.local_addr(),
         };
 
-        self.client.recv(buf, info)
+        self.client.recv(&EventLoopIteration::new(), buf, info)
     }
 
     pub fn server_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
@@ -353,7 +353,7 @@ impl<F: BufFactory> Pipe<F> {
             from: client_path.local_addr(),
         };
 
-        self.server.recv(buf, info)
+        self.server.recv(&EventLoopIteration::new(), buf, info)
     }
 
     pub fn send_pkt_to_server(
@@ -404,11 +404,12 @@ pub fn recv_send<F: BufFactory>(
         from: active_path.peer_addr(),
     };
 
-    conn.recv(&mut buf[..len], info)?;
+    let iteration = &EventLoopIteration::new();
+    conn.recv(iteration, &mut buf[..len], info)?;
 
     let mut off = 0;
 
-    match conn.send(&mut buf[off..]) {
+    match conn.send(iteration, &mut buf[off..]) {
         Ok((write, _)) => off += write,
 
         Err(Error::Done) => (),
@@ -422,13 +423,14 @@ pub fn recv_send<F: BufFactory>(
 pub fn process_flight<F: BufFactory>(
     conn: &mut Connection<F>, flight: Vec<(Vec<u8>, SendInfo)>,
 ) -> Result<()> {
+    let iteration = &EventLoopIteration::new();
     for (mut pkt, si) in flight {
         let info = RecvInfo {
             to: si.to,
             from: si.from,
         };
 
-        conn.recv(&mut pkt, info)?;
+        conn.recv(iteration, &mut pkt, info)?;
     }
 
     Ok(())
@@ -440,10 +442,11 @@ pub fn emit_flight_with_max_buffer<F: BufFactory>(
 ) -> Result<Vec<(Vec<u8>, SendInfo)>> {
     let mut flight = Vec::new();
 
+    let iteration = &EventLoopIteration::new();
     loop {
         let mut out = vec![0u8; out_size];
 
-        let info = match conn.send_on_path(&mut out, from, to) {
+        let info = match conn.send_on_path(iteration, &mut out, from, to) {
             Ok((written, info)) => {
                 out.truncate(written);
                 info
@@ -660,22 +663,27 @@ pub fn trigger_ack_based_loss<F: BufFactory>(
 
     for _ in 0..pkt_thresh {
         sender.send_ack_eliciting().unwrap();
-        let (len, _) = sender.send(&mut buf).unwrap();
+        let (len, _) = sender.send(&EventLoopIteration::new(), &mut buf).unwrap();
 
         let info = RecvInfo {
             to: receiver.paths.get_active().unwrap().local_addr(),
             from: receiver.paths.get_active().unwrap().peer_addr(),
         };
-        receiver.recv(&mut buf[..len], info).unwrap();
+        receiver
+            .recv(&EventLoopIteration::new(), &mut buf[..len], info)
+            .unwrap();
     }
 
     // Receiver sends ACK for the new packets.
-    let (ack_len, _) = receiver.send(&mut buf).unwrap();
+    let (ack_len, _) =
+        receiver.send(&EventLoopIteration::new(), &mut buf).unwrap();
 
     // Sender receives ACK, triggering loss detection.
     let info = RecvInfo {
         to: sender.paths.get_active().unwrap().local_addr(),
         from: sender.paths.get_active().unwrap().peer_addr(),
     };
-    sender.recv(&mut buf[..ack_len], info).unwrap();
+    sender
+        .recv(&EventLoopIteration::new(), &mut buf[..ack_len], info)
+        .unwrap();
 }

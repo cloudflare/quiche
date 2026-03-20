@@ -25,6 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use h3i::quiche;
+use h3i::quiche::EventLoopIteration;
 use std::net::SocketAddr;
 use tokio_quiche::quic::SimpleConnectionIdGenerator;
 use tokio_quiche::ConnectionIdGenerator as _;
@@ -218,7 +219,9 @@ async fn process_flight(
         };
 
         // Process potentially coalesced packets.
-        let _ = conn.recv(&mut buf[..len], recv_info).unwrap();
+        let _ = conn
+            .recv(&EventLoopIteration::new(), &mut buf[..len], recv_info)
+            .unwrap();
     }
 }
 

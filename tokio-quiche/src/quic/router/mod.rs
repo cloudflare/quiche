@@ -45,6 +45,7 @@ use datagram_socket::DatagramSocketRecv;
 use datagram_socket::DatagramSocketSend;
 use foundations::telemetry::log;
 use quiche::ConnectionId;
+use quiche::EventLoopIteration;
 use quiche::Header;
 use quiche::MAX_CONN_ID_LEN;
 use std::default::Default;
@@ -226,7 +227,9 @@ where
         )
     }
 
-    fn on_incoming(&mut self, mut incoming: Incoming) -> io::Result<()> {
+    fn on_incoming(
+        &mut self, iteration: &EventLoopIteration, mut incoming: Incoming,
+    ) -> io::Result<()> {
         #[cfg(feature = "perf-quic-listener-metrics")]
         let start = std::time::Instant::now();
 
@@ -268,6 +271,7 @@ where
         let init_rx_time = incoming.rx_time;
 
         let new_connection = self.incoming_packet_handler.handle_initials(
+            iteration,
             incoming,
             hdr,
             self.config.as_mut(),
@@ -676,7 +680,10 @@ where
         let server_addr = self.local_addr;
 
         loop {
-            if let Err(error) = self.incoming_packet_handler.update(cx) {
+            let iteration = EventLoopIteration::new();
+            if let Err(error) =
+                self.incoming_packet_handler.update(&iteration, cx)
+            {
                 // This is so rare that it's easier to spawn a separate task
                 let sender = self.accept_sink.clone();
                 spawn_with_killswitch(async move {
@@ -707,7 +714,7 @@ where
                         server_addr
                     };
 
-                    let res = self.on_incoming(Incoming {
+                    let res = self.on_incoming(&iteration, Incoming {
                         peer_addr,
                         local_addr: send_from,
                         buf,
@@ -798,13 +805,15 @@ fn initial_packet_error_type(
 /// The handler produces [`quiche::Connection`]s which are then turned into
 /// [`QuicConnection`](super::QuicConnection), IoWorker pair.
 pub trait InitialPacketHandler {
-    fn update(&mut self, _ctx: &mut Context<'_>) -> io::Result<()> {
+    fn update(
+        &mut self, _iteration: &EventLoopIteration, _ctx: &mut Context<'_>,
+    ) -> io::Result<()> {
         Ok(())
     }
 
     fn handle_initials(
-        &mut self, incoming: Incoming, hdr: Header<'static>,
-        quiche_config: &mut quiche::Config,
+        &mut self, iteration: &EventLoopIteration, incoming: Incoming,
+        hdr: Header<'static>, quiche_config: &mut quiche::Config,
     ) -> io::Result<Option<NewConnection>>;
 }
 

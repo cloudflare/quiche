@@ -254,7 +254,10 @@ fn version_negotiation() {
 
     let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
 
-    let (mut len, _) = pipe.client.send(&mut buf).unwrap();
+    let (mut len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let hdr = Header::from_slice(&mut buf[..len], 0).unwrap();
     len = negotiate_version(&hdr.scid, &hdr.dcid, &mut buf).unwrap();
@@ -381,7 +384,10 @@ fn missing_initial_source_connection_id(
     assert_eq!(pipe.client.encode_transport_params(), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server rejects transport parameters.
     assert_eq!(
@@ -405,7 +411,10 @@ fn invalid_initial_source_connection_id(
     assert_eq!(pipe.client.encode_transport_params(), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server rejects transport parameters.
     assert_eq!(
@@ -633,10 +642,16 @@ fn handshake_alpn_mismatch(
     assert_eq!(pipe.server.application_proto(), b"");
 
     // Server should only send one packet in response to ALPN mismatch.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, 1200);
 
-    assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.server.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
     assert_eq!(pipe.server.sent_count, 1);
 }
 
@@ -677,7 +692,10 @@ fn handshake_0rtt(
     assert_eq!(pipe.client.set_session(session), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
     // Client sends 0-RTT packet.
@@ -742,7 +760,10 @@ fn handshake_0rtt_reordered(
     assert_eq!(pipe.client.set_session(session), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let mut initial = buf[..len].to_vec();
 
     // Client sends 0-RTT packet.
@@ -817,7 +838,9 @@ fn handshake_0rtt_truncated(
     assert_eq!(pipe.client.set_session(session), Ok(()));
 
     // Client sends initial flight.
-    pipe.client.send(&mut buf).unwrap();
+    pipe.client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Client sends 0-RTT packet.
     let pkt_type = Type::ZeroRTT;
@@ -887,11 +910,12 @@ fn crypto_limit(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) 
     };
 
     assert_eq!(
-        pipe.server.recv(&mut buf[..written], info),
+        pipe.server
+            .recv(&EventLoopIteration::new(), &mut buf[..written], info),
         Err(Error::CryptoBufferExceeded)
     );
 
-    let written = match pipe.server.send(&mut buf) {
+    let written = match pipe.server.send(&EventLoopIteration::new(), &mut buf) {
         Ok((write, _)) => write,
 
         Err(_) => unreachable!(),
@@ -1053,7 +1077,10 @@ fn zero_rtt(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     assert_eq!(pipe.client.set_session(session), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let mut initial = buf[..len].to_vec();
 
     assert!(pipe.client.is_in_early_data());
@@ -1061,7 +1088,10 @@ fn zero_rtt(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     // Client sends 0-RTT data.
     assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let mut zrtt = buf[..len].to_vec();
 
     // Server receives packets.
@@ -1348,7 +1378,10 @@ fn min_payload(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     // Artificially limit the amount of bytes the server can send.
     initial_path.max_send_bytes = 60;
 
-    assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.server.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
 }
 
 #[rstest]
@@ -2614,7 +2647,10 @@ fn streams_blocked_bidi_retransmit(
     // Trigger the lost-frames processing by calling send().  The loss handler
     // is invoked at the start of each send_on_path() call to process any frames
     // added to lost_frames by ack-based loss detection.
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let (len, send_info) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // After the retransmit send the sequence is:
     //   1. loss handler: clears `streams_blocked_bidi_state.blocked_sent` to
@@ -2637,7 +2673,9 @@ fn streams_blocked_bidi_retransmit(
         to: server_path.local_addr(),
         from: server_path.peer_addr(),
     };
-    pipe.server.recv(&mut buf[..len], info).unwrap();
+    pipe.server
+        .recv(&EventLoopIteration::new(), &mut buf[..len], info)
+        .unwrap();
 
     // The server must have received the retransmitted STREAMS_BLOCKED frame.
     assert_eq!(pipe.server.streams_blocked_bidi_recv_count, 1);
@@ -2696,7 +2734,10 @@ fn streams_blocked_uni_retransmit(
     // Trigger the lost-frames processing by calling send().  The loss handler
     // is invoked at the start of each send_on_path() call to process any frames
     // added to lost_frames by ack-based loss detection.
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let (len, send_info) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     assert!(!pipe
         .client
@@ -2713,7 +2754,9 @@ fn streams_blocked_uni_retransmit(
         to: server_path.local_addr(),
         from: server_path.peer_addr(),
     };
-    pipe.server.recv(&mut buf[..len], info).unwrap();
+    pipe.server
+        .recv(&EventLoopIteration::new(), &mut buf[..len], info)
+        .unwrap();
 
     // The server must have received the retransmitted STREAMS_BLOCKED frame.
     assert_eq!(pipe.server.streams_blocked_uni_recv_count, 1);
@@ -3668,7 +3711,10 @@ fn stream_shutdown_read(
     let mut r = pipe.server.readable();
     assert_eq!(r.next(), None);
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let mut dummy = buf[..len].to_vec();
 
@@ -3753,7 +3799,10 @@ fn stream_shutdown_read_after_fin(
     // Server sends a flow control update, but it does NOT send
     // STOP_SENDING frame, since it has already received a FIN from
     // the client.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let mut dummy = buf[..len].to_vec();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut dummy[..len]).unwrap();
@@ -4022,7 +4071,10 @@ fn stream_shutdown_write(
     let mut r = pipe.server.writable();
     assert_eq!(r.next(), None);
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let mut dummy = buf[..len].to_vec();
 
@@ -4173,7 +4225,10 @@ fn stream_round_robin(
     assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
     assert_eq!(pipe.client.stream_send(4, b"aaaaa", false), Ok(5));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
@@ -4191,7 +4246,10 @@ fn stream_round_robin(
         })
     );
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
@@ -4204,7 +4262,10 @@ fn stream_round_robin(
         })
     );
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
@@ -4505,7 +4566,10 @@ fn invalid_initial_client(
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server sends initial flight.
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(1200));
@@ -5450,7 +5514,10 @@ fn retry(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
 
     // Client sends initial flight.
-    let (mut len, _) = pipe.client.send(&mut buf).unwrap();
+    let (mut len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server sends Retry packet.
     let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
@@ -5470,7 +5537,10 @@ fn retry(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let (len, send_info) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
     assert_eq!(&hdr.token.unwrap(), token);
@@ -5513,7 +5583,10 @@ fn retry_with_pto(
     let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
 
     // Client sends initial flight.
-    let (mut len, _) = pipe.client.send(&mut buf).unwrap();
+    let (mut len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server sends Retry packet.
     let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
@@ -5533,7 +5606,10 @@ fn retry_with_pto(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let (len, send_info) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
     assert_eq!(&hdr.token.unwrap(), token);
@@ -5552,7 +5628,7 @@ fn retry_with_pto(
     // Wait for the client's PTO so it will try to send an Initial again.
     let timer = pipe.client.timeout().unwrap();
     std::thread::sleep(timer + Duration::from_millis(1));
-    pipe.client.on_timeout();
+    pipe.client.on_timeout(&EventLoopIteration::new());
 
     assert_eq!(pipe.advance(), Ok(()));
 
@@ -5581,7 +5657,10 @@ fn retry_missing_original_destination_connection_id(
     let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
 
     // Client sends initial flight.
-    let (mut len, _) = pipe.client.send(&mut buf).unwrap();
+    let (mut len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server sends Retry packet.
     let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
@@ -5599,7 +5678,10 @@ fn retry_missing_original_destination_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server accepts connection and send first flight. But original
     // destination connection ID is ignored.
@@ -5643,7 +5725,10 @@ fn retry_invalid_original_destination_connection_id(
     let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
 
     // Client sends initial flight.
-    let (mut len, _) = pipe.client.send(&mut buf).unwrap();
+    let (mut len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server sends Retry packet.
     let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
@@ -5661,7 +5746,10 @@ fn retry_invalid_original_destination_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server accepts connection and send first flight. But original
     // destination connection ID is invalid.
@@ -5706,7 +5794,10 @@ fn retry_separate_source_connection_id(
     let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
 
     // Client sends initial flight.
-    let (mut len, _) = pipe.client.send(&mut buf).unwrap();
+    let (mut len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server sends Retry packet.
     let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
@@ -5728,7 +5819,10 @@ fn retry_separate_source_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let (len, send_info) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
     assert_eq!(&hdr.token.unwrap(), token);
@@ -5777,7 +5871,10 @@ fn retry_invalid_source_connection_id(
     let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
 
     // Client sends initial flight.
-    let (mut len, _) = pipe.client.send(&mut buf).unwrap();
+    let (mut len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server sends Retry packet.
     let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
@@ -5793,7 +5890,10 @@ fn retry_invalid_source_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let (len, send_info) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     // Server accepts connection and send first flight. But retry source
     // connection ID is invalid.
@@ -5927,7 +6027,10 @@ fn data_blocked(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) 
     assert_eq!(pipe.client.stream_send(8, b"aaaaaaaaaaa", false), Ok(10));
     assert_eq!(pipe.client.blocked_limit, Some(30));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(pipe.client.blocked_limit, None);
 
     let frames =
@@ -5966,7 +6069,10 @@ fn stream_data_blocked(
     assert_eq!(pipe.client.stream_send(0, b"aaaaaa", false), Ok(5));
     assert_eq!(pipe.client.streams.blocked().len(), 1);
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(pipe.client.streams.blocked().len(), 0);
 
     let frames =
@@ -5999,7 +6105,10 @@ fn stream_data_blocked(
     // again.
     assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(pipe.client.streams.blocked().len(), 0);
 
     let frames =
@@ -6024,7 +6133,10 @@ fn stream_data_blocked(
         Err(Error::Done)
     );
     assert_eq!(pipe.client.streams.blocked().len(), 0);
-    assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.client.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
 }
 
 #[rstest]
@@ -6052,13 +6164,22 @@ fn stream_data_blocked_unblocked_flow_control(
     // No matter how many times we try to write stream data tried, no
     // packets containing STREAM_BLOCKED should be emitted.
     assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
-    assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.client.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
 
     assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
-    assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.client.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
 
     assert_eq!(pipe.client.stream_send(0, b"h", false), Err(Error::Done));
-    assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.client.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
 
     // Now read some data at the server to release flow control.
     let mut r = pipe.server.readable();
@@ -6077,7 +6198,10 @@ fn stream_data_blocked_unblocked_flow_control(
     assert_eq!(pipe.client.stream_send(0, b"hhhhhhhhhh!", false), Ok(10));
     assert_eq!(pipe.client.streams.blocked().len(), 1);
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(pipe.client.streams.blocked().len(), 0);
 
     let frames =
@@ -6097,7 +6221,10 @@ fn stream_data_blocked_unblocked_flow_control(
 
     assert_eq!(pipe.client.stream_send(0, b"!", false), Err(Error::Done));
     assert_eq!(pipe.client.streams.blocked().len(), 0);
-    assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.client.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
 }
 
 #[rstest]
@@ -6499,7 +6626,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
 
     let mut buf = [0; 2000];
 
-    let ret = pipe.client.send(&mut buf);
+    let ret = pipe.client.send(&EventLoopIteration::new(), &mut buf);
 
     assert_eq!(pipe.client.tx_cap, 0);
 
@@ -6577,7 +6704,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
             .expect("client recv ping");
 
         // Client acknowledges despite a full congestion window
-        let ret = pipe.client.send(&mut buf);
+        let ret = pipe.client.send(&EventLoopIteration::new(), &mut buf);
 
         assert!(matches!(ret, Ok((_, _))), "the client should at least send one packet to acknowledge the newly received data");
 
@@ -6599,7 +6726,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
     // The client shouldn't need to send any more packets after the ACK only
     // packet it just sent.
     assert_eq!(
-        pipe.client.send(&mut buf),
+        pipe.client.send(&EventLoopIteration::new(), &mut buf),
         Err(Error::Done),
         "nothing for client to send after ACK-only packet"
     );
@@ -7225,8 +7352,10 @@ fn stream_priority(
     let mut off = 0;
 
     for _ in 1..=3 {
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7248,8 +7377,10 @@ fn stream_priority(
     let mut off = 0;
 
     for _ in 1..=3 {
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7271,8 +7402,10 @@ fn stream_priority(
     let mut off = 0;
 
     for _ in 1..=3 {
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7294,8 +7427,10 @@ fn stream_priority(
     let mut off = 0;
 
     for _ in 1..=3 {
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7308,8 +7443,10 @@ fn stream_priority(
             })
         );
 
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7332,8 +7469,10 @@ fn stream_priority(
     let mut off = 0;
 
     for _ in 1..=3 {
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7351,7 +7490,10 @@ fn stream_priority(
         };
     }
 
-    assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.server.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
 }
 
 #[rstest]
@@ -7416,7 +7558,10 @@ fn stream_reprioritize(
     assert_eq!(pipe.server.stream_priority(0, 20, true), Ok(()));
 
     // First is stream 8.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7430,7 +7575,10 @@ fn stream_reprioritize(
     );
 
     // Then is stream 0.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7444,7 +7592,10 @@ fn stream_reprioritize(
     );
 
     // Then are stream 12 and 4, with the same priority.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7457,7 +7608,10 @@ fn stream_reprioritize(
         })
     );
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7470,7 +7624,10 @@ fn stream_reprioritize(
         })
     );
 
-    assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.server.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
 }
 
 #[rstest]
@@ -7541,8 +7698,10 @@ fn stream_datagram_priority(
 
     for _ in 1..=3 {
         // DATAGRAM
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7554,8 +7713,10 @@ fn stream_datagram_priority(
         assert_eq!(frame_iter.next(), None);
 
         // STREAM 0
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7575,8 +7736,10 @@ fn stream_datagram_priority(
         assert_eq!(frame_iter.next(), None);
 
         // DATAGRAM
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7588,8 +7751,10 @@ fn stream_datagram_priority(
         assert_eq!(frame_iter.next(), None);
 
         // STREAM 4
-        let (len, _) =
-            pipe.server.send(&mut buf[..MAX_TEST_PACKET_SIZE]).unwrap();
+        let (len, _) = pipe
+            .server
+            .send(&EventLoopIteration::new(), &mut buf[..MAX_TEST_PACKET_SIZE])
+            .unwrap();
 
         let frames =
             test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -7626,13 +7791,16 @@ fn early_retransmit(
 
     // Client sends more stream data, but packet is lost
     assert_eq!(pipe.client.stream_send(4, b"b", false), Ok(1));
-    assert!(pipe.client.send(&mut buf).is_ok());
+    assert!(pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .is_ok());
 
     // Wait until PTO expires. Since the RTT is very low, wait a bit more.
     let timer = pipe.client.timeout().unwrap();
     std::thread::sleep(timer + Duration::from_millis(1));
 
-    pipe.client.on_timeout();
+    pipe.client.on_timeout(&EventLoopIteration::new());
 
     let epoch = packet::Epoch::Application;
     assert_eq!(
@@ -7646,7 +7814,10 @@ fn early_retransmit(
     );
 
     // Client retransmits stream data in PTO probe.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(
         pipe.client
             .paths
@@ -7706,7 +7877,10 @@ fn max_data_frames_retransmit(
     // So is the servers's max_rx_data, since it hasn't sent a MAX_DATA frame yet
     assert_eq!(pipe.server.max_rx_data(), 30);
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
@@ -7741,7 +7915,10 @@ fn max_data_frames_retransmit(
     // Trigger loss detection
     test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
@@ -7779,7 +7956,10 @@ fn dont_coalesce_probes(
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Client sends Initial packet.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, 1200);
     assert_eq!(pipe.client.path_stats().next().unwrap().total_pto_count, 0);
 
@@ -7787,7 +7967,7 @@ fn dont_coalesce_probes(
     let timer = pipe.client.timeout().unwrap();
     std::thread::sleep(timer + Duration::from_millis(1));
 
-    pipe.client.on_timeout();
+    pipe.client.on_timeout(&EventLoopIteration::new());
     assert_eq!(pipe.client.path_stats().next().unwrap().total_pto_count, 1);
 
     let epoch = packet::Epoch::Initial;
@@ -7802,7 +7982,10 @@ fn dont_coalesce_probes(
     );
 
     // Client sends PTO probe.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, 1200);
     assert_eq!(
         pipe.client
@@ -7818,7 +8001,7 @@ fn dont_coalesce_probes(
     let timer = pipe.client.timeout().unwrap();
     std::thread::sleep(timer + Duration::from_millis(1));
 
-    pipe.client.on_timeout();
+    pipe.client.on_timeout(&EventLoopIteration::new());
     assert_eq!(pipe.client.path_stats().next().unwrap().total_pto_count, 2);
 
     assert_eq!(
@@ -7832,7 +8015,10 @@ fn dont_coalesce_probes(
     );
 
     // Client sends first PTO probe.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, 1200);
     assert_eq!(
         pipe.client
@@ -7845,7 +8031,10 @@ fn dont_coalesce_probes(
     );
 
     // Client sends second PTO probe.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, 1200);
     assert_eq!(
         pipe.client
@@ -7867,16 +8056,25 @@ fn coalesce_padding_short(
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Client sends first flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
     // Server sends first flight.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
     // Client sends stream data.
@@ -7884,7 +8082,10 @@ fn coalesce_padding_short(
     assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
 
     // Client sends second flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
@@ -7920,7 +8121,10 @@ fn handshake_anti_deadlock(
     assert!(pipe.server.handshake_status().peer_verified_address);
 
     // Client sends padded Initial.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, 1200);
 
     // Server receives client's Initial and sends own Initial and Handshake
@@ -7958,7 +8162,10 @@ fn handshake_packet_type_corruption(
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Client sends padded Initial.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, 1200);
 
     // Server receives client's Initial and sends own Initial and Handshake.
@@ -8058,7 +8265,10 @@ fn dgram_send_app_limited(
     );
     assert_eq!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     assert_ne!(pipe.client.dgram_send_queue.byte_size(), 0);
     assert_ne!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
@@ -8467,7 +8677,10 @@ fn close(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
         Err(Error::Done)
     );
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
@@ -8495,7 +8708,10 @@ fn app_close_by_client(
 
     assert_eq!(pipe.client.close(true, 0x4321, b"hello!"), Err(Error::Done));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
@@ -9111,7 +9327,10 @@ fn in_handshake_config(
     )?;
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     assert_eq!(pipe.server.tx_cap, 0);
 
@@ -9126,7 +9345,10 @@ fn in_handshake_config(
     assert_eq!(pipe.server.idle_timeout(), Some(CUSTOM_MAX_IDLE_TIMEOUT));
 
     // Server sends initial flight.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     pipe.client_recv(&mut buf[..len]).unwrap();
 
     // Ensure the client received the new transport parameters.
@@ -9199,10 +9421,16 @@ fn max_streams_threshold_after_handshake_callback_update(
 
     // Complete handshake - server's callback changes max_streams to
     // CALLBACK_INITIAL_MAX_STREAMS_BIDI so verify the client received that.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     pipe.server_recv(&mut buf[..len]).unwrap();
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     pipe.client_recv(&mut buf[..len]).unwrap();
 
     assert_eq!(
@@ -9383,11 +9611,14 @@ fn last_tx_data_larger_than_tx_data(
     let timer = pipe.server.timeout().unwrap();
     std::thread::sleep(timer + Duration::from_millis(1));
 
-    pipe.server.on_timeout();
+    pipe.server.on_timeout(&EventLoopIteration::new());
 
     // Server sends PTO probe (not limited to cwnd),
     // to update last_tx_data.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(len, 1200);
 
     // Client sends STOP_SENDING to decrease tx_data
@@ -9514,11 +9745,12 @@ fn connection_id_zero(
     };
 
     assert_eq!(
-        pipe.server.recv(&mut buf[..written], info),
+        pipe.server
+            .recv(&EventLoopIteration::new(), &mut buf[..written], info),
         Err(Error::InvalidFrame)
     );
 
-    let written = match pipe.server.send(&mut buf) {
+    let written = match pipe.server.send(&EventLoopIteration::new(), &mut buf) {
         Ok((write, _)) => write,
 
         Err(_) => unreachable!(),
@@ -9588,11 +9820,12 @@ fn connection_id_invalid_max_len(
     };
 
     assert_eq!(
-        pipe.server.recv(&mut buf[..written], info),
+        pipe.server
+            .recv(&EventLoopIteration::new(), &mut buf[..written], info),
         Err(Error::InvalidFrame)
     );
 
-    let written = match pipe.server.send(&mut buf) {
+    let written = match pipe.server.send(&EventLoopIteration::new(), &mut buf) {
         Ok((write, _)) => write,
 
         Err(_) => unreachable!(),
@@ -9735,7 +9968,7 @@ fn lost_connection_id_frames(
     let timer = pipe.client.timeout().unwrap();
     std::thread::sleep(timer + Duration::from_millis(1));
 
-    pipe.client.on_timeout();
+    pipe.client.on_timeout(&EventLoopIteration::new());
 
     // Let exchange packets over the connection.
     assert_eq!(pipe.advance(), Ok(()));
@@ -9753,7 +9986,7 @@ fn lost_connection_id_frames(
     let timer = pipe.server.timeout().unwrap();
     std::thread::sleep(timer + Duration::from_millis(1));
 
-    pipe.server.on_timeout();
+    pipe.server.on_timeout(&EventLoopIteration::new());
 
     // Let exchange packets over the connection.
     assert_eq!(pipe.advance(), Ok(()));
@@ -9877,11 +10110,12 @@ fn connection_id_retire_limit(
     };
 
     assert_eq!(
-        pipe.server.recv(&mut buf[..written], info),
+        pipe.server
+            .recv(&EventLoopIteration::new(), &mut buf[..written], info),
         Err(Error::IdLimit)
     );
 
-    let written = match pipe.server.send(&mut buf) {
+    let written = match pipe.server.send(&EventLoopIteration::new(), &mut buf) {
         Ok((write, _)) => write,
 
         Err(_) => unreachable!(),
@@ -10184,7 +10418,7 @@ fn losing_probing_packets(
     let timer = probe_instant.duration_since(Instant::now());
     std::thread::sleep(timer + Duration::from_millis(1));
 
-    pipe.client.on_timeout();
+    pipe.client.on_timeout(&EventLoopIteration::new());
 
     assert_eq!(pipe.advance(), Ok(()));
 
@@ -10253,7 +10487,7 @@ fn failed_path_validation(
         let timer = probe_instant.duration_since(Instant::now());
         std::thread::sleep(timer + Duration::from_millis(1));
 
-        pipe.client.on_timeout();
+        pipe.client.on_timeout(&EventLoopIteration::new());
     }
 
     assert_eq!(
@@ -10481,15 +10715,24 @@ fn send_on_path_test(
     let mut buf = [0; 65535];
     // There is nothing to send on the initial path.
     assert_eq!(
-        pipe.client
-            .send_on_path(&mut buf, Some(client_addr), Some(server_addr)),
+        pipe.client.send_on_path(
+            &EventLoopIteration::new(),
+            &mut buf,
+            Some(client_addr),
+            Some(server_addr)
+        ),
         Err(Error::Done)
     );
 
     // Client should send padded PATH_CHALLENGE.
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, Some(client_addr_2), Some(server_addr))
+        .send_on_path(
+            &EventLoopIteration::new(),
+            &mut buf,
+            Some(client_addr_2),
+            Some(server_addr),
+        )
         .expect("No error");
     assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(si.from, client_addr_2);
@@ -10499,7 +10742,11 @@ fn send_on_path_test(
         to: si.to,
         from: si.from,
     };
-    assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+    assert_eq!(
+        pipe.server
+            .recv(&EventLoopIteration::new(), &mut buf[..sent], ri),
+        Ok(sent)
+    );
 
     let stats = pipe.server.stats();
     assert_eq!(stats.path_challenge_rx_count, 1);
@@ -10509,6 +10756,7 @@ fn send_on_path_test(
     let server_addr_2 = "127.0.0.1:9876".parse().unwrap();
     assert_eq!(
         pipe.client.send_on_path(
+            &EventLoopIteration::new(),
             &mut buf,
             Some(client_addr_3),
             Some(server_addr)
@@ -10517,6 +10765,7 @@ fn send_on_path_test(
     );
     assert_eq!(
         pipe.client.send_on_path(
+            &EventLoopIteration::new(),
             &mut buf,
             Some(client_addr),
             Some(server_addr_2)
@@ -10533,7 +10782,12 @@ fn send_on_path_test(
     // PATH_CHALLENGE
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, Some(client_addr), None)
+        .send_on_path(
+            &EventLoopIteration::new(),
+            &mut buf,
+            Some(client_addr),
+            None,
+        )
         .expect("No error");
     assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(si.from, client_addr);
@@ -10543,7 +10797,11 @@ fn send_on_path_test(
         to: si.to,
         from: si.from,
     };
-    assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+    assert_eq!(
+        pipe.server
+            .recv(&EventLoopIteration::new(), &mut buf[..sent], ri),
+        Ok(sent)
+    );
 
     let stats = pipe.server.stats();
     assert_eq!(stats.path_challenge_rx_count, 2);
@@ -10551,7 +10809,12 @@ fn send_on_path_test(
     // STREAM frame on active path.
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, Some(client_addr), None)
+        .send_on_path(
+            &EventLoopIteration::new(),
+            &mut buf,
+            Some(client_addr),
+            None,
+        )
         .expect("No error");
     assert_eq!(si.from, client_addr);
     assert_eq!(si.to, server_addr);
@@ -10560,7 +10823,11 @@ fn send_on_path_test(
         to: si.to,
         from: si.from,
     };
-    assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+    assert_eq!(
+        pipe.server
+            .recv(&EventLoopIteration::new(), &mut buf[..sent], ri),
+        Ok(sent)
+    );
 
     let stats = pipe.server.stats();
     assert_eq!(stats.path_challenge_rx_count, 2);
@@ -10568,7 +10835,12 @@ fn send_on_path_test(
     // PATH_CHALLENGE
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, None, Some(server_addr))
+        .send_on_path(
+            &EventLoopIteration::new(),
+            &mut buf,
+            None,
+            Some(server_addr),
+        )
         .expect("No error");
     assert_eq!(sent, MIN_CLIENT_INITIAL_LEN);
     assert_eq!(si.from, client_addr_3);
@@ -10578,7 +10850,11 @@ fn send_on_path_test(
         to: si.to,
         from: si.from,
     };
-    assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+    assert_eq!(
+        pipe.server
+            .recv(&EventLoopIteration::new(), &mut buf[..sent], ri),
+        Ok(sent)
+    );
 
     let stats = pipe.server.stats();
     assert_eq!(stats.path_challenge_rx_count, 3);
@@ -10586,7 +10862,12 @@ fn send_on_path_test(
     // STREAM frame on active path.
     let (sent, si) = pipe
         .client
-        .send_on_path(&mut buf, None, Some(server_addr))
+        .send_on_path(
+            &EventLoopIteration::new(),
+            &mut buf,
+            None,
+            Some(server_addr),
+        )
         .expect("No error");
     assert_eq!(si.from, client_addr);
     assert_eq!(si.to, server_addr);
@@ -10595,15 +10876,29 @@ fn send_on_path_test(
         to: si.to,
         from: si.from,
     };
-    assert_eq!(pipe.server.recv(&mut buf[..sent], ri), Ok(sent));
+    assert_eq!(
+        pipe.server
+            .recv(&EventLoopIteration::new(), &mut buf[..sent], ri),
+        Ok(sent)
+    );
 
     // No more data to exchange leads to Error::Done.
     assert_eq!(
-        pipe.client.send_on_path(&mut buf, Some(client_addr), None),
+        pipe.client.send_on_path(
+            &EventLoopIteration::new(),
+            &mut buf,
+            Some(client_addr),
+            None
+        ),
         Err(Error::Done)
     );
     assert_eq!(
-        pipe.client.send_on_path(&mut buf, None, Some(server_addr)),
+        pipe.client.send_on_path(
+            &EventLoopIteration::new(),
+            &mut buf,
+            None,
+            Some(server_addr)
+        ),
         Err(Error::Done)
     );
 
@@ -11113,7 +11408,7 @@ fn resilience_against_migration_attack(
     let timer = probe_instant.duration_since(Instant::now());
     std::thread::sleep(timer + Duration::from_millis(1));
 
-    pipe.server.on_timeout();
+    pipe.server.on_timeout(&EventLoopIteration::new());
 
     // Because of the small ACK size, the server cannot send more to the
     // client. Fallback on the previous active path.
@@ -11202,7 +11497,10 @@ fn send_ack_eliciting_causes_ping(
 
     // Make sure ping is sent
     let mut buf = [0; 1500];
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -11228,7 +11526,10 @@ fn send_ack_eliciting_no_ping(
 
     // Make sure ping is not sent
     let mut buf = [0; 1500];
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -11528,10 +11829,14 @@ fn challenge_no_cids(
     pipe.client.next_pkt_num += 1;
 
     pipe.server
-        .recv(&mut pkt_buf[..written], RecvInfo {
-            to: server_addr,
-            from: client_addr_2,
-        })
+        .recv(
+            &EventLoopIteration::new(),
+            &mut pkt_buf[..written],
+            RecvInfo {
+                to: server_addr,
+                from: client_addr_2,
+            },
+        )
         .expect("server receive path challenge");
 
     // Show that the new path is not considered a destination path by quiche
@@ -11623,7 +11928,10 @@ fn pmtud_no_duplicate_probes(
     let mut frames: Vec<frame::Frame> = Vec::new();
     for _ in 0..2 {
         let mut buf = [0; 1400];
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
+        let (len, _) = pipe
+            .client
+            .send(&EventLoopIteration::new(), &mut buf)
+            .unwrap();
         frames.append(
             test_utils::decode_pkt(&mut pipe.server, &mut buf[..len])
                 .unwrap()
@@ -11637,7 +11945,12 @@ fn pmtud_no_duplicate_probes(
     assert!(matches!(frames[2], frame::Frame::Ping { .. }));
 
     let mut buf = [0; 1400];
-    assert_eq!(pipe.client.send(&mut buf).unwrap_err(), Error::Done);
+    assert_eq!(
+        pipe.client
+            .send(&EventLoopIteration::new(), &mut buf)
+            .unwrap_err(),
+        Error::Done
+    );
 
     // Verify probe flag was reset after sending
     assert!(!pipe
@@ -11681,9 +11994,15 @@ fn pmtud_probe_retry_after_loss(
     // Send first probe
     let mut out = [0; 4096];
     // ACK frame
-    let _ = pipe.client.send(&mut out).unwrap();
+    let _ = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut out)
+        .unwrap();
     // PING + PADDING frames
-    let (len, _) = pipe.client.send(&mut out).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut out)
+        .unwrap();
     assert_eq!(len, 1400);
 
     // Verify probe flag was reset after sending
@@ -11713,7 +12032,10 @@ fn pmtud_probe_retry_after_loss(
     // Send second probe
     let mut out = [0; 4096];
     // PING + PADDING frames
-    let (len, _) = pipe.client.send(&mut out).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut out)
+        .unwrap();
     assert_eq!(len, 1300);
 
     // Verify should_probe flag gets reset
@@ -12193,7 +12515,10 @@ fn reset_stream_retransmit_after_stream_collected(
     // retransmission. Confirm the new packet contains RESET_STREAM.
     test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
     let has_reset_stream = frames.iter().any(|f| {
@@ -12233,7 +12558,10 @@ fn stop_sending_retransmit(
     assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
 
     // Server sends STOP_SENDING, but we don't deliver it (simulating loss).
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
     let has_stop_sending = frames.iter().any(|f| {
@@ -12248,7 +12576,10 @@ fn stop_sending_retransmit(
     test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
 
     // Server should retransmit STOP_SENDING.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
     let has_stop_sending = frames.iter().any(|f| {
@@ -12285,7 +12616,10 @@ fn stop_sending_no_retransmit_after_fin(
     assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
 
     // Server sends STOP_SENDING, but we don't deliver it (simulating loss).
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
@@ -12309,7 +12643,10 @@ fn stop_sending_no_retransmit_after_fin(
 
     // Server should have nothing to send since STOP_SENDING should not be
     // retransmitted after FIN.
-    assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+    assert_eq!(
+        pipe.server.send(&EventLoopIteration::new(), &mut buf),
+        Err(Error::Done)
+    );
 }
 
 #[rstest]
@@ -12343,19 +12680,28 @@ fn max_streams_bidi_frame_retransmit(
     // Respond with stream FIN. However, stream is not collected until client
     // ACKs the FIN.
     pipe.server.stream_send(0, b"a", true).unwrap();
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     assert_eq!(pipe.server.streams.max_streams_bidi_next(), NUM_STREAMS);
     assert_eq!(pipe.client.streams.peer_streams_left_bidi(), 0);
 
     pipe.client_recv(&mut buf[..len]).unwrap();
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .client
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     pipe.server_recv(&mut buf[..len]).unwrap();
 
     // Stream 0 is now complete. Server should send MAX_STREAMS_BIDI.
     assert_eq!(pipe.server.streams.max_streams_bidi_next(), NUM_STREAMS + 1);
 
     // Capture MAX_STREAMS_BIDI packet (don't deliver to simulate loss)
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
@@ -12371,12 +12717,15 @@ fn max_streams_bidi_frame_retransmit(
 
     // Provide a buffer that is too small to generate the MAX_STREAMS
     // frame. Make sure the frame is not lost.
-    assert_eq!(pipe.server.send(&mut buf[0..1]), Err(Error::Done));
+    assert_eq!(
+        pipe.server.send(&EventLoopIteration::new(), &mut buf[0..1]),
+        Err(Error::Done)
+    );
 
     // Server should retransmit MAX_STREAMS_BIDI
     let (len, _) = pipe
         .server
-        .send(&mut buf)
+        .send(&EventLoopIteration::new(), &mut buf)
         .expect("Expected a packet to carry MAX_STREAMS");
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -12424,7 +12773,10 @@ fn max_streams_uni_frame_retransmit(
 
     // Server should want to send MAX_STREAMS_UNI.
     // Capture the packet (don't deliver to client to simulate loss).
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
@@ -12442,10 +12794,16 @@ fn max_streams_uni_frame_retransmit(
 
     // Provide a buffer that is too small to generate the MAX_STREAMS
     // frame. Make sure the frame is not lost.
-    assert_eq!(pipe.server.send(&mut buf[0..1]), Err(Error::Done));
+    assert_eq!(
+        pipe.server.send(&EventLoopIteration::new(), &mut buf[0..1]),
+        Err(Error::Done)
+    );
 
     // Server should retransmit MAX_STREAMS_UNI
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let (len, _) = pipe
+        .server
+        .send(&EventLoopIteration::new(), &mut buf)
+        .unwrap();
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 

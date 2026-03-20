@@ -35,6 +35,7 @@ use ring::rand::*;
 use crate::client::QUIC_VERSION;
 use crate::frame::H3iFrame;
 use crate::quiche;
+use crate::quiche::EventLoopIteration;
 
 use crate::actions::h3::Action;
 use crate::actions::h3::StreamEventType;
@@ -216,7 +217,9 @@ pub fn connect_with_early_data(
     let mut app_proto_selected = false;
 
     // Send ClientHello and initiate the handshake.
-    let (write, send_info) = conn.send(&mut out).expect("initial send failed");
+    let (write, send_info) = conn
+        .send(&EventLoopIteration::new(), &mut out)
+        .expect("initial send failed");
 
     let mut client = SyncClient::new(close_trigger_frames);
     // Send early data if connection is_in_early_data (resumption with 0-RTT was
@@ -285,12 +288,14 @@ pub fn connect_with_early_data(
         log::debug!("actual sleep is {actual_sleep:?}");
         poll.poll(&mut events, actual_sleep).unwrap();
 
+        let iteration = EventLoopIteration::new();
+
         // If the event loop reported no events, run a belt and braces check on
         // the quiche connection's timeouts.
         if events.is_empty() {
             log::debug!("timed out");
 
-            conn.on_timeout();
+            conn.on_timeout(&iteration);
         }
 
         // Read incoming UDP packets from the socket and feed them to quiche,
@@ -326,14 +331,15 @@ pub fn connect_with_early_data(
                 };
 
                 // Process potentially coalesced packets.
-                let _read = match conn.recv(&mut buf[..len], recv_info) {
-                    Ok(v) => v,
+                let _read =
+                    match conn.recv(&iteration, &mut buf[..len], recv_info) {
+                        Ok(v) => v,
 
-                    Err(e) => {
-                        log::debug!("{local_addr}: recv failed: {e:?}");
-                        continue 'read;
-                    },
-                };
+                        Err(e) => {
+                            log::debug!("{local_addr}: recv failed: {e:?}");
+                            continue 'read;
+                        },
+                    };
             }
         }
 
@@ -433,6 +439,7 @@ pub fn connect_with_early_data(
             for peer_addr in conn.paths_iter(local_addr) {
                 loop {
                     let (write, send_info) = match conn.send_on_path(
+                        &iteration,
                         &mut out,
                         Some(local_addr),
                         Some(peer_addr),
