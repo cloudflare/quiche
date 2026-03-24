@@ -332,7 +332,7 @@ where
                 // The sleep branch will be handled by the current_deadline and on_timeout check on the next iteration of the loop.
                 () = &mut sleep => (),
                 Some(pkt) = incoming_recv.recv() => ctx.in_pkt = Some(pkt),
-                directive = self.wait_for_data_or_handshake(&iteration, qconn, application) => {
+                directive = self.wait_for_data_or_handshake(qconn, application) => {
                     match directive? {
                         WaitForDataOrHandshakeDirective::Flush => {
                             self.flush_buffer_to_socket(application.buffer()).await;
@@ -711,8 +711,7 @@ where
     // application, but wait_for_quiche relies on IOW methods, so we can't write a
     // default implementation for ConnectionStage
     async fn wait_for_data_or_handshake<A: ApplicationOverQuic>(
-        &mut self, iteration: &EventLoopIteration, qconn: &mut QuicheConnection,
-        quic_application: &mut A,
+        &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
     ) -> QuicResult<WaitForDataOrHandshakeDirective> {
         if quic_application.should_act() {
             // Poll the application to make progress.
@@ -728,7 +727,7 @@ where
             Ok(WaitForDataOrHandshakeDirective::Noop)
         } else {
             // Poll quiche to make progress on handshake callbacks.
-            self.wait_for_quiche(iteration, qconn, quic_application.buffer())
+            self.wait_for_quiche(qconn, quic_application.buffer())
                 .await?;
             Ok(WaitForDataOrHandshakeDirective::Flush)
         }
@@ -747,11 +746,11 @@ where
     /// once one of the `gather_data_from_quiche_conn()` calls writes to the
     /// send buffer, we signal to the caller which has to take care of flushing
     async fn wait_for_quiche(
-        &mut self, iteration: &EventLoopIteration, qconn: &mut QuicheConnection,
-        buffer: &mut [u8],
+        &mut self, qconn: &mut QuicheConnection, buffer: &mut [u8],
     ) -> QuicResult<()> {
         std::future::poll_fn(|_| {
-            match self.gather_data_from_quiche_conn(iteration, qconn, buffer) {
+            let iteration = EventLoopIteration::new();
+            match self.gather_data_from_quiche_conn(&iteration, qconn, buffer) {
                 Ok(bytes_written) => {
                     // We need to avoid consecutive calls to gather(), which write
                     // data to the buffer, without a flush().
