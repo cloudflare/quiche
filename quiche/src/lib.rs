@@ -1950,7 +1950,7 @@ struct QlogInfo {
 /// [`on_timeout`]: Connection::on_timeout
 pub struct EventLoopIteration {
     /// The time at which this event loop iteration started.
-    now: Instant,
+    start: Instant,
 }
 
 #[allow(clippy::new_without_default)]
@@ -1958,13 +1958,13 @@ impl EventLoopIteration {
     /// Creates a new [`EventLoopIteration`], capturing the current time.
     pub fn new() -> Self {
         Self {
-            now: Instant::now(),
+            start: Instant::now(),
         }
     }
 
     /// Returns the time at which this event loop iteration started.
-    pub fn now(&self) -> Instant {
-        self.now
+    pub fn start(&self) -> Instant {
+        self.start
     }
 }
 
@@ -2966,7 +2966,7 @@ impl<F: BufFactory> Connection<F> {
         &mut self, iteration: &EventLoopIteration, buf: &mut [u8],
         info: &RecvInfo, recv_pid: Option<usize>,
     ) -> Result<usize> {
-        let now = iteration.now();
+        let now = iteration.start();
 
         if buf.is_empty() {
             return Err(Error::Done);
@@ -3969,7 +3969,7 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        let now = iteration.now();
+        let now = iteration.start();
 
         if self.local_error.is_none() {
             self.do_handshake(now)?;
@@ -6898,7 +6898,7 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// If no timeout has occurred it does nothing.
     pub fn on_timeout(&mut self, iteration: &EventLoopIteration) {
-        let now = iteration.now();
+        let now = iteration.start();
 
         if let Some(draining_timer) = self.draining_timer {
             if draining_timer <= now {

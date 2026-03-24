@@ -225,7 +225,7 @@ where
 
         loop {
             let iteration = EventLoopIteration::new();
-            let now = iteration.now();
+            let now = iteration.start();
 
             if let Some(deadline) = current_deadline {
                 if deadline <= now {
@@ -373,7 +373,7 @@ where
 
         self.write_state.selected_path = None;
 
-        let now = iteration.now();
+        let now = iteration.start();
 
         let send_buf = {
             let trunc = UDP_MAX_GSO_PACKET_SIZE.min(send_buf.len());
