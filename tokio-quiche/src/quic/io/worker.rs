@@ -309,7 +309,6 @@ where
             }
 
             let incoming_recv = &mut ctx.incoming_pkt_receiver;
-            let application = &mut ctx.application;
 
             select! {
                 biased;
@@ -327,14 +326,7 @@ where
                     sleep.as_mut().reset((now + DEFAULT_SLEEP).into());
                 }
                 Some(pkt) = incoming_recv.recv() => ctx.in_pkt = Some(pkt),
-                directive = self.wait_for_data_or_handshake(qconn, application) => {
-                    match directive? {
-                        WaitForDataOrHandshakeDirective::Flush => {
-                            self.flush_buffer_to_socket(application.buffer()).await;
-                        }
-                        WaitForDataOrHandshakeDirective::Noop => {}
-                    }
-                },
+                status = self.conn_stage.wait(qconn, &mut ctx.application) => status?
             };
 
             if let ControlFlow::Break(reason) = self.conn_stage.post_wait(qconn) {
@@ -693,81 +685,6 @@ where
 
         Ok(())
     }
-
-    // When a connection is established, process application data, if not the task
-    // is probably polled following a wakeup from boring, so we check if quiche
-    // has any handshake packets to send.
-    //
-    // TODO(erittenhouse): would be nice to decouple wait_for_data from the
-    // application, but wait_for_quiche relies on IOW methods, so we can't write a
-    // default implementation for ConnectionStage
-    async fn wait_for_data_or_handshake<A: ApplicationOverQuic>(
-        &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
-    ) -> QuicResult<WaitForDataOrHandshakeDirective> {
-        if quic_application.should_act() {
-            // Poll the application to make progress.
-            //
-            // Once the connection has been established (i.e. the handshake is
-            // complete), we only poll the application.
-            //
-            // The exception is 0-RTT in TLS 1.3, where the full handshake is
-            // still in progress but we have 0-RTT keys to process early data.
-            // This means TLS callbacks might only be polled on the next timeout
-            // or when a packet is received from the peer.
-            quic_application.wait_for_data(qconn).await?;
-            Ok(WaitForDataOrHandshakeDirective::Noop)
-        } else {
-            // Poll quiche to make progress on handshake callbacks.
-            self.wait_for_quiche(qconn, quic_application.buffer())
-                .await?;
-            Ok(WaitForDataOrHandshakeDirective::Flush)
-        }
-    }
-
-    /// Check if Quiche has any packets to send
-    ///
-    /// If yes: fills buffer and updates self.write_state.bytes_written
-    /// If no: Poll::Pending
-    ///
-    /// # Example
-    ///
-    /// This function can be used, for example, to drive an asynchronous TLS
-    /// handshake. Each call to `gather_data_from_quiche_conn` attempts to
-    /// progress the handshake via a call to `quiche::Connection.send()` -
-    /// once one of the `gather_data_from_quiche_conn()` calls writes to the
-    /// send buffer, we signal to the caller which has to take care of flushing
-    async fn wait_for_quiche(
-        &mut self, qconn: &mut QuicheConnection, buffer: &mut [u8],
-    ) -> QuicResult<()> {
-        std::future::poll_fn(|_| {
-            match self.gather_data_from_quiche_conn(qconn, buffer) {
-                Ok(bytes_written) => {
-                    // We need to avoid consecutive calls to gather(), which write
-                    // data to the buffer, without a flush().
-                    // If we don't avoid those consecutive calls, we end
-                    // up overwriting data in the buffer or unnecessarily waiting
-                    // for more calls to drive_handshake()
-                    // before calling the handshake complete.
-                    if bytes_written == 0 && self.write_state.bytes_written == 0 {
-                        Poll::Pending
-                    } else {
-                        Poll::Ready(Ok(()))
-                    }
-                },
-                _ => Poll::Ready(Err(quiche::Error::TlsFail)),
-            }
-        })
-        .await?;
-        Ok(())
-    }
-}
-
-/// Whether caller of [`wait_for_data_or_handshake`] is required to
-/// call [`flush_buffer_to_socket`]
-#[must_use]
-enum WaitForDataOrHandshakeDirective {
-    Noop,
-    Flush,
 }
 
 pub struct Running<Tx, M, A> {

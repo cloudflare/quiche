@@ -25,7 +25,9 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::fmt::Debug;
+use std::future::Future;
 use std::ops::ControlFlow;
+use std::task::Poll;
 use std::time::Instant;
 
 use tokio::sync::mpsc;
@@ -63,6 +65,13 @@ pub trait ConnectionStage: Send + Debug {
         _ctx: &mut ConnectionStageContext<A>,
     ) -> ControlFlow<QuicResult<()>> {
         ControlFlow::Continue(())
+    }
+
+    /// By default, stages will only wait for incoming packets or Quiche timers.
+    fn wait<A: ApplicationOverQuic>(
+        &mut self, _qconn: &mut QuicheConnection, _app: &mut A,
+    ) -> impl Future<Output = QuicResult<()>> + Send {
+        std::future::pending()
     }
 
     fn wait_deadline(&mut self) -> Option<Instant> {
@@ -122,12 +131,43 @@ impl ConnectionStage for Handshake {
         &mut self, qconn: &mut QuicheConnection,
         _ctx: &mut ConnectionStageContext<A>,
     ) -> ControlFlow<QuicResult<()>> {
-        // Transition to RunningApplication if we have 1-RTT keys (handshake is
-        // complete) or if we have 0-RTT keys (in early data).
         if qconn.is_established() || qconn.is_in_early_data() {
+            // Transition to RunningApplication if we have 1-RTT keys (handshake
+            // is complete) or if we have 0-RTT keys (in early data).
             ControlFlow::Break(Ok(()))
         } else {
             ControlFlow::Continue(())
+        }
+    }
+
+    fn wait<A: ApplicationOverQuic>(
+        &mut self, qconn: &mut QuicheConnection, _: &mut A,
+    ) -> impl Future<Output = QuicResult<()>> + Send {
+        async {
+            let mut polled = false;
+
+            // We first poll this future when we hit select! unconditionally. We
+            // return Pending to avoid a busy-loop. Tokio will
+            // reschedule the task if the SslRef's waker woke while
+            // the task was running.
+            std::future::poll_fn(move |cx| {
+                // Reset the task waker in case `handshake_fut` has changed tasks.
+                //
+                // NOTE: this may not be necessary, but we've seen strange hangs
+                // on private key callbacks, so can't hurt.
+                let ssl = qconn.as_mut();
+                ssl.set_task_waker(Some(cx.waker().clone()));
+
+                if polled {
+                    println!("wait() ready");
+                    Poll::Ready(Ok(()))
+                } else {
+                    polled = true;
+                    println!("wait() pending");
+                    Poll::Pending
+                }
+            })
+            .await
         }
     }
 
@@ -164,6 +204,12 @@ impl ConnectionStage for RunningApplication {
         }
 
         Ok(())
+    }
+
+    fn wait<A: ApplicationOverQuic>(
+        &mut self, qconn: &mut QuicheConnection, app: &mut A,
+    ) -> impl Future<Output = QuicResult<()>> + Send {
+        app.wait_for_data(qconn)
     }
 }
 
