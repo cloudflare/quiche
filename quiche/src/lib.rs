@@ -1503,6 +1503,15 @@ where
     /// Key phase bit used for outgoing protected packets.
     key_phase: bool,
 
+    /// The time the connection was created.
+    created_at: Instant,
+
+    /// The time the handshake was completed.
+    handshake_completed_at: Option<Instant>,
+
+    /// The number of 1-RTT key updates.
+    key_update_count: u64,
+
     /// Whether an ack-eliciting packet has been sent since last receiving a
     /// packet.
     ack_eliciting_sent: bool,
@@ -2159,6 +2168,12 @@ impl<F: BufFactory> Connection<F> {
             handshake_confirmed: false,
 
             key_phase: false,
+
+            created_at: Instant::now(),
+
+            handshake_completed_at: None,
+
+            key_update_count: 0,
 
             ack_eliciting_sent: false,
 
@@ -3321,6 +3336,8 @@ impl<F: BufFactory> Connection<F> {
             }
 
             trace!("{} key update verified", self.trace_id);
+
+            self.key_update_count += 1;
 
             let _ = self.crypto_ctx[epoch].crypto_seal.replace(seal_next);
 
@@ -7638,6 +7655,20 @@ impl<F: BufFactory> Connection<F> {
             path_challenge_rx_count: self.path_challenge_rx_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
             tx_buffered_state: self.tx_buffered_state,
+            handshake_duration: self
+                .handshake_completed_at
+                .map(|completed| completed.duration_since(self.created_at)),
+            key_update_count: self.key_update_count,
+            peer_max_idle_timeout: if self.parsed_peer_transport_params &&
+                self.peer_transport_params.max_idle_timeout > 0
+            {
+                Some(Duration::from_millis(
+                    self.peer_transport_params.max_idle_timeout,
+                ))
+            } else {
+                None
+            },
+            connection_duration: self.created_at.elapsed(),
         }
     }
 
@@ -7888,6 +7919,10 @@ impl<F: BufFactory> Connection<F> {
         };
 
         self.handshake_completed = self.handshake.is_completed();
+
+        if self.handshake_completed && self.handshake_completed_at.is_none() {
+            self.handshake_completed_at = Some(Instant::now());
+        }
 
         self.alpn = self.handshake.alpn_protocol().to_vec();
 
@@ -9242,6 +9277,19 @@ pub struct Stats {
 
     /// Health state of the connection's tx_buffered.
     pub tx_buffered_state: TxBufferTrackingState,
+
+    /// The time from connection creation to handshake completion.
+    /// `None` if the handshake has not yet completed.
+    pub handshake_duration: Option<Duration>,
+
+    /// The number of 1-RTT key updates.
+    pub key_update_count: u64,
+
+    /// The peer's max idle timeout from transport parameters.
+    pub peer_max_idle_timeout: Option<Duration>,
+
+    /// Wall-clock time since connection creation.
+    pub connection_duration: Duration,
 }
 
 impl std::fmt::Debug for Stats {
@@ -9258,6 +9306,20 @@ impl std::fmt::Debug for Stats {
             " sent_bytes={} recv_bytes={} lost_bytes={}",
             self.sent_bytes, self.recv_bytes, self.lost_bytes,
         )?;
+
+        write!(
+            f,
+            " key_update_count={} connection_duration={:?}",
+            self.key_update_count, self.connection_duration,
+        )?;
+
+        if let Some(hs) = self.handshake_duration {
+            write!(f, " handshake_duration={:?}", hs)?;
+        }
+
+        if let Some(idle) = self.peer_max_idle_timeout {
+            write!(f, " peer_max_idle_timeout={:?}", idle)?;
+        }
 
         Ok(())
     }

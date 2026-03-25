@@ -1346,6 +1346,10 @@ pub struct Stats {
     path_challenge_rx_count: u64,
     bytes_in_flight_duration_msec: u64,
     tx_buffered_inconsistent: bool,
+    handshake_duration_ms: i64,
+    key_update_count: u64,
+    peer_max_idle_timeout_ms: i64,
+    connection_duration_ms: u64,
 }
 
 pub struct TransportParams {
@@ -1396,6 +1400,50 @@ pub extern "C" fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
         stats.bytes_in_flight_duration.as_millis() as u64;
     out.tx_buffered_inconsistent =
         stats.tx_buffered_state != TxBufferTrackingState::Ok;
+    out.handshake_duration_ms = stats
+        .handshake_duration
+        .map_or(-1, |d| d.as_millis() as i64);
+    out.key_update_count = stats.key_update_count;
+    out.peer_max_idle_timeout_ms = stats
+        .peer_max_idle_timeout
+        .map_or(-1, |d| d.as_millis() as i64);
+    out.connection_duration_ms = stats.connection_duration.as_millis() as u64;
+}
+
+/// Returns the handshake duration in milliseconds, or -1 if the
+/// handshake has not yet completed.
+#[no_mangle]
+pub extern "C" fn quiche_conn_stats_handshake_duration_ms(
+    conn: &Connection,
+) -> i64 {
+    conn.stats()
+        .handshake_duration
+        .map_or(-1, |d| d.as_millis() as i64)
+}
+
+/// Returns the number of 1-RTT key updates.
+#[no_mangle]
+pub extern "C" fn quiche_conn_stats_key_update_count(conn: &Connection) -> u64 {
+    conn.stats().key_update_count
+}
+
+/// Returns the peer's max idle timeout in milliseconds, or -1 if
+/// not available.
+#[no_mangle]
+pub extern "C" fn quiche_conn_stats_peer_max_idle_timeout_ms(
+    conn: &Connection,
+) -> i64 {
+    conn.stats()
+        .peer_max_idle_timeout
+        .map_or(-1, |d| d.as_millis() as i64)
+}
+
+/// Returns the connection duration in milliseconds.
+#[no_mangle]
+pub extern "C" fn quiche_conn_stats_connection_duration_ms(
+    conn: &Connection,
+) -> u64 {
+    conn.stats().connection_duration.as_millis() as u64
 }
 
 #[no_mangle]

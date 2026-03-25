@@ -12486,3 +12486,53 @@ fn connect_custom_client_dcid_too_short() {
     );
     assert_eq!(client.err().unwrap(), Error::InvalidDcidInitialization);
 }
+
+#[rstest]
+fn connection_timing_stats_before_handshake(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    let client_stats = pipe.client.stats();
+    let server_stats = pipe.server.stats();
+
+    // Before handshake, handshake_duration should be None.
+    assert!(client_stats.handshake_duration.is_none());
+    assert!(server_stats.handshake_duration.is_none());
+
+    // connection_duration should be positive after creation.
+    assert!(client_stats.connection_duration > Duration::ZERO);
+    assert!(server_stats.connection_duration > Duration::ZERO);
+
+    // key_update_count should start at 0.
+    assert_eq!(client_stats.key_update_count, 0);
+    assert_eq!(server_stats.key_update_count, 0);
+}
+
+#[rstest]
+fn connection_timing_stats_after_handshake(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let client_stats = pipe.client.stats();
+    let server_stats = pipe.server.stats();
+
+    // After handshake, handshake_duration should be Some.
+    assert!(client_stats.handshake_duration.is_some());
+    assert!(server_stats.handshake_duration.is_some());
+
+    // connection_duration should be positive.
+    assert!(client_stats.connection_duration > Duration::ZERO);
+    assert!(server_stats.connection_duration > Duration::ZERO);
+
+    // key_update_count should still be 0 after handshake.
+    assert_eq!(client_stats.key_update_count, 0);
+    assert_eq!(server_stats.key_update_count, 0);
+
+    // peer_max_idle_timeout should reflect transport params.
+    // The default test config sets max_idle_timeout to 180000ms.
+    assert!(client_stats.peer_max_idle_timeout.is_some());
+    assert!(server_stats.peer_max_idle_timeout.is_some());
+}
