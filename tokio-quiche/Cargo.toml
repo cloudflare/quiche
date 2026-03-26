@@ -50,6 +50,7 @@ foundations = { workspace = true, default-features = false, features = [
 futures = { workspace = true }
 futures-util = { workspace = true }
 ipnetwork = { workspace = true }
+libc = { workspace = true }
 log = { workspace = true }
 octets = { workspace = true }
 pin-project = { workspace = true }

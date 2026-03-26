@@ -1367,6 +1367,151 @@ mod server_side_driver {
         assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
     }
 
+    // Test that dropping the H3 event receiver when there are no active streams
+    // and datagram flows causes the connection to close immediately.
+    #[test]
+    fn h3_controller_drop_closes_connection_when_maps_empty() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+
+        assert!(helper.driver.stream_map.is_empty());
+        assert!(helper.driver.flow_map.is_empty());
+        assert!(helper.pipe.server.local_error().is_none());
+
+        // drop the controller to trigger receiver drop detection
+        drop(helper.controller);
+
+        // run wait_for_data to detect the receiver drop
+        tokio::task::unconstrained(
+            helper.driver.wait_for_data(&mut helper.pipe.server),
+        )
+        .now_or_never();
+
+        // connection closed with H3 NoError
+        let local_error = helper
+            .pipe
+            .server
+            .local_error()
+            .expect("connection should be closing");
+        assert!(local_error.is_app, "should be application-level close");
+        assert_eq!(
+            local_error.error_code,
+            h3::WireErrorCode::NoError as u64,
+            "should close with H3 NoError"
+        );
+    }
+
+    // Test that dropping the H3Controller when there are active streams/flows
+    // does NOT close the connection immediately (e.g. tunnel scenarios).
+    #[test]
+    fn h3_controller_drop_keeps_connection_alive_when_streams_exist() {
+        let mut helper =
+            DriverTestHelper::<ServerHooks>::with_pipe_and_http3_settings(
+                quiche::test_utils::Pipe::with_config(
+                    &mut default_quiche_config(),
+                )
+                .unwrap(),
+                Http3Settings {
+                    enable_extended_connect: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // CONNECT-UDP request creates both a stream and a datagram flow
+        let connect_headers = vec![
+            h3::Header::new(b":method", b"CONNECT-UDP"),
+            h3::Header::new(b":scheme", b"https"),
+            h3::Header::new(b":authority", b"quic.tech"),
+            h3::Header::new(b":path", b"/"),
+            h3::Header::new(b"datagram-flow-id", b"0"),
+        ];
+        helper
+            .peer_client_send_request(connect_headers, false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Consume events to keep channels alive
+        assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Core(H3Event::NewFlow { .. })
+        );
+        assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { .. }
+        );
+
+        assert_eq!(helper.driver.stream_map.len(), 1);
+        assert_eq!(helper.driver.flow_map.len(), 1);
+
+        drop(helper.controller);
+        tokio::task::unconstrained(
+            helper.driver.wait_for_data(&mut helper.pipe.server),
+        )
+        .now_or_never();
+
+        // Connection stays open (stream and flow still active)
+        assert!(helper.pipe.server.local_error().is_none());
+    }
+
+    /// Test that a CONNECT request with `:protocol` does NOT create a
+    /// datagram flow when extended CONNECT is disabled.
+    #[test]
+    fn protocol_without_extended_connect_closes_on_controller_drop() {
+        // Default settings have enable_extended_connect: false
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // CONNECT with :protocol, but extended CONNECT is disabled
+        let connect_headers = vec![
+            h3::Header::new(b":method", b"CONNECT"),
+            h3::Header::new(b":scheme", b"https"),
+            h3::Header::new(b":authority", b"quic.tech"),
+            h3::Header::new(b":path", b"/"),
+            h3::Header::new(b":protocol", b"webtransport"),
+        ];
+        helper
+            .peer_client_send_request(connect_headers, true)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // No NewFlow event — flow was not created
+        assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { .. }
+        );
+
+        assert_eq!(helper.driver.stream_map.len(), 1);
+        assert_eq!(helper.driver.flow_map.len(), 0);
+
+        // Drop controller, then run wait_for_data
+        drop(helper.controller);
+        tokio::task::unconstrained(
+            helper.driver.wait_for_data(&mut helper.pipe.server),
+        )
+        .now_or_never();
+        tokio::task::unconstrained(
+            helper.driver.wait_for_data(&mut helper.pipe.server),
+        )
+        .now_or_never();
+
+        // Connection closes because stream_map and flow_map are empty
+        let local_error = helper
+            .pipe
+            .server
+            .local_error()
+            .expect("connection should be closing");
+        assert!(local_error.is_app, "should be application-level close");
+        assert_eq!(
+            local_error.error_code,
+            h3::WireErrorCode::NoError as u64,
+            "should close with H3 NoError"
+        );
+    }
+
     /// Test that calling `H3Controller::shutdown_stream` with
     /// `StreamShutdown::Write` sends a RESET_STREAM frame to the peer.
     #[test]

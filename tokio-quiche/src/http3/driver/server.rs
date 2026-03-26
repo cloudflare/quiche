@@ -164,6 +164,9 @@ pub struct ServerHooks {
     /// Handle to the post-accept timeout entry. If present, the server must
     /// receive a HEADERS frame before this timeout.
     post_accept_timeout: Option<TimeoutKey>,
+    /// Whether the extended CONNECT protocol is enabled. When disabled,
+    /// skip DATAGRAM flow creation for `:protocol` requests.
+    extended_connect_enabled: bool,
 }
 
 impl ServerHooks {
@@ -191,9 +194,12 @@ impl ServerHooks {
         let (mut stream_ctx, send, recv) =
             StreamCtx::new(stream_id, STREAM_CAPACITY);
 
-        if let Some(flow_id) = datagram::extract_flow_id(stream_id, &headers) {
-            let _ = driver.get_or_insert_flow(flow_id)?;
-            stream_ctx.associated_dgram_flow_id = Some(flow_id);
+        if driver.hooks.extended_connect_enabled {
+            if let Some(flow_id) = datagram::extract_flow_id(stream_id, &headers)
+            {
+                let _ = driver.get_or_insert_flow(flow_id)?;
+                stream_ctx.associated_dgram_flow_id = Some(flow_id);
+            }
         }
 
         let latest_priority_update: Option<RawPriorityValue> = driver
@@ -251,6 +257,7 @@ impl DriverHooks for ServerHooks {
             settings_enforcer: settings.into(),
             requests: 0,
             post_accept_timeout: None,
+            extended_connect_enabled: settings.enable_extended_connect,
         }
     }
 
