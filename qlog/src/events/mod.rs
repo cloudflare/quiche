@@ -54,13 +54,7 @@ pub enum EventType {
     None,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum TimeFormat {
-    #[default]
-    RelativeToEpoch,
-    RelativeToPreviousEvent,
-}
+use crate::TimeFormat;
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, Debug)]

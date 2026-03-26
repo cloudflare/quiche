@@ -390,6 +390,8 @@
 //! [`add_event_data_now()`]: streamer/struct.QlogStreamer.html#method.add_event_data_now
 //! [`finish_log()`]: streamer/struct.QlogStreamer.html#method.finish_log
 
+use std::time::SystemTime;
+
 use crate::events::quic::PacketHeader;
 use crate::events::Event;
 
@@ -560,12 +562,39 @@ pub enum VantagePointType {
     Unknown,
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeFormat {
+    #[default]
+    RelativeToEpoch,
+    RelativeToPreviousEvent,
+}
+
+#[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub struct ReferenceTime {
     pub clock_type: String,
     pub epoch: String,
     pub wall_clock_time: Option<String>,
+}
+
+impl ReferenceTime {
+    /// Create a new `ReferenceTime` instance that uses a monotonic clock.
+    ///
+    /// If `wall_clock_time` is specified, it will be added as the optional
+    /// `wall_clock_time` field of `ReferenceTime`.
+    pub fn new_monotonic(wall_clock_time: Option<SystemTime>) -> Self {
+        let wall_clock_time =
+            wall_clock_time.map(|t| humantime::format_rfc3339(t).to_string());
+        ReferenceTime {
+            clock_type: "monotonic".to_string(),
+            // per draft-ietf-quic-qlog-main-schema-13 epoch must be "unknown"
+            // for monotonic clocks
+            epoch: "unknown".to_string(),
+            wall_clock_time,
+        }
+    }
 }
 
 #[serde_with::skip_serializing_none]
@@ -576,7 +605,7 @@ pub struct CommonFields {
     pub protocol_types: Option<Vec<String>>,
 
     pub reference_time: ReferenceTime,
-    pub time_format: Option<String>,
+    pub time_format: Option<TimeFormat>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -629,3 +658,32 @@ pub mod reader;
 pub mod streamer;
 #[doc(hidden)]
 pub mod testing;
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use std::time::UNIX_EPOCH;
+
+    use super::ReferenceTime;
+
+    #[test]
+    fn reference_time_new_monotonic_serialization() {
+        // 2024-01-15T10:30:00Z = 1705314600 seconds after UNIX epoch
+        let t = UNIX_EPOCH + Duration::from_secs(1_705_314_600);
+        let rt = ReferenceTime::new_monotonic(Some(t));
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&serde_json::to_string(&rt).unwrap()).unwrap();
+
+        assert_eq!(map["clock_type"], "monotonic");
+        assert_eq!(map["epoch"], "unknown");
+        assert_eq!(map["wall_clock_time"], "2024-01-15T10:30:00Z");
+
+        let rt = ReferenceTime::new_monotonic(None);
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&serde_json::to_string(&rt).unwrap()).unwrap();
+
+        assert_eq!(map["clock_type"], "monotonic");
+        assert_eq!(map["epoch"], "unknown");
+        assert!(!map.contains_key("wall_clock_time"));
+    }
+}

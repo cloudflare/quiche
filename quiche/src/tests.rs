@@ -12486,3 +12486,56 @@ fn connect_custom_client_dcid_too_short() {
     );
     assert_eq!(client.err().unwrap(), Error::InvalidDcidInitialization);
 }
+
+#[cfg(feature = "qlog")]
+#[test]
+fn server_qlog() {
+    use qlog::reader::QlogSeqReader;
+
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+
+    pipe.server.set_qlog(
+        Box::new(std::io::Cursor::new(Vec::<u8>::new())),
+        "test qlog".to_string(),
+        "test qlog description".to_string(),
+    );
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    pipe.server.qlog_streamer().unwrap().finish_log().unwrap();
+
+    let raw = pipe.server.qlog_streamer().unwrap().writer();
+    #[allow(clippy::borrowed_box)]
+    let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(raw) };
+    let bytes = w.get_ref().clone();
+
+    let mut reader = QlogSeqReader::new(Box::new(std::io::BufReader::new(
+        std::io::Cursor::new(bytes),
+    )))
+    .unwrap();
+
+    // Header is parsed by QlogSeqReader::new into reader.qlog.
+    let header = reader.qlog.clone();
+    assert_eq!(header.title.as_deref(), Some("test qlog"));
+    assert_eq!(header.description.as_deref(), Some("test qlog description"));
+    assert_eq!(
+        header.trace.vantage_point.unwrap().ty,
+        qlog::VantagePointType::Server
+    );
+    let ref_time = header.trace.common_fields.unwrap().reference_time;
+    assert_eq!(ref_time.clock_type, "monotonic");
+    assert_eq!(ref_time.epoch, "unknown");
+    assert!(ref_time.wall_clock_time.is_some());
+
+    // First event yielded by the iterator is TransportParametersSet.
+    let first = reader.next().unwrap();
+    if let qlog::reader::Event::Qlog(event) = first {
+        if let EventData::QuicParametersSet(params) = event.data {
+            assert_eq!(params.initiator, Some(TransportInitiator::Local));
+        } else {
+            panic!("expected QuicParametersSet event");
+        }
+    } else {
+        panic!("expected Qlog event");
+    }
+}
