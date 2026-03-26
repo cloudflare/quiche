@@ -2310,6 +2310,8 @@ impl<F: BufFactory> Connection<F> {
         use qlog::events::quic::TransportInitiator;
         use qlog::events::HTTP3_URI;
         use qlog::events::QUIC_URI;
+        use qlog::CommonFields;
+        use qlog::ReferenceTime;
 
         let vp = if self.is_server {
             qlog::VantagePointType::Server
@@ -2327,10 +2329,18 @@ impl<F: BufFactory> Connection<F> {
 
         self.qlog.level = level;
 
+        // Best effort to get Instant::now() and SystemTime::now() as closely
+        // together as possible.
+        let now = Instant::now();
+        let now_wall_clock = std::time::SystemTime::now();
+        let common_fields = CommonFields {
+            reference_time: ReferenceTime::new_monotonic(Some(now_wall_clock)),
+            ..Default::default()
+        };
         let trace = qlog::TraceSeq::new(
             Some(title.to_string()),
             Some(description.to_string()),
-            None,
+            Some(common_fields),
             Some(qlog::VantagePoint {
                 name: None,
                 ty: vp,
@@ -2342,7 +2352,7 @@ impl<F: BufFactory> Connection<F> {
         let mut streamer = qlog::streamer::QlogStreamer::new(
             Some(title),
             Some(description),
-            Instant::now(),
+            now,
             trace,
             self.qlog.level,
             writer,
