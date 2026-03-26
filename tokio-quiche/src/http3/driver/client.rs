@@ -162,8 +162,12 @@ impl ClientHooks {
     /// request should be retried after a short delay rather than treated as a
     /// fatal connection error.
     ///
+    /// `send_request` rolls back any partial stream state before returning
+    /// these errors, so retrying the call with the same arguments is safe.
+    ///
     /// * `StreamBlocked` — the QUIC stream's flow-control window is temporarily
-    ///   exhausted.
+    ///   exhausted; the stream entry is removed by `send_request` before
+    ///   returning, so the stream ID is not consumed.
     /// * `TransportError(StreamLimit)` — the peer's concurrent-stream limit has
     ///   been reached; QUIC will deliver a MAX_STREAMS frame when credit opens
     ///   up.

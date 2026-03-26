@@ -1103,8 +1103,10 @@ impl Connection {
     ///
     /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
-    /// happens the application should retry the operation once the stream is
-    /// reported as writable again.
+    /// happens the application should retry the **entire** `send_request` call
+    /// once the stream is reported as writable again. Any partial state created
+    /// by the failed call is rolled back, so repeating the call with the same
+    /// arguments is safe.
     ///
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
@@ -1136,7 +1138,18 @@ impl Connection {
             return Err(e.into());
         };
 
-        self.send_headers(conn, stream_id, headers, fin)?;
+        if let Err(e) = self.send_headers(conn, stream_id, headers, fin) {
+            // If the stream was blocked before any header bytes were written,
+            // the QUIC stream exists but carries no H3 data yet. Roll back the
+            // H3-layer stream entry so the stream ID is not consumed and a
+            // subsequent retry of `send_request` starts from a clean state,
+            // consistent with the `StreamBlocked` path above.
+            if e == Error::StreamBlocked {
+                self.streams.remove(&stream_id);
+            }
+
+            return Err(e);
+        }
 
         // To avoid skipping stream IDs, we only calculate the next available
         // stream ID when a request has been successfully buffered.
