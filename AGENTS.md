@@ -75,6 +75,7 @@ quiche  datagram-socket    |        qlog-dancer        (Layer 1)
 ## CONVENTIONS
 
 - **Line width 82** (`rustfmt.toml`), comments 80. Nightly rustfmt required.
+- **MANDATORY: run `cargo +nightly fmt` after every code change, no exceptions** -- this includes trivial edits like renames, comment changes, or single-line fixes.
 - **One `use` per item** (`imports_granularity = "Item"`, vertical layout).
 - **`pub(crate)`** for cross-module internals; `pub` only for true public API.
 - **BSD-2-Clause copyright header** on every `.rs` file.
