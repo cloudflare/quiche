@@ -33,6 +33,7 @@ use datagram_socket::DatagramSocketSend;
 use datagram_socket::DatagramSocketSendExt;
 use datagram_socket::MAX_DATAGRAM_SIZE;
 use quiche::ConnectionId;
+use quiche::EventLoopIteration;
 use quiche::Header;
 use quiche::RetryConnectionIds;
 use quiche::Type as PacketType;
@@ -208,8 +209,8 @@ where
     M: Metrics,
 {
     fn handle_initials(
-        &mut self, incoming: Incoming, hdr: quiche::Header<'static>,
-        quiche_config: &mut quiche::Config,
+        &mut self, _iteration: &EventLoopIteration, incoming: Incoming,
+        hdr: quiche::Header<'static>, quiche_config: &mut quiche::Config,
     ) -> io::Result<Option<NewConnection>> {
         if hdr.ty != PacketType::Initial {
             // Non-initial packets should have a valid CID, but we want to have

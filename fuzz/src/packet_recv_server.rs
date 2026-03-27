@@ -6,6 +6,8 @@ extern crate libfuzzer_sys;
 use std::net::SocketAddr;
 
 use std::sync::Mutex;
+
+use quiche::EventLoopIteration;
 use std::sync::Once;
 use std::sync::OnceLock;
 
@@ -55,8 +57,8 @@ fuzz_target!(|data: &[u8]| {
 
     let info = quiche::RecvInfo { from, to };
 
-    conn.recv(&mut buf, info).ok();
+    conn.recv(&EventLoopIteration::new(), &mut buf, info).ok();
 
     let mut out_buf = [0; 1500];
-    while conn.send(&mut out_buf).is_ok() {}
+    while conn.send(&EventLoopIteration::new(), &mut out_buf).is_ok() {}
 });

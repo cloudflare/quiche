@@ -831,8 +831,34 @@ impl From<&RecvInfo<'_>> for crate::RecvInfo {
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_event_loop_iteration_new() -> *mut EventLoopIteration {
+    Box::into_raw(Box::new(EventLoopIteration::new()))
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_event_loop_iteration_free(
+    iteration: *mut EventLoopIteration,
+) {
+    drop(unsafe { Box::from_raw(iteration) });
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_recv(
     conn: &mut Connection, buf: *mut u8, buf_len: size_t, info: &RecvInfo,
+) -> ssize_t {
+    quiche_conn_recv_with_iteration(
+        conn,
+        buf,
+        buf_len,
+        info,
+        &EventLoopIteration::new(),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_conn_recv_with_iteration(
+    conn: &mut Connection, buf: *mut u8, buf_len: size_t, info: &RecvInfo,
+    iteration: &EventLoopIteration,
 ) -> ssize_t {
     if buf_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
@@ -840,7 +866,7 @@ pub extern "C" fn quiche_conn_recv(
 
     let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
 
-    match conn.recv(buf, info.into()) {
+    match conn.recv(iteration, buf, info.into()) {
         Ok(v) => v as ssize_t,
 
         Err(e) => e.to_c(),
@@ -861,13 +887,27 @@ pub struct SendInfo {
 pub extern "C" fn quiche_conn_send(
     conn: &mut Connection, out: *mut u8, out_len: size_t, out_info: &mut SendInfo,
 ) -> ssize_t {
+    quiche_conn_send_with_iteration(
+        conn,
+        out,
+        out_len,
+        out_info,
+        &EventLoopIteration::new(),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_conn_send_with_iteration(
+    conn: &mut Connection, out: *mut u8, out_len: size_t,
+    out_info: &mut SendInfo, iteration: &EventLoopIteration,
+) -> ssize_t {
     if out_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
     }
 
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
-    match conn.send(out) {
+    match conn.send(iteration, out) {
         Ok((v, info)) => {
             out_info.from_len = std_addr_to_c(&info.from, &mut out_info.from);
             out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
@@ -887,6 +927,25 @@ pub extern "C" fn quiche_conn_send_on_path(
     from_len: socklen_t, to: *const sockaddr, to_len: socklen_t,
     out_info: &mut SendInfo,
 ) -> ssize_t {
+    quiche_conn_send_on_path_with_iteration(
+        conn,
+        out,
+        out_len,
+        from,
+        from_len,
+        to,
+        to_len,
+        out_info,
+        &EventLoopIteration::new(),
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_conn_send_on_path_with_iteration(
+    conn: &mut Connection, out: *mut u8, out_len: size_t, from: *const sockaddr,
+    from_len: socklen_t, to: *const sockaddr, to_len: socklen_t,
+    out_info: &mut SendInfo, iteration: &EventLoopIteration,
+) -> ssize_t {
     if out_len > <ssize_t>::MAX as usize {
         panic!("The provided buffer is too large");
     }
@@ -895,7 +954,7 @@ pub extern "C" fn quiche_conn_send_on_path(
     let to = optional_std_addr_from_c(to, to_len);
     let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
 
-    match conn.send_on_path(out, from, to) {
+    match conn.send_on_path(iteration, out, from, to) {
         Ok((v, info)) => {
             out_info.from_len = std_addr_to_c(&info.from, &mut out_info.from);
             out_info.to_len = std_addr_to_c(&info.to, &mut out_info.to);
@@ -1099,7 +1158,14 @@ pub extern "C" fn quiche_conn_timeout_as_millis(conn: &Connection) -> u64 {
 
 #[no_mangle]
 pub extern "C" fn quiche_conn_on_timeout(conn: &mut Connection) {
-    conn.on_timeout()
+    quiche_conn_on_timeout_with_iteration(conn, &EventLoopIteration::new())
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_conn_on_timeout_with_iteration(
+    conn: &mut Connection, iteration: &EventLoopIteration,
+) {
+    conn.on_timeout(iteration)
 }
 
 #[no_mangle]

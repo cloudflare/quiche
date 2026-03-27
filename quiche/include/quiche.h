@@ -367,9 +367,29 @@ typedef struct {
     socklen_t to_len;
 } quiche_recv_info;
 
+// Represents a single iteration of the event loop. Create one instance per
+// event loop iteration and pass it to quiche_conn_recv_with_iteration,
+// quiche_conn_send_with_iteration, quiche_conn_send_on_path_with_iteration,
+// and quiche_conn_on_timeout_with_iteration, so they can share a single
+// timestamp for the iteration.
+typedef struct quiche_event_loop_iteration quiche_event_loop_iteration;
+
+// Creates a new event loop iteration, capturing the current time.
+quiche_event_loop_iteration *quiche_event_loop_iteration_new(void);
+
+// Frees an event loop iteration object.
+void quiche_event_loop_iteration_free(quiche_event_loop_iteration *iteration);
+
 // Processes QUIC packets received from the peer.
 ssize_t quiche_conn_recv(quiche_conn *conn, uint8_t *buf, size_t buf_len,
                          const quiche_recv_info *info);
+
+// Processes QUIC packets received from the peer, using the provided event
+// loop iteration for timestamping.
+ssize_t quiche_conn_recv_with_iteration(quiche_conn *conn, uint8_t *buf,
+                                        size_t buf_len,
+                                        const quiche_recv_info *info,
+                                        const quiche_event_loop_iteration *iteration);
 
 typedef struct {
     // The local address the packet should be sent from.
@@ -388,6 +408,13 @@ typedef struct {
 ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len,
                          quiche_send_info *out_info);
 
+// Writes a single QUIC packet to be sent to the peer, using the provided
+// event loop iteration for timestamping.
+ssize_t quiche_conn_send_with_iteration(quiche_conn *conn, uint8_t *out,
+                                        size_t out_len,
+                                        quiche_send_info *out_info,
+                                        const quiche_event_loop_iteration *iteration);
+
 // Returns the size of the send quantum, in bytes.
 size_t quiche_conn_send_quantum(const quiche_conn *conn);
 
@@ -397,6 +424,18 @@ ssize_t quiche_conn_send_on_path(quiche_conn *conn, uint8_t *out, size_t out_len
                                  const struct sockaddr *from, socklen_t from_len,
                                  const struct sockaddr *to, socklen_t to_len,
                                  quiche_send_info *out_info);
+
+// Writes a single QUIC packet to be sent to the peer from the specified local
+// address "from" to the destination address "to", using the provided event
+// loop iteration for timestamping.
+ssize_t quiche_conn_send_on_path_with_iteration(quiche_conn *conn,
+                                                uint8_t *out, size_t out_len,
+                                                const struct sockaddr *from,
+                                                socklen_t from_len,
+                                                const struct sockaddr *to,
+                                                socklen_t to_len,
+                                                quiche_send_info *out_info,
+                                                const quiche_event_loop_iteration *iteration);
 
 // Returns the size of the send quantum over the given 4-tuple, in bytes.
 size_t quiche_conn_send_quantum_on_path(const quiche_conn *conn,
@@ -473,6 +512,11 @@ uint64_t quiche_conn_timeout_as_millis(const quiche_conn *conn);
 
 // Processes a timeout event.
 void quiche_conn_on_timeout(quiche_conn *conn);
+
+// Processes a timeout event, using the provided event loop iteration for
+// timestamping.
+void quiche_conn_on_timeout_with_iteration(quiche_conn *conn,
+                                           const quiche_event_loop_iteration *iteration);
 
 // Closes the connection with the given error and reason.
 int quiche_conn_close(quiche_conn *conn, bool app, uint64_t err,
