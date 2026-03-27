@@ -75,6 +75,39 @@ fn stream_ids(event: &Event) -> TypedArray<'_, i64> {
             EventData::Http3FrameParsed(v) => {
                 ids.push(v.stream_id as i64);
             },
+            EventData::MOQTControlMessageCreated(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTControlMessageParsed(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTStreamTypeSet(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTSubgroupHeaderCreated(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTSubgroupHeaderParsed(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTSubgroupObjectCreated(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTSubgroupObjectParsed(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTFetchHeaderCreated(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTFetchHeaderParsed(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTFetchObjectCreated(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::MOQTFetchObjectParsed(v) => {
+                ids.push(v.stream_id as i64);
+            },
 
             // other events are not related to streams
             _ => (),
@@ -87,6 +120,79 @@ fn stream_ids(event: &Event) -> TypedArray<'_, i64> {
     ids
 }
 
+#[derive(Default)]
+struct MOQTFilterFields<'a> {
+    pub group_ids: TypedArray<'a, i64>,
+    pub object_ids: TypedArray<'a, i64>,
+    pub object_payload_length: TypedArray<'a, i64>,
+}
+
+impl From<&Event> for MOQTFilterFields<'_> {
+    fn from(value: &Event) -> Self {
+        let mut group_ids: TypedArray<i64> = TypedArray::new();
+        let mut object_ids: TypedArray<i64> = TypedArray::new();
+        let mut object_payload_length: TypedArray<i64> = TypedArray::new();
+
+        match value {
+            Event::Qlog(event) => match &event.data {
+                EventData::MOQTObjectDatagramCreated(v) => {
+                    group_ids.push(v.group_id as i64);
+                    if let Some(id) = v.object_id {
+                        object_ids.push(id as i64);
+                    }
+                },
+                EventData::MOQTObjectDatagramParsed(v) => {
+                    group_ids.push(v.group_id as i64);
+                    if let Some(id) = v.object_id {
+                        object_ids.push(id as i64);
+                    }
+                },
+                EventData::MOQTSubgroupHeaderCreated(v) => {
+                    group_ids.push(v.group_id as i64);
+                },
+                EventData::MOQTSubgroupHeaderParsed(v) => {
+                    group_ids.push(v.group_id as i64);
+                },
+                EventData::MOQTSubgroupObjectCreated(v) => {
+                    object_payload_length.push(v.object_payload_length as i64);
+                },
+                EventData::MOQTSubgroupObjectParsed(v) => {
+                    object_payload_length.push(v.object_payload_length as i64);
+                },
+                EventData::MOQTFetchObjectCreated(v) => {
+                    if let Some(id) = v.group_id {
+                        group_ids.push(id as i64);
+                    }
+                    if let Some(id) = v.object_id {
+                        object_ids.push(id as i64);
+                    }
+                    object_payload_length.push(v.object_payload_length as i64);
+                },
+                EventData::MOQTFetchObjectParsed(v) => {
+                    if let Some(id) = v.group_id {
+                        group_ids.push(id as i64);
+                    }
+                    if let Some(id) = v.object_id {
+                        object_ids.push(id as i64);
+                    }
+                    object_payload_length.push(v.object_payload_length as i64);
+                },
+
+                // other events don't have MOQT fields we care about
+                _ => (),
+            },
+
+            Event::Json(_event) => {},
+        }
+
+        Self {
+            group_ids,
+            object_ids,
+            object_payload_length,
+        }
+    }
+}
+
 pub fn filter_sqlog_events(mut events: Vec<Event>, filter: &str) -> Vec<Event> {
     let mut ret = vec![];
 
@@ -94,6 +200,9 @@ pub fn filter_sqlog_events(mut events: Vec<Event>, filter: &str) -> Vec<Event> {
         category: Bytes,
         name: Bytes,
         stream_id: Array(Int),
+        moqt.group_id: Array(Int),
+        moqt.object_id: Array(Int),
+        moqt.object_payload_length: Array(Int),
     };
 
     builder
@@ -108,6 +217,8 @@ pub fn filter_sqlog_events(mut events: Vec<Event>, filter: &str) -> Vec<Event> {
     for event in events.drain(..) {
         // Recreate context each time to appease borrow checker
         let mut ctx = ExecutionContext::new(&scheme);
+
+        let moqt_filter_fields = MOQTFilterFields::from(&event);
 
         let filter_match = match &event {
             Event::Qlog(ev) => {
@@ -127,6 +238,24 @@ pub fn filter_sqlog_events(mut events: Vec<Event>, filter: &str) -> Vec<Event> {
                 ctx.set_field_value(
                     scheme.get_field("stream_id").unwrap(),
                     stream_ids(&event),
+                )
+                .unwrap();
+
+                ctx.set_field_value(
+                    scheme.get_field("moqt.group_id").unwrap(),
+                    moqt_filter_fields.group_ids,
+                )
+                .unwrap();
+
+                ctx.set_field_value(
+                    scheme.get_field("moqt.object_id").unwrap(),
+                    moqt_filter_fields.object_ids,
+                )
+                .unwrap();
+
+                ctx.set_field_value(
+                    scheme.get_field("moqt.object_payload_length").unwrap(),
+                    moqt_filter_fields.object_payload_length,
                 )
                 .unwrap();
 
@@ -150,6 +279,25 @@ pub fn filter_sqlog_events(mut events: Vec<Event>, filter: &str) -> Vec<Event> {
                     stream_ids(&event),
                 )
                 .unwrap();
+
+                ctx.set_field_value(
+                    scheme.get_field("moqt.group_id").unwrap(),
+                    moqt_filter_fields.group_ids,
+                )
+                .unwrap();
+
+                ctx.set_field_value(
+                    scheme.get_field("moqt.object_id").unwrap(),
+                    moqt_filter_fields.object_ids,
+                )
+                .unwrap();
+
+                ctx.set_field_value(
+                    scheme.get_field("moqt.object_payload_length").unwrap(),
+                    moqt_filter_fields.object_payload_length,
+                )
+                .unwrap();
+
                 filter.execute(&ctx).unwrap()
             },
         };
@@ -455,5 +603,171 @@ mod tests {
             },
             Event::Json(_json_event) => panic!("unexpected type"),
         }
+    }
+
+    // MOQT test helpers and tests
+
+    use qlog::events::moqt::MOQTObjectDatagramCreated;
+    use qlog::events::moqt::MOQTSubgroupHeaderCreated;
+    use qlog::events::moqt::MOQTSubgroupObjectCreated;
+    use qlog::events::EventData::MOQTObjectDatagramCreated as MOQTObjectDatagramCreatedData;
+    use qlog::events::EventData::MOQTSubgroupHeaderCreated as MOQTSubgroupHeaderCreatedData;
+    use qlog::events::EventData::MOQTSubgroupObjectCreated as MOQTSubgroupObjectCreatedData;
+
+    fn moqt_events() -> Vec<Event> {
+        let mut events = vec![];
+
+        // Event with group_id=1, object_id=10
+        let event_data =
+            MOQTObjectDatagramCreatedData(MOQTObjectDatagramCreated {
+                track_alias: 100,
+                group_id: 1,
+                object_id: Some(10),
+                publisher_priority: None,
+                extension_headers_length: None,
+                extension_headers: None,
+                object_status: None,
+                object_payload: None,
+                end_of_group: false,
+            });
+        events.push(Event::Qlog(qlog::events::Event::with_time(0.0, event_data)));
+
+        // Event with group_id=2, object_id=20
+        let event_data =
+            MOQTObjectDatagramCreatedData(MOQTObjectDatagramCreated {
+                track_alias: 100,
+                group_id: 2,
+                object_id: Some(20),
+                publisher_priority: None,
+                extension_headers_length: None,
+                extension_headers: None,
+                object_status: None,
+                object_payload: None,
+                end_of_group: false,
+            });
+        events.push(Event::Qlog(qlog::events::Event::with_time(1.0, event_data)));
+
+        // Subgroup header with stream_id=5, group_id=3
+        let event_data =
+            MOQTSubgroupHeaderCreatedData(MOQTSubgroupHeaderCreated {
+                stream_id: 5,
+                track_alias: 100,
+                group_id: 3,
+                subgroup_id_mode: 0,
+                subgroup_id: Some(0),
+                publisher_priority: Some(1),
+                contains_end_of_group: false,
+                extensions_present: false,
+            });
+        events.push(Event::Qlog(qlog::events::Event::with_time(2.0, event_data)));
+
+        // Subgroup object with stream_id=5, object_payload_length=1000
+        let event_data =
+            MOQTSubgroupObjectCreatedData(MOQTSubgroupObjectCreated {
+                stream_id: 5,
+                object_id_delta: 0,
+                extension_headers: None,
+                object_payload_length: 1000,
+                object_status: None,
+                object_payload: None,
+            });
+        events.push(Event::Qlog(qlog::events::Event::with_time(3.0, event_data)));
+
+        // Another subgroup object with object_payload_length=500
+        let event_data =
+            MOQTSubgroupObjectCreatedData(MOQTSubgroupObjectCreated {
+                stream_id: 6,
+                object_id_delta: 1,
+                extension_headers: None,
+                object_payload_length: 500,
+                object_status: None,
+                object_payload: None,
+            });
+        events.push(Event::Qlog(qlog::events::Event::with_time(4.0, event_data)));
+
+        events
+    }
+
+    #[test]
+    fn test_moqt_stream_id_filter() {
+        let events = moqt_events();
+        assert_eq!(events.len(), 5);
+
+        let filter = "any(stream_id[*]==5)";
+        let filtered_events = filter_sqlog_events(events, filter);
+        assert_eq!(filtered_events.len(), 2);
+    }
+
+    #[test]
+    fn test_moqt_group_id_filter() {
+        let events = moqt_events();
+        assert_eq!(events.len(), 5);
+
+        let filter = "any(moqt.group_id[*]==2)";
+        let filtered_events = filter_sqlog_events(events, filter);
+        assert_eq!(filtered_events.len(), 1);
+
+        match &filtered_events[0] {
+            Event::Qlog(event) => match &event.data {
+                MOQTObjectDatagramCreatedData(v) => {
+                    assert_eq!(v.group_id, 2);
+                    assert_eq!(v.object_id, Some(20));
+                },
+                _ => panic!("unexpected event data"),
+            },
+            Event::Json(_) => panic!("unexpected type"),
+        }
+    }
+
+    #[test]
+    fn test_moqt_object_id_filter() {
+        let events = moqt_events();
+        assert_eq!(events.len(), 5);
+
+        let filter = "any(moqt.object_id[*]==10)";
+        let filtered_events = filter_sqlog_events(events, filter);
+        assert_eq!(filtered_events.len(), 1);
+
+        match &filtered_events[0] {
+            Event::Qlog(event) => match &event.data {
+                MOQTObjectDatagramCreatedData(v) => {
+                    assert_eq!(v.group_id, 1);
+                    assert_eq!(v.object_id, Some(10));
+                },
+                _ => panic!("unexpected event data"),
+            },
+            Event::Json(_) => panic!("unexpected type"),
+        }
+    }
+
+    #[test]
+    fn test_moqt_object_payload_length_filter() {
+        let events = moqt_events();
+        assert_eq!(events.len(), 5);
+
+        let filter = "any(moqt.object_payload_length[*]==1000)";
+        let filtered_events = filter_sqlog_events(events, filter);
+        assert_eq!(filtered_events.len(), 1);
+
+        match &filtered_events[0] {
+            Event::Qlog(event) => match &event.data {
+                MOQTSubgroupObjectCreatedData(v) => {
+                    assert_eq!(v.stream_id, 5);
+                    assert_eq!(v.object_payload_length, 1000);
+                },
+                _ => panic!("unexpected event data"),
+            },
+            Event::Json(_) => panic!("unexpected type"),
+        }
+    }
+
+    #[test]
+    fn test_moqt_filter_no_match() {
+        let events = moqt_events();
+        assert_eq!(events.len(), 5);
+
+        let filter = "any(moqt.group_id[*]==999)";
+        let filtered_events = filter_sqlog_events(events, filter);
+        assert!(filtered_events.is_empty());
     }
 }
