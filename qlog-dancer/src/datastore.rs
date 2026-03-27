@@ -1560,7 +1560,7 @@ impl Datastore {
         &mut self, fc: &qlog::events::http3::FrameCreated, ev_time: f64,
     ) {
         match &fc.frame {
-            Http3Frame::Headers { headers } => {
+            Http3Frame::Headers { headers, .. } => {
                 let req = self.get_or_insert_http_req(fc.stream_id);
                 req.time_first_headers_tx.get_or_insert(ev_time);
                 req.set_request_info_from_qlog(headers);
@@ -1582,11 +1582,12 @@ impl Datastore {
             },
 
             Http3Frame::PriorityUpdate {
-                prioritized_element_id,
+                stream_id: Some(stream_id),
                 priority_field_value,
                 ..
             } => {
-                let req = self.get_or_insert_http_req(*prioritized_element_id);
+                let req: &mut HttpRequestStub =
+                    self.get_or_insert_http_req(*stream_id);
                 req.priority_updates.push(priority_field_value.clone());
             },
 
@@ -1599,7 +1600,7 @@ impl Datastore {
         &mut self, fc: &qlog::events::http3::FrameCreated, ev_time: f64,
     ) {
         match &fc.frame {
-            Http3Frame::Headers { headers } => {
+            Http3Frame::Headers { headers, .. } => {
                 let req = self.get_or_insert_http_req(fc.stream_id);
                 req.time_first_headers_tx.get_or_insert(ev_time);
                 req.set_response_info_from_qlog(headers);
@@ -1629,7 +1630,7 @@ impl Datastore {
         &mut self, fp: &qlog::events::http3::FrameParsed, ev_time: f64,
     ) {
         match &fp.frame {
-            Http3Frame::Headers { headers } => {
+            Http3Frame::Headers { headers, .. } => {
                 let req = self.get_or_insert_http_req(fp.stream_id);
                 req.time_first_headers_rx.get_or_insert(ev_time);
 
@@ -1666,7 +1667,7 @@ impl Datastore {
         &mut self, fp: &qlog::events::http3::FrameParsed, ev_time: f64,
     ) {
         match &fp.frame {
-            Http3Frame::Headers { headers } => {
+            Http3Frame::Headers { headers, .. } => {
                 let req = self.get_or_insert_http_req(fp.stream_id);
                 req.time_first_headers_rx.get_or_insert(ev_time);
                 req.path = NaOption::new(find_header_value(headers, ":path"));
@@ -1690,11 +1691,11 @@ impl Datastore {
             },
 
             Http3Frame::PriorityUpdate {
-                prioritized_element_id,
+                stream_id: Some(stream_id),
                 priority_field_value,
                 ..
             } => {
-                let req = self.get_or_insert_http_req(*prioritized_element_id);
+                let req = self.get_or_insert_http_req(*stream_id);
                 req.priority_updates.push(priority_field_value.clone());
             },
 

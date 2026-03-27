@@ -127,6 +127,7 @@ impl From<&Action> for QlogEvents {
 
                 let frame = Http3Frame::Headers {
                     headers: qlog_headers,
+                    raw: None,
                 };
 
                 let frame_ev = EventData::Http3FrameCreated(FrameCreated {
@@ -501,7 +502,7 @@ impl From<H3FrameCreatedEx> for Action {
             .as_str();
 
         let ret = match &value.frame_created.frame {
-            Http3Frame::Settings { settings } => {
+            Http3Frame::Settings { settings, .. } => {
                 let mut raw_settings = vec![];
                 let mut additional_settings = vec![];
                 // This is ugly but it reflects ambiguity in the qlog
@@ -547,7 +548,7 @@ impl From<H3FrameCreatedEx> for Action {
                 }
             },
 
-            Http3Frame::Headers { headers } => {
+            Http3Frame::Headers { headers, .. } => {
                 let hdrs: Vec<quiche::h3::Header> = headers
                     .iter()
                     .map(|h| map_header(h, host_override))
@@ -591,7 +592,7 @@ impl From<H3FrameCreatedEx> for Action {
                 }
             },
 
-            Http3Frame::Goaway { id } => Action::SendFrame {
+            Http3Frame::Goaway { id, .. } => Action::SendFrame {
                 stream_id,
                 fin_stream,
                 frame: Frame::GoAway { id: *id },
