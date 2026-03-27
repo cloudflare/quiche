@@ -30,7 +30,6 @@ ring = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["macros", "std"] }
-smallvec = { workspace = true }
 url = { workspace = true }
 
 # Dependencies for async client
