@@ -927,7 +927,7 @@ impl CryptoContext {
             u64::MAX,
             u64::MAX,
             true,
-            true,
+            stream::MAX_STREAM_WINDOW,
             stream::MAX_STREAM_WINDOW,
         );
         CryptoContext {
@@ -947,7 +947,7 @@ impl CryptoContext {
             u64::MAX,
             u64::MAX,
             true,
-            true,
+            stream::MAX_STREAM_WINDOW,
             stream::MAX_STREAM_WINDOW,
         );
     }
