@@ -164,6 +164,7 @@ pub fn filter_sqlog_events(mut events: Vec<Event>, filter: &str) -> Vec<Event> {
 
 #[cfg(test)]
 mod tests {
+    use crate::wirefilter::filter_sqlog_events;
     use qlog::events::quic::PacketHeader;
     use qlog::events::quic::PacketSent;
     use qlog::events::quic::PacketType::Initial;
@@ -171,7 +172,6 @@ mod tests {
     use qlog::events::EventData::QuicPacketSent;
     use qlog::events::RawInfo;
     use qlog::reader::Event;
-    use crate::wirefilter::filter_sqlog_events;
 
     fn stream_frame(stream_id: u64) -> QuicFrame {
         QuicFrame::Stream {
