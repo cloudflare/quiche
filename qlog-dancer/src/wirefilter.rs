@@ -171,8 +171,6 @@ mod tests {
     use qlog::events::EventData::QuicPacketSent;
     use qlog::events::RawInfo;
     use qlog::reader::Event;
-    use smallvec::smallvec;
-
     use crate::wirefilter::filter_sqlog_events;
 
     fn stream_frame(stream_id: u64) -> QuicFrame {
@@ -314,7 +312,7 @@ mod tests {
                     QuicPacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
-                            Some(smallvec![
+                            Some(vec![
                                 stream_frame(0),
                                 stream_frame(100),
                                 stream_frame(200),
@@ -352,7 +350,7 @@ mod tests {
                 QuicPacketSent(packet_sent) => {
                     assert_eq!(
                         packet_sent.frames,
-                        Some(smallvec![
+                        Some(vec![
                             QuicFrame::Crypto {
                                 offset: 0,
                                 raw: Some(raw),
@@ -378,7 +376,7 @@ mod tests {
                     QuicPacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
-                            Some(smallvec![
+                            Some(vec![
                                 stream_frame(1),
                                 stream_frame(100),
                                 stream_frame(2),
@@ -416,7 +414,7 @@ mod tests {
                     QuicPacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
-                            Some(smallvec![
+                            Some(vec![
                                 QuicFrame::Crypto {
                                     offset: 0,
                                     raw: Some(raw),
@@ -443,7 +441,7 @@ mod tests {
                     QuicPacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
-                            Some(smallvec![
+                            Some(vec![
                                 stream_frame(0),
                                 stream_frame(100),
                                 stream_frame(200),

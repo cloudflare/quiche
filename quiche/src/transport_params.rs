@@ -575,7 +575,7 @@ impl TransportParams {
 
         let tls_cipher: Option<String> = cipher.map(|f| format!("{f:?}"));
 
-        EventData::QuicParametersSet(qlog::events::quic::ParametersSet {
+        EventData::QuicParametersSet(Box::new(qlog::events::quic::ParametersSet {
             initiator: Some(initiator),
             tls_cipher,
             original_destination_connection_id,
@@ -615,6 +615,6 @@ impl TransportParams {
                 .unwrap_or_default(),
 
             ..Default::default()
-        })
+        }))
     }
 }
