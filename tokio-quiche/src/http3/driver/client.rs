@@ -162,16 +162,16 @@ impl ClientHooks {
         let (mut stream_ctx, send, recv) =
             StreamCtx::new(stream_id, STREAM_CAPACITY);
 
-        if let Some(flow_id) =
-            datagram::extract_flow_id(stream_id, &request.headers)
+        if let Some(quarter_stream_id) =
+            datagram::extract_quarter_stream_id(stream_id, &request.headers)
         {
             log::info!(
                 "creating new flow for MASQUE request";
                 "stream_id" => stream_id,
-                "flow_id" => flow_id,
+                "quarter_stream_id" => quarter_stream_id,
             );
-            let _ = driver.get_or_insert_flow(flow_id)?;
-            stream_ctx.associated_dgram_flow_id = Some(flow_id);
+            let _ = driver.get_or_insert_flow(quarter_stream_id)?;
+            stream_ctx.associated_dgram_flow_id = Some(quarter_stream_id);
         }
 
         if let Some(body_writer) = request.body_writer {

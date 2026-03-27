@@ -191,7 +191,9 @@ impl ServerHooks {
         let (mut stream_ctx, send, recv) =
             StreamCtx::new(stream_id, STREAM_CAPACITY);
 
-        if let Some(flow_id) = datagram::extract_flow_id(stream_id, &headers) {
+        if let Some(flow_id) =
+            datagram::extract_quarter_stream_id(stream_id, &headers)
+        {
             let _ = driver.get_or_insert_flow(flow_id)?;
             stream_ctx.associated_dgram_flow_id = Some(flow_id);
         }

@@ -210,8 +210,9 @@ impl RecvBuf {
     ///
     /// On success the amount of data read and a flag indicating
     /// if there is no more data in the buffer, are returned as a tuple.
-    pub fn emit(&mut self, out: &mut [u8]) -> Result<(usize, bool)> {
-        self.emit_or_discard(RecvAction::Emit { out })
+    #[inline]
+    pub fn emit(&mut self, mut out: &mut [u8]) -> Result<(usize, bool)> {
+        self.emit_or_discard(RecvAction::Emit { out: &mut out })
     }
 
     /// Reads or discards contiguous data from the receive buffer.
@@ -228,12 +229,12 @@ impl RecvBuf {
     ///
     /// On success the amount of data read or discarded, and a flag indicating
     /// if there is no more data in the buffer, are returned as a tuple.
-    pub fn emit_or_discard(
-        &mut self, mut action: RecvAction,
+    pub fn emit_or_discard<B: bytes::BufMut>(
+        &mut self, mut action: RecvAction<B>,
     ) -> Result<(usize, bool)> {
         let mut len = 0;
         let mut cap = match &action {
-            RecvAction::Emit { out } => out.len(),
+            RecvAction::Emit { out } => out.remaining_mut(),
             RecvAction::Discard { len } => *len,
         };
 
@@ -260,7 +261,15 @@ impl RecvBuf {
 
             // Only copy data if we're emitting, not discarding.
             if let RecvAction::Emit { ref mut out } = action {
-                out[len..len + buf_len].copy_from_slice(&buf[..buf_len]);
+                // Note: `BufMut::remaining_mut()` cannot "shrink", but BufMut
+                // impls are allowed to grow the buffer, so we
+                // check here that we still have at least
+                // `cap` bytes, but we can't require equality
+                debug_assert!(
+                    cap <= out.remaining_mut(),
+                    "We updated `cap` incorrectly"
+                );
+                out.put_slice(&buf[..buf_len])
             }
 
             self.off += buf_len as u64;
@@ -416,6 +425,7 @@ impl RecvBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::BufMut as _;
     use rstest::rstest;
 
     // Helper function for testing either buffer emit or discard.
@@ -439,20 +449,20 @@ mod tests {
         recv: &mut RecvBuf, emit: bool, target_len: usize, result_len: usize,
         is_fin: bool, test_bytes: Option<&[u8]>,
     ) {
-        let mut buf = [0; 32];
+        let mut buf = Vec::<u8>::with_capacity(512).limit(target_len);
         let action = if emit {
-            RecvAction::Emit {
-                out: &mut buf[..target_len],
-            }
+            RecvAction::Emit { out: &mut buf }
         } else {
             RecvAction::Discard { len: target_len }
         };
 
         let (read, fin) = recv.emit_or_discard(action).unwrap();
 
+        let buf = buf.into_inner();
         if emit {
+            assert_eq!(buf.len(), read);
             if let Some(v) = test_bytes {
-                assert_eq!(&buf[..read], v);
+                assert_eq!(&buf, v);
             }
         }
 
@@ -462,9 +472,11 @@ mod tests {
 
     // Helper function for testing buffer status for either emit or discard.
     fn assert_emit_discard_done(recv: &mut RecvBuf, emit: bool) {
-        let mut buf = [0; 32];
+        let mut buf = [0u8; 32];
         let action = if emit {
-            RecvAction::Emit { out: &mut buf }
+            RecvAction::Emit {
+                out: &mut buf.as_mut_slice(),
+            }
         } else {
             RecvAction::Discard { len: 32 }
         };
@@ -654,12 +666,59 @@ mod tests {
         assert_eq!(recv.off, 19);
     }
 
+    #[test]
+    fn split_read_incremental_buf() {
+        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
+        assert_eq!(recv.len, 0);
+
+        let first = RangeBuf::from(b"something", 0, false);
+        let second = RangeBuf::from(b"helloworld", 9, true);
+
+        assert!(recv.write(first).is_ok());
+        assert_eq!(recv.len, 9);
+        assert_eq!(recv.off, 0);
+
+        assert!(recv.write(second).is_ok());
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 0);
+
+        let mut buf = Vec::new().limit(10);
+        assert_eq!(
+            recv.emit_or_discard(RecvAction::Emit { out: &mut buf }),
+            Ok((10, false))
+        );
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 10);
+        assert_eq!(buf.get_ref().len(), 10);
+        assert_eq!(buf.get_ref().as_slice(), b"somethingh");
+
+        buf.set_limit(5);
+        assert_eq!(
+            recv.emit_or_discard(RecvAction::Emit { out: &mut buf }),
+            Ok((5, false))
+        );
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 15);
+        assert_eq!(buf.get_ref().len(), 15);
+        assert_eq!(buf.get_ref().as_slice(), b"somethinghellow");
+
+        buf.set_limit(42);
+        assert_eq!(
+            recv.emit_or_discard(RecvAction::Emit { out: &mut buf }),
+            Ok((4, true))
+        );
+        assert_eq!(recv.len, 19);
+        assert_eq!(recv.off, 19);
+        assert_eq!(buf.get_ref().len(), 19);
+        assert_eq!(buf.get_ref().as_slice(), b"somethinghelloworld");
+    }
+
     #[rstest]
     fn incomplete_read(#[values(true, false)] emit: bool) {
         let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
-        let mut buf = [0; 32];
+        let mut buf = [0u8; 32];
 
         let first = RangeBuf::from(b"something", 0, false);
         let second = RangeBuf::from(b"helloworld", 9, true);
@@ -669,7 +728,9 @@ mod tests {
         assert_eq!(recv.off, 0);
 
         let action = if emit {
-            RecvAction::Emit { out: &mut buf }
+            RecvAction::Emit {
+                out: &mut buf.as_mut_slice(),
+            }
         } else {
             RecvAction::Discard { len: 32 }
         };

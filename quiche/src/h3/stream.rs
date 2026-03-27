@@ -602,13 +602,13 @@ impl Stream {
     }
 
     /// Tries to read DATA payload from the transport stream.
-    pub fn try_consume_data<F: BufFactory>(
-        &mut self, conn: &mut crate::Connection<F>, out: &mut [u8],
+    pub fn try_consume_data<F: BufFactory, OUT: bytes::BufMut>(
+        &mut self, conn: &mut crate::Connection<F>, out: OUT,
     ) -> Result<(usize, bool)> {
         debug_assert_eq!(self.state, State::Data);
-        let left = std::cmp::min(out.len(), self.state_len - self.state_off);
+        let out = out.limit(self.state_len - self.state_off);
 
-        let (len, fin) = match conn.stream_recv(self.id, &mut out[..left]) {
+        let (len, fin) = match conn.stream_recv_buf(self.id, out) {
             Ok(v) => v,
 
             Err(e) => {
