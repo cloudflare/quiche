@@ -212,6 +212,7 @@ where
 
                 config,
 
+                #[cfg(target_os = "linux")]
                 buf: Vec::new(),
                 #[cfg(target_os = "linux")]
                 metrics_handshake_time_seconds: metrics.handshake_time_seconds(labels::QuicHandshakeStage::QueueWaiting),
@@ -396,7 +397,6 @@ where
         let mut read_buf = tokio::io::ReadBuf::uninit(buf.spare_capacity_mut());
         let addr = ready!(self.socket_rx.poll_recv_from(cx, &mut read_buf))?;
         let n = read_buf.filled().len();
-        drop(read_buf);
         unsafe {
             // Safety: ReadBuf has guaranteed that `n` initialized bytes have
             // been written to the buffer, so we can set the vec's length
@@ -456,11 +456,8 @@ where
                     .map_err(|x| x.into())
                 }) {
                     Ok(r) => {
-                        let filled_buf = r
-                            .iovs()
-                            .next()
-                            .map(|slice| Vec::from(slice))
-                            .unwrap_or_default();
+                        let filled_buf =
+                            r.iovs().next().map(Vec::from).unwrap_or_default();
                         // The slices returend by `nix::socket::recvmsg`'s result
                         // add up to `r.bytes`. This assert is just to make sure
                         // the code handles the result correctly.

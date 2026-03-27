@@ -34,13 +34,13 @@ use super::InboundFrame;
 use crate::buf_factory::BufFactory;
 use crate::quic::QuicheConnection;
 
-/// Extracts the DATAGRAM flow ID proxied over the given `stream_id`,
-/// or `None` if this is not a proxy request.
+/// Extracts the DATAGRAM flow ID or quarter stream id proxied over the given
+/// `stream_id`, or `None` if this is not a proxy request.
 pub(crate) fn extract_quarter_stream_id(
     stream_id: u64, headers: &[h3::Header],
 ) -> Option<u64> {
     let mut method = None;
-    let mut datagram_quarter_stream_id: Option<u64> = None;
+    let mut datagram_flow_id: Option<u64> = None;
     let mut protocol = None;
 
     for header in headers {
@@ -48,24 +48,23 @@ pub(crate) fn extract_quarter_stream_id(
             b":method" => method = Some(header.value()),
             b":protocol" => protocol = Some(header.value()),
             b"datagram-flow-id" =>
-                datagram_quarter_stream_id = std::str::from_utf8(header.value())
+                datagram_flow_id = std::str::from_utf8(header.value())
                     .ok()
                     .and_then(|v| v.parse().ok()),
             _ => {},
         };
 
-        // We have all of the information needed to get a quarter_stream_id or
+        // We have all of the information needed to get a flow_id or
         // quarter_stream_id
-        if method.is_some() &&
-            (datagram_quarter_stream_id.is_some() || protocol.is_some())
+        if method.is_some() && (datagram_flow_id.is_some() || protocol.is_some())
         {
             break;
         }
     }
 
     // draft-ietf-masque-connect-udp-03 CONNECT-UDP
-    if method == Some(b"CONNECT-UDP") && datagram_quarter_stream_id.is_some() {
-        datagram_quarter_stream_id
+    if method == Some(b"CONNECT-UDP") && datagram_flow_id.is_some() {
+        datagram_flow_id
     // RFC 9298 CONNECT-UDP
     } else if method == Some(b"CONNECT") && protocol.is_some() {
         // we use the quarter_stream_id for RFC 9297
@@ -97,7 +96,10 @@ fn h3_dgram_add_quarter_stream_id(
         // There wasn't enough room. Let's add more headroom and add the
         // prefix again. DGRAM_HEADROOM is large enough, so
         // try_add_prefix cannot fail after splice_headroom.
-        debug_assert!(BufFactory::DGRAM_HEADROOM >= /* max varint len */ 8);
+        const {
+            // Note, since this is const, it asserts at compile time.
+            assert!(BufFactory::DGRAM_HEADROOM >= /* max varint len */ 8);
+        }
         dgram.splice_headroom(BufFactory::DGRAM_HEADROOM);
         dgram.try_add_prefix(prefix).unwrap();
     }

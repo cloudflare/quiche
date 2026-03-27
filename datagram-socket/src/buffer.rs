@@ -104,6 +104,10 @@ impl DgramBuffer {
     /// Prepends `prefix` into the headroom region, sliding the read cursor
     /// backwards. Returns `Err(())` if the headroom is smaller than
     /// `prefix.len()`.
+    #[allow(
+        clippy::result_unit_err,
+        reason = "There is only a single error case, adding a custom error type doesn't make sense"
+    )]
     pub fn try_add_prefix(&mut self, prefix: &[u8]) -> Result<(), ()> {
         if self.start < prefix.len() {
             return Err(());
