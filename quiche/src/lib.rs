@@ -605,6 +605,10 @@ pub struct Config {
     track_unknown_transport_params: Option<usize>,
 
     initial_rtt: Duration,
+
+    /// When true, uses the initial max data (for connection
+    /// and stream) as the initial flow control window.
+    use_initial_max_data_as_flow_control_win: bool,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -683,6 +687,8 @@ impl Config {
 
             track_unknown_transport_params: None,
             initial_rtt: DEFAULT_INITIAL_RTT,
+
+            use_initial_max_data_as_flow_control_win: false,
         })
     }
 
@@ -1243,6 +1249,20 @@ impl Config {
     /// The default is that the feature is disabled.
     pub fn enable_track_unknown_transport_parameters(&mut self, size: usize) {
         self.track_unknown_transport_params = Some(size);
+    }
+
+    /// Sets whether the initial max data value should be used as the initial
+    /// flow control window.
+    ///
+    /// If set to true, the initial flow control window for streams and the
+    /// connection itself will be set to the initial max data value for streams
+    /// and the connection respectively. If false, the window is set to the
+    /// minimum of initial max data and `DEFAULT_STREAM_WINDOW` or
+    /// `DEFAULT_CONNECTION_WINDOW`
+    ///
+    /// The default is false.
+    pub fn set_use_initial_max_data_as_flow_control_win(&mut self, v: bool) {
+        self.use_initial_max_data_as_flow_control_win = v;
     }
 }
 
@@ -2033,6 +2053,12 @@ impl<F: BufFactory> Connection<F> {
             reset_token,
         );
 
+        let initial_flow_control_window =
+            if config.use_initial_max_data_as_flow_control_win {
+                max_rx_data
+            } else {
+                cmp::min(max_rx_data / 2 * 3, DEFAULT_CONNECTION_WINDOW)
+            };
         let mut conn = Connection {
             version: config.version,
 
@@ -2091,7 +2117,7 @@ impl<F: BufFactory> Connection<F> {
             rx_data: 0,
             flow_control: flowcontrol::FlowControl::new(
                 max_rx_data,
-                cmp::min(max_rx_data / 2 * 3, DEFAULT_CONNECTION_WINDOW),
+                initial_flow_control_window,
                 config.max_connection_window,
             ),
             should_send_max_data: false,
@@ -2205,6 +2231,9 @@ impl<F: BufFactory> Connection<F> {
 
             max_amplification_factor: config.max_amplification_factor,
         };
+        conn.streams.set_use_initial_max_data_as_flow_control_win(
+            config.use_initial_max_data_as_flow_control_win,
+        );
 
         if let Some(retry_cids) = retry_cids {
             conn.local_transport_params
@@ -7998,7 +8027,7 @@ impl<F: BufFactory> Connection<F> {
     /// The connection-level flow control window will only be changed if it
     /// hasn't been auto tuned yet. For streams: only newly created streams
     /// receive the new setting.
-    pub(crate) fn enable_use_initial_max_data_as_flow_control_win(&mut self) {
+    fn enable_use_initial_max_data_as_flow_control_win(&mut self) {
         self.flow_control.set_window_if_not_tuned_yet(
             self.local_transport_params.initial_max_data,
         );

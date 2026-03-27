@@ -200,7 +200,7 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     max_stream_window: u64,
 
     /// When `true`, the initial flow control window will be set to the
-    /// `max_rx_data`, if false, it will be set to
+    /// `max_rx_data`, if false, it will be set to `DEFAULT_STREAM_WINDOW`
     use_initial_max_data_as_flow_control_win: bool,
 }
 
@@ -722,7 +722,7 @@ impl<F: BufFactory> StreamMap<F> {
     }
 
     /// When `true`, the initial flow control window will be set to the
-    /// `max_rx_data`, if false, it will be set to
+    /// `max_rx_data`, if false, it will be set to `DEFAULT_STREAM_WINDOW`
     pub(crate) fn set_use_initial_max_data_as_flow_control_win(
         &mut self, v: bool,
     ) {

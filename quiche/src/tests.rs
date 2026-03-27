@@ -9420,6 +9420,58 @@ fn enable_use_initial_max_data_as_flow_control_win() {
     );
 }
 
+#[test]
+fn enable_use_initial_max_data_as_flow_control_win_in_config() {
+    let mut client_config = test_utils::Pipe::default_config("cubic").unwrap();
+    let mut server_config = test_utils::Pipe::default_config("cubic").unwrap();
+    for config in [&mut client_config, &mut server_config] {
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.set_initial_max_data(1_000_000);
+        config.set_initial_max_stream_data_bidi_remote(500_000);
+        config.set_initial_max_stream_data_bidi_local(500_000);
+        config.set_initial_max_streams_bidi(10);
+        config.verify_peer(false);
+    }
+    server_config.set_use_initial_max_data_as_flow_control_win(true);
+    let mut pipe = test_utils::Pipe::with_client_and_server_config(
+        &mut client_config,
+        &mut server_config,
+    )
+    .unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    pipe.server
+        .enable_use_initial_max_data_as_flow_control_win();
+
+    // We overrode the window and set it to initial_max_data
+    assert_eq!(pipe.server.flow_control.window(), 1_000_000);
+    // the clients window is set to DEFAULT_CONNECTION_WINDOW
+    assert_eq!(pipe.client.flow_control.window(), DEFAULT_CONNECTION_WINDOW);
+
+    // Create a new stream
+    pipe.client.stream_send(0, &[1, 2, 3], false).unwrap();
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(
+        pipe.client
+            .get_or_create_stream(0, true)
+            .unwrap()
+            .recv
+            .flow_control_for_tests()
+            .window(),
+        stream::DEFAULT_STREAM_WINDOW
+    );
+    assert_eq!(
+        pipe.server
+            .get_or_create_stream(0, false)
+            .unwrap()
+            .recv
+            .flow_control_for_tests()
+            .window(),
+        500_000
+    );
+}
+
 /// Tests that `set_use_initial_max_data_as_flow_control_win_in_handshake()`
 /// correctly updates flow control windows.
 #[cfg(feature = "boringssl-boring-crate")]

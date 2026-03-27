@@ -677,7 +677,8 @@ mod tests {
 
     #[test]
     fn split_read_incremental_buf() {
-        let mut recv = RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW);
+        let mut recv =
+            RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
         assert_eq!(recv.len, 0);
 
         let first = RangeBuf::from(b"something", 0, false);
