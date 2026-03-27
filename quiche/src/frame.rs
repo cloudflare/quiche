@@ -922,7 +922,7 @@ impl Frame {
                     // TODO: pick the token type some how
                     ty: Some(qlog::TokenType::Retry),
                     raw: Some(RawInfo {
-                        data: qlog::HexSlice::maybe_string(Some(token)),
+                        data: qlog::HexSlice::maybe_string(Some(token)).map(Box::new),
                         length: Some(token.len() as u64),
                         payload_length: None,
                     }),

@@ -3518,7 +3518,7 @@ impl<F: BufFactory> Connection<F> {
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
-        qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
+        qlog_with_type!(QLOG_METRICS, self.qlog, q, {
             let recv_path = self.paths.get_mut(recv_pid)?;
             recv_path.recovery.maybe_qlog(q, now);
         });
@@ -5325,9 +5325,8 @@ impl<F: BufFactory> Connection<F> {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames: SmallVec<
-            [qlog::events::quic::QuicFrame; 1],
-        > = SmallVec::with_capacity(frames.len());
+        let mut qlog_frames: Vec<qlog::events::quic::QuicFrame> =
+            Vec::with_capacity(frames.len());
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);

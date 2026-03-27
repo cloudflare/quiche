@@ -45,8 +45,6 @@ use quiche::h3::NameValue;
 
 use serde_json::json;
 
-use smallvec::smallvec;
-
 use crate::actions::h3::Action;
 use crate::actions::h3::WaitType;
 use crate::encode_header_block;
@@ -204,7 +202,7 @@ impl From<&Action> for QlogEvents {
                 ..
             } => {
                 let len = bytes.len() as u64;
-                let ev = fake_packet_sent(Some(smallvec![QuicFrame::Stream {
+                let ev = fake_packet_sent(Some(vec![QuicFrame::Stream {
                     stream_id: *stream_id,
                     fin: Some(*fin_stream),
                     // ignore offset
@@ -212,7 +210,7 @@ impl From<&Action> for QlogEvents {
                     raw: Some(RawInfo {
                         length: None,
                         payload_length: Some(len),
-                        data: String::from_utf8(bytes.clone()).ok()
+                        data: String::from_utf8(bytes.clone()).ok().map(Box::new)
                     })
                 }]));
 
@@ -224,11 +222,11 @@ impl From<&Action> for QlogEvents {
 
             Action::SendDatagram { payload } => {
                 let len = payload.len() as u64;
-                let ev = fake_packet_sent(Some(smallvec![QuicFrame::Datagram {
+                let ev = fake_packet_sent(Some(vec![QuicFrame::Datagram {
                     raw: Some(RawInfo {
                         length: None,
                         payload_length: Some(len),
-                        data: String::from_utf8(payload.clone()).ok()
+                        data: String::from_utf8(payload.clone()).ok().map(Box::new)
                     })
                 }]));
 
@@ -243,7 +241,7 @@ impl From<&Action> for QlogEvents {
                 error_code,
             } => {
                 let ev =
-                    fake_packet_sent(Some(smallvec![QuicFrame::ResetStream {
+                    fake_packet_sent(Some(vec![QuicFrame::ResetStream {
                         stream_id: *stream_id,
                         error: qlog::events::ApplicationError::Unknown,
                         error_code: Some(*error_code),
@@ -261,7 +259,7 @@ impl From<&Action> for QlogEvents {
                 error_code,
             } => {
                 let ev =
-                    fake_packet_sent(Some(smallvec![QuicFrame::StopSending {
+                    fake_packet_sent(Some(vec![QuicFrame::StopSending {
                         stream_id: *stream_id,
                         error: qlog::events::ApplicationError::Unknown,
                         error_code: Some(*error_code),
@@ -306,7 +304,7 @@ impl From<&Action> for QlogEvents {
                     Some(String::from_utf8(error.reason.clone()).unwrap())
                 };
 
-                let ev = fake_packet_sent(Some(smallvec![
+                let ev = fake_packet_sent(Some(vec![
                     QuicFrame::ConnectionClose {
                         error_space: Some(error_space),
                         error: None,
@@ -454,11 +452,11 @@ impl From<&PacketSent> for H3Actions {
 
                     QuicFrame::Datagram { raw, .. } => {
                         actions.push(Action::SendDatagram {
-                            payload: raw
+                            payload: (*raw
                                 .clone()
                                 .unwrap_or_default()
                                 .data
-                                .unwrap_or_default()
+                                .unwrap_or_default())
                                 .into(),
                         });
                     },
@@ -585,7 +583,7 @@ impl From<H3FrameCreatedEx> for Action {
                     payload = r
                         .data
                         .clone()
-                        .unwrap_or("".to_string())
+                        .unwrap_or_default()
                         .as_bytes()
                         .to_vec();
                 }
