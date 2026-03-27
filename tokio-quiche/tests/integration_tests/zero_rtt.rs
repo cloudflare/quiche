@@ -43,7 +43,6 @@ use quiche::WireErrorCode;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::http3::driver::OutboundFrame;
@@ -220,12 +219,9 @@ fn helper_server_handler(
                     .await
                     .unwrap();
 
-                    send.send(OutboundFrame::Body(
-                        BufFactory::get_empty_buf(),
-                        true,
-                    ))
-                    .await
-                    .unwrap();
+                    send.send(OutboundFrame::Body(Default::default(), true))
+                        .await
+                        .unwrap();
                 },
             }
         }

@@ -19,8 +19,8 @@ qlog/                       # qlog event schema (RFC draft)
 qlog-dancer/                # qlog/netlog visualization (native + wasm)
 netlog/                     # Chrome netlog parser
 octets/                     # Zero-copy byte buffer primitives
-buffer-pool/                # Sharded lock-free buffer pool
-datagram-socket/            # UDP socket abstraction (sendmmsg/recvmmsg)
+buffer-pool/                # Sharded lock-free buffer pool (deprecated — no longer used by other workspace crates)
+datagram-socket/            # UDP socket abstraction (sendmmsg/recvmmsg) + zero-copy buffer for datagrams
 task-killswitch/            # Async task cancellation primitive
 fuzz/                       # Fuzz targets (excluded from workspace)
 tools/                      # Android build tooling, http3_test harness
@@ -29,10 +29,10 @@ tools/                      # Android build tooling, http3_test harness
 ## DEPENDENCY GRAPH
 
 ```
-octets  buffer-pool  task-killswitch  qlog  netlog    (Layer 0: no workspace deps)
-  |         |              |            |      |
-  v         v              |            v      v
-quiche  datagram-socket    |        qlog-dancer        (Layer 1)
+octets  task-killswitch  qlog  netlog  buffer-pool    (Layer 0: no workspace deps)
+  |           |            |      |     (no dependents)
+  v           |            v      v
+quiche  datagram-socket  qlog-dancer        (Layer 1)
   |   \     |              |
   v    \    v              v
   tokio-quiche  <----------+                           (Layer 2: depends on most)
@@ -68,7 +68,7 @@ quiche  datagram-socket    |        qlog-dancer        (Layer 1)
 | `H3Driver<H>` | struct | `tokio-quiche/src/http3/driver/` | Generic H3 driver |
 | `IoWorker<Tx,M,S>` | struct | `tokio-quiche/src/quic/io/worker.rs` | Per-connection IO loop |
 | `Pipe` | struct | `quiche/src/test_utils.rs` | In-memory test connection pair |
-| `BufFactory` | trait | `quiche/src/range_buf.rs` | Zero-copy buffer creation |
+| `BufFactory` | trait | `quiche/src/buffers.rs` | Zero-copy buffer creation |
 | `Recovery` | enum | `quiche/src/recovery/mod.rs` | CC dispatch via enum_dispatch |
 | `RecoveryOps` | trait | `quiche/src/recovery/mod.rs` | 40+ method CC interface |
 

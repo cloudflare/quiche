@@ -37,9 +37,17 @@ pub trait BufFactory: Clone + Default + Debug {
     /// e.g., by using an [`Arc`].
     type Buf: Clone + Debug + AsRef<[u8]>;
 
+    /// The type of generated buffers used for datagrams. These do not need to
+    /// be cloneable.
+    type DgramBuf: AsRef<[u8]> + From<Vec<u8>>;
+
     /// Generate a new buffer from a given slice, the buffer must contain the
     /// same data as the original slice.
     fn buf_from_slice(buf: &[u8]) -> Self::Buf;
+
+    /// Generate a new datagram buffer from a given slice, the buffer must
+    /// contain the same data as the original slice.
+    fn dgram_buf_from_slice(buf: &[u8]) -> Self::DgramBuf;
 }
 
 /// A trait that enables zero-copy sends to quiche. When buffers produced
@@ -63,18 +71,35 @@ pub struct DefaultBufFactory;
 
 /// The default [`BufFactory::Buf`] is a boxed slice wrapped in an [`Arc`].
 #[derive(Debug, Clone, Default)]
-pub struct DefaultBuf(Arc<Box<[u8]>>);
+pub struct DefaultBuf(Arc<[u8]>);
 
 impl BufFactory for DefaultBufFactory {
     type Buf = DefaultBuf;
+    type DgramBuf = Vec<u8>;
 
-    fn buf_from_slice(buf: &[u8]) -> Self::Buf {
-        DefaultBuf(Arc::new(buf.into()))
+    fn buf_from_slice(buf: &[u8]) -> DefaultBuf {
+        DefaultBuf(Arc::from(buf))
+    }
+
+    fn dgram_buf_from_slice(buf: &[u8]) -> Vec<u8> {
+        buf.into()
     }
 }
 
 impl AsRef<[u8]> for DefaultBuf {
     fn as_ref(&self) -> &[u8] {
-        &self.0[..]
+        &self.0
+    }
+}
+
+impl BufSplit for bytes::Bytes {
+    fn split_at(&mut self, at: usize) -> Self {
+        self.split_off(at)
+    }
+}
+
+impl BufSplit for bytes::BytesMut {
+    fn split_at(&mut self, at: usize) -> Self {
+        self.split_off(at)
     }
 }

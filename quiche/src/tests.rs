@@ -991,6 +991,71 @@ fn streamio(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     assert!(pipe.server.stream_finished(4));
 }
 
+/// Test receiving into `BufMut`
+#[rstest]
+fn stream_recv_buf(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    use bytes::BufMut as _;
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(!pipe.server.stream_finished(4));
+
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), Some(4));
+    assert_eq!(r.next(), None);
+
+    let mut b = Vec::with_capacity(15).limit(15);
+    assert_eq!(b.get_ref().len(), 0);
+    assert_eq!(pipe.server.stream_recv_buf(4, &mut b), Ok((12, true)));
+    let b = b.into_inner();
+    assert_eq!(b.len(), 12);
+    assert_eq!(&b, b"hello, world");
+
+    assert!(pipe.server.stream_finished(4));
+}
+
+/// Test receiving into a BufMut. We test that a `Vec` used as `BufMut` will
+/// indeed grow automatically, and that `limit` is honored, and that we can
+/// adjust the limit, (and that we properly append once the limit is increased)
+#[rstest]
+fn stream_recv_buf_empty(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    use bytes::BufMut as _;
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(!pipe.server.stream_finished(4));
+
+    let mut r = pipe.server.readable();
+    assert_eq!(r.next(), Some(4));
+    assert_eq!(r.next(), None);
+
+    let mut b = Vec::new().limit(2);
+    assert_eq!(b.get_ref().len(), 0);
+    assert_eq!(pipe.server.stream_recv_buf(4, &mut b), Ok((2, false)));
+    // The buffer won't accept additional writes
+    assert_eq!(pipe.server.stream_recv_buf(4, &mut b), Ok((0, false)));
+
+    b.set_limit(15);
+    assert_eq!(pipe.server.stream_recv_buf(4, &mut b), Ok((10, true)));
+    let b = b.into_inner();
+    assert_eq!(b.len(), 12);
+    assert_eq!(&b, b"hello, world");
+
+    assert!(pipe.server.stream_finished(4));
+}
+
 #[rstest]
 fn streamio_mixed_actions(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,

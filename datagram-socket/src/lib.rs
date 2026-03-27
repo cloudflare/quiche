@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+mod buffer;
 mod datagram;
 mod shutdown;
 mod socket_stats;
@@ -40,6 +41,7 @@ pub use mmsg::*;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 
+pub use self::buffer::DgramBuffer;
 pub use self::shutdown::*;
 pub use self::socket_stats::*;
 

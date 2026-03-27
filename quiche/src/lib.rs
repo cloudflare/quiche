@@ -1527,8 +1527,8 @@ where
     qlog: QlogInfo,
 
     /// DATAGRAM queues.
-    dgram_recv_queue: dgram::DatagramQueue,
-    dgram_send_queue: dgram::DatagramQueue,
+    dgram_recv_queue: dgram::DatagramQueue<F>,
+    dgram_send_queue: dgram::DatagramQueue<F>,
 
     /// Whether to emit DATAGRAM frames in the next packet.
     emit_dgram: bool,
@@ -5026,7 +5026,7 @@ impl<F: BufFactory> Connection<F> {
                                     b.split_at(hdr_off + hdr_len)?;
 
                                 dgram_payload.as_mut()[..len]
-                                    .copy_from_slice(&data);
+                                    .copy_from_slice(data.as_ref());
 
                                 // Encode the frame's header.
                                 //
@@ -5546,8 +5546,56 @@ impl<F: BufFactory> Connection<F> {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
+    #[inline]
     pub fn stream_recv(
         &mut self, stream_id: u64, out: &mut [u8],
+    ) -> Result<(usize, bool)> {
+        self.stream_recv_buf(stream_id, out)
+    }
+
+    /// Reads contiguous data from a stream into the provided [`bytes::BufMut`].
+    ///
+    /// **NOTE**:
+    /// The BufMut will be populated with all available data up to its capacity.
+    /// Since some BufMut implementations, e.g., [`Vec<u8>`], dynamically
+    /// allocate additional memory, the caller may use [`BufMut::limit()`]
+    /// to limit the maximum amount of data that can be written.
+    ///
+    /// On success the amount of bytes read and a flag indicating the fin state
+    /// is returned as a tuple, or [`Done`] if there is no data to read.
+    /// [`BufMut::advance_mut()`] will have been called with the same number of
+    /// total bytes.
+    ///
+    /// Reading data from a stream may trigger queueing of control messages
+    /// (e.g. MAX_STREAM_DATA). [`send()`] should be called afterwards.
+    ///
+    /// [`BufMut::limit()`]: bytes::BufMut::limit
+    /// [`BufMut::advance_mut()`]: bytes::BufMut::advance_mut
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`send()`]: struct.Connection.html#method.send
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # use bytes::BufMut as _;
+    /// # let mut buf = Vec::new().limit(1024);  // Read at most 1024 bytes
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
+    /// # let peer = "127.0.0.1:1234".parse().unwrap();
+    /// # let local = socket.local_addr().unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
+    /// # let stream_id = 0;
+    /// # let mut total_read = 0;
+    /// while let Ok((read, fin)) = conn.stream_recv_buf(stream_id, &mut buf) {
+    ///     println!("Got {} bytes on stream {}", read, stream_id);
+    ///     total_read += read;
+    ///     assert_eq!(buf.get_ref().len(), total_read);
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn stream_recv_buf<B: bytes::BufMut>(
+        &mut self, stream_id: u64, out: B,
     ) -> Result<(usize, bool)> {
         self.do_stream_recv(stream_id, RecvAction::Emit { out })
     }
@@ -5582,7 +5630,10 @@ impl<F: BufFactory> Connection<F> {
     pub fn stream_discard(
         &mut self, stream_id: u64, len: usize,
     ) -> Result<(usize, bool)> {
-        self.do_stream_recv(stream_id, RecvAction::Discard { len })
+        // `do_stream_recv()` is generic on the kind of `BufMut` in RecvAction.
+        // Since we are discarding, it doesn't matter, but the compiler still
+        // wants to know, so we say `&mut [u8]`.
+        self.do_stream_recv::<&mut [u8]>(stream_id, RecvAction::Discard { len })
     }
 
     // Reads or discards contiguous data from a stream.
@@ -5603,8 +5654,8 @@ impl<F: BufFactory> Connection<F> {
     //
     // [`Done`]: enum.Error.html#variant.Done
     // [`send()`]: struct.Connection.html#method.send
-    fn do_stream_recv(
-        &mut self, stream_id: u64, action: RecvAction,
+    fn do_stream_recv<B: bytes::BufMut>(
+        &mut self, stream_id: u64, action: RecvAction<B>,
     ) -> Result<(usize, bool)> {
         // We can't read on our own unidirectional streams.
         if !stream::is_bidi(stream_id) &&
@@ -6558,12 +6609,13 @@ impl<F: BufFactory> Connection<F> {
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.dgram_recv_queue.pop() {
             Some(d) => {
-                if d.len() > buf.len() {
+                if d.as_ref().len() > buf.len() {
                     return Err(Error::BufferTooShort);
                 }
+                let len = d.as_ref().len();
 
-                buf[..d.len()].copy_from_slice(&d);
-                Ok(d.len())
+                buf[..len].copy_from_slice(d.as_ref());
+                Ok(len)
             },
 
             None => Err(Error::Done),
@@ -6572,17 +6624,13 @@ impl<F: BufFactory> Connection<F> {
 
     /// Reads the first received DATAGRAM.
     ///
-    /// This is the same as [`dgram_recv()`] but returns the DATAGRAM as a
-    /// `Vec<u8>` instead of copying into the provided buffer.
+    /// This is the same as [`dgram_recv()`] but returns the DATAGRAM as an
+    /// owned buffer instead of copying into the provided buffer.
     ///
     /// [`dgram_recv()`]: struct.Connection.html#method.dgram_recv
     #[inline]
-    pub fn dgram_recv_vec(&mut self) -> Result<Vec<u8>> {
-        match self.dgram_recv_queue.pop() {
-            Some(d) => Ok(d),
-
-            None => Err(Error::Done),
-        }
+    pub fn dgram_recv_buf(&mut self) -> Result<F::DgramBuf> {
+        self.dgram_recv_queue.pop().ok_or(Error::Done)
     }
 
     /// Reads the first received DATAGRAM without removing it from the queue.
@@ -6678,43 +6726,23 @@ impl<F: BufFactory> Connection<F> {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
-        let max_payload_len = match self.dgram_max_writable_len() {
-            Some(v) => v,
-
-            None => return Err(Error::InvalidState),
-        };
-
-        if buf.len() > max_payload_len {
-            return Err(Error::BufferTooShort);
-        }
-
-        self.dgram_send_queue.push(buf.to_vec())?;
-
-        let active_path = self.paths.get_active_mut()?;
-
-        if self.dgram_send_queue.byte_size() >
-            active_path.recovery.cwnd_available()
-        {
-            active_path.recovery.update_app_limited(false);
-        }
-
-        Ok(())
+        self.dgram_send_buf(F::dgram_buf_from_slice(buf))
     }
 
     /// Sends data in a DATAGRAM frame.
     ///
-    /// This is the same as [`dgram_send()`] but takes a `Vec<u8>` instead of
-    /// a slice.
+    /// This is the same as [`dgram_send()`] but takes an owned buffer
+    /// instead of a slice and avoids copying.
     ///
     /// [`dgram_send()`]: struct.Connection.html#method.dgram_send
-    pub fn dgram_send_vec(&mut self, buf: Vec<u8>) -> Result<()> {
+    pub fn dgram_send_buf(&mut self, buf: F::DgramBuf) -> Result<()> {
         let max_payload_len = match self.dgram_max_writable_len() {
             Some(v) => v,
 
             None => return Err(Error::InvalidState),
         };
 
-        if buf.len() > max_payload_len {
+        if buf.as_ref().len() > max_payload_len {
             return Err(Error::BufferTooShort);
         }
 
@@ -8614,7 +8642,7 @@ impl<F: BufFactory> Connection<F> {
                     self.dgram_recv_queue.pop();
                 }
 
-                self.dgram_recv_queue.push(data)?;
+                self.dgram_recv_queue.push(data.into())?;
 
                 self.dgram_recv_count = self.dgram_recv_count.saturating_add(1);
 

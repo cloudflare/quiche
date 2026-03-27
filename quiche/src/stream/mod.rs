@@ -83,9 +83,9 @@ impl RecvBufResetReturn {
 }
 
 /// Action to perform when reading from a stream's receive buffer.
-pub enum RecvAction<'a> {
+pub enum RecvAction<T: bytes::BufMut> {
     /// Emit data by copying it into the provided buffer.
-    Emit { out: &'a mut [u8] },
+    Emit { out: T },
     /// Discard up to the specified number of bytes without copying.
     Discard { len: usize },
 }

@@ -44,10 +44,7 @@ mod client_side_driver {
         let mut from_server = resp.recv;
         // client sends body
         to_server
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[1; 5]),
-                false,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[1; 5]), false))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
 
@@ -58,7 +55,7 @@ mod client_side_driver {
 
         // client sends fin, server sends body and fin
         to_server
-            .try_send(OutboundFrame::Body(BufFactory::get_empty_buf(), true))
+            .try_send(OutboundFrame::Body(Default::default(), true))
             .unwrap();
         helper.peer_server_send_body(0, &[2; 10], true).unwrap();
 
@@ -78,7 +75,7 @@ mod client_side_driver {
 
         // client receives the server body
         assert_matches!(from_server.try_recv(), Ok(InboundFrame::Body(buf, fin)) => {
-            assert_eq!(buf.into_inner().into_vec(), vec![2; 10]);
+            assert_eq!(buf.to_vec(), vec![2; 10]);
             // TODO: it would be nice if we could receive the fin here, but that's not
             // how quiche::h3 works. Instead we need another receive call on the channel
             assert!(!fin);
@@ -104,6 +101,57 @@ mod client_side_driver {
         assert_matches!(from_server.try_recv(), Err(TryRecvError::Disconnected));
         assert_eq!(helper.driver.stream_map.len(), 0);
     }
+
+    #[test]
+    fn client_body_recv_buf() {
+        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // client sends a request with fin
+        let stream_id = helper
+            .driver_send_request(make_request_headers("GET"), true)
+            .unwrap();
+
+        // servers reads request and sends response headers
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_server_poll().unwrap(),
+            (0, h3::Event::Headers { .. })
+        );
+        helper.peer_server_send_response(0, false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client receives response headers
+        let resp = assert_matches!(
+            helper.driver_recv_core_event().unwrap(),
+            H3Event::IncomingHeaders(headers) => { headers }
+        );
+        assert_eq!(resp.stream_id, stream_id);
+        assert!(!resp.read_fin);
+        let mut from_server = resp.recv;
+
+        // Set the buffer size
+        helper.driver_set_body_buf_size(30);
+        // Server sends an initial 10 byte body.
+        helper.peer_server_send_body(0, &[2; 10], false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        // client receives the server body
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![2; 10]);
+        // another 10 bytes
+        helper.peer_server_send_body(0, &[3; 10], false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![3; 10]);
+        // another 10 bytes. That should have used the initial buffer.
+        helper.peer_server_send_body(0, &[4; 10], false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![4; 10]);
+        // another 10 bytes. Should transparently use a new buffer
+        helper.peer_server_send_body(0, &[5; 10], true).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![5; 10]);
+    }
+
     /// Test that dropping the OutboundFrame channel causes the driver to
     /// send a RESET_STREAM frame to the peer.
     #[test]
@@ -159,7 +207,7 @@ mod client_side_driver {
 
         // client receives the server body
         assert_matches!(from_server.try_recv(), Ok(InboundFrame::Body(buf, fin)) => {
-            assert_eq!(buf.into_inner().into_vec(), vec![2; 10]);
+            assert_eq!(buf.to_vec(), vec![2; 10]);
             // TODO: it would be nice if we could receive the fin here, but that's not
             // how quiche::h3 works. Instead we need another receive call on the channel
             assert!(!fin);
@@ -257,7 +305,7 @@ mod client_side_driver {
         config.set_initial_max_stream_data_bidi_local(30);
         config.set_initial_max_stream_data_bidi_remote(30);
         let mut helper = DriverTestHelper::<ClientHooks>::with_pipe(
-            quiche::test_utils::Pipe::with_config(&mut config).unwrap(),
+            quiche::test_utils::Pipe::with_config_and_buf(&mut config).unwrap(),
         )
         .unwrap();
         const REQUEST_CANCELED_ERR: u64 =
@@ -295,7 +343,7 @@ mod client_side_driver {
             .get_ref()
             .unwrap()
             .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[23; 50]),
+                Bytes::copy_from_slice(&[23; 50]),
                 false,
             ))
             .unwrap();
@@ -393,7 +441,7 @@ mod client_side_driver {
         resp.send
             .get_ref()
             .unwrap()
-            .try_send(OutboundFrame::Body(BufFactory::get_empty_buf(), true))
+            .try_send(OutboundFrame::Body(Default::default(), true))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
 
@@ -437,6 +485,7 @@ mod client_side_driver {
 /// Note that most of these tests could have just as easily been written for
 /// the client side.
 mod server_side_driver {
+
     use super::*;
 
     #[test]
@@ -481,10 +530,7 @@ mod server_side_driver {
 
         // server sends body and fin
         to_client
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[42]),
-                true,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[42]), true))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
@@ -499,7 +545,6 @@ mod server_side_driver {
         assert_eq!(helper.driver.stream_map.len(), 0);
     }
 
-    // This test verifies https://github.com/cloudflare/quiche/pull/2162
     #[test]
     fn verify_pr_2162() {
         let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
@@ -527,10 +572,7 @@ mod server_side_driver {
         helper.work_loop_iter().unwrap();
         // server sends body and fin. This caused an infinite loop before #2162
         to_client
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[42]),
-                true,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[42]), true))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
 
@@ -600,7 +642,7 @@ mod server_side_driver {
         // StreamStopped back and closes the channel.
         to_client
             .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[23; 10]),
+                Bytes::copy_from_slice(&[23; 10]),
                 false,
             ))
             .unwrap();
@@ -688,17 +730,11 @@ mod server_side_driver {
         // We can still write to the peer and in fact, we must eventually send a
         // fin.
         to_client
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[5; 4]),
-                false,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[5; 4]), false))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
         to_client
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[6; 4]),
-                true,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[6; 4]), true))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
 
@@ -751,7 +787,7 @@ mod server_side_driver {
         helper.work_loop_iter().unwrap();
         to_client
             .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(b"foobar 42"),
+                Bytes::copy_from_slice(b"foobar 42"),
                 true,
             ))
             .unwrap();
@@ -830,7 +866,7 @@ mod server_side_driver {
         helper.work_loop_iter().unwrap();
         to_client
             .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[1, 2, 3, 4]),
+                Bytes::copy_from_slice(&[1, 2, 3, 4]),
                 false,
             ))
             .unwrap();
@@ -849,10 +885,10 @@ mod server_side_driver {
         // put it into the `from_client` channel
         helper.pipe.advance().unwrap();
         // Limit the amount of data we read from the stream.
-        helper.driver.pooled_buf = BufFactory::buf_from_slice(&[0; 5]);
+        helper.driver_set_body_buf_size(5);
         helper.work_loop_iter().unwrap();
         assert_matches!(from_client.try_recv(), Ok(InboundFrame::Body(buf, fin)) => {
-            assert_eq!(buf.into_inner().into_vec(), &[1; 5]);
+            assert_eq!(buf.to_vec(), &[1; 5]);
             assert!(!fin);
         });
         assert_matches!(
@@ -899,10 +935,7 @@ mod server_side_driver {
         // We can still write to the peer and in fact, we must eventually send a
         // fin.
         to_client
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[6; 4]),
-                true,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[6; 4]), true))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
 
@@ -967,10 +1000,10 @@ mod server_side_driver {
         // put it into the `from_client` channel
         helper.pipe.advance().unwrap();
         // Limit the amount of data we read from the stream.
-        helper.driver.pooled_buf = BufFactory::buf_from_slice(&[0; 5]);
+        helper.driver_set_body_buf_size(5);
         helper.work_loop_iter().unwrap();
         assert_matches!(from_client.try_recv(), Ok(InboundFrame::Body(buf, fin)) => {
-            assert_eq!(buf.into_inner().into_vec(), &[1; 5]);
+            assert_eq!(buf.to_vec(), &[1; 5]);
             assert!(!fin);
         });
         assert_matches!(
@@ -1002,7 +1035,7 @@ mod server_side_driver {
 
         // send fin to client
         to_client
-            .try_send(OutboundFrame::Body(BufFactory::get_empty_buf(), true))
+            .try_send(OutboundFrame::Body(Default::default(), true))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
 
@@ -1103,10 +1136,7 @@ mod server_side_driver {
 
         // we still need to send a fin
         to_client
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[42]),
-                true,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[42]), true))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
@@ -1182,10 +1212,7 @@ mod server_side_driver {
 
         // we still need to send a fin
         to_client
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[42]),
-                true,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[42]), true))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
@@ -1269,10 +1296,7 @@ mod server_side_driver {
 
         // we still need to send a fin
         to_client
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[42]),
-                true,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[42]), true))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
@@ -1340,10 +1364,7 @@ mod server_side_driver {
 
         // server sends body
         to_client
-            .try_send(OutboundFrame::Body(
-                BufFactory::buf_from_slice(&[42]),
-                false,
-            ))
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[42]), false))
             .unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
