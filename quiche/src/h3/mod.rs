@@ -301,8 +301,6 @@ use qlog::events::http3::Http3Frame;
 #[cfg(feature = "qlog")]
 use qlog::events::http3::Initiator;
 #[cfg(feature = "qlog")]
-use qlog::events::http3::PriorityTargetStreamType;
-#[cfg(feature = "qlog")]
 use qlog::events::http3::StreamType;
 #[cfg(feature = "qlog")]
 use qlog::events::http3::StreamTypeSet;
@@ -1473,6 +1471,7 @@ impl Connection {
 
             let frame = Http3Frame::Headers {
                 headers: qlog_headers,
+                raw: None,
             };
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
                 stream_id,
@@ -1948,9 +1947,10 @@ impl Connection {
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::PriorityUpdate {
-                target_stream_type: PriorityTargetStreamType::Request,
-                prioritized_element_id: stream_id,
+                stream_id: Some(stream_id),
+                push_id: None,
                 priority_field_value: field_value.clone(),
+                raw: None,
             };
 
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
@@ -2323,7 +2323,10 @@ impl Connection {
         );
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-            let frame = Http3Frame::Reserved { length: Some(0) };
+            let frame = Http3Frame::Reserved {
+                frame_type_bytes: grease_frame1,
+                raw: None,
+            };
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
                 stream_id,
                 length: Some(0),
@@ -2352,7 +2355,8 @@ impl Connection {
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::Reserved {
-                length: Some(grease_payload.len() as u64),
+                frame_type_bytes: grease_frame2,
+                raw: None,
             };
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
                 stream_id,
@@ -2981,6 +2985,7 @@ impl Connection {
 
                     let frame = Http3Frame::Headers {
                         headers: qlog_headers,
+                        raw: None,
                     };
 
                     let ev_data = EventData::Http3FrameParsed(FrameParsed {

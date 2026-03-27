@@ -516,6 +516,7 @@ fn handle_response_frame<C: Client>(
 
             to_qlog = Some(Http3Frame::Headers {
                 headers: qlog_headers,
+                raw: None,
             });
         },
         H3iFrame::QuicheH3(quiche_frame) => {
