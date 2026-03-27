@@ -321,7 +321,7 @@
 //!             Some(1234), data: None
 //!           };
 //! let padding = qlog::events::quic::QuicFrame::Padding {
-//!     raw: Some(raw),
+//!     raw: Some(Box::new(raw)),
 //! };
 //!
 //! let event_data =

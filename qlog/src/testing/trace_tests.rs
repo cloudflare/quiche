@@ -126,11 +126,11 @@ fn trace_single_transport_event() {
         stream_id: 0,
         offset: Some(0),
         fin: Some(true),
-        raw: Some(RawInfo {
+        raw: Some(Box::new(RawInfo {
             length: None,
             payload_length: Some(100),
             data: None,
-        }),
+        })),
     }];
     let event_data = EventData::QuicPacketSent(PacketSent {
         header: pkt_hdr,

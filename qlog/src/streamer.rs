@@ -391,11 +391,11 @@ mod tests {
         let frame1 = QuicFrame::Stream {
             stream_id: 40,
             offset: Some(40),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(400),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
@@ -411,22 +411,22 @@ mod tests {
         let frame2 = QuicFrame::Stream {
             stream_id: 0,
             offset: Some(0),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(100),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
         let frame3 = QuicFrame::Stream {
             stream_id: 0,
             offset: Some(0),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(100),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
@@ -554,11 +554,11 @@ mod tests {
         let frame1 = QuicFrame::Stream {
             stream_id: 40,
             offset: Some(40),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(400),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
@@ -579,11 +579,11 @@ mod tests {
         let frame2 = QuicFrame::Stream {
             stream_id: 1,
             offset: Some(0),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(100),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
