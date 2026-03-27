@@ -121,22 +121,22 @@ fn packet_sent_event_some_frames() {
 
     let frames = vec![
         QuicFrame::Padding {
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(1234),
                 data: None,
-            }),
+            })),
         },
         QuicFrame::Ping { raw: None },
         QuicFrame::Stream {
             stream_id: 0,
             offset: Some(0),
             fin: Some(true),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(100),
                 data: None,
-            }),
+            })),
         },
     ];
 

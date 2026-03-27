@@ -207,11 +207,11 @@ impl From<&Action> for QlogEvents {
                     fin: Some(*fin_stream),
                     // ignore offset
                     offset: None,
-                    raw: Some(RawInfo {
+                    raw: Some(Box::new(RawInfo {
                         length: None,
                         payload_length: Some(len),
                         data: String::from_utf8(bytes.clone()).ok().map(Box::new)
-                    })
+                    }))
                 }]));
 
                 vec![QlogEvent::Event {
@@ -223,11 +223,11 @@ impl From<&Action> for QlogEvents {
             Action::SendDatagram { payload } => {
                 let len = payload.len() as u64;
                 let ev = fake_packet_sent(Some(vec![QuicFrame::Datagram {
-                    raw: Some(RawInfo {
+                    raw: Some(Box::new(RawInfo {
                         length: None,
                         payload_length: Some(len),
                         data: String::from_utf8(payload.clone()).ok().map(Box::new)
-                    })
+                    }))
                 }]));
 
                 vec![QlogEvent::Event {

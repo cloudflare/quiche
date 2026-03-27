@@ -178,11 +178,11 @@ mod tests {
             stream_id,
             offset: Some(0),
             fin: Some(true),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(10),
                 data: None,
-            }),
+            })),
         }
     }
 
@@ -210,7 +210,7 @@ mod tests {
         let frames = vec![
             QuicFrame::Crypto {
                 offset: 0,
-                raw: Some(raw),
+                raw: Some(Box::new(raw)),
             },
             stream_frame(1),
             stream_frame(2),
@@ -353,7 +353,7 @@ mod tests {
                         Some(vec![
                             QuicFrame::Crypto {
                                 offset: 0,
-                                raw: Some(raw),
+                                raw: Some(Box::new(raw)),
                             },
                             stream_frame(1),
                             stream_frame(2),
@@ -417,7 +417,7 @@ mod tests {
                             Some(vec![
                                 QuicFrame::Crypto {
                                     offset: 0,
-                                    raw: Some(raw),
+                                    raw: Some(Box::new(raw)),
                                 },
                                 stream_frame(1),
                                 stream_frame(2),

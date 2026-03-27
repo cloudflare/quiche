@@ -839,11 +839,11 @@ impl Frame {
 
         match self {
             Frame::Padding { len } => QuicFrame::Padding {
-                raw: Some(RawInfo {
+                raw: Some(Box::new(RawInfo {
                     length: None,
                     payload_length: Some(*len as u64),
                     data: None,
-                }),
+                })),
             },
 
             Frame::Ping { .. } => QuicFrame::Ping { raw: None },
@@ -901,20 +901,20 @@ impl Frame {
 
             Frame::Crypto { data } => QuicFrame::Crypto {
                 offset: data.off(),
-                raw: Some(RawInfo {
+                raw: Some(Box::new(RawInfo {
                     length: None,
                     payload_length: Some(data.len() as u64),
                     data: None,
-                }),
+                })),
             },
 
             Frame::CryptoHeader { offset, length } => QuicFrame::Crypto {
                 offset: *offset,
-                raw: Some(RawInfo {
+                raw: Some(Box::new(RawInfo {
                     length: None,
                     payload_length: Some(*length as u64),
                     data: None,
-                }),
+                })),
             },
 
             Frame::NewToken { token } => QuicFrame::NewToken {
@@ -922,7 +922,8 @@ impl Frame {
                     // TODO: pick the token type some how
                     ty: Some(qlog::TokenType::Retry),
                     raw: Some(RawInfo {
-                        data: qlog::HexSlice::maybe_string(Some(token)).map(Box::new),
+                        data: qlog::HexSlice::maybe_string(Some(token))
+                            .map(Box::new),
                         length: Some(token.len() as u64),
                         payload_length: None,
                     }),
@@ -935,11 +936,11 @@ impl Frame {
                 stream_id: *stream_id,
                 offset: Some(data.off()),
                 fin: data.fin().then_some(true),
-                raw: Some(RawInfo {
+                raw: Some(Box::new(RawInfo {
                     length: None,
                     payload_length: Some(data.len() as u64),
                     data: None,
-                }),
+                })),
             },
 
             Frame::StreamHeader {
@@ -951,11 +952,11 @@ impl Frame {
                 stream_id: *stream_id,
                 offset: Some(*offset),
                 fin: fin.then(|| true),
-                raw: Some(RawInfo {
+                raw: Some(Box::new(RawInfo {
                     length: None,
                     payload_length: Some(*length as u64),
                     data: None,
-                }),
+                })),
             },
 
             Frame::MaxData { max } => QuicFrame::MaxData {
@@ -1067,19 +1068,19 @@ impl Frame {
             Frame::HandshakeDone => QuicFrame::HandshakeDone { raw: None },
 
             Frame::Datagram { data } => QuicFrame::Datagram {
-                raw: Some(RawInfo {
+                raw: Some(Box::new(RawInfo {
                     length: None,
                     payload_length: Some(data.len() as u64),
                     data: None,
-                }),
+                })),
             },
 
             Frame::DatagramHeader { length } => QuicFrame::Datagram {
-                raw: Some(RawInfo {
+                raw: Some(Box::new(RawInfo {
                     length: None,
                     payload_length: Some(*length as u64),
                     data: None,
-                }),
+                })),
             },
         }
     }

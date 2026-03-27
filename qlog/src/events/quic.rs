@@ -454,11 +454,11 @@ pub enum QuicFrameTypeName {
 // also works automatically.
 pub enum QuicFrame {
     Padding {
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Ping {
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Ack {
@@ -469,7 +469,7 @@ pub enum QuicFrame {
         ect0: Option<u64>,
         ce: Option<u64>,
 
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     ResetStream {
@@ -478,7 +478,7 @@ pub enum QuicFrame {
         error_code: Option<u64>,
         final_size: u64,
 
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     StopSending {
@@ -486,17 +486,17 @@ pub enum QuicFrame {
         error: ApplicationError,
         error_code: Option<u64>,
 
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Crypto {
         offset: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     NewToken {
         token: Token,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Stream {
@@ -504,41 +504,41 @@ pub enum QuicFrame {
         offset: Option<u64>,
         fin: Option<bool>,
 
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     MaxData {
         maximum: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     MaxStreamData {
         stream_id: u64,
         maximum: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     MaxStreams {
         stream_type: StreamType,
         maximum: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     DataBlocked {
         limit: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     StreamDataBlocked {
         stream_id: u64,
         limit: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     StreamsBlocked {
         stream_type: StreamType,
         limit: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     NewConnectionId {
@@ -547,22 +547,22 @@ pub enum QuicFrame {
         connection_id_length: Option<u8>,
         connection_id: Bytes,
         stateless_reset_token: Option<StatelessResetToken>,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     RetireConnectionId {
         sequence_number: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     PathChallenge {
         data: Option<Bytes>,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     PathResponse {
         data: Option<Bytes>,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     ConnectionClose {
@@ -576,16 +576,16 @@ pub enum QuicFrame {
     },
 
     HandshakeDone {
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Datagram {
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Unknown {
         frame_type_bytes: Option<u64>,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 }
 
