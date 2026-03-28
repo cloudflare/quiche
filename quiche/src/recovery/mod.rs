@@ -325,6 +325,12 @@ pub trait RecoveryOps {
     fn bbr_check_if_app_limited(
         &mut self, had_flushable_data_before_poll: bool, now: &Instant,
     );
+
+    fn bbr_do_app_limited_check_next_iteration(
+        &mut self, has_flushable_data: bool,
+    );
+
+    fn bbr_maybe_check_if_app_limited(&mut self, now: &Instant);
 }
 
 impl Recovery {

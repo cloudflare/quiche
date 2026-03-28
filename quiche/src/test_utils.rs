@@ -419,16 +419,9 @@ pub fn recv_send<F: BufFactory>(
     Ok(off)
 }
 
-pub fn run_work_loop_round_start_hook<F: BufFactory>(conn: &mut Connection<F>) {
-    let has_flushable_data = conn.has_flushable_data();
-    conn.work_loop_round_start(has_flushable_data, &Instant::now());
-}
-
 pub fn process_flight<F: BufFactory>(
     conn: &mut Connection<F>, flight: Vec<(Vec<u8>, SendInfo)>,
 ) -> Result<()> {
-    run_work_loop_round_start_hook(conn);
-
     for (mut pkt, si) in flight {
         let info = RecvInfo {
             to: si.to,

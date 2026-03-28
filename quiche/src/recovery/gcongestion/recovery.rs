@@ -469,6 +469,8 @@ pub struct GRecovery {
     pacer: Pacer,
 
     enable_bbr_app_limited_fix: bool,
+
+    check_for_app_limited_next_iteration: bool,
 }
 
 impl GRecovery {
@@ -535,6 +537,7 @@ impl GRecovery {
             lost_reuse: Vec::new(),
             enable_bbr_app_limited_fix: recovery_config
                 .enable_bbr_app_limited_fix,
+            check_for_app_limited_next_iteration: false,
         })
     }
 
@@ -1181,6 +1184,21 @@ impl RecoveryOps for GRecovery {
             )
         {
             self.pacer.on_app_limited(self.bytes_in_flight.get())
+        }
+    }
+
+    fn bbr_do_app_limited_check_next_iteration(
+        &mut self, has_flushable_data: bool,
+    ) {
+        if !has_flushable_data {
+            self.check_for_app_limited_next_iteration = true;
+        }
+    }
+
+    fn bbr_maybe_check_if_app_limited(&mut self, now: &Instant) {
+        if self.check_for_app_limited_next_iteration {
+            self.check_for_app_limited_next_iteration = false;
+            self.bbr_check_if_app_limited(false, now);
         }
     }
 

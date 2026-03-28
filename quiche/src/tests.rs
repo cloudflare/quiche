@@ -7184,7 +7184,6 @@ fn app_limited_not_changed_on_no_new_frames(
 
     // Client has no new frames to send - returns Done.
     assert_eq!(test_utils::emit_flight(&mut pipe.client), Err(Error::Done));
-    test_utils::run_work_loop_round_start_hook(&mut pipe.client);
 
     // Client's app_limited should remain the same.
     if cc_algorithm_name == "cubic" || enable_bbr_app_limited_fix {
