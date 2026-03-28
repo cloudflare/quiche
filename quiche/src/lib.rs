@@ -2849,48 +2849,8 @@ impl<F: BufFactory> Connection<F> {
 
     /// Returns true if at least 1 stream has headers or body data to
     /// write, or there are items in the DATAGRAM send queue.
-    pub fn has_flushable_data(&self) -> bool {
+    fn has_flushable_data(&self) -> bool {
         self.streams.has_flushable() || !self.dgram_send_queue.is_empty()
-    }
-
-    /// Signal the start of an iteration of the event loop that will
-    /// receive packets and then attempt to send packets.
-    ///
-    /// This hook is used to implement the "Detecting application-limited
-    /// phases" logic described in the BBR RFC draft which is described at:
-    /// https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-detecting-application-limit
-    ///
-    /// This function must be invoked at the beginning of each iteration of the
-    /// connection work loop, before receiving packets from the network and
-    /// processing ACKs/timeouts.
-    ///
-    /// The expected work loop order is:
-    /// 1. Call work_loop_round_start with the value of has_flushable_data from
-    ///    the end of the previous loop, before polling for additional
-    ///    application data.
-    /// 2. Process timeouts by calling conn.on_timeout().
-    /// 3. Call conn.recv() to process received packets which contain ACKs and
-    ///    stream data.
-    /// 4. Call conn.send_on_path() to generate new packets and send them.
-    /// 5. Save the value of conn.has_flushable_data() for the next iteration.
-    /// 6. Poll for additional data from upstream or wait for the next send
-    ///    timeout.
-    ///
-    /// In cases where the new packet generate + send loop yields early due to
-    /// an interation limit or the sendmsg on the socket returning EAGAIN, we
-    /// should expect had_flushable_data_before_poll to remain true since the
-    /// connection wasn't able to send all the available data despite not
-    /// consuming the full congestion window.  The call to
-    /// bbr_check_if_app_limited() will not mark the connection app-limited
-    /// at the last-sent-packet-number because had_flushable_data_before_poll
-    /// is true; this is correct and expected behavior.
-    pub fn work_loop_round_start(
-        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
-    ) {
-        for (_, path) in self.paths.iter_mut() {
-            path.recovery
-                .bbr_check_if_app_limited(had_flushable_data_before_poll, now);
-        }
     }
 
     /// Processes QUIC packets received from the peer.
@@ -2942,10 +2902,17 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::BufferTooShort);
         }
 
+        let now = Instant::now();
+
         let recv_pid = self.paths.path_id_from_addrs(&(info.to, info.from));
 
         if let Some(recv_pid) = recv_pid {
             let recv_path = self.paths.get_mut(recv_pid)?;
+
+            // Run the app limited check if the previous send loop ran out of data
+            // to send. Limit the check to the path where the packet
+            // was received.
+            recv_path.recovery.bbr_check_if_app_limited(&now);
 
             // Keep track of how many bytes we received from the client, so we
             // can limit bytes sent back before address validation, to a
@@ -2979,6 +2946,7 @@ impl<F: BufFactory> Connection<F> {
         // Process coalesced packets.
         while left > 0 {
             let read = match self.recv_single(
+                now,
                 &mut buf[len - left..len],
                 &info,
                 recv_pid,
@@ -3076,10 +3044,9 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     fn recv_single(
-        &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
+        &mut self, now: Instant, buf: &mut [u8], info: &RecvInfo,
+        recv_pid: Option<usize>,
     ) -> Result<usize> {
-        let now = Instant::now();
-
         if buf.is_empty() {
             return Err(Error::Done);
         }
@@ -4118,6 +4085,11 @@ impl<F: BufFactory> Connection<F> {
 
         let send_path = self.paths.get_mut(send_pid)?;
 
+        // Run the app limited check if the previous send loop ran out of data to
+        // send. Limit the check to the path where the connection is
+        // trying to send.
+        send_path.recovery.bbr_check_if_app_limited(&now);
+
         // Update max datagram size to allow path MTU discovery probe to be sent.
         if let Some(pmtud) = send_path.pmtud.as_mut() {
             if pmtud.should_probe() {
@@ -4151,7 +4123,15 @@ impl<F: BufFactory> Connection<F> {
             ) {
                 Ok(v) => v,
 
-                Err(Error::BufferTooShort) | Err(Error::Done) => break,
+                Err(Error::BufferTooShort) => break,
+
+                Err(Error::Done) => {
+                    let has_flushable_data = self.has_flushable_data();
+                    let send_path = self.paths.get_mut(send_pid)?;
+                    send_path.recovery.send_stopped_early(has_flushable_data);
+
+                    break;
+                },
 
                 Err(e) => return Err(e),
             };
@@ -7113,6 +7093,11 @@ impl<F: BufFactory> Connection<F> {
     /// If no timeout has occurred it does nothing.
     pub fn on_timeout(&mut self) {
         let now = Instant::now();
+
+        // Check for app limited on all paths when handling a timeout.
+        for (_, path) in self.paths.iter_mut() {
+            path.recovery.bbr_check_if_app_limited(&now);
+        }
 
         if let Some(draining_timer) = self.draining_timer {
             if draining_timer <= now {

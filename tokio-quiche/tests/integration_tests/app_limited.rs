@@ -26,13 +26,13 @@
 
 use crate::fixtures::*;
 
+use bytes::Bytes;
 use futures::SinkExt;
 use parking_lot::Mutex;
 use rstest::rstest;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Notify;
-use bytes::Bytes;
 
 use h3i::client::connection_summary::ConnectionSummary;
 use h3i::frame::H3iFrame;

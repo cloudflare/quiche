@@ -1037,9 +1037,12 @@ impl RecoveryOps for LegacyRecovery {
         false
     }
 
-    fn bbr_check_if_app_limited(
-        &mut self, _had_flushable_data_before_poll: bool, _now: &Instant,
-    ) {
+    fn send_stopped_early(&mut self, _has_flushable_data: bool) {
+        // Not implemented -- only used by the BBR implementation
+        // which lives in the gcongestion directory.
+    }
+
+    fn bbr_check_if_app_limited(&mut self, _now: &Instant) {
         // Not implemented -- only used by the BBR implementation
         // which lives in the gcongestion directory.
     }

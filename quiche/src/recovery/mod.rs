@@ -322,9 +322,16 @@ pub trait RecoveryOps {
 
     fn gcongestion_enabled(&self) -> bool;
 
-    fn bbr_check_if_app_limited(
-        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
-    );
+    // Called if the send loop stopped early because send_single
+    // returned Err::Done; this indicates that it is time to yield
+    // because either there is no cwnd remaining or there is no data
+    // left to send.
+    fn send_stopped_early(&mut self, has_flushable_data: bool);
+
+    // Allow the BBR implementation to compute if the congestion
+    // controller is app-limited, before processing timeouts, ACKs or
+    // generating packets to send.
+    fn bbr_check_if_app_limited(&mut self, now: &Instant);
 }
 
 impl Recovery {
