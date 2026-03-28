@@ -28,6 +28,8 @@ gcongestion = ["quiche/gcongestion"]
 # Deprecated: zero-copy sends are now always enabled when using tokio-quiche.
 # This feature is kept for backwards compatibility and only enables `gcongestion`.
 zero-copy = ["gcongestion"]
+# Forward custom-client-dcid to quiche.
+custom-client-dcid = ["quiche/custom-client-dcid"]
 
 # Deprecated: use `--cfg capture_keylogs` instead.
 capture_keylogs = []
