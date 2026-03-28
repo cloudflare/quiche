@@ -2853,46 +2853,6 @@ impl<F: BufFactory> Connection<F> {
         self.streams.has_flushable() || !self.dgram_send_queue.is_empty()
     }
 
-    /// Signal the start of an iteration of the event loop that will
-    /// receive packets and then attempt to send packets.
-    ///
-    /// This hook is used to implement the "Detecting application-limited
-    /// phases" logic described in the BBR RFC draft which is described at:
-    /// https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-04.html#name-detecting-application-limit
-    ///
-    /// This function must be invoked at the beginning of each iteration of the
-    /// connection work loop, before receiving packets from the network and
-    /// processing ACKs/timeouts.
-    ///
-    /// The expected work loop order is:
-    /// 1. Call work_loop_round_start with the value of has_flushable_data from
-    ///    the end of the previous loop, before polling for additional
-    ///    application data.
-    /// 2. Process timeouts by calling conn.on_timeout().
-    /// 3. Call conn.recv() to process received packets which contain ACKs and
-    ///    stream data.
-    /// 4. Call conn.send_on_path() to generate new packets and send them.
-    /// 5. Save the value of conn.has_flushable_data() for the next iteration.
-    /// 6. Poll for additional data from upstream or wait for the next send
-    ///    timeout.
-    ///
-    /// In cases where the new packet generate + send loop yields early due to
-    /// an interation limit or the sendmsg on the socket returning EAGAIN, we
-    /// should expect had_flushable_data_before_poll to remain true since the
-    /// connection wasn't able to send all the available data despite not
-    /// consuming the full congestion window.  The call to
-    /// bbr_check_if_app_limited() will not mark the connection app-limited
-    /// at the last-sent-packet-number because had_flushable_data_before_poll
-    /// is true; this is correct and expected behavior.
-    pub fn work_loop_round_start(
-        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
-    ) {
-        for (_, path) in self.paths.iter_mut() {
-            path.recovery
-                .bbr_check_if_app_limited(had_flushable_data_before_poll, now);
-        }
-    }
-
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
@@ -3079,6 +3039,10 @@ impl<F: BufFactory> Connection<F> {
         &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
     ) -> Result<usize> {
         let now = Instant::now();
+
+        for (_, path) in self.paths.iter_mut() {
+            path.recovery.bbr_maybe_check_if_app_limited(&now);
+        }
 
         if buf.is_empty() {
             return Err(Error::Done);
@@ -4117,6 +4081,7 @@ impl<F: BufFactory> Connection<F> {
         };
 
         let send_path = self.paths.get_mut(send_pid)?;
+        send_path.recovery.bbr_maybe_check_if_app_limited(&now);
 
         // Update max datagram size to allow path MTU discovery probe to be sent.
         if let Some(pmtud) = send_path.pmtud.as_mut() {
@@ -4151,7 +4116,16 @@ impl<F: BufFactory> Connection<F> {
             ) {
                 Ok(v) => v,
 
-                Err(Error::BufferTooShort) | Err(Error::Done) => break,
+                Err(Error::BufferTooShort) => break,
+
+                Err(Error::Done) => {
+                    let send_path = self.paths.get_mut(send_pid)?;
+                    send_path
+                        .recovery
+                        .bbr_do_app_limited_check_next_iteration(false);
+
+                    break;
+                },
 
                 Err(e) => return Err(e),
             };
@@ -7114,6 +7088,10 @@ impl<F: BufFactory> Connection<F> {
     pub fn on_timeout(&mut self) {
         let now = Instant::now();
 
+        for (_, path) in self.paths.iter_mut() {
+            path.recovery.bbr_maybe_check_if_app_limited(&now);
+        }
+
         if let Some(draining_timer) = self.draining_timer {
             if draining_timer <= now {
                 trace!("{} draining timeout expired", self.trace_id);
@@ -8205,7 +8183,7 @@ impl<F: BufFactory> Connection<F> {
     }
 
     /// Selects the packet type for the next outgoing packet.
-    fn write_pkt_type(&self, send_pid: usize) -> Result<Type> {
+    fn write_pkt_type(&mut self, send_pid: usize) -> Result<Type> {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
         if self

@@ -1044,6 +1044,18 @@ impl RecoveryOps for LegacyRecovery {
         // which lives in the gcongestion directory.
     }
 
+    fn bbr_do_app_limited_check_next_iteration(
+        &mut self, _has_flushable_data: bool,
+    ) {
+        // Not implemented -- only used by the BBR implementation
+        // which lives in the gcongestion directory.
+    }
+
+    fn bbr_maybe_check_if_app_limited(&mut self, _now: &Instant) {
+        // Not implemented -- only used by the BBR implementation
+        // which lives in the gcongestion directory.
+    }
+
     fn lost_count(&self) -> usize {
         self.congestion.lost_count
     }
