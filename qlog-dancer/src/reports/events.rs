@@ -25,7 +25,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use qlog::events::http3::Http3Frame;
-use qlog::events::quic::AckedRanges;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
 use tabled::Table;
@@ -91,20 +90,9 @@ pub fn frames_to_string(frames: &[QuicFrame]) -> String {
             },
             QuicFrame::Ack { acked_ranges, .. } => {
                 s += " ACK {";
-                if let Some(ar) = acked_ranges {
-                    match ar {
-                        AckedRanges::Single(items) => {
-                            for a in items {
-                                for b in a {
-                                    s += &format!{"{b}, "};
-                                }
-                            }
-                        },
-                        AckedRanges::Double(items) => {
-                            for a in items {
-                                s += &format!{"{}-{}, ", a.0, a.1};
-                            }
-                        },
+                if let Some(acked_ranges) = acked_ranges {
+                    for range in acked_ranges {
+                        s += &format!("{}, ", range);
                     }
                 }
                 s += "}";
