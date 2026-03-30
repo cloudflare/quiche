@@ -24,8 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use bytes::Bytes;
 use datagram_socket::QuicAuditStats;
-use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::InboundFrame;
 use tokio_quiche::http3::driver::InboundFrameStream;
@@ -194,8 +194,8 @@ pub async fn handle_forwarded_headers_frame(
                         "{stream_id},GET {}|",
                         String::from_utf8(path).unwrap()
                     );
-                    send.send(OutboundFrame::body(
-                        BufFactory::buf_from_slice(res.as_bytes()),
+                    send.send(OutboundFrame::Body(
+                        Bytes::copy_from_slice(res.as_bytes()),
                         true,
                     ))
                     .await

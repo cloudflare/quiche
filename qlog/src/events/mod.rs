@@ -54,13 +54,7 @@ pub enum EventType {
     None,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum TimeFormat {
-    #[default]
-    RelativeToEpoch,
-    RelativeToPreviousEvent,
-}
+use crate::TimeFormat;
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -87,10 +81,9 @@ pub struct Event {
     pub data: EventData,
 
     #[serde(flatten)]
-    pub ex_data: ExData,
+    pub ex_data: Box<ExData>,
 
-    pub protocol_type: Option<String>,
-    pub group_id: Option<String>,
+    pub group_id: Option<Box<String>>,
 
     pub time_format: Option<TimeFormat>,
 
@@ -110,8 +103,7 @@ impl Event {
         Event {
             time,
             data,
-            ex_data,
-            protocol_type: Default::default(),
+            ex_data: Box::new(ex_data),
             group_id: Default::default(),
             time_format: Default::default(),
             ty,
@@ -135,7 +127,6 @@ impl PartialEq for Event {
         self.time == other.time &&
             self.data == other.data &&
             self.ex_data == other.ex_data &&
-            self.protocol_type == other.protocol_type &&
             self.group_id == other.group_id &&
             self.time_format == other.time_format
     }
@@ -434,7 +425,7 @@ pub struct RawInfo {
     pub length: Option<u64>,
     pub payload_length: Option<u64>,
 
-    pub data: Option<Bytes>,
+    pub data: Option<Box<Bytes>>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -474,7 +465,7 @@ pub enum EventData {
     QuicAlpnInformation(quic::AlpnInformation),
 
     #[serde(rename = "quic:parameters_set")]
-    QuicParametersSet(quic::ParametersSet),
+    QuicParametersSet(Box<quic::ParametersSet>),
 
     #[serde(rename = "quic:parameters_restored")]
     QuicParametersRestored(quic::ParametersRestored),

@@ -455,7 +455,7 @@ impl Frame {
                 priority_field_value,
             } => Http3Frame::PriorityUpdate {
                 target_stream_type:
-                    qlog::events::http3::PriorityTargetStreamType::Request,
+                    qlog::events::http3::PriorityTargetStreamType::Push,
                 prioritized_element_id: *prioritized_element_id,
                 priority_field_value: String::from_utf8_lossy(
                     priority_field_value,

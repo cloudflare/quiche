@@ -9,7 +9,7 @@ categories = { workspace = true }
 description = "Utilities for working with datagram sockets"
 
 [dependencies]
-buffer-pool = { workspace = true }
+bytes = { workspace = true }
 futures-util = { workspace = true }
 libc = { workspace = true }
 smallvec = { workspace = true }

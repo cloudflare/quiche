@@ -24,7 +24,6 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use buffer_pool::RawPoolBufDatagramIo;
 use futures_util::future::poll_fn;
 use futures_util::ready;
 use futures_util::FutureExt;
@@ -63,6 +62,41 @@ pub const MAX_DATAGRAM_SIZE: usize = 1500;
 pub trait DatagramSocketWithStats: DatagramSocket {}
 
 impl<T> DatagramSocketWithStats for T where T: DatagramSocket + AsSocketStats {}
+
+pub trait RawPoolBufDatagramIo: Send {
+    fn poll_send_datagrams(
+        &mut self, cx: &mut Context, datagrams: &mut [crate::DgramBuffer],
+    ) -> Poll<io::Result<usize>>;
+
+    fn poll_recv_dgram(
+        &mut self, cx: &mut Context,
+    ) -> Poll<io::Result<crate::DgramBuffer>>;
+
+    fn poll_recv_datagrams(
+        &mut self, cx: &mut Context, buffer: &mut Vec<crate::DgramBuffer>,
+        dgram_limit: usize,
+    ) -> Poll<io::Result<usize>> {
+        for i in 0..dgram_limit {
+            match self.poll_recv_dgram(cx) {
+                Poll::Ready(Ok(buf)) => buffer.push(buf),
+                Poll::Ready(Err(err)) =>
+                    if i > 0 {
+                        return Poll::Ready(Ok(i));
+                    } else {
+                        return Poll::Ready(Err(err));
+                    },
+                Poll::Pending =>
+                    if i > 0 {
+                        return Poll::Ready(Ok(i));
+                    } else {
+                        return Poll::Pending;
+                    },
+            }
+        }
+
+        Poll::Ready(Ok(dgram_limit))
+    }
+}
 
 /// Describes an implementation of a connected datagram socket.
 ///

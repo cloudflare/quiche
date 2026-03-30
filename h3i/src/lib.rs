@@ -163,7 +163,6 @@ use quiche::h3::qpack::encode_int;
 use quiche::h3::qpack::encode_str;
 use quiche::h3::qpack::LITERAL;
 use quiche::h3::NameValue;
-use smallvec::SmallVec;
 
 #[cfg(not(feature = "async"))]
 pub use quiche;
@@ -270,7 +269,7 @@ fn fake_packet_header() -> PacketHeader {
     }
 }
 
-fn fake_packet_sent(frames: Option<SmallVec<[QuicFrame; 1]>>) -> EventData {
+fn fake_packet_sent(frames: Option<Vec<QuicFrame>>) -> EventData {
     EventData::QuicPacketSent(PacketSent {
         header: fake_packet_header(),
         frames,

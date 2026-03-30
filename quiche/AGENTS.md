@@ -28,7 +28,8 @@ src/
   transport_params.rs        QUIC transport parameter encode/decode
   flowcontrol.rs             Connection-level flow control
   ranges.rs                  ACK range tracking
-  range_buf.rs               BufFactory/BufSplit traits for zero-copy buffer creation
+  buffers.rs                 BufFactory/BufSplit/DefaultBufFactory traits and types
+  range_buf.rs               RangeBuf — ordered byte buffer for stream reassembly
   dgram.rs                   DATAGRAM frame support
   rand.rs                    Random number generation
   minmax.rs                  Windowed min/max filter
@@ -71,4 +72,4 @@ deps/
 - Tests use `rstest` with `#[values("cubic", "bbr2_gcongestion")]` parameterization for CC coverage.
 - `QUICHE_BSSL_PATH` env var skips vendored BoringSSL build.
 - Crate-type: `lib` + `staticlib` + `cdylib` — the latter two for C consumers.
-- `BufFactory` trait (`range_buf.rs`) enables zero-copy buffer creation; `Connection<F>` is generic over it.
+- `BufFactory` trait (`buffers.rs`) enables zero-copy buffer creation; `Connection<F>` is generic over it.

@@ -27,8 +27,6 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use smallvec::SmallVec;
-
 use super::ExData;
 use crate::HexSlice;
 
@@ -72,7 +70,7 @@ pub struct PacketHeader {
     pub packet_number_length: Option<u8>,
     pub packet_number: Option<u64>,
 
-    pub token: Option<Token>,
+    pub token: Option<Box<Token>>,
 
     pub length: Option<u16>,
 
@@ -89,7 +87,7 @@ impl PacketHeader {
     /// Creates a new PacketHeader.
     pub fn new(
         packet_type: PacketType, packet_number: Option<u64>,
-        token: Option<Token>, length: Option<u16>, version: Option<u32>,
+        token: Option<Box<Token>>, length: Option<u16>, version: Option<u32>,
         scid: Option<&[u8]>, dcid: Option<&[u8]>,
     ) -> Self {
         let (scil, scid) = match scid {
@@ -456,11 +454,11 @@ pub enum QuicFrameTypeName {
 // also works automatically.
 pub enum QuicFrame {
     Padding {
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Ping {
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Ack {
@@ -471,7 +469,7 @@ pub enum QuicFrame {
         ect0: Option<u64>,
         ce: Option<u64>,
 
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     ResetStream {
@@ -480,7 +478,7 @@ pub enum QuicFrame {
         error_code: Option<u64>,
         final_size: u64,
 
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     StopSending {
@@ -488,17 +486,17 @@ pub enum QuicFrame {
         error: ApplicationError,
         error_code: Option<u64>,
 
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Crypto {
         offset: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     NewToken {
         token: Token,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Stream {
@@ -506,41 +504,41 @@ pub enum QuicFrame {
         offset: Option<u64>,
         fin: Option<bool>,
 
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     MaxData {
         maximum: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     MaxStreamData {
         stream_id: u64,
         maximum: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     MaxStreams {
         stream_type: StreamType,
         maximum: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     DataBlocked {
         limit: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     StreamDataBlocked {
         stream_id: u64,
         limit: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     StreamsBlocked {
         stream_type: StreamType,
         limit: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     NewConnectionId {
@@ -549,22 +547,22 @@ pub enum QuicFrame {
         connection_id_length: Option<u8>,
         connection_id: Bytes,
         stateless_reset_token: Option<StatelessResetToken>,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     RetireConnectionId {
         sequence_number: u64,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     PathChallenge {
         data: Option<Bytes>,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     PathResponse {
         data: Option<Bytes>,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     ConnectionClose {
@@ -578,16 +576,16 @@ pub enum QuicFrame {
     },
 
     HandshakeDone {
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Datagram {
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 
     Unknown {
         frame_type_bytes: Option<u64>,
-        raw: Option<RawInfo>,
+        raw: Option<Box<RawInfo>>,
     },
 }
 
@@ -731,7 +729,7 @@ pub struct PacketReceived {
     // `frames` is defined here in the QLog schema specification. However,
     // our streaming serializer requires serde to put the object at the end,
     // so we define it there and depend on serde's preserve_order feature.
-    pub stateless_reset_token: Option<StatelessResetToken>,
+    pub stateless_reset_token: Option<Box<StatelessResetToken>>,
 
     pub supported_versions: Option<Vec<Bytes>>,
 
@@ -750,7 +748,7 @@ pub struct PacketSent {
     // `frames` is defined here in the QLog schema specification. However,
     // our streaming serializer requires serde to put the object at the end,
     // so we define it there and depend on serde's preserve_order feature.
-    pub stateless_reset_token: Option<StatelessResetToken>,
+    pub stateless_reset_token: Option<Box<StatelessResetToken>>,
 
     pub supported_versions: Option<Vec<Bytes>>,
 
@@ -762,7 +760,7 @@ pub struct PacketSent {
 
     pub send_at_time: Option<f64>,
 
-    pub frames: Option<SmallVec<[QuicFrame; 1]>>,
+    pub frames: Option<Vec<QuicFrame>>,
 }
 
 #[serde_with::skip_serializing_none]

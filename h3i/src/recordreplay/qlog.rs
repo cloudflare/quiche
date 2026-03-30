@@ -45,8 +45,6 @@ use quiche::h3::NameValue;
 
 use serde_json::json;
 
-use smallvec::smallvec;
-
 use crate::actions::h3::Action;
 use crate::actions::h3::WaitType;
 use crate::encode_header_block;
@@ -204,16 +202,16 @@ impl From<&Action> for QlogEvents {
                 ..
             } => {
                 let len = bytes.len() as u64;
-                let ev = fake_packet_sent(Some(smallvec![QuicFrame::Stream {
+                let ev = fake_packet_sent(Some(vec![QuicFrame::Stream {
                     stream_id: *stream_id,
                     fin: Some(*fin_stream),
                     // ignore offset
                     offset: None,
-                    raw: Some(RawInfo {
+                    raw: Some(Box::new(RawInfo {
                         length: None,
                         payload_length: Some(len),
-                        data: String::from_utf8(bytes.clone()).ok()
-                    })
+                        data: String::from_utf8(bytes.clone()).ok().map(Box::new),
+                    })),
                 }]));
 
                 vec![QlogEvent::Event {
@@ -224,12 +222,14 @@ impl From<&Action> for QlogEvents {
 
             Action::SendDatagram { payload } => {
                 let len = payload.len() as u64;
-                let ev = fake_packet_sent(Some(smallvec![QuicFrame::Datagram {
-                    raw: Some(RawInfo {
+                let ev = fake_packet_sent(Some(vec![QuicFrame::Datagram {
+                    raw: Some(Box::new(RawInfo {
                         length: None,
                         payload_length: Some(len),
-                        data: String::from_utf8(payload.clone()).ok()
-                    })
+                        data: String::from_utf8(payload.clone())
+                            .ok()
+                            .map(Box::new),
+                    })),
                 }]));
 
                 vec![QlogEvent::Event {
@@ -242,14 +242,13 @@ impl From<&Action> for QlogEvents {
                 stream_id,
                 error_code,
             } => {
-                let ev =
-                    fake_packet_sent(Some(smallvec![QuicFrame::ResetStream {
-                        stream_id: *stream_id,
-                        error: qlog::events::ApplicationError::Unknown,
-                        error_code: Some(*error_code),
-                        final_size: 0,
-                        raw: None,
-                    }]));
+                let ev = fake_packet_sent(Some(vec![QuicFrame::ResetStream {
+                    stream_id: *stream_id,
+                    error: qlog::events::ApplicationError::Unknown,
+                    error_code: Some(*error_code),
+                    final_size: 0,
+                    raw: None,
+                }]));
                 vec![QlogEvent::Event {
                     data: Box::new(ev),
                     ex_data: BTreeMap::new(),
@@ -260,13 +259,12 @@ impl From<&Action> for QlogEvents {
                 stream_id,
                 error_code,
             } => {
-                let ev =
-                    fake_packet_sent(Some(smallvec![QuicFrame::StopSending {
-                        stream_id: *stream_id,
-                        error: qlog::events::ApplicationError::Unknown,
-                        error_code: Some(*error_code),
-                        raw: None,
-                    }]));
+                let ev = fake_packet_sent(Some(vec![QuicFrame::StopSending {
+                    stream_id: *stream_id,
+                    error: qlog::events::ApplicationError::Unknown,
+                    error_code: Some(*error_code),
+                    raw: None,
+                }]));
                 vec![QlogEvent::Event {
                     data: Box::new(ev),
                     ex_data: BTreeMap::new(),
@@ -306,16 +304,15 @@ impl From<&Action> for QlogEvents {
                     Some(String::from_utf8(error.reason.clone()).unwrap())
                 };
 
-                let ev = fake_packet_sent(Some(smallvec![
-                    QuicFrame::ConnectionClose {
+                let ev =
+                    fake_packet_sent(Some(vec![QuicFrame::ConnectionClose {
                         error_space: Some(error_space),
                         error: None,
                         error_code: Some(error.error_code),
                         reason,
                         reason_bytes: None,
-                        trigger_frame_type: None
-                    }
-                ]));
+                        trigger_frame_type: None,
+                    }]));
 
                 vec![QlogEvent::Event {
                     data: Box::new(ev),
@@ -341,7 +338,7 @@ pub fn actions_from_qlog(event: Event, host_override: Option<&str>) -> H3Actions
         EventData::Http3FrameCreated(fc) => {
             let mut frame_created = H3FrameCreatedEx {
                 frame_created: fc.clone(),
-                ex_data: event.ex_data.clone(),
+                ex_data: event.ex_data.as_ref().clone(),
             };
 
             // Insert custom data so that conversion of frames to Actions can
@@ -454,12 +451,12 @@ impl From<&PacketSent> for H3Actions {
 
                     QuicFrame::Datagram { raw, .. } => {
                         actions.push(Action::SendDatagram {
-                            payload: raw
+                            payload: (*raw
                                 .clone()
                                 .unwrap_or_default()
                                 .data
-                                .unwrap_or_default()
-                                .into(),
+                                .unwrap_or_default())
+                            .into(),
                         });
                     },
                     _ => (),
@@ -582,12 +579,8 @@ impl From<H3FrameCreatedEx> for Action {
             Http3Frame::Data { raw } => {
                 let mut payload = vec![];
                 if let Some(r) = raw {
-                    payload = r
-                        .data
-                        .clone()
-                        .unwrap_or("".to_string())
-                        .as_bytes()
-                        .to_vec();
+                    payload =
+                        r.data.clone().unwrap_or_default().as_bytes().to_vec();
                 }
 
                 Action::SendFrame {

@@ -36,6 +36,7 @@ anyhow = { version = "1" }
 assert_matches = { version = "1" }
 boring = { version = "4.3" }
 buffer-pool = { version = "0.2.1", path = "./buffer-pool" }
+bytes = { version = "1.11.1" }
 crossbeam = { version = "0.8.1", default-features = false }
 dashmap = { version = "6" }
 datagram-socket = { version = "0.7.0", path = "./datagram-socket" }
@@ -66,11 +67,11 @@ slog-stdlog = { version = "4.1.1" }
 smallvec = { version = "1.10", default-features = false }
 task-killswitch = { version = "0.2.1", path = "./task-killswitch" }
 thiserror = { version = "2" }
+humantime = { version = "2" }
 tokio = { version = "1.44", default-features = false }
 tokio-quiche = { version = "0.16.1", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
-triomphe = { version = "0.1" }
 url = { version = "2" }
 
 [profile.bench]

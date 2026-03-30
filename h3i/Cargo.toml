@@ -14,7 +14,7 @@ categories = { workspace = true }
 readme = "README.md"
 
 [features]
-async = ["dep:buffer-pool", "dep:tokio", "dep:tokio-quiche"]
+async = ["dep:tokio", "dep:tokio-quiche"]
 
 [dependencies]
 clap = "3"
@@ -30,10 +30,8 @@ ring = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["macros", "std"] }
-smallvec = { workspace = true }
 url = { workspace = true }
 
 # Dependencies for async client
-buffer-pool = { optional = true, workspace = true }
 tokio = { version = "1.44", features = ["net", "sync", "time"], optional = true }
 tokio-quiche = { features = ["capture_keylogs", "quiche_internal"], optional = true, workspace = true }
