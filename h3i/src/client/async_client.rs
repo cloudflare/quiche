@@ -27,8 +27,6 @@
 //! Responsible for creating a [tokio_quiche::quic::QuicheConnection] and
 //! yielding I/O to tokio-quiche.
 
-use buffer_pool::ConsumeBuffer;
-use buffer_pool::Pooled;
 use log;
 use quiche::PathStats;
 use quiche::Stats;
@@ -224,7 +222,7 @@ impl Future for BuildingConnectionSummary {
 }
 
 pub struct H3iDriver {
-    buffer: Pooled<ConsumeBuffer>,
+    buffer: Vec<u8>,
     actions: Vec<Action>,
     actions_executed: usize,
     next_fire_time: Instant,
@@ -248,7 +246,7 @@ impl H3iDriver {
 
         (
             Self {
-                buffer: BufFactory::get_max_buf(),
+                buffer: vec![0u8; BufFactory::MAX_BUF_SIZE],
                 actions,
                 actions_executed: 0,
                 next_fire_time: Instant::now(),

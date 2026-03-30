@@ -710,6 +710,9 @@ pub struct ExData<'a> {
     pub pmtud: Option<(bool, u8)>,
 
     pub is_server: bool,
+
+    /// see [`Connection::use_initial_max_data_as_flow_control_win`]
+    pub use_initial_max_data_as_flow_control_win: bool,
 }
 
 impl<'a> ExData<'a> {

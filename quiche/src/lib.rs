@@ -605,6 +605,10 @@ pub struct Config {
     track_unknown_transport_params: Option<usize>,
 
     initial_rtt: Duration,
+
+    /// When true, uses the initial max data (for connection
+    /// and stream) as the initial flow control window.
+    use_initial_max_data_as_flow_control_win: bool,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -683,6 +687,8 @@ impl Config {
 
             track_unknown_transport_params: None,
             initial_rtt: DEFAULT_INITIAL_RTT,
+
+            use_initial_max_data_as_flow_control_win: false,
         })
     }
 
@@ -1244,6 +1250,20 @@ impl Config {
     pub fn enable_track_unknown_transport_parameters(&mut self, size: usize) {
         self.track_unknown_transport_params = Some(size);
     }
+
+    /// Sets whether the initial max data value should be used as the initial
+    /// flow control window.
+    ///
+    /// If set to true, the initial flow control window for streams and the
+    /// connection itself will be set to the initial max data value for streams
+    /// and the connection respectively. If false, the window is set to the
+    /// minimum of initial max data and `DEFAULT_STREAM_WINDOW` or
+    /// `DEFAULT_CONNECTION_WINDOW`
+    ///
+    /// The default is false.
+    pub fn set_use_initial_max_data_as_flow_control_win(&mut self, v: bool) {
+        self.use_initial_max_data_as_flow_control_win = v;
+    }
 }
 
 /// Tracks the health of the tx_buffered value.
@@ -1527,8 +1547,8 @@ where
     qlog: QlogInfo,
 
     /// DATAGRAM queues.
-    dgram_recv_queue: dgram::DatagramQueue,
-    dgram_send_queue: dgram::DatagramQueue,
+    dgram_recv_queue: dgram::DatagramQueue<F>,
+    dgram_send_queue: dgram::DatagramQueue<F>,
 
     /// Whether to emit DATAGRAM frames in the next packet.
     emit_dgram: bool,
@@ -2033,6 +2053,12 @@ impl<F: BufFactory> Connection<F> {
             reset_token,
         );
 
+        let initial_flow_control_window =
+            if config.use_initial_max_data_as_flow_control_win {
+                max_rx_data
+            } else {
+                cmp::min(max_rx_data / 2 * 3, DEFAULT_CONNECTION_WINDOW)
+            };
         let mut conn = Connection {
             version: config.version,
 
@@ -2091,7 +2117,7 @@ impl<F: BufFactory> Connection<F> {
             rx_data: 0,
             flow_control: flowcontrol::FlowControl::new(
                 max_rx_data,
-                cmp::min(max_rx_data / 2 * 3, DEFAULT_CONNECTION_WINDOW),
+                initial_flow_control_window,
                 config.max_connection_window,
             ),
             should_send_max_data: false,
@@ -2205,6 +2231,9 @@ impl<F: BufFactory> Connection<F> {
 
             max_amplification_factor: config.max_amplification_factor,
         };
+        conn.streams.set_use_initial_max_data_as_flow_control_win(
+            config.use_initial_max_data_as_flow_control_win,
+        );
 
         if let Some(retry_cids) = retry_cids {
             conn.local_transport_params
@@ -2310,6 +2339,8 @@ impl<F: BufFactory> Connection<F> {
         use qlog::events::quic::TransportInitiator;
         use qlog::events::HTTP3_URI;
         use qlog::events::QUIC_URI;
+        use qlog::CommonFields;
+        use qlog::ReferenceTime;
 
         let vp = if self.is_server {
             qlog::VantagePointType::Server
@@ -2327,10 +2358,18 @@ impl<F: BufFactory> Connection<F> {
 
         self.qlog.level = level;
 
+        // Best effort to get Instant::now() and SystemTime::now() as closely
+        // together as possible.
+        let now = Instant::now();
+        let now_wall_clock = std::time::SystemTime::now();
+        let common_fields = CommonFields {
+            reference_time: ReferenceTime::new_monotonic(Some(now_wall_clock)),
+            ..Default::default()
+        };
         let trace = qlog::TraceSeq::new(
             Some(title.to_string()),
             Some(description.to_string()),
-            None,
+            Some(common_fields),
             Some(qlog::VantagePoint {
                 name: None,
                 ty: vp,
@@ -2342,7 +2381,7 @@ impl<F: BufFactory> Connection<F> {
         let mut streamer = qlog::streamer::QlogStreamer::new(
             Some(title),
             Some(description),
-            Instant::now(),
+            now,
             trace,
             self.qlog.level,
             writer,
@@ -2740,6 +2779,25 @@ impl<F: BufFactory> Connection<F> {
         // handshake state.
         std::mem::forget(handshake);
 
+        Ok(())
+    }
+
+    /// Sets the `use_initial_max_data_as_flow_control_win` flag during SSL
+    /// handshake.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Connection::enable_use_initial_max_data_as_flow_control_win()`].
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_use_initial_max_data_as_flow_control_win_in_handshake(
+        ssl: &mut boring::ssl::SslRef,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.use_initial_max_data_as_flow_control_win = true;
         Ok(())
     }
 
@@ -3460,7 +3518,7 @@ impl<F: BufFactory> Connection<F> {
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
-        qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
+        qlog_with_type!(QLOG_METRICS, self.qlog, q, {
             let recv_path = self.paths.get_mut(recv_pid)?;
             recv_path.recovery.maybe_qlog(q, now);
         });
@@ -5016,7 +5074,7 @@ impl<F: BufFactory> Connection<F> {
                                     b.split_at(hdr_off + hdr_len)?;
 
                                 dgram_payload.as_mut()[..len]
-                                    .copy_from_slice(&data);
+                                    .copy_from_slice(data.as_ref());
 
                                 // Encode the frame's header.
                                 //
@@ -5267,9 +5325,8 @@ impl<F: BufFactory> Connection<F> {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames: SmallVec<
-            [qlog::events::quic::QuicFrame; 1],
-        > = SmallVec::with_capacity(frames.len());
+        let mut qlog_frames: Vec<qlog::events::quic::QuicFrame> =
+            Vec::with_capacity(frames.len());
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
@@ -5536,8 +5593,56 @@ impl<F: BufFactory> Connection<F> {
     /// }
     /// # Ok::<(), quiche::Error>(())
     /// ```
+    #[inline]
     pub fn stream_recv(
         &mut self, stream_id: u64, out: &mut [u8],
+    ) -> Result<(usize, bool)> {
+        self.stream_recv_buf(stream_id, out)
+    }
+
+    /// Reads contiguous data from a stream into the provided [`bytes::BufMut`].
+    ///
+    /// **NOTE**:
+    /// The BufMut will be populated with all available data up to its capacity.
+    /// Since some BufMut implementations, e.g., [`Vec<u8>`], dynamically
+    /// allocate additional memory, the caller may use [`BufMut::limit()`]
+    /// to limit the maximum amount of data that can be written.
+    ///
+    /// On success the amount of bytes read and a flag indicating the fin state
+    /// is returned as a tuple, or [`Done`] if there is no data to read.
+    /// [`BufMut::advance_mut()`] will have been called with the same number of
+    /// total bytes.
+    ///
+    /// Reading data from a stream may trigger queueing of control messages
+    /// (e.g. MAX_STREAM_DATA). [`send()`] should be called afterwards.
+    ///
+    /// [`BufMut::limit()`]: bytes::BufMut::limit
+    /// [`BufMut::advance_mut()`]: bytes::BufMut::advance_mut
+    /// [`Done`]: enum.Error.html#variant.Done
+    /// [`send()`]: struct.Connection.html#method.send
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # use bytes::BufMut as _;
+    /// # let mut buf = Vec::new().limit(1024);  // Read at most 1024 bytes
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
+    /// # let peer = "127.0.0.1:1234".parse().unwrap();
+    /// # let local = socket.local_addr().unwrap();
+    /// # let mut conn = quiche::accept(&scid, None, local, peer, &mut config)?;
+    /// # let stream_id = 0;
+    /// # let mut total_read = 0;
+    /// while let Ok((read, fin)) = conn.stream_recv_buf(stream_id, &mut buf) {
+    ///     println!("Got {} bytes on stream {}", read, stream_id);
+    ///     total_read += read;
+    ///     assert_eq!(buf.get_ref().len(), total_read);
+    /// }
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    pub fn stream_recv_buf<B: bytes::BufMut>(
+        &mut self, stream_id: u64, out: B,
     ) -> Result<(usize, bool)> {
         self.do_stream_recv(stream_id, RecvAction::Emit { out })
     }
@@ -5572,7 +5677,10 @@ impl<F: BufFactory> Connection<F> {
     pub fn stream_discard(
         &mut self, stream_id: u64, len: usize,
     ) -> Result<(usize, bool)> {
-        self.do_stream_recv(stream_id, RecvAction::Discard { len })
+        // `do_stream_recv()` is generic on the kind of `BufMut` in RecvAction.
+        // Since we are discarding, it doesn't matter, but the compiler still
+        // wants to know, so we say `&mut [u8]`.
+        self.do_stream_recv::<&mut [u8]>(stream_id, RecvAction::Discard { len })
     }
 
     // Reads or discards contiguous data from a stream.
@@ -5593,8 +5701,8 @@ impl<F: BufFactory> Connection<F> {
     //
     // [`Done`]: enum.Error.html#variant.Done
     // [`send()`]: struct.Connection.html#method.send
-    fn do_stream_recv(
-        &mut self, stream_id: u64, action: RecvAction,
+    fn do_stream_recv<B: bytes::BufMut>(
+        &mut self, stream_id: u64, action: RecvAction<B>,
     ) -> Result<(usize, bool)> {
         // We can't read on our own unidirectional streams.
         if !stream::is_bidi(stream_id) &&
@@ -6548,12 +6656,13 @@ impl<F: BufFactory> Connection<F> {
     pub fn dgram_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
         match self.dgram_recv_queue.pop() {
             Some(d) => {
-                if d.len() > buf.len() {
+                if d.as_ref().len() > buf.len() {
                     return Err(Error::BufferTooShort);
                 }
+                let len = d.as_ref().len();
 
-                buf[..d.len()].copy_from_slice(&d);
-                Ok(d.len())
+                buf[..len].copy_from_slice(d.as_ref());
+                Ok(len)
             },
 
             None => Err(Error::Done),
@@ -6562,17 +6671,13 @@ impl<F: BufFactory> Connection<F> {
 
     /// Reads the first received DATAGRAM.
     ///
-    /// This is the same as [`dgram_recv()`] but returns the DATAGRAM as a
-    /// `Vec<u8>` instead of copying into the provided buffer.
+    /// This is the same as [`dgram_recv()`] but returns the DATAGRAM as an
+    /// owned buffer instead of copying into the provided buffer.
     ///
     /// [`dgram_recv()`]: struct.Connection.html#method.dgram_recv
     #[inline]
-    pub fn dgram_recv_vec(&mut self) -> Result<Vec<u8>> {
-        match self.dgram_recv_queue.pop() {
-            Some(d) => Ok(d),
-
-            None => Err(Error::Done),
-        }
+    pub fn dgram_recv_buf(&mut self) -> Result<F::DgramBuf> {
+        self.dgram_recv_queue.pop().ok_or(Error::Done)
     }
 
     /// Reads the first received DATAGRAM without removing it from the queue.
@@ -6668,43 +6773,23 @@ impl<F: BufFactory> Connection<F> {
     /// # Ok::<(), quiche::Error>(())
     /// ```
     pub fn dgram_send(&mut self, buf: &[u8]) -> Result<()> {
-        let max_payload_len = match self.dgram_max_writable_len() {
-            Some(v) => v,
-
-            None => return Err(Error::InvalidState),
-        };
-
-        if buf.len() > max_payload_len {
-            return Err(Error::BufferTooShort);
-        }
-
-        self.dgram_send_queue.push(buf.to_vec())?;
-
-        let active_path = self.paths.get_active_mut()?;
-
-        if self.dgram_send_queue.byte_size() >
-            active_path.recovery.cwnd_available()
-        {
-            active_path.recovery.update_app_limited(false);
-        }
-
-        Ok(())
+        self.dgram_send_buf(F::dgram_buf_from_slice(buf))
     }
 
     /// Sends data in a DATAGRAM frame.
     ///
-    /// This is the same as [`dgram_send()`] but takes a `Vec<u8>` instead of
-    /// a slice.
+    /// This is the same as [`dgram_send()`] but takes an owned buffer
+    /// instead of a slice and avoids copying.
     ///
     /// [`dgram_send()`]: struct.Connection.html#method.dgram_send
-    pub fn dgram_send_vec(&mut self, buf: Vec<u8>) -> Result<()> {
+    pub fn dgram_send_buf(&mut self, buf: F::DgramBuf) -> Result<()> {
         let max_payload_len = match self.dgram_max_writable_len() {
             Some(v) => v,
 
             None => return Err(Error::InvalidState),
         };
 
-        if buf.len() > max_payload_len {
+        if buf.as_ref().len() > max_payload_len {
             return Err(Error::BufferTooShort);
         }
 
@@ -7812,6 +7897,8 @@ impl<F: BufFactory> Connection<F> {
             pmtud: None,
 
             is_server: self.is_server,
+
+            use_initial_max_data_as_flow_control_win: false,
         };
 
         if self.handshake_completed {
@@ -7861,6 +7948,10 @@ impl<F: BufFactory> Connection<F> {
                         self.local_transport_params =
                             ex_data.local_transport_params;
                     }
+                }
+
+                if ex_data.use_initial_max_data_as_flow_control_win {
+                    self.enable_use_initial_max_data_as_flow_control_win();
                 }
 
                 // Try to parse transport parameters as soon as the first flight
@@ -7928,6 +8019,19 @@ impl<F: BufFactory> Connection<F> {
         }
 
         Ok(())
+    }
+
+    /// Use the value of the intial max_data / initial stream max_data setting
+    /// as the initial flow control window for the connection and streams.
+    /// The connection-level flow control window will only be changed if it
+    /// hasn't been auto tuned yet. For streams: only newly created streams
+    /// receive the new setting.
+    fn enable_use_initial_max_data_as_flow_control_win(&mut self) {
+        self.flow_control.set_window_if_not_tuned_yet(
+            self.local_transport_params.initial_max_data,
+        );
+        self.streams
+            .set_use_initial_max_data_as_flow_control_win(true);
     }
 
     /// Selects the packet type for the next outgoing packet.
@@ -8604,7 +8708,7 @@ impl<F: BufFactory> Connection<F> {
                     self.dgram_recv_queue.pop();
                 }
 
-                self.dgram_recv_queue.push(data)?;
+                self.dgram_recv_queue.push(data.into())?;
 
                 self.dgram_recv_count = self.dgram_recv_count.saturating_add(1);
 

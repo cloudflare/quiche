@@ -370,7 +370,6 @@ mod tests {
     use crate::events::quic;
     use crate::events::quic::QuicFrame;
     use crate::events::RawInfo;
-    use smallvec::smallvec;
     use testing::*;
 
     use serde_json::json;
@@ -392,17 +391,17 @@ mod tests {
         let frame1 = QuicFrame::Stream {
             stream_id: 40,
             offset: Some(40),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(400),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
         let event_data1 = EventData::QuicPacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
-            frames: Some(smallvec![frame1]),
+            frames: Some(vec![frame1]),
             raw: raw.clone(),
             ..Default::default()
         });
@@ -412,28 +411,28 @@ mod tests {
         let frame2 = QuicFrame::Stream {
             stream_id: 0,
             offset: Some(0),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(100),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
         let frame3 = QuicFrame::Stream {
             stream_id: 0,
             offset: Some(0),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(100),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
         let event_data2 = EventData::QuicPacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
-            frames: Some(smallvec![frame2]),
+            frames: Some(vec![frame2]),
             raw: raw.clone(),
             ..Default::default()
         });
@@ -442,8 +441,8 @@ mod tests {
 
         let event_data3 = EventData::QuicPacketSent(quic::PacketSent {
             header: pkt_hdr,
-            frames: Some(smallvec![frame3]),
-            stateless_reset_token: Some("reset_token".to_string()),
+            frames: Some(vec![frame3]),
+            stateless_reset_token: Some(Box::new("reset_token".to_string())),
             raw,
             ..Default::default()
         });
@@ -555,17 +554,17 @@ mod tests {
         let frame1 = QuicFrame::Stream {
             stream_id: 40,
             offset: Some(40),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(400),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
         let event_data1 = EventData::QuicPacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
-            frames: Some(smallvec![frame1]),
+            frames: Some(vec![frame1]),
             raw: raw.clone(),
             ..Default::default()
         });
@@ -580,17 +579,17 @@ mod tests {
         let frame2 = QuicFrame::Stream {
             stream_id: 1,
             offset: Some(0),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(100),
                 data: None,
-            }),
+            })),
             fin: Some(true),
         };
 
         let event_data2 = EventData::QuicPacketSent(quic::PacketSent {
             header: pkt_hdr.clone(),
-            frames: Some(smallvec![frame2]),
+            frames: Some(vec![frame2]),
             raw: raw.clone(),
             ..Default::default()
         });

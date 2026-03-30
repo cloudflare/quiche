@@ -227,8 +227,8 @@ impl WaitingFor {
 
     /// Check and clear the [`WaitType::CanOpenNumStreams`] condition if
     /// `conn` now reports enough available streams.
-    pub(crate) fn check_can_open_num_streams(
-        &mut self, conn: &quiche::Connection,
+    pub(crate) fn check_can_open_num_streams<F: quiche::BufFactory>(
+        &mut self, conn: &quiche::Connection<F>,
     ) {
         if let Some(streams_required) = self.required_stream_quota {
             let available_streams = if streams_required.bidi {

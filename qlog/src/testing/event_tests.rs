@@ -25,6 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::*;
+use crate::events::quic::AckRange;
 use crate::events::quic::PacketSent;
 use crate::events::quic::PacketType;
 use crate::events::quic::QuicFrame;
@@ -121,22 +122,22 @@ fn packet_sent_event_some_frames() {
 
     let frames = vec![
         QuicFrame::Padding {
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(1234),
                 data: None,
-            }),
+            })),
         },
         QuicFrame::Ping { raw: None },
         QuicFrame::Stream {
             stream_id: 0,
             offset: Some(0),
             fin: Some(true),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(100),
                 data: None,
-            }),
+            })),
         },
     ];
 
@@ -287,4 +288,146 @@ fn metrics_updated_no_ex_data() {
         json.get("ex_data").is_none(),
         "ex_data should not be present"
     );
+}
+
+#[test]
+fn ack_range_display() {
+    assert_eq!(AckRange::new(5, 5).to_string(), "5");
+    assert_eq!(AckRange::new(1, 4).to_string(), "1-4");
+}
+
+#[test]
+fn ack_range_as_range_inclusive() {
+    let v: Vec<u64> = AckRange::new(3, 5).as_range_inclusive().collect();
+    assert_eq!(v, &[3, 4, 5]);
+
+    let v: Vec<u64> = AckRange::new(42, 42).as_range_inclusive().collect();
+    assert_eq!(v, &[42]);
+}
+
+#[test]
+fn ack_range_serialize() {
+    assert_eq!(
+        serde_json::to_value(&AckRange::new(5, 5)).unwrap(),
+        serde_json::json!([5])
+    );
+    assert_eq!(
+        serde_json::to_value(&AckRange::new(0, 9)).unwrap(),
+        serde_json::json!([0, 9])
+    );
+}
+
+#[test]
+fn ack_range_deserialize() {
+    assert_eq!(
+        serde_json::from_str::<AckRange>("[7]").unwrap(),
+        AckRange::new(7, 7)
+    );
+    assert_eq!(
+        serde_json::from_str::<AckRange>("[0, 9]").unwrap(),
+        AckRange::new(0, 9)
+    );
+    assert!(serde_json::from_str::<AckRange>("[1, 2, 3]").is_err());
+}
+
+#[test]
+fn ack_frame_serialize_mixed_ranges() {
+    // AckRange(15,15) → [15], AckRange(0,9) → [0,9]
+    let frame = QuicFrame::Ack {
+        ack_delay: None,
+        acked_ranges: Some(vec![AckRange::new(0, 9), AckRange::new(15, 15)]),
+        ect1: None,
+        ect0: None,
+        ce: None,
+        raw: None,
+    };
+    let json = serde_json::to_value(&frame).unwrap();
+    assert_eq!(json["acked_ranges"], serde_json::json!([[0, 9], [15]]));
+}
+
+#[test]
+fn ack_frame_serialize_unordered_ranges() {
+    // draft-ietf-quic-qlog-quic-events-12 specified that ack ranges can be in any
+    // order
+    let frame = QuicFrame::Ack {
+        ack_delay: None,
+        acked_ranges: Some(vec![
+            AckRange::new(15, 19),
+            AckRange::new(5, 5),
+            AckRange::new(22, 23),
+        ]),
+        ect1: None,
+        ect0: None,
+        ce: None,
+        raw: None,
+    };
+    let json = serde_json::to_value(&frame).unwrap();
+    assert_eq!(
+        json["acked_ranges"],
+        serde_json::json!([[15, 19], [5], [22, 23]])
+    );
+}
+
+#[test]
+fn ack_frame_roundtrip() {
+    let frame = QuicFrame::Ack {
+        ack_delay: Some(1.5),
+        acked_ranges: Some(vec![
+            AckRange::new(0, 9),
+            AckRange::new(20, 20),
+            AckRange::new(30, 39),
+        ]),
+        ect1: None,
+        ect0: None,
+        ce: None,
+        raw: None,
+    };
+    let json_str = serde_json::to_string(&frame).unwrap();
+    let decoded: QuicFrame = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(frame, decoded);
+}
+
+#[test]
+fn ack_frame_roundtrip_preserve_order() {
+    // draft-ietf-quic-qlog-quic-events-12 specifies that ack ranges may appear in
+    // any order.
+    let frame = QuicFrame::Ack {
+        ack_delay: Some(1.5),
+        acked_ranges: Some(vec![
+            AckRange::new(0, 9),
+            AckRange::new(30, 39),
+            AckRange::new(20, 20),
+            AckRange::new(12, 13),
+        ]),
+        ect1: None,
+        ect0: None,
+        ce: None,
+        raw: None,
+    };
+    let json_str = serde_json::to_string(&frame).unwrap();
+    let decoded: QuicFrame = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(frame, decoded);
+}
+
+#[test]
+fn ack_frame_deserialize_mixed_input() {
+    // Input uses both 1-element and 2-element arrays.
+    // The ranges are also unsorted which the draft calls out as allowed
+    let json = r#"{
+        "frame_type": "ack",
+        "acked_ranges": [[0, 9], [40], [30, 39]]
+    }"#;
+    let frame: QuicFrame = serde_json::from_str(json).unwrap();
+    assert_eq!(frame, QuicFrame::Ack {
+        ack_delay: None,
+        acked_ranges: Some(vec![
+            AckRange::new(0, 9),
+            AckRange::new(40, 40),
+            AckRange::new(30, 39),
+        ]),
+        ect1: None,
+        ect0: None,
+        ce: None,
+        raw: None,
+    });
 }

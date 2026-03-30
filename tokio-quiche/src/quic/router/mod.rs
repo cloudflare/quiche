@@ -34,8 +34,6 @@ use super::connection::InitialQuicConnection;
 use super::connection::QuicConnectionParams;
 use super::io::worker::WriterConfig;
 use super::QuicheConnection;
-use crate::buf_factory::BufFactory;
-use crate::buf_factory::PooledBuf;
 use crate::metrics::labels;
 use crate::metrics::quic_expensive_metrics_ip_reduce;
 use crate::metrics::Metrics;
@@ -100,7 +98,7 @@ mod listener_stage_timer {
 
 #[derive(Debug)]
 struct PollRecvData {
-    bytes: usize,
+    buf: Vec<u8>,
     // The packet's source, e.g., the peer's address
     src_addr: SocketAddr,
     // The packet's original destination. If the original destination is
@@ -159,7 +157,8 @@ where
     #[cfg(target_os = "linux")]
     reusable_cmsg_space: Vec<u8>,
 
-    current_buf: PooledBuf,
+    #[cfg(target_os = "linux")]
+    buf: Vec<u8>,
 
     // We keep the metrics in here, to avoid cloning them each packet
     #[cfg(target_os = "linux")]
@@ -210,10 +209,11 @@ where
                     sockaddr_in6, // IPV6_RECVORIGDSTADDR
                     u32 // SO_MARK
                 ),
+
                 config,
 
-                current_buf: BufFactory::get_max_buf(),
-
+                #[cfg(target_os = "linux")]
+                buf: Vec::new(),
                 #[cfg(target_os = "linux")]
                 metrics_handshake_time_seconds: metrics.handshake_time_seconds(labels::QuicHandshakeStage::QueueWaiting),
                 #[cfg(target_os = "linux")]
@@ -391,10 +391,20 @@ where
     fn poll_recv_from(
         &mut self, cx: &mut Context<'_>,
     ) -> Poll<io::Result<PollRecvData>> {
-        let mut buf = tokio::io::ReadBuf::new(&mut self.current_buf);
-        let addr = ready!(self.socket_rx.poll_recv_from(cx, &mut buf))?;
+        let mut buf = Vec::with_capacity(datagram_socket::MAX_DATAGRAM_SIZE);
+        // We use ReadBuf's ability to write to uninitialized memory to avoid
+        // the cost of having to initialize the Vec.
+        let mut read_buf = tokio::io::ReadBuf::uninit(buf.spare_capacity_mut());
+        let addr = ready!(self.socket_rx.poll_recv_from(cx, &mut read_buf))?;
+        let n = read_buf.filled().len();
+        unsafe {
+            // Safety: ReadBuf has guaranteed that `n` initialized bytes have
+            // been written to the buffer, so we can set the vec's length
+            // accordingly
+            buf.set_len(n);
+        }
         Poll::Ready(Ok(PollRecvData {
-            bytes: buf.filled().len(),
+            buf,
             src_addr: addr,
             rx_time: None,
             gro: None,
@@ -423,14 +433,19 @@ where
             use std::os::fd::AsRawFd;
             use tokio::io::Interest;
 
+            use crate::buf_factory::BufFactory;
+
             let Some(udp_socket) = self.socket_rx.as_udp_socket() else {
                 // the given socket is not a UDP socket, fall back to the
                 // simple poll_recv_from.
                 return self.poll_recv_from(cx);
             };
 
+            // Note, the resize will be a no-op after the first call since
+            // we never truncate the `self.buf`
+            self.buf.resize(BufFactory::MAX_BUF_SIZE, 0u8);
             loop {
-                let iov_s = &mut [io::IoSliceMut::new(&mut self.current_buf)];
+                let iov_s = &mut [io::IoSliceMut::new(&mut self.buf)];
                 match udp_socket.try_io(Interest::READABLE, || {
                     recvmsg::<SockaddrStorage>(
                         udp_socket.as_raw_fd(),
@@ -441,7 +456,12 @@ where
                     .map_err(|x| x.into())
                 }) {
                     Ok(r) => {
-                        let bytes = r.bytes;
+                        let filled_buf =
+                            r.iovs().next().map(Vec::from).unwrap_or_default();
+                        // The slices returend by `nix::socket::recvmsg`'s result
+                        // add up to `r.bytes`. This assert is just to make sure
+                        // the code handles the result correctly.
+                        debug_assert_eq!(r.bytes, filled_buf.len());
 
                         let address = match r.address {
                             Some(inner) => inner,
@@ -470,7 +490,7 @@ where
                         let Ok(cmsgs) = r.cmsgs() else {
                             // Best-effort if we can't read cmsgs.
                             return Poll::Ready(Ok(PollRecvData {
-                                bytes,
+                                buf: filled_buf,
                                 src_addr: peer_addr,
                                 dst_addr_override,
                                 rx_time,
@@ -582,7 +602,7 @@ where
                         }
 
                         return Poll::Ready(Ok(PollRecvData {
-                            bytes,
+                            buf: filled_buf,
                             src_addr: peer_addr,
                             dst_addr_override,
                             rx_time,
@@ -686,7 +706,7 @@ where
 
             match self.poll_recv_and_rx_time(cx) {
                 Poll::Ready(Ok(PollRecvData {
-                    bytes,
+                    buf,
                     src_addr: peer_addr,
                     dst_addr_override,
                     rx_time,
@@ -694,12 +714,6 @@ where
                     #[cfg(target_os = "linux")]
                     so_mark_data,
                 })) => {
-                    let mut buf = std::mem::replace(
-                        &mut self.current_buf,
-                        BufFactory::get_max_buf(),
-                    );
-                    buf.truncate(bytes);
-
                     let send_from = if let Some(dst_addr) = dst_addr_override {
                         log::trace!("overriding local address"; "actual_local" => dst_addr, "configured_local" => server_addr);
                         dst_addr

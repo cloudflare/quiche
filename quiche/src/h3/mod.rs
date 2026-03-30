@@ -301,8 +301,6 @@ use qlog::events::http3::Http3Frame;
 #[cfg(feature = "qlog")]
 use qlog::events::http3::Initiator;
 #[cfg(feature = "qlog")]
-use qlog::events::http3::PriorityTargetStreamType;
-#[cfg(feature = "qlog")]
 use qlog::events::http3::StreamType;
 #[cfg(feature = "qlog")]
 use qlog::events::http3::StreamTypeSet;
@@ -1473,6 +1471,7 @@ impl Connection {
 
             let frame = Http3Frame::Headers {
                 headers: qlog_headers,
+                raw: None,
             };
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
                 stream_id,
@@ -1763,25 +1762,69 @@ impl Connection {
         &mut self, conn: &mut super::Connection<F>, stream_id: u64,
         out: &mut [u8],
     ) -> Result<usize> {
+        self.recv_body_buf(conn, stream_id, out)
+    }
+
+    /// Reads request or response body data into the provided BufMut buffer.
+    ///
+    /// **NOTE**:
+    /// The BufMut will be populated with all available data up to its capacity.
+    /// Since some BufMut implementations, e.g., [`Vec<u8>`], dynamically
+    /// allocate additional memory, the caller may use
+    /// [`BufMut::limit()`] to limit the maximum amount of data that
+    /// can be written.
+    ///
+    /// Applications should call this method (or [`recv_body()`]) whenever
+    /// the [`poll()`] method returns a [`Data`] event.
+    ///
+    /// On success the amount of bytes read is returned, or [`Done`] if there
+    /// is no data to read.
+    ///
+    /// [`BufMut::limit()`]: bytes::BufMut::limit()
+    /// [`recv_body()`]: Self::recv_body()
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`Data`]: enum.Event.html#variant.Data
+    /// [`Done`]: enum.Error.html#variant.Done
+    ///
+    /// ## Example:
+    /// ```no_run
+    /// # use quiche::h3;
+    /// fn receive(
+    ///     qconn: &mut quiche::Connection, h3conn: &mut h3::Connection,
+    /// ) -> Result<Vec<u8>, h3::Error> {
+    ///     use bytes::BufMut as _;
+    ///     let mut buffer = Vec::with_capacity(2048).limit(2048);
+    ///     let bytes = h3conn.recv_body_buf(qconn, 0, &mut buffer)?;
+    ///     let buffer = buffer.into_inner();
+    ///     // The vec has been filled with exactly `bytes` number of bytes
+    ///     assert_eq!(buffer.len(), bytes);
+    ///     Ok(buffer)
+    /// }
+    /// ```
+    pub fn recv_body_buf<F: BufFactory, OUT: bytes::BufMut>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64, mut out: OUT,
+    ) -> Result<usize> {
         let mut total = 0;
 
         // Try to consume all buffered data for the stream, even across multiple
         // DATA frames.
-        while total < out.len() {
+        // Note, that even if the BufMut does not have a limit defined, we are
+        // inherently limited by how much data is in quiche's receive buffer for
+        // that stream, so the BufMut cannot grow unbounded.
+        while out.has_remaining_mut() {
             let stream = self.streams.get_mut(&stream_id).ok_or(Error::Done)?;
 
             if stream.state() != stream::State::Data {
                 break;
             }
 
-            let (read, fin) =
-                match stream.try_consume_data(conn, &mut out[total..]) {
-                    Ok(v) => v,
+            let (read, fin) = match stream.try_consume_data(conn, &mut out) {
+                Ok(v) => v,
 
-                    Err(Error::Done) => break,
+                Err(Error::Done) => break,
 
-                    Err(e) => return Err(e),
-                };
+                Err(e) => return Err(e),
+            };
 
             total += read;
 
@@ -1904,9 +1947,10 @@ impl Connection {
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::PriorityUpdate {
-                target_stream_type: PriorityTargetStreamType::Request,
-                prioritized_element_id: stream_id,
+                stream_id: Some(stream_id),
+                push_id: None,
                 priority_field_value: field_value.clone(),
+                raw: None,
             };
 
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
@@ -2279,7 +2323,10 @@ impl Connection {
         );
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-            let frame = Http3Frame::Reserved { length: Some(0) };
+            let frame = Http3Frame::Reserved {
+                frame_type_bytes: grease_frame1,
+                raw: None,
+            };
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
                 stream_id,
                 length: Some(0),
@@ -2308,7 +2355,8 @@ impl Connection {
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::Reserved {
-                length: Some(grease_payload.len() as u64),
+                frame_type_bytes: grease_frame2,
+                raw: None,
             };
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
                 stream_id,
@@ -2937,6 +2985,7 @@ impl Connection {
 
                     let frame = Http3Frame::Headers {
                         headers: qlog_headers,
+                        raw: None,
                     };
 
                     let ev_data = EventData::Http3FrameParsed(FrameParsed {
@@ -3197,10 +3246,8 @@ pub mod testing {
         ) -> Result<Session> {
             Session::<DefaultBufFactory>::with_configs_and_buf(config, h3_config)
         }
-    }
 
-    impl<F: BufFactory> Session<F> {
-        pub fn new_with_buf() -> Result<Session<F>> {
+        pub fn default_configs() -> Result<(crate::Config, Config)> {
             fn path_relative_to_manifest_dir(path: &str) -> String {
                 std::fs::canonicalize(
                     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path),
@@ -3229,6 +3276,13 @@ pub mod testing {
             config.set_ack_delay_exponent(8);
 
             let h3_config = Config::new()?;
+            Ok((config, h3_config))
+        }
+    }
+
+    impl<F: BufFactory> Session<F> {
+        pub fn new_with_buf() -> Result<Session<F>> {
+            let (mut config, h3_config) = Session::default_configs()?;
             Session::with_configs_and_buf(&mut config, &h3_config)
         }
 
@@ -3379,6 +3433,16 @@ pub mod testing {
             self.client.recv_body(&mut self.pipe.client, stream, buf)
         }
 
+        /// Fetches DATA payload from the server.
+        ///
+        /// On success it returns the number of bytes received.
+        pub fn recv_body_buf_client<B: bytes::BufMut>(
+            &mut self, stream: u64, buf: B,
+        ) -> Result<usize> {
+            self.client
+                .recv_body_buf(&mut self.pipe.client, stream, buf)
+        }
+
         /// Sends some default payload from server.
         ///
         /// On success it returns the payload.
@@ -3402,6 +3466,16 @@ pub mod testing {
             &mut self, stream: u64, buf: &mut [u8],
         ) -> Result<usize> {
             self.server.recv_body(&mut self.pipe.server, stream, buf)
+        }
+
+        /// Fetches DATA payload from the client.
+        ///
+        /// On success it returns the number of bytes received.
+        pub fn recv_body_buf_server<B: bytes::BufMut>(
+            &mut self, stream: u64, buf: B,
+        ) -> Result<usize> {
+            self.server
+                .recv_body_buf(&mut self.pipe.server, stream, buf)
         }
 
         /// Sends a single HTTP/3 frame from the client.
@@ -3532,6 +3606,8 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use bytes::BufMut as _;
+
     use super::*;
 
     use super::testing::*;
@@ -3726,6 +3802,95 @@ mod tests {
         for _ in 0..total_data_frames {
             assert_eq!(s.recv_body_client(stream, &mut recv_buf), Ok(body.len()));
         }
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Send a request with no body, get a response with multiple DATA frames.
+    fn request_no_body_response_many_chunks_with_buf() {
+        let (mut config, h3_config) = Session::default_configs().unwrap();
+        // we don't want to be limited by flow or cong. control
+        config.set_initial_congestion_window_packets(100);
+        config.set_initial_max_data(200_000);
+        config.set_initial_max_stream_data_bidi_local(200_000);
+        config.set_initial_max_stream_data_bidi_remote(200_000);
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        s.handshake().unwrap();
+
+        let (stream, req) = s.send_request(true).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+
+        let total_data_frames = 4;
+
+        // Use a large body
+        let data = vec![0xab_u8; 16 * 1024];
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        for _ in 0..total_data_frames - 1 {
+            assert_eq!(
+                s.server.send_body(&mut s.pipe.server, stream, &data, false),
+                Ok(data.len())
+            );
+            s.advance().ok();
+        }
+
+        s.server
+            .send_body(&mut s.pipe.server, stream, &data, true)
+            .unwrap();
+        s.advance().ok();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // We expect to be able to read multiple data frames in a single call and
+        // reads don't have to end on frame boundaries. So let's try to read
+        // 1.5 times the amount we sent in one frame.
+        let how_much_to_read_per_call = data.len() * 2 / 3;
+        let mut remaining_to_read = total_data_frames * data.len();
+        let mut recv_buf = Vec::new().limit(how_much_to_read_per_call);
+        assert_eq!(
+            s.recv_body_buf_client(stream, &mut recv_buf),
+            Ok(how_much_to_read_per_call)
+        );
+        remaining_to_read -= how_much_to_read_per_call;
+        assert_eq!(recv_buf.get_ref().len(), how_much_to_read_per_call);
+
+        while remaining_to_read > 0 {
+            // Set a different limit for the following reads.
+            recv_buf.set_limit(data.len());
+            // We should either read up to the limit we set above, or to
+            // the end of buffered data.
+            let expected = std::cmp::min(data.len(), remaining_to_read);
+            assert_eq!(
+                s.recv_body_buf_client(stream, &mut recv_buf),
+                Ok(expected)
+            );
+            remaining_to_read -= expected;
+        }
+        // We've read everything now. Ensure the Vec reflects that
+        assert_eq!(recv_buf.get_ref().len(), total_data_frames * data.len());
+
+        // No more data to read.
+        assert_eq!(
+            s.recv_body_buf_client(stream, &mut recv_buf),
+            Err(Error::Done)
+        );
 
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
         assert_eq!(s.poll_client(), Err(Error::Done));

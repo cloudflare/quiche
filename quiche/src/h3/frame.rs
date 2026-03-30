@@ -344,10 +344,15 @@ impl Frame {
             // Qlog expects the `headers` to be represented as an array of
             // name:value pairs. At this stage, we only have the qpack block, so
             // populate the field with an empty vec.
-            Frame::Headers { .. } => Http3Frame::Headers { headers: vec![] },
+            Frame::Headers { .. } => Http3Frame::Headers {
+                headers: vec![],
+                raw: None,
+            },
 
-            Frame::CancelPush { push_id } =>
-                Http3Frame::CancelPush { push_id: *push_id },
+            Frame::CancelPush { push_id } => Http3Frame::CancelPush {
+                push_id: *push_id,
+                raw: None,
+            },
 
             Frame::Settings {
                 max_field_section_size,
@@ -421,7 +426,10 @@ impl Frame {
                     }
                 }
 
-                Http3Frame::Settings { settings }
+                Http3Frame::Settings {
+                    settings,
+                    raw: None,
+                }
             },
 
             // Qlog expects the `headers` to be represented as an array of
@@ -430,41 +438,44 @@ impl Frame {
             Frame::PushPromise { push_id, .. } => Http3Frame::PushPromise {
                 push_id: *push_id,
                 headers: vec![],
+                raw: None,
             },
 
-            Frame::GoAway { id } => Http3Frame::Goaway { id: *id },
+            Frame::GoAway { id } => Http3Frame::Goaway { id: *id, raw: None },
 
-            Frame::MaxPushId { push_id } =>
-                Http3Frame::MaxPushId { push_id: *push_id },
+            Frame::MaxPushId { push_id } => Http3Frame::MaxPushId {
+                push_id: *push_id,
+                raw: None,
+            },
 
             Frame::PriorityUpdateRequest {
                 prioritized_element_id,
                 priority_field_value,
             } => Http3Frame::PriorityUpdate {
-                target_stream_type:
-                    qlog::events::http3::PriorityTargetStreamType::Request,
-                prioritized_element_id: *prioritized_element_id,
+                stream_id: Some(*prioritized_element_id),
+                push_id: None,
                 priority_field_value: String::from_utf8_lossy(
                     priority_field_value,
                 )
                 .into_owned(),
+                raw: None,
             },
 
             Frame::PriorityUpdatePush {
                 prioritized_element_id,
                 priority_field_value,
             } => Http3Frame::PriorityUpdate {
-                target_stream_type:
-                    qlog::events::http3::PriorityTargetStreamType::Request,
-                prioritized_element_id: *prioritized_element_id,
+                stream_id: None,
+                push_id: Some(*prioritized_element_id),
                 priority_field_value: String::from_utf8_lossy(
                     priority_field_value,
                 )
                 .into_owned(),
+                raw: None,
             },
 
             Frame::Unknown { raw_type, payload } => Http3Frame::Unknown {
-                frame_type_value: *raw_type,
+                frame_type_bytes: *raw_type,
                 raw: Some(RawInfo {
                     data: None,
                     payload_length: Some(payload.len() as u64),

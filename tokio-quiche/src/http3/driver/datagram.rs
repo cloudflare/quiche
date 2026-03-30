@@ -24,18 +24,19 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use super::InboundFrame;
-use crate::buf_factory::BufFactory;
-use crate::buf_factory::PooledDgram;
-use crate::quic::QuicheConnection;
+use datagram_socket::DgramBuffer;
 use quiche::h3::NameValue;
 use quiche::h3::{
     self,
 };
 
-/// Extracts the DATAGRAM flow ID proxied over the given `stream_id`,
-/// or `None` if this is not a proxy request.
-pub(crate) fn extract_flow_id(
+use super::InboundFrame;
+use crate::buf_factory::BufFactory;
+use crate::quic::QuicheConnection;
+
+/// Extracts the DATAGRAM flow ID or quarter stream id proxied over the given
+/// `stream_id`, or `None` if this is not a proxy request.
+pub(crate) fn extract_quarter_stream_id(
     stream_id: u64, headers: &[h3::Header],
 ) -> Option<u64> {
     let mut method = None;
@@ -74,35 +75,106 @@ pub(crate) fn extract_flow_id(
     }
 }
 
-/// Sends an HTTP/3 datagram over the QUIC connection with the given `flow_id`.
+/// Sends an HTTP/3 datagram over the QUIC connection with the given
+/// `quarter_stream_id`.
+#[inline]
 pub(crate) fn send_h3_dgram(
-    conn: &mut QuicheConnection, flow_id: u64, mut dgram: PooledDgram,
+    conn: &mut QuicheConnection, quarter_stream_id: u64, dgram: DgramBuffer,
 ) -> quiche::Result<()> {
-    let mut prefix = [0u8; 8];
-    let mut buf = octets::OctetsMut::with_slice(&mut prefix);
-    let flow_id = buf.put_varint(flow_id)?;
+    conn.dgram_send_buf(h3_dgram_add_quarter_stream_id(quarter_stream_id, dgram)?)
+}
 
-    if dgram.add_prefix(flow_id) {
-        conn.dgram_send(&dgram)
-    } else {
-        let mut inner = dgram.into_inner().into_vec();
-        inner.splice(..0, flow_id.iter().copied());
-        conn.dgram_send_vec(inner)
+/// Prepend the `quarter_stream_id` to `dgram`
+fn h3_dgram_add_quarter_stream_id(
+    quarter_stream_id: u64, mut dgram: DgramBuffer,
+) -> quiche::Result<DgramBuffer> {
+    let mut prefix_buf = [0u8; 8];
+    let mut enc = octets::OctetsMut::with_slice(&mut prefix_buf);
+    let prefix = enc.put_varint(quarter_stream_id)?;
+
+    if dgram.try_add_prefix(prefix).is_err() {
+        // There wasn't enough room. Let's add more headroom and add the
+        // prefix again. DGRAM_HEADROOM is large enough, so
+        // try_add_prefix cannot fail after splice_headroom.
+        const {
+            // Note, since this is const, it asserts at compile time.
+            assert!(BufFactory::DGRAM_HEADROOM >= /* max varint len */ 8);
+        }
+        dgram.splice_headroom(BufFactory::DGRAM_HEADROOM);
+        dgram.try_add_prefix(prefix).unwrap();
     }
+    Ok(dgram)
+}
+
+/// Strips the varint-encoded quarter stream ID from the front of `dgram` and
+/// returns `(quarter_stream_id, dgram)` with the cursor advanced past the
+/// prefix.
+fn h3_dgram_remove_quarter_stream_id(
+    mut dgram: DgramBuffer,
+) -> quiche::Result<(u64, DgramBuffer)> {
+    let quarter_stream_id =
+        octets::Octets::with_slice(dgram.as_slice()).get_varint()?;
+    let advance = octets::varint_len(quarter_stream_id);
+    // Advance the cursor past the varint prefix — zero copy.
+    dgram.advance(advance);
+    Ok((quarter_stream_id, dgram))
 }
 
 /// Reads the next HTTP/3 datagram from the QUIC connection.
 ///
 /// [`quiche::Error::Done`] is returned if there is no datagram to read.
+#[inline]
 pub(crate) fn receive_h3_dgram(
     conn: &mut QuicheConnection,
 ) -> quiche::Result<(u64, InboundFrame)> {
-    let dgram = conn.dgram_recv_vec()?;
-    let mut buf = octets::Octets::with_slice(&dgram);
-    let flow_id = buf.get_varint()?;
-    let advance = buf.off();
-    let datagram =
-        InboundFrame::Datagram(BufFactory::dgram_from_slice(&dgram[advance..]));
+    let dgram = conn.dgram_recv_buf()?;
+    let (quarter_stream_id, dgram) = h3_dgram_remove_quarter_stream_id(dgram)?;
+    Ok((quarter_stream_id, InboundFrame::Datagram(dgram)))
+}
 
-    Ok((flow_id, datagram))
+#[cfg(test)]
+mod tests {
+    use bytes::BufMut;
+    use datagram_socket::DgramBuffer;
+
+    use super::*;
+
+    #[test]
+    fn h3_dgram_add_quarter_stream_id_enough_headroom() {
+        let mut dgram = DgramBuffer::with_capacity_and_headroom(16, 8);
+        dgram.put_slice(&[0xaa, 0xbb, 0xcc]);
+
+        // 67 requires two bytes to encode
+        let result = h3_dgram_add_quarter_stream_id(67, dgram).unwrap();
+        assert_eq!(result.as_slice(), &[64, 67, 0xaa, 0xbb, 0xcc]);
+    }
+
+    /// When there is no headroom, splice_headroom is invoked automatically.
+    #[test]
+    fn h3_dgram_add_quarter_stream_id_need_more_headroom() {
+        let dgram = DgramBuffer::from_slice(&[1, 2]);
+
+        // 42 requires a single byte for encoding
+        let result = h3_dgram_add_quarter_stream_id(42, dgram).unwrap();
+        assert_eq!(result.as_slice(), &[42, 1, 2]);
+    }
+
+    #[test]
+    fn h3_dgram_remove_quarter_stream_id_tests() {
+        let dgram = DgramBuffer::from_slice(&[1, 2, 3, 4]);
+        let dgram = h3_dgram_add_quarter_stream_id(67, dgram).unwrap();
+        let (quarter_stream_id, rest) =
+            h3_dgram_remove_quarter_stream_id(dgram).unwrap();
+
+        assert_eq!(quarter_stream_id, 67);
+        assert_eq!(rest.as_slice(), &[1, 2, 3, 4]);
+    }
+
+    /// remove_quarter_stream_id on an empty buffer returns an error (buffer too
+    /// short).
+    #[test]
+    fn remove_quarter_stream_id_empty_buffer_errors() {
+        let dgram = DgramBuffer::new();
+        assert!(h3_dgram_remove_quarter_stream_id(dgram).is_err());
+    }
 }

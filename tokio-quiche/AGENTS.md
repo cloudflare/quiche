@@ -9,7 +9,7 @@ Async tokio wrapper for `quiche`. Spawns per-connection IO worker tasks driven b
 ```
 src/
   lib.rs              Re-exports, listen(), capture_quiche_logs()
-  buf_factory.rs      BufFactory: tiered static pools, QuicheBuf (zero-copy feature)
+  buf_factory.rs      BufFactory: wraps quiche::BufFactory; provides MAX_BUF_SIZE constant
   result.rs           BoxError = Box<dyn Error+Send+Sync>, QuicResult<T>
   settings/           ConnectionParams → quiche::Config → h3::Config cascade
   metrics/            Metrics trait (pluggable); DefaultMetrics (foundations Prometheus)
@@ -29,7 +29,6 @@ src/
 | Per-connection IO loop | `quic/io/worker.rs` — `IoWorker` |
 | Packet routing/demux | `quic/router/mod.rs` — `InboundPacketRouter` |
 | Config cascade | `settings/config.rs` — `Config::new()` |
-| Buffer pools | `buf_factory.rs` — `BufFactory`, static pools |
 | Metrics interface | `metrics/mod.rs` — `Metrics` trait |
 
 ## CODE MAP
@@ -46,15 +45,14 @@ src/
 | `QuicConnection` | struct | `quic/connection/mod.rs` | Post-handshake metadata handle (not the qconn itself) |
 | `ConnectionParams` | struct | `settings/mod.rs` | QuicSettings + TLS + Hooks + session |
 | `Config` | struct(crate) | `settings/config.rs` | Builds quiche::Config from ConnectionParams |
-| `BufFactory` | struct | `buf_factory.rs` | Handle to static tiered buffer pools |
-| `QuicheBuf` | struct | `buf_factory.rs` | Zero-copy splittable buffer (zero-copy feature) |
+| `BufFactory` | struct | `buf_factory.rs` | Wraps `quiche::BufFactory`; `Buf = Bytes` |
 | `Metrics` | trait | `metrics/mod.rs` | Pluggable telemetry; `DefaultMetrics` uses foundations |
 | `QuicCommand` | enum | `quic/connection/mod.rs` | ConnectionClose / Custom / Stats commands |
 | `BoxError` | type alias | `result.rs` | `Box<dyn Error + Send + Sync>` — deliberate choice, see docstring |
 
 ## CONVENTIONS (crate-specific)
 
-- Re-exports: `pub extern crate quiche`, `pub use buffer_pool`, `pub use datagram_socket`.
+- Re-exports: `pub extern crate quiche`, `pub use datagram_socket`.
 - `foundations` for logging (slog), not `log` directly. `capture_quiche_logs()` bridges quiche's `log` into slog.
 - `DriverHooks` is **sealed** — prevents external `H3Driver` variants.
 - `QuicAuditStats` (from `datagram-socket`) threaded through all connections via `Arc`.

@@ -164,6 +164,7 @@ pub fn filter_sqlog_events(mut events: Vec<Event>, filter: &str) -> Vec<Event> {
 
 #[cfg(test)]
 mod tests {
+    use crate::wirefilter::filter_sqlog_events;
     use qlog::events::quic::PacketHeader;
     use qlog::events::quic::PacketSent;
     use qlog::events::quic::PacketType::Initial;
@@ -171,20 +172,17 @@ mod tests {
     use qlog::events::EventData::QuicPacketSent;
     use qlog::events::RawInfo;
     use qlog::reader::Event;
-    use smallvec::smallvec;
-
-    use crate::wirefilter::filter_sqlog_events;
 
     fn stream_frame(stream_id: u64) -> QuicFrame {
         QuicFrame::Stream {
             stream_id,
             offset: Some(0),
             fin: Some(true),
-            raw: Some(RawInfo {
+            raw: Some(Box::new(RawInfo {
                 length: None,
                 payload_length: Some(10),
                 data: None,
-            }),
+            })),
         }
     }
 
@@ -212,7 +210,7 @@ mod tests {
         let frames = vec![
             QuicFrame::Crypto {
                 offset: 0,
-                raw: Some(raw),
+                raw: Some(Box::new(raw)),
             },
             stream_frame(1),
             stream_frame(2),
@@ -314,7 +312,7 @@ mod tests {
                     QuicPacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
-                            Some(smallvec![
+                            Some(vec![
                                 stream_frame(0),
                                 stream_frame(100),
                                 stream_frame(200),
@@ -352,10 +350,10 @@ mod tests {
                 QuicPacketSent(packet_sent) => {
                     assert_eq!(
                         packet_sent.frames,
-                        Some(smallvec![
+                        Some(vec![
                             QuicFrame::Crypto {
                                 offset: 0,
-                                raw: Some(raw),
+                                raw: Some(Box::new(raw)),
                             },
                             stream_frame(1),
                             stream_frame(2),
@@ -378,7 +376,7 @@ mod tests {
                     QuicPacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
-                            Some(smallvec![
+                            Some(vec![
                                 stream_frame(1),
                                 stream_frame(100),
                                 stream_frame(2),
@@ -416,10 +414,10 @@ mod tests {
                     QuicPacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
-                            Some(smallvec![
+                            Some(vec![
                                 QuicFrame::Crypto {
                                     offset: 0,
-                                    raw: Some(raw),
+                                    raw: Some(Box::new(raw)),
                                 },
                                 stream_frame(1),
                                 stream_frame(2),
@@ -443,7 +441,7 @@ mod tests {
                     QuicPacketSent(packet_sent) => {
                         assert_eq!(
                             packet_sent.frames,
-                            Some(smallvec![
+                            Some(vec![
                                 stream_frame(0),
                                 stream_frame(100),
                                 stream_frame(200),

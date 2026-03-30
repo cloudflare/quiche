@@ -45,6 +45,10 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Instant;
 
+use bytes::BufMut as _;
+use bytes::Bytes;
+use bytes::BytesMut;
+use datagram_socket::DgramBuffer;
 use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
 use futures::FutureExt;
@@ -71,8 +75,6 @@ use self::streams::WaitForDownstreamData;
 use self::streams::WaitForStream;
 use self::streams::WaitForUpstreamCapacity;
 use crate::buf_factory::BufFactory;
-use crate::buf_factory::PooledBuf;
-use crate::buf_factory::PooledDgram;
 use crate::http3::settings::Http3Settings;
 use crate::http3::H3AuditStats;
 use crate::metrics::Metrics;
@@ -284,13 +286,9 @@ pub enum OutboundFrame {
     /// Response headers to be sent to the peer, with optional priority.
     Headers(Vec<h3::Header>, Option<quiche::h3::Priority>),
     /// Response body/CONNECT downstream data plus FIN flag.
-    #[cfg(feature = "zero-copy")]
-    Body(crate::buf_factory::QuicheBuf, bool),
-    /// Response body/CONNECT downstream data plus FIN flag.
-    #[cfg(not(feature = "zero-copy"))]
-    Body(PooledBuf, bool),
+    Body(Bytes, bool),
     /// CONNECT-UDP (DATAGRAM) downstream data plus flow ID.
-    Datagram(PooledDgram, u64),
+    Datagram(DgramBuffer, u64),
     /// Close the stream with a trailers, with optional priority.
     Trailers(Vec<h3::Header>, Option<quiche::h3::Priority>),
     /// An error encountered when serving the request. Stream should be closed.
@@ -299,25 +297,15 @@ pub enum OutboundFrame {
     FlowShutdown { flow_id: u64, stream_id: u64 },
 }
 
-impl OutboundFrame {
-    /// Creates a body frame with the provided buffer.
-    pub fn body(body: PooledBuf, fin: bool) -> Self {
-        #[cfg(feature = "zero-copy")]
-        let body = crate::buf_factory::QuicheBuf::new(body);
-
-        OutboundFrame::Body(body, fin)
-    }
-}
-
 /// An [`InboundFrame`] is a data frame that was received from the peer over a
 /// [`quiche::h3::Connection`]. This is used by peers to send body or datagrams
 /// to the local task.
 #[derive(Debug)]
 pub enum InboundFrame {
     /// Request body/CONNECT upstream data plus FIN flag.
-    Body(PooledBuf, bool),
+    Body(BytesMut, bool),
     /// CONNECT-UDP (DATAGRAM) upstream data.
-    Datagram(PooledDgram),
+    Datagram(DgramBuffer),
 }
 
 /// A ready-made [`ApplicationOverQuic`] which can handle HTTP/3 and MASQUE.
@@ -358,9 +346,12 @@ pub struct H3Driver<H: DriverHooks> {
     dgram_recv: OutboundFrameStream,
     /// Keeps the datagram channel open such that datagram flows can be created.
     dgram_send: OutboundFrameSender,
+    /// A buffer to receive H3 body data from quiche. We initialize a large
+    /// buffer and then `split()` off filled parts until we need to reallocate.
+    body_recv_buf: bytes::buf::Limit<BytesMut>,
 
     /// The buffer used to interact with the underlying IoWorker.
-    pooled_buf: PooledBuf,
+    io_worker_buf: Vec<u8>,
     /// The maximum HTTP/3 stream ID seen on this connection.
     max_stream_seen: u64,
 
@@ -393,8 +384,10 @@ impl<H: DriverHooks> H3Driver<H> {
 
                 dgram_recv,
                 dgram_send: PollSender::new(dgram_send),
-                pooled_buf: BufFactory::get_max_buf(),
                 max_stream_seen: 0,
+                body_recv_buf: BytesMut::with_capacity(BufFactory::MAX_BUF_SIZE)
+                    .limit(BufFactory::MAX_BUF_SIZE),
+                io_worker_buf: vec![0u8; BufFactory::MAX_BUF_SIZE],
 
                 waiting_streams: FuturesUnordered::new(),
 
@@ -504,21 +497,24 @@ impl<H: DriverHooks> H3Driver<H> {
 
             if ctx.fin_or_reset_recv {
                 // Signal end-of-body to upstream
-                permit
-                    .send(InboundFrame::Body(BufFactory::get_empty_buf(), true));
+                permit.send(InboundFrame::Body(Default::default(), true));
                 break StreamStatus::Done {
                     close: ctx.fin_or_reset_sent,
                 };
             }
 
-            match conn.recv_body(qconn, stream_id, &mut self.pooled_buf) {
+            // NOTE: `self.body_recv_buf` is `Limit<BytesMut>` so
+            // `has_remaining_mut()` will indicate if the buffer
+            // has space available until the *limit* is
+            //  reached. (A plain `BytesMut` can reallocate and would always
+            // return true)
+            if !self.body_recv_buf.has_remaining_mut() {
+                self.body_recv_buf =
+                    BytesMut::with_capacity(BufFactory::MAX_BUF_SIZE)
+                        .limit(BufFactory::MAX_BUF_SIZE)
+            };
+            match conn.recv_body_buf(qconn, stream_id, &mut self.body_recv_buf) {
                 Ok(n) => {
-                    let mut body = std::mem::replace(
-                        &mut self.pooled_buf,
-                        BufFactory::get_max_buf(),
-                    );
-                    body.truncate(n);
-
                     ctx.audit_stats.add_downstream_bytes_recvd(n as u64);
                     let event = H3Event::BodyBytesReceived {
                         stream_id,
@@ -526,8 +522,15 @@ impl<H: DriverHooks> H3Driver<H> {
                         fin: false,
                     };
                     let _ = self.h3_event_sender.send(event.into());
-
-                    permit.send(InboundFrame::Body(body, false));
+                    // Take the filled part, leave the remaining capacity
+                    let filled_body = self.body_recv_buf.get_mut().split();
+                    // Sanity check: the remaining spare capacity should equal
+                    // the limit.
+                    debug_assert_eq!(
+                        self.body_recv_buf.get_mut().spare_capacity_mut().len(),
+                        self.body_recv_buf.remaining_mut()
+                    );
+                    permit.send(InboundFrame::Body(filled_body, false));
                 },
                 Err(h3::Error::Done) =>
                     break StreamStatus::Done { close: false },
@@ -746,7 +749,7 @@ impl<H: DriverHooks> H3Driver<H> {
             },
 
             OutboundFrame::Body(body, fin) => {
-                let len = body.as_ref().len();
+                let len = body.len();
                 if len == 0 && !*fin {
                     // quiche doesn't allow sending an empty body when the fin
                     // flag is not set
@@ -760,19 +763,18 @@ impl<H: DriverHooks> H3Driver<H> {
                     // from a closed mpsc channel https://github.com/tokio-rs/tokio/issues/7631
                     ctx.recv = None;
                 }
-                #[cfg(feature = "zero-copy")]
                 let n = conn.send_body_zc(qconn, stream_id, body, *fin)?;
-
-                #[cfg(not(feature = "zero-copy"))]
-                let n = conn.send_body(qconn, stream_id, body, *fin)?;
 
                 audit_stats.add_downstream_bytes_sent(n as _);
                 if n != len {
-                    // Couldn't write the entire body, keep what remains for
-                    // future retry.
-                    #[cfg(not(feature = "zero-copy"))]
-                    body.pop_front(n);
-
+                    // Couldn't write the entire body, `send_body_zc` will
+                    // have trimmed `body` accordingly. The driver keeps
+                    // the remainder of the body to send in the future.
+                    debug_assert_eq!(
+                        n + body.len(),
+                        len,
+                        "send_body_zc() should have trimmed body but did not"
+                    );
                     Err(h3::Error::StreamBlocked)
                 } else {
                     if *fin {
@@ -1211,7 +1213,7 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
 
     #[inline]
     fn buffer(&mut self) -> &mut [u8] {
-        &mut self.pooled_buf
+        &mut self.io_worker_buf
     }
 
     /// Poll the underlying [`quiche::h3::Connection`] for

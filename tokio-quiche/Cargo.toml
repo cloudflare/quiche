@@ -25,7 +25,8 @@ rpk = ["boring/rpk"]
 # Replaces quiche's original congestion control
 # implementation with one adapted from google/quiche.
 gcongestion = ["quiche/gcongestion"]
-# Use quiche with zero-copy send calls.
+# Deprecated: zero-copy sends are now always enabled when using tokio-quiche.
+# This feature is kept for backwards compatibility and only enables `gcongestion`.
 zero-copy = ["gcongestion"]
 
 # Deprecated: use `--cfg capture_keylogs` instead.
@@ -41,7 +42,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(capture_keylogs)'] }
 [dependencies]
 anyhow = { workspace = true }
 boring = { workspace = true }
-buffer-pool = { workspace = true }
+bytes = { workspace = true }
 crossbeam = { workspace = true, default-features = false }
 datagram-socket = { workspace = true }
 foundations = { workspace = true, default-features = false, features = [
@@ -70,7 +71,6 @@ tokio-util = { workspace = true, features = [
   "io",
   "rt",
 ] }
-triomphe = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]

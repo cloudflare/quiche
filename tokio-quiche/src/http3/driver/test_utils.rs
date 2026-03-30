@@ -1,12 +1,15 @@
 use std::time::Instant;
 
 use anyhow::Context;
+use bytes::BufMut;
+use bytes::BytesMut;
 use futures::FutureExt as _;
 use quiche::h3;
 use quiche::h3::Header;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::oneshot;
 
+use crate::buf_factory::BufFactory;
 use crate::http3::driver::client::ClientHooks;
 use crate::http3::driver::hooks::DriverHooks;
 use crate::http3::driver::server::ServerHooks;
@@ -21,8 +24,10 @@ use crate::http3::driver::OutboundFrameSender;
 use crate::http3::driver::ServerH3Event;
 use crate::http3::settings::Http3Settings;
 use crate::quic::HandshakeInfo;
+use crate::quic::QuicheConnection;
 use crate::ApplicationOverQuic as _;
-use quiche::test_utils::Pipe;
+
+type Pipe = quiche::test_utils::Pipe<BufFactory>;
 
 pub fn default_quiche_config() -> quiche::Config {
     let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
@@ -67,26 +72,26 @@ pub fn make_response_trailers() -> Vec<Header> {
 /// ourselvers (to use with the `H3Driver`) or our peer (to use
 /// with `quiche::H3::Connection`
 pub trait GetConnectionForHook {
-    fn qconn(pipe: &mut Pipe) -> &mut quiche::Connection;
-    fn peer_qconn(pipe: &mut Pipe) -> &mut quiche::Connection;
+    fn qconn(pipe: &mut Pipe) -> &mut QuicheConnection;
+    fn peer_qconn(pipe: &mut Pipe) -> &mut QuicheConnection;
 }
 
 impl GetConnectionForHook for ClientHooks {
-    fn qconn(pipe: &mut Pipe) -> &mut quiche::Connection {
+    fn qconn(pipe: &mut Pipe) -> &mut QuicheConnection {
         &mut pipe.client
     }
 
-    fn peer_qconn(pipe: &mut Pipe) -> &mut quiche::Connection {
+    fn peer_qconn(pipe: &mut Pipe) -> &mut QuicheConnection {
         &mut pipe.server
     }
 }
 
 impl GetConnectionForHook for ServerHooks {
-    fn qconn(pipe: &mut Pipe) -> &mut quiche::Connection {
+    fn qconn(pipe: &mut Pipe) -> &mut QuicheConnection {
         &mut pipe.server
     }
 
-    fn peer_qconn(pipe: &mut Pipe) -> &mut quiche::Connection {
+    fn peer_qconn(pipe: &mut Pipe) -> &mut QuicheConnection {
         &mut pipe.client
     }
 }
@@ -96,7 +101,7 @@ impl GetConnectionForHook for ServerHooks {
 /// to allow testing the H3Driver logic. The other endpoint (the peer) is
 /// driven directly by an `quiche::h3::Connection`.
 pub struct DriverTestHelper<H: DriverHooks + GetConnectionForHook> {
-    pub pipe: quiche::test_utils::Pipe,
+    pub pipe: Pipe,
     pub driver: H3Driver<H>,
     pub controller: H3Controller<H>,
     /// Our peer, not using a driver, just the h3::Connection directly
@@ -106,7 +111,7 @@ pub struct DriverTestHelper<H: DriverHooks + GetConnectionForHook> {
 impl<H: DriverHooks + GetConnectionForHook> DriverTestHelper<H> {
     pub fn new() -> anyhow::Result<Self> {
         Self::with_pipe_and_http3_settings(
-            Pipe::with_config(&mut default_quiche_config())?,
+            Pipe::with_config_and_buf(&mut default_quiche_config())?,
             Http3Settings::default(),
         )
     }
@@ -237,9 +242,9 @@ impl<H: DriverHooks + GetConnectionForHook> DriverTestHelper<H> {
         Ok(buf)
     }
 
-    // Repeately calls try_recv() on the given receiver and work_loop_iter()
-    // until the receiver returns an empty or disconnected.
-    // Merges all received parts into a single Vec.
+    /// Repeately calls try_recv() on the given receiver and work_loop_iter()
+    /// until the receiver returns an empty or disconnected.
+    /// Merges all received parts into a single Vec.
     pub fn driver_try_recv_body(
         &mut self, recv: &mut InboundFrameStream,
     ) -> (Vec<u8>, bool, TryRecvError) {
@@ -261,6 +266,10 @@ impl<H: DriverHooks + GetConnectionForHook> DriverTestHelper<H> {
             }
             self.work_loop_iter().unwrap();
         }
+    }
+
+    pub fn driver_set_body_buf_size(&mut self, limit: usize) {
+        self.driver.body_recv_buf = BytesMut::with_capacity(limit).limit(limit);
     }
 }
 
