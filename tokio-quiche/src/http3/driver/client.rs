@@ -339,12 +339,15 @@ impl DriverHooks for ClientHooks {
     }
 
     async fn wait_for_action(
-        &mut self, _qconn: &mut QuicheConnection,
+        &mut self, qconn: &mut QuicheConnection,
     ) -> H3ConnectionResult<()> {
         // Sleep briefly to let the peer open stream credit or raise the
-        // MAX_STREAMS limit, then re-enqueue all waiting requests back into
+        // MAX_STREAMS limit, then re-enqueue waiting requests back into
         // the driver's command channel so that `conn_command` can retry them
         // with a full `&mut H3Driver` on the next loop iteration.
+        //
+        // Only drain up to the number of available bidi streams to avoid
+        // re-queueing requests that would immediately fail.
         tokio::time::sleep(BLOCKED_RETRY_DELAY).await;
 
         let Some(sender) = &self.self_cmd_sender else {
@@ -352,7 +355,10 @@ impl DriverHooks for ClientHooks {
             return Ok(());
         };
 
-        for request in self.queued_requests.drain(..) {
+        let streams_left = qconn.peer_streams_left_bidi() as usize;
+        let to_drain = streams_left.min(self.queued_requests.len());
+
+        for request in self.queued_requests.drain(..to_drain) {
             log::debug!(
                 "retrying queued request after stream-blocked delay";
                 "request_id" => request.request_id,
