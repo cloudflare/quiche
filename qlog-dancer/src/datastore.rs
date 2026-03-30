@@ -35,7 +35,6 @@ use std::fmt::Display;
 use log::error;
 use log::trace;
 use qlog::events::http3::Http3Frame;
-use qlog::events::quic::AckedRanges;
 use qlog::events::quic::QuicFrame;
 use qlog::events::quic::TransportInitiator;
 use qlog::events::EventData;
@@ -1238,50 +1237,12 @@ impl Datastore {
                                 if let Some(pkt_space) =
                                     self.packet_sent.get_mut(&ty)
                                 {
-                                    match ack_ranges {
-                                        AckedRanges::Single(ranges) => {
-                                            // TODO: qlog deserializer seems to
-                                            // get confused (bug?) so work
-                                            // around it detecting single or
-                                            // pairs
-
-                                            for pkt_nums in ranges {
-                                                if pkt_nums.len() == 1 {
-                                                    if let Some(pkt) = pkt_space
-                                                        .get_mut(&pkt_nums[0])
-                                                    {
-                                                        pkt.acked = Some(true);
-                                                    }
-                                                } else if pkt_nums.len() == 2 {
-                                                    // TODO: check ack ranges and
-                                                    // rust
-                                                    // Range mapping is correct
-                                                    let actual_range = pkt_nums
-                                                        [0]..
-                                                        pkt_nums[1] + 1;
-
-                                                    pkt_space
-                                                        .range_mut(actual_range)
-                                                        .for_each(|e| {
-                                                            e.1.acked = Some(true)
-                                                        });
-                                                }
-                                            }
-                                        },
-                                        AckedRanges::Double(ranges) => {
-                                            for range in ranges {
-                                                // TODO: check ack ranges and rust
-                                                // Range mapping is correct
-                                                let actual_range =
-                                                    range.0..range.1 + 1;
-
-                                                pkt_space
-                                                    .range_mut(actual_range)
-                                                    .for_each(|e| {
-                                                        e.1.acked = Some(true)
-                                                    });
-                                            }
-                                        },
+                                    for range in ack_ranges {
+                                        // TODO: check ack ranges and rust
+                                        // Range mapping is correct
+                                        pkt_space
+                                            .range_mut(range.as_range_inclusive())
+                                            .for_each(|e| e.1.acked = Some(true));
                                     }
                                 }
                             }

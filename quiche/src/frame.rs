@@ -34,7 +34,7 @@ use crate::range_buf::RangeBuf;
 use crate::ranges;
 
 #[cfg(feature = "qlog")]
-use qlog::events::quic::AckedRanges;
+use qlog::events::quic::AckRange;
 #[cfg(feature = "qlog")]
 use qlog::events::quic::ErrorSpace;
 #[cfg(feature = "qlog")]
@@ -853,9 +853,10 @@ impl Frame {
                 ranges,
                 ecn_counts,
             } => {
-                let ack_ranges = AckedRanges::Double(
-                    ranges.iter().map(|r| (r.start, r.end - 1)).collect(),
-                );
+                let ack_ranges = ranges
+                    .iter()
+                    .map(|r| AckRange::new(r.start, r.end - 1))
+                    .collect();
 
                 let (ect0, ect1, ce) = match ecn_counts {
                     Some(ecn) => (
