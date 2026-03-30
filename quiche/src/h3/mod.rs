@@ -424,6 +424,10 @@ pub enum Error {
     /// The requested operation cannot be served over HTTP/3. Peer should retry
     /// over HTTP/1.1.
     VersionFallback,
+
+    /// A datagram was received that could not be associated with any known
+    /// request, or was malformed per RFC 9297.
+    DatagramError,
 }
 
 /// HTTP/3 error codes sent on the wire.
@@ -477,6 +481,8 @@ pub enum WireErrorCode {
     /// The requested operation cannot be served over HTTP/3. The peer should
     /// retry over HTTP/1.1.
     VersionFallback      = 0x110,
+    /// An error with HTTP/3 datagram handling as defined in RFC 9297.
+    DatagramError        = 0x33,
 }
 
 impl Error {
@@ -501,6 +507,7 @@ impl Error {
             Error::RequestCancelled => WireErrorCode::RequestCancelled as u64,
             Error::RequestIncomplete => WireErrorCode::RequestIncomplete as u64,
             Error::MessageError => WireErrorCode::MessageError as u64,
+            Error::DatagramError => WireErrorCode::DatagramError as u64,
             Error::ConnectError => WireErrorCode::ConnectError as u64,
             Error::VersionFallback => WireErrorCode::VersionFallback as u64,
         }
@@ -529,6 +536,7 @@ impl Error {
             Error::MessageError => -18,
             Error::ConnectError => -19,
             Error::VersionFallback => -20,
+            Error::DatagramError => -21,
 
             Error::TransportError(quic_error) => quic_error.to_c() - 1000,
         }
@@ -968,6 +976,10 @@ pub struct Connection {
     local_settings: ConnectionSettings,
     peer_settings: ConnectionSettings,
 
+    /// Peer's SETTINGS_H3_DATAGRAM value from a previous session, stored
+    /// for 0-RTT validation per RFC 9297 Section 2.1.1.
+    zero_rtt_h3_datagram: Option<u64>,
+
     control_stream_id: Option<u64>,
     peer_control_stream_id: Option<u64>,
 
@@ -1022,6 +1034,8 @@ impl Connection {
                 additional_settings: Default::default(),
                 raw: Default::default(),
             },
+
+            zero_rtt_h3_datagram: None,
 
             control_stream_id: None,
             peer_control_stream_id: None,
@@ -1744,6 +1758,16 @@ impl Connection {
     /// [`poll()`]: struct.Connection.html#method.poll
     pub fn extended_connect_enabled_by_peer(&self) -> bool {
         self.peer_settings.connect_protocol_enabled == Some(1)
+    }
+
+    /// Stores the peer's SETTINGS_H3_DATAGRAM value for 0-RTT validation.
+    ///
+    /// Clients SHOULD call this with the server's setting from a previous
+    /// session before attempting 0-RTT. When the server's new SETTINGS
+    /// arrive, they will be validated against this stored value per
+    /// RFC 9297 Section 2.1.1.
+    pub fn set_zero_rtt_h3_datagram(&mut self, value: u64) {
+        self.zero_rtt_h3_datagram = Some(value);
     }
 
     /// Reads request or response body data into the provided buffer.
@@ -2869,6 +2893,22 @@ impl Connection {
                             true,
                             Error::SettingsError.to_wire(),
                             b"H3_DATAGRAM sent with value 1 but max_datagram_frame_size TP not set.",
+                        )?;
+
+                        return Err(Error::SettingsError);
+                    }
+                }
+
+                // RFC 9297 Section 2.1.1: When resuming with 0-RTT, the
+                // server's new SETTINGS_H3_DATAGRAM MUST be >= the stored
+                // value from the previous session.
+                if let Some(stored) = self.zero_rtt_h3_datagram {
+                    let new_val = h3_datagram.unwrap_or(0);
+                    if new_val < stored {
+                        conn.close(
+                            true,
+                            Error::SettingsError.to_wire(),
+                            b"0-RTT H3_DATAGRAM value decreased.",
                         )?;
 
                         return Err(Error::SettingsError);
@@ -6249,6 +6289,81 @@ mod tests {
     }
 
     #[test]
+    /// Tests that 0-RTT SETTINGS_H3_DATAGRAM validation rejects decreased
+    /// values per RFC 9297 Section 2.1.1.
+    fn zero_rtt_h3_datagram_decreased() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        assert_eq!(s.pipe.handshake(), Ok(()));
+
+        // Simulate 0-RTT: client stored SETTINGS_H3_DATAGRAM = 1 from
+        // a previous session.
+        s.client.set_zero_rtt_h3_datagram(1);
+
+        // Server sends SETTINGS without h3_datagram (effectively value 0).
+        s.server.send_settings(&mut s.pipe.server).unwrap();
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        // Client MUST reject because new value (0) < stored value (1).
+        assert_eq!(
+            s.client.poll(&mut s.pipe.client),
+            Err(Error::SettingsError)
+        );
+    }
+
+    #[test]
+    /// Tests that 0-RTT SETTINGS_H3_DATAGRAM validation accepts equal
+    /// values per RFC 9297 Section 2.1.1.
+    fn zero_rtt_h3_datagram_unchanged() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.enable_dgram(true, 1000, 1000);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        assert_eq!(s.pipe.handshake(), Ok(()));
+
+        // Client stored SETTINGS_H3_DATAGRAM = 1 from previous session.
+        s.client.set_zero_rtt_h3_datagram(1);
+
+        // Server sends SETTINGS with h3_datagram = 1 (equal to stored).
+        s.server.send_settings(&mut s.pipe.server).unwrap();
+        assert_eq!(s.pipe.advance(), Ok(()));
+
+        // Should succeed (1 >= 1).
+        assert_eq!(s.client.poll(&mut s.pipe.client), Err(Error::Done));
+    }
+
+    #[test]
     /// Tests that receiving a H3_DATAGRAM setting when no TP is set generates
     /// an error.
     fn dgram_setting_no_tp() {
@@ -7562,4 +7677,6 @@ pub mod frame;
 mod frame;
 #[doc(hidden)]
 pub mod qpack;
+#[doc(hidden)]
+pub mod capsule;
 mod stream;

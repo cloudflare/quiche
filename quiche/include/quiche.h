@@ -1028,6 +1028,9 @@ enum quiche_h3_error {
     // over HTTP/1.1.
     QUICHE_H3_ERR_VERSION_FALLBACK = -20,
 
+    // An error with HTTP/3 datagram handling (RFC 9297).
+    QUICHE_H3_ERR_DATAGRAM_ERROR = -21,
+
     // The following QUICHE_H3_TRANSPORT_ERR_* errors are propagated
     // from the QUIC transport layer.
 

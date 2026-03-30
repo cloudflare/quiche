@@ -468,8 +468,8 @@ const DEFAULT_MAX_DGRAM_QUEUE_LEN: usize = 0;
 // The default length of PATH_CHALLENGE receive queue.
 const DEFAULT_MAX_PATH_CHALLENGE_RX_QUEUE_LEN: usize = 3;
 
-// The DATAGRAM standard recommends either none or 65536 as maximum DATAGRAM
-// frames size. We enforce the recommendation for forward compatibility.
+// RFC 9221 recommends either none or 65536 as maximum DATAGRAM frame size.
+// We enforce the recommendation for forward compatibility.
 const MAX_DGRAM_FRAME_SIZE: u64 = 65536;
 
 // The length of the payload length field.
@@ -1146,7 +1146,7 @@ impl Config {
     /// Configures whether to enable receiving DATAGRAM frames.
     ///
     /// When enabled, the `max_datagram_frame_size` transport parameter is set
-    /// to 65536 as recommended by draft-ietf-quic-datagram-01.
+    /// to 65536 as recommended by RFC 9221.
     ///
     /// The default is `false`.
     pub fn enable_dgram(
@@ -7582,6 +7582,25 @@ impl<F: BufFactory> Connection<F> {
         // Record the max_active_conn_id parameter advertised by the peer.
         self.ids
             .set_source_conn_id_limit(peer_params.active_conn_id_limit);
+
+        // RFC 9221 Section 3: When resuming with 0-RTT, the server's new
+        // max_datagram_frame_size MUST be >= the value from the previous
+        // session that was used to accept early data.
+        if self.is_in_early_data() {
+            if let Some(old_size) =
+                self.peer_transport_params.max_datagram_frame_size
+            {
+                match peer_params.max_datagram_frame_size {
+                    Some(new_size) if new_size < old_size => {
+                        return Err(Error::InvalidTransportParam);
+                    },
+                    None => {
+                        return Err(Error::InvalidTransportParam);
+                    },
+                    _ => (),
+                }
+            }
+        }
 
         self.peer_transport_params = peer_params;
 
