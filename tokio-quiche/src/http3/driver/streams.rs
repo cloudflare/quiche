@@ -114,13 +114,14 @@ impl StreamCtx {
     /// in response when it receives a STOP_SENDING (as recommended by the
     /// RFC)
     pub(crate) fn handle_recvd_stop_sending(&mut self, wire_err_code: u64) {
-        // It is valid to receive STOP_SENDING after we already sent fin
-        // (or a reset): the write side is already finished and there is
-        // nothing left to do.  Record the error code for audit purposes
-        // and return early.
+        // Update stats even if the stream is already closing.
+        self.audit_stats
+            .set_recvd_stop_sending_error_code(wire_err_code as i64);
+
         if self.fin_or_reset_sent {
-            self.audit_stats
-                .set_recvd_stop_sending_error_code(wire_err_code as i64);
+            // It is valid to receive STOP_SENDING after we already sent fin
+            // (or a reset): the write side is already finished and there is
+            // nothing left to do.
             return;
         }
 
@@ -128,8 +129,6 @@ impl StreamCtx {
         // write direction has closed. We still need to continue
         // reading from the stream until we receive a RESET_FRAME or
         // `fin`.
-        self.audit_stats
-            .set_recvd_stop_sending_error_code(wire_err_code as i64);
         self.fin_or_reset_sent = true;
         // Drop any pending data and close the write side.
         // We can't accept additional frames
