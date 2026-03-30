@@ -167,15 +167,21 @@ pub(crate) struct FlowCtx {
     /// Sends inbound datagrams to a local task.
     send: mpsc::Sender<InboundFrame>,
     // No `recv`: all outbound datagrams are sent on a shared channel in H3Driver
+
+    /// The H3 stream ID that owns this datagram flow.
+    pub(crate) stream_id: u64,
 }
 
 impl FlowCtx {
     /// Creates a new [FlowCtx]. This method returns the context itself
     /// as well as the datagram receiver for this flow.
-    pub(crate) fn new(capacity: usize) -> (Self, InboundFrameStream) {
+    pub(crate) fn new(
+        stream_id: u64, capacity: usize,
+    ) -> (Self, InboundFrameStream) {
         let (forward_sender, forward_receiver) = mpsc::channel(capacity);
         let ctx = FlowCtx {
             send: forward_sender,
+            stream_id,
         };
         (ctx, forward_receiver)
     }

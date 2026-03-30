@@ -408,15 +408,16 @@ impl<H: DriverHooks> H3Driver<H> {
     }
 
     /// Retrieve the [FlowCtx] associated with the given `flow_id`. If no
-    /// context is found, a new one will be created.
+    /// context is found, a new one will be created with the given
+    /// `stream_id` as the owning stream.
     fn get_or_insert_flow(
-        &mut self, flow_id: u64,
+        &mut self, flow_id: u64, stream_id: u64,
     ) -> H3ConnectionResult<&mut FlowCtx> {
         use std::collections::btree_map::Entry;
         Ok(match self.flow_map.entry(flow_id) {
             Entry::Vacant(e) => {
                 // This is a datagram for a new flow we haven't seen before
-                let (flow, recv) = FlowCtx::new(FLOW_CAPACITY);
+                let (flow, recv) = FlowCtx::new(stream_id, FLOW_CAPACITY);
                 let flow_req = H3Event::NewFlow {
                     flow_id,
                     recv,
@@ -881,13 +882,51 @@ impl<H: DriverHooks> H3Driver<H> {
     fn dgram_ready(
         &mut self, qconn: &mut QuicheConnection, frame: OutboundFrame,
     ) -> H3ConnectionResult<()> {
+        // RFC 9297 §2.1.1: MUST NOT send QUIC DATAGRAM frames until
+        // SETTINGS_H3_DATAGRAM=1 has been both sent and received.
+        let dgram_negotiated = self
+            .conn
+            .as_ref()
+            .map_or(false, |c| c.dgram_enabled_by_peer(qconn));
+
         let mut frame = Ok(frame);
 
         loop {
             match frame {
                 Ok(OutboundFrame::Datagram(dgram, flow_id)) => {
-                    // Drop datagrams if there is no capacity
-                    let _ = datagram::send_h3_dgram(qconn, flow_id, dgram);
+                    if !dgram_negotiated {
+                        // Drop: SETTINGS not yet exchanged.
+                        log::debug!(
+                            "dropping outbound datagram: SETTINGS_H3_DATAGRAM not negotiated";
+                            "flow_id" => flow_id,
+                        );
+                    } else {
+                        // RFC 9297 §2.1: MUST NOT send when stream send
+                        // side is not open.
+                        let stream_id = self
+                            .flow_map
+                            .get(&flow_id)
+                            .map(|f| f.stream_id)
+                            .unwrap_or(flow_id * 4);
+                        let send_open = self
+                            .stream_map
+                            .get(&stream_id)
+                            .map(|c| !c.fin_or_reset_sent)
+                            .unwrap_or(false);
+                        if send_open {
+                            let res =
+                                datagram::send_h3_dgram(qconn, flow_id, dgram);
+                            if let Err(e) = res {
+                                if e != quiche::Error::Done {
+                                    log::warn!(
+                                        "failed to send datagram";
+                                        "flow_id" => flow_id,
+                                        "error" => ?e,
+                                    );
+                                }
+                            }
+                        }
+                    }
                 },
                 Ok(OutboundFrame::FlowShutdown { flow_id, stream_id }) => {
                     self.shutdown_stream(
@@ -1056,15 +1095,72 @@ impl<H: DriverHooks> H3Driver<H> {
 impl<H: DriverHooks> H3Driver<H> {
     /// Reads all buffered datagrams out of `qconn` and distributes them to
     /// their flow channels.
+    ///
+    /// RFC 9297 Section 2.1: datagrams received for a stream whose receive
+    /// side is closed are silently dropped.
     fn process_available_dgrams(
         &mut self, qconn: &mut QuicheConnection,
     ) -> H3ConnectionResult<()> {
         loop {
             match datagram::receive_h3_dgram(qconn) {
                 Ok((flow_id, dgram)) => {
-                    self.get_or_insert_flow(flow_id)?.send_best_effort(dgram);
+                    // RFC 9297 Section 2.1: if the corresponding stream's
+                    // receive side is closed, silently drop the datagram.
+                    // Use the stream_id stored in the flow if available,
+                    // otherwise fall back to Quarter Stream ID.
+                    let stream_id = self
+                        .flow_map
+                        .get(&flow_id)
+                        .map(|f| f.stream_id)
+                        .unwrap_or(flow_id * 4);
+                    if let Some(ctx) = self.stream_map.get(&stream_id) {
+                        if ctx.fin_or_reset_recv {
+                            continue;
+                        }
+                    }
+
+                    // Deliver to existing flows, or create a new flow if the
+                    // stream was set up for datagrams.
+                    if let Some(flow) = self.flow_map.get_mut(&flow_id) {
+                        flow.send_best_effort(dgram);
+                    } else if let Some(ctx) =
+                        self.stream_map.get(&stream_id)
+                    {
+                        if ctx.associated_dgram_flow_id.is_some() {
+                            self.get_or_insert_flow(flow_id, stream_id)?
+                                .send_best_effort(dgram);
+                        } else {
+                            // RFC 9297 §2: datagram received for a stream
+                            // with no known datagram semantics — MUST abort
+                            // the request stream with H3_DATAGRAM_ERROR.
+                            let _ = qconn.stream_shutdown(
+                                stream_id,
+                                quiche::Shutdown::Read,
+                                WireErrorCode::DatagramError as u64,
+                            );
+                            let _ = qconn.stream_shutdown(
+                                stream_id,
+                                quiche::Shutdown::Write,
+                                WireErrorCode::DatagramError as u64,
+                            );
+                        }
+                    }
+                    // else: no stream — silently drop per RFC 9297 §2.1.
                 },
                 Err(quiche::Error::Done) => return Ok(()),
+                Err(quiche::Error::InvalidFrame) => {
+                    // RFC 9297 §2.1: truncated Quarter Stream ID or
+                    // value > 2^60-1 MUST be treated as an HTTP/3
+                    // connection error of type H3_DATAGRAM_ERROR.
+                    let _ = qconn.close(
+                        true,
+                        WireErrorCode::DatagramError as u64,
+                        b"Malformed HTTP/3 datagram",
+                    );
+                    return Err(H3ConnectionError::H3(
+                        h3::Error::DatagramError,
+                    ));
+                },
                 Err(err) => return Err(H3ConnectionError::from(err)),
             }
         }
