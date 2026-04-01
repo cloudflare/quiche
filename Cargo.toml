@@ -69,7 +69,7 @@ task-killswitch = { version = "0.2.1", path = "./task-killswitch" }
 thiserror = { version = "2" }
 humantime = { version = "2" }
 tokio = { version = "1.44", default-features = false }
-tokio-quiche = { version = "0.17.0", path = "./tokio-quiche" }
+tokio-quiche = { version = "0.18.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 url = { version = "2" }
