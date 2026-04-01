@@ -30,7 +30,7 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: 'recursive'
 
@@ -52,7 +52,9 @@ jobs:
       - name: Build OpenSSL
         if: ${{ matrix.tls-feature == 'openssl' }}
         run: |
-          git clone https://github.com/quictls/openssl
+          # TODO openssl has been archived, move to new project: https://github.com/quictls/quictls
+          # Attention: Default branch is 3.1.7, not 3.3.0. Latest tag was openssl-3.3.0-quic1
+          git clone --depth 1 https://github.com/quictls/openssl
           cd openssl
           ./Configure --prefix="$PWD/install"
           make -j"$(nproc)"
@@ -118,7 +120,7 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: 'recursive'
 
@@ -147,7 +149,7 @@ jobs:
       IPHONEOS_DEPLOYMENT_TARGET: "10.0"
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: 'recursive'
 
@@ -181,7 +183,7 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: 'recursive'
 
@@ -193,16 +195,16 @@ jobs:
 
       - name: Set up MinGW for 64 bit
         if: matrix.target == 'x86_64-pc-windows-gnu'
-        uses: bwoodsend/setup-winlibs-action@v1.10
+        uses: bwoodsend/setup-winlibs-action@v1.16
         with:
-          tag: 12.2.0-16.0.0-10.0.0-msvcrt-r5
+          tag: 15.1.0posix-13.0.0-msvcrt-r2
 
       - name: Set up MinGW for 32 bit
         if: matrix.target == 'i686-pc-windows-gnu'
-        uses: bwoodsend/setup-winlibs-action@v1.10
+        uses: bwoodsend/setup-winlibs-action@v1.16
         with:
           architecture: i686
-          tag: 12.2.0-16.0.0-10.0.0-msvcrt-r5
+          tag: 15.1.0posix-13.0.0-msvcrt-r2
 
       - name: Install dependencies
         uses: crazy-max/ghaction-chocolatey@v3
@@ -227,7 +229,7 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: 'recursive'
 
@@ -252,7 +254,7 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: 'recursive'
 
@@ -275,7 +277,7 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: 'recursive'
 
@@ -303,7 +305,7 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: 'recursive'
 
