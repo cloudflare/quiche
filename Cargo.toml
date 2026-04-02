@@ -40,6 +40,7 @@ bytes = { version = "1.11.1" }
 crossbeam = { version = "0.8.1", default-features = false }
 dashmap = { version = "6" }
 datagram-socket = { version = "0.8.0", path = "./datagram-socket" }
+debug_panic = "0.2.1"
 env_logger = "0.11"
 foundations = { version = ">=4,<6", default-features = false }
 futures = { version = "0.3" }
