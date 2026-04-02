@@ -971,6 +971,41 @@ fn custom_limit_handshake_data(
 }
 
 #[rstest]
+fn amplification_limited_stat() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert-big.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+
+    let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    // Server sends handshake until amplification budget is exhausted.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    assert!(!flight.is_empty());
+    assert!(pipe.server.stats().amplification_limited_count > 0);
+    // Complete handshake and verifies client address.
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    // Counter should not increment after address verification.
+    let count_after_handshake = pipe.server.stats().amplification_limited_count;
+    let flight = test_utils::emit_flight(&mut pipe.server);
+    assert!(flight.is_ok() || flight == Err(Error::Done));
+    assert_eq!(
+        pipe.server.stats().amplification_limited_count,
+        count_after_handshake
+    );
+}
+
+#[rstest]
 fn streamio(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));

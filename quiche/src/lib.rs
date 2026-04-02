@@ -1592,6 +1592,10 @@ where
     /// indicating the peer is blocked on opening new unidirectional streams.
     streams_blocked_uni_recv_count: u64,
 
+    /// The number of times send() was blocked because the anti-amplification
+    /// budget (bytes received × max_amplification_factor) was exhausted.
+    amplification_limited_count: u64,
+
     /// Tracks if the connection hit the peer's bidi or uni stream limit, and if
     /// STREAMS_BLOCKED frames are pending transmission.
     streams_blocked_bidi_state: StreamsBlockedState,
@@ -2225,6 +2229,8 @@ impl<F: BufFactory> Connection<F> {
 
             streams_blocked_bidi_recv_count: 0,
             streams_blocked_uni_recv_count: 0,
+
+            amplification_limited_count: 0,
 
             streams_blocked_bidi_state: Default::default(),
             streams_blocked_uni_state: Default::default(),
@@ -5439,7 +5445,16 @@ impl<F: BufFactory> Connection<F> {
             path.recovery.update_app_limited(false);
         }
 
+        let had_send_budget = path.max_send_bytes > 0;
         path.max_send_bytes = path.max_send_bytes.saturating_sub(written);
+        if self.is_server &&
+            !path.verified_peer_address &&
+            had_send_budget &&
+            path.max_send_bytes == 0
+        {
+            self.amplification_limited_count =
+                self.amplification_limited_count.saturating_add(1);
+        }
 
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr_ty == Type::Handshake {
@@ -7721,6 +7736,7 @@ impl<F: BufFactory> Connection<F> {
             streams_blocked_bidi_recv_count: self.streams_blocked_bidi_recv_count,
             streams_blocked_uni_recv_count: self.streams_blocked_uni_recv_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
+            amplification_limited_count: self.amplification_limited_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
             tx_buffered_state: self.tx_buffered_state,
         }
@@ -9339,6 +9355,10 @@ pub struct Stats {
 
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
+
+    /// The number of times send() was blocked because the anti-amplification
+    /// budget (bytes received × max_amplification_factor) was exhausted.
+    pub amplification_limited_count: u64,
 
     /// Total duration during which this side of the connection was
     /// actively sending bytes or waiting for those bytes to be acked.
