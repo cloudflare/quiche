@@ -2390,6 +2390,7 @@ impl<F: BufFactory> Connection<F> {
             now,
             trace,
             self.qlog.level,
+            qlog::streamer::EventTimePrecision::MicroSeconds,
             writer,
         );
 
