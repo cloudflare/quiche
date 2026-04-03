@@ -330,6 +330,10 @@ pub struct H3Driver<H: DriverHooks> {
     h3_event_sender: mpsc::UnboundedSender<H::Event>,
     /// Receives [`H3Command`]s from the [H3Controller] paired with this driver.
     cmd_recv: mpsc::UnboundedReceiver<H::Command>,
+    /// A sender that feeds back into `cmd_recv`. Used by hooks that need to
+    /// re-queue commands (e.g. retrying blocked requests) without access to
+    /// the [H3Controller]'s copy of the sender.
+    cmd_sender: mpsc::UnboundedSender<H::Command>,
 
     /// A map of stream IDs to their [StreamCtx]. This is mainly used to
     /// retrieve the internal Tokio channels associated with the stream.
@@ -378,6 +382,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 hooks: H::new(&http3_settings),
                 h3_event_sender,
                 cmd_recv,
+                cmd_sender: cmd_sender.clone(),
 
                 stream_map: BTreeMap::new(),
                 flow_map: BTreeMap::new(),
@@ -398,6 +403,15 @@ impl<H: DriverHooks> H3Driver<H> {
                 h3_event_recv: Some(h3_event_recv),
             },
         )
+    }
+
+    /// Returns a sender that feeds back into this driver's own `cmd_recv`.
+    ///
+    /// Hooks that need to re-queue commands (e.g. retrying a request that
+    /// was temporarily blocked) can use this sender without needing access
+    /// to the paired [H3Controller].
+    pub(crate) fn self_cmd_sender(&self) -> &mpsc::UnboundedSender<H::Command> {
+        &self.cmd_sender
     }
 
     /// Retrieve the [FlowCtx] associated with the given `flow_id`. If no
