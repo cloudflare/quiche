@@ -1120,6 +1120,20 @@ void quiche_h3_config_set_qpack_blocked_streams(quiche_h3_config *config, uint64
 // Sets the `SETTINGS_ENABLE_CONNECT_PROTOCOL` setting.
 void quiche_h3_config_enable_extended_connect(quiche_h3_config *config, bool enabled);
 
+// Sets an additional HTTP/3 setting.
+//
+// Returns 0 on success. Returns `QUICHE_H3_ERR_SETTINGS_ERROR` if the setting
+// is already present in the config or if it is one of the settings already
+// handled by the library:
+//
+// - SETTINGS_QPACK_MAX_TABLE_CAPACITY
+// - SETTINGS_MAX_FIELD_SECTION_SIZE
+// - SETTINGS_QPACK_BLOCKED_STREAMS
+// - SETTINGS_ENABLE_CONNECT_PROTOCOL
+// - SETTINGS_H3_DATAGRAM
+int quiche_h3_config_set_additional_setting(quiche_h3_config *config,
+                                            uint64_t setting, uint64_t value);
+
 // Frees the HTTP/3 config object.
 void quiche_h3_config_free(quiche_h3_config *config);
 
