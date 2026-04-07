@@ -8585,6 +8585,50 @@ fn is_readable(
     assert!(!pipe.client.is_readable());
 }
 
+/// Tests that the dgram_lost stat is incremented when a DATAGRAM frame is
+/// declared lost.
+#[rstest]
+fn dgram_lost_stat(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.enable_dgram(true, 10, 10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Verify initial state: no datagrams lost.
+    assert_eq!(pipe.client.path_stats().next().unwrap().dgram_lost, 0);
+
+    // Client sends a datagram.
+    assert_eq!(pipe.client.dgram_send(b"hello, world"), Ok(()));
+
+    // Emit the datagram packet but don't deliver it to the server.
+    assert!(test_utils::emit_flight(&mut pipe.client).is_ok());
+
+    // Trigger loss detection.
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
+
+    // Trigger the lost-frames processing by calling send().
+    pipe.client.send(&mut buf).unwrap();
+
+    // Verify dgram_lost stat is incremented.
+    assert_eq!(pipe.client.path_stats().next().unwrap().dgram_lost, 1);
+}
+
 #[rstest]
 fn close(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
