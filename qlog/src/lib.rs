@@ -265,6 +265,7 @@
 //!     std::time::Instant::now(),
 //!     trace,
 //!     qlog::events::EventImportance::Base,
+//!     qlog::streamer::EventTimePrecision::NanoSeconds,
 //!     Box::new(file),
 //! );
 //!
@@ -297,6 +298,7 @@
 //! #     std::time::Instant::now(),
 //! #     trace,
 //! #     qlog::events::EventImportance::Base,
+//! #     qlog::streamer::EventTimePrecision::NanoSeconds,
 //! #     Box::new(file),
 //! # );
 //!
@@ -364,6 +366,7 @@
 //! #     std::time::Instant::now(),
 //! #     trace,
 //! #     qlog::events::EventImportance::Base,
+//! #     qlog::streamer::EventTimePrecision::NanoSeconds,
 //! #     Box::new(file),
 //! # );
 //! streamer.finish_log().ok();

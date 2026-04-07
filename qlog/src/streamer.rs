@@ -30,20 +30,45 @@ use crate::events::EventType;
 use crate::events::Eventable;
 use crate::events::ExData;
 
-/// Multiplier for rounding qlog event time values to at most 6 decimal places.
-/// Since event times are in milliseconds, this provides microsecond precision.
-const TIME_PRECISION_MULTIPLIER: f64 = 1e6;
+/// Controls the time precisions of events.
+///
+/// Times are always logged in units of whole milliseconds with optional
+/// precision, determining the number of decimal places output by the
+/// serializer.
+pub enum EventTimePrecision {
+    /// Logging may contain 1 decimal place to ensure float serialization e.g.,
+    /// 1.0, 2.0,
+    MilliSeconds,
+    /// Logged up to 3 decimal places e.g., 1.234, 2.001
+    MicroSeconds,
+    /// Logged up to 6 decimal places e.g., 1.234567, 2.001001
+    NanoSeconds,
+}
 
-/// Computes elapsed time in milliseconds since `start`, rounded to 6 decimal
-/// places. In test builds, always returns 0.0 for deterministic output.
-fn elapsed_millis(start: std::time::Instant, now: std::time::Instant) -> f64 {
-    let dur = if cfg!(test) {
-        std::time::Duration::from_secs(0)
-    } else {
-        now.duration_since(start)
-    };
-    let ms = dur.as_secs_f64() * 1000.0;
-    (ms * TIME_PRECISION_MULTIPLIER).round() / TIME_PRECISION_MULTIPLIER
+/// Converts a [`Duration`] to milliseconds as `f64` using the requested
+/// precision variant.
+fn duration_to_millis(
+    dur: std::time::Duration, precision: &EventTimePrecision,
+) -> f64 {
+    match precision {
+        EventTimePrecision::MilliSeconds => dur.as_millis() as f64,
+        EventTimePrecision::MicroSeconds => dur.as_micros() as f64 / 1_000.0,
+        EventTimePrecision::NanoSeconds => dur.as_nanos() as f64 / 1_000_000.0,
+    }
+}
+
+/// Computes elapsed time in milliseconds since `start`, based on the provided
+/// `precision`. In test builds, always returns 0.0 for deterministic output.
+fn elapsed_millis(
+    start: std::time::Instant, now: std::time::Instant,
+    precision: &EventTimePrecision,
+) -> f64 {
+    if cfg!(test) {
+        return 0.0;
+    }
+
+    let dur = now.saturating_duration_since(start);
+    duration_to_millis(dur, precision)
 }
 
 /// A helper object specialized for streaming JSON-serialized qlog to a
@@ -71,6 +96,7 @@ pub struct QlogStreamer {
     qlog: QlogSeq,
     state: StreamerState,
     log_level: EventImportance,
+    time_precision: EventTimePrecision,
 }
 
 impl QlogStreamer {
@@ -87,7 +113,7 @@ impl QlogStreamer {
     pub fn new(
         title: Option<String>, description: Option<String>,
         start_time: std::time::Instant, trace: TraceSeq,
-        log_level: EventImportance,
+        log_level: EventImportance, time_precision: EventTimePrecision,
         writer: Box<dyn std::io::Write + Send + Sync>,
     ) -> Self {
         let qlog = QlogSeq {
@@ -104,6 +130,7 @@ impl QlogStreamer {
             qlog,
             state: StreamerState::Initial,
             log_level,
+            time_precision,
         }
     }
 
@@ -198,7 +225,11 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        event.set_time(elapsed_millis(self.start_time, now));
+        event.set_time(elapsed_millis(
+            self.start_time,
+            now,
+            &self.time_precision,
+        ));
 
         if pretty {
             self.add_event_pretty(event)
@@ -293,7 +324,7 @@ impl QlogStreamer {
         }
 
         let event = Event::with_time_ex(
-            elapsed_millis(self.start_time, now),
+            elapsed_millis(self.start_time, now, &self.time_precision),
             event_data,
             ex_data,
         );
@@ -455,6 +486,7 @@ mod tests {
             std::time::Instant::now(),
             trace,
             EventImportance::Base,
+            EventTimePrecision::NanoSeconds,
             writer,
         );
 
@@ -517,6 +549,7 @@ mod tests {
             std::time::Instant::now(),
             trace,
             EventImportance::Base,
+            EventTimePrecision::NanoSeconds,
             writer,
         );
 
@@ -602,6 +635,7 @@ mod tests {
             std::time::Instant::now(),
             trace,
             EventImportance::Base,
+            EventTimePrecision::NanoSeconds,
             writer,
         );
 
@@ -622,5 +656,39 @@ mod tests {
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
 
         pretty_assertions::assert_eq!(log_string, written_string);
+    }
+
+    #[test]
+    fn elapsed_millis_precision() {
+        let dur = std::time::Duration::from_nanos(1_234_567);
+        assert_eq!(
+            duration_to_millis(dur, &EventTimePrecision::MilliSeconds),
+            1.0
+        );
+        assert_eq!(
+            duration_to_millis(dur, &EventTimePrecision::MicroSeconds),
+            1.234000
+        );
+        assert_eq!(
+            duration_to_millis(dur, &EventTimePrecision::NanoSeconds),
+            1.234567
+        );
+    }
+
+    #[test]
+    fn elapsed_millis_zero_duration_all_precisions() {
+        let dur = std::time::Duration::from_secs(0);
+        assert_eq!(
+            duration_to_millis(dur, &EventTimePrecision::MilliSeconds),
+            0.0
+        );
+        assert_eq!(
+            duration_to_millis(dur, &EventTimePrecision::MicroSeconds),
+            0.0
+        );
+        assert_eq!(
+            duration_to_millis(dur, &EventTimePrecision::NanoSeconds),
+            0.0
+        );
     }
 }

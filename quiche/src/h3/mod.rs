@@ -1103,8 +1103,10 @@ impl Connection {
     ///
     /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
-    /// happens the application should retry the operation once the stream is
-    /// reported as writable again.
+    /// happens the application should retry the **entire** `send_request` call
+    /// once the stream is reported as writable again. Any partial state created
+    /// by the failed call is rolled back, so repeating the call with the same
+    /// arguments is safe.
     ///
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
@@ -1136,7 +1138,18 @@ impl Connection {
             return Err(e.into());
         };
 
-        self.send_headers(conn, stream_id, headers, fin)?;
+        if let Err(e) = self.send_headers(conn, stream_id, headers, fin) {
+            // If the stream was blocked before any header bytes were written,
+            // the QUIC stream exists but carries no H3 data yet. Roll back the
+            // H3-layer stream entry so the stream ID is not consumed and a
+            // subsequent retry of `send_request` starts from a clean state,
+            // consistent with the `StreamBlocked` path above.
+            if e == Error::StreamBlocked {
+                self.streams.remove(&stream_id);
+            }
+
+            return Err(e);
+        }
 
         // To avoid skipping stream IDs, we only calculate the next available
         // stream ID when a request has been successfully buffered.
@@ -5947,6 +5960,76 @@ mod tests {
         assert_eq!(s.pipe.client.stream_data_blocked_sent_count, 0);
         assert_eq!(s.pipe.client.data_blocked_recv_count, 0);
         assert_eq!(s.pipe.client.stream_data_blocked_recv_count, 0);
+    }
+
+    #[test]
+    /// Ensure that the connection does not consume a stream ID when
+    /// send_request fails with StreamBlocked due to hitting the
+    /// MAX_DATA flow control limit when attempting to send headers.
+    /// The headers are sent successfully after a MAX_DATA update.
+    fn headers_blocked_by_max_data_success_on_retry() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test/with/long/url"),
+        ];
+
+        // After the HTTP handshake, some bytes of connection flow
+        // control have been consumed.  The serialized request does
+        // not fit in the remaining connection-level flow control
+        // limit.  send_request fails without creating a stream.
+        assert_eq!(
+            s.client.send_request(&mut s.pipe.client, &req, true),
+            Err(Error::StreamBlocked)
+        );
+
+        // Verify that stream 0 does not exist in the H3 stream map after the
+        // failed attempt.
+        assert!(!s.client.streams.contains_key(&0));
+
+        // Emit the control stream data and drain it at the server to give back
+        // flow control.
+        s.advance().ok();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        s.advance().ok();
+
+        // Now we can send the request. The stream ID should be 0 (not 4),
+        // confirming that the blocked attempt did not consume the stream ID.
+        let stream_id = s.client.send_request(&mut s.pipe.client, &req, true);
+        assert_eq!(stream_id, Ok(0));
+        assert!(s.client.streams.contains_key(&0));
+        assert!(!s.client.streams.contains_key(&4));
+
+        // Subsequent request should use stream ID 4.
+        let stream_id2 = s.client.send_request(&mut s.pipe.client, &req, true);
+        assert_eq!(stream_id2, Ok(4));
+        assert!(s.client.streams.contains_key(&0));
+        assert!(s.client.streams.contains_key(&4));
+
+        s.advance().ok();
     }
 
     #[test]
