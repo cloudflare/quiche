@@ -25,7 +25,9 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::sync::Arc;
+use std::time::Duration;
 
 use foundations::telemetry::log;
 use quiche::h3;
@@ -136,27 +138,77 @@ struct PendingClientRequest {
     recv: InboundFrameStream,
 }
 
+/// Retry delay when `StreamBlocked` or `StreamLimit` is returned by
+/// `send_request`. Both errors are transient: the peer will open more
+/// stream credit or flow-control window within a few milliseconds.
+const BLOCKED_RETRY_DELAY: Duration = Duration::from_millis(5);
+
 pub struct ClientHooks {
     /// Mapping from stream IDs to the associated [`PendingClientRequest`].
     pending_requests: BTreeMap<u64, PendingClientRequest>,
+    /// Requests that could not be sent yet due to `StreamBlocked` or
+    /// `StreamLimit`. They will be retried after [`BLOCKED_RETRY_DELAY`].
+    queued_requests: VecDeque<NewClientRequest>,
+    /// A sender back into the driver's own command channel, used to
+    /// re-enqueue blocked requests after the retry delay.
+    ///
+    /// Initialised in `conn_established`; `None` before the connection
+    /// is established.
+    self_cmd_sender: Option<mpsc::UnboundedSender<ClientH3Command>>,
 }
 
 impl ClientHooks {
+    /// Returns `true` when `err` from `h3::Connection::send_request` means the
+    /// request should be retried after a short delay rather than treated as a
+    /// fatal connection error.
+    ///
+    /// `send_request` rolls back any partial stream state before returning
+    /// these errors, so retrying the call with the same arguments is safe.
+    ///
+    /// * `StreamBlocked` — the QUIC stream's flow-control window is temporarily
+    ///   exhausted; the stream entry is removed by `send_request` before
+    ///   returning, so the stream ID is not consumed.
+    /// * `TransportError(StreamLimit)` — the peer's concurrent-stream limit has
+    ///   been reached; QUIC will deliver a MAX_STREAMS frame when credit opens
+    ///   up.
+    fn is_retriable_send_error(err: &h3::Error) -> bool {
+        matches!(
+            err,
+            h3::Error::StreamBlocked |
+                h3::Error::TransportError(quiche::Error::StreamLimit)
+        )
+    }
+
     /// Initiates a client-side request. This sends the request, stores the
     /// [`PendingClientRequest`] and allocates a new stream plus potential
     /// DATAGRAM flow (CONNECT-{UDP,IP}).
+    ///
+    /// If the connection temporarily cannot open a new stream (`StreamBlocked`
+    /// or `StreamLimit`), the request is pushed onto `queued_requests` and
+    /// will be retried after [`BLOCKED_RETRY_DELAY`].
     fn initiate_request(
         driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         request: NewClientRequest,
     ) -> H3ConnectionResult<()> {
         let body_finished = request.body_writer.is_none();
 
-        // TODO: retry the request if the error is not fatal
-        let stream_id = driver.conn_mut()?.send_request(
+        let stream_id = match driver.conn_mut()?.send_request(
             qconn,
             &request.headers,
             body_finished,
-        )?;
+        ) {
+            Ok(id) => id,
+            Err(ref err) if Self::is_retriable_send_error(err) => {
+                log::debug!(
+                    "send_request blocked, queuing for retry";
+                    "request_id" => request.request_id,
+                    "error" => %err,
+                );
+                driver.hooks.queued_requests.push_back(request);
+                return Ok(());
+            },
+            Err(err) => return Err(H3ConnectionError::from(err)),
+        };
 
         // log::info!("sent h3 request"; "stream_id" => stream_id);
         let (mut stream_ctx, send, recv) =
@@ -240,17 +292,20 @@ impl DriverHooks for ClientHooks {
     fn new(_settings: &Http3Settings) -> Self {
         Self {
             pending_requests: BTreeMap::new(),
+            queued_requests: VecDeque::new(),
+            self_cmd_sender: None,
         }
     }
 
     fn conn_established(
-        _driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         _handshake_info: &HandshakeInfo,
     ) -> H3ConnectionResult<()> {
         assert!(
             !qconn.is_server(),
             "ClientH3Driver requires a client-side QUIC connection"
         );
+        driver.hooks.self_cmd_sender = Some(driver.self_cmd_sender().clone());
         Ok(())
     }
 
@@ -277,6 +332,41 @@ impl DriverHooks for ClientHooks {
             ClientH3Command::ClientRequest(req) =>
                 Self::initiate_request(driver, qconn, req),
         }
+    }
+
+    fn has_wait_action(driver: &mut H3Driver<Self>) -> bool {
+        !driver.hooks.queued_requests.is_empty()
+    }
+
+    async fn wait_for_action(
+        &mut self, qconn: &mut QuicheConnection,
+    ) -> H3ConnectionResult<()> {
+        // Sleep briefly to let the peer open stream credit or raise the
+        // MAX_STREAMS limit, then re-enqueue waiting requests back into
+        // the driver's command channel so that `conn_command` can retry them
+        // with a full `&mut H3Driver` on the next loop iteration.
+        //
+        // Only drain up to the number of available bidi streams to avoid
+        // re-queueing requests that would immediately fail.
+        tokio::time::sleep(BLOCKED_RETRY_DELAY).await;
+
+        let Some(sender) = &self.self_cmd_sender else {
+            // Should not happen: `conn_established` always sets this.
+            return Ok(());
+        };
+
+        let streams_left = qconn.peer_streams_left_bidi() as usize;
+        let to_drain = streams_left.min(self.queued_requests.len());
+
+        for request in self.queued_requests.drain(..to_drain) {
+            log::debug!(
+                "retrying queued request after stream-blocked delay";
+                "request_id" => request.request_id,
+            );
+            let _ = sender.send(ClientH3Command::ClientRequest(request));
+        }
+
+        Ok(())
     }
 }
 
