@@ -17,6 +17,7 @@ include = [
   "/deps/boringssl/**/*.[chS]",
   "/deps/boringssl/**/*.asm",
   "/deps/boringssl/src/**/*.cc",
+  "/deps/boringssl/src/util/32-bit-toolchain.cmake",
   "/deps/boringssl/**/CMakeLists.txt",
   "/deps/boringssl/**/sources.cmake",
   "/deps/boringssl/LICENSE",
