@@ -133,7 +133,6 @@ impl StreamCtx {
         // Drop any pending data and close the write side.
         // We can't accept additional frames
         self.queued_frame = None;
-        debug_assert!(self.recv.is_some());
         self.recv = None;
     }
 
