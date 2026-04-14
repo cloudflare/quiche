@@ -71,14 +71,13 @@ pub struct ConnectionParams<'a> {
 impl core::fmt::Debug for ConnectionParams<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Avoid printing 'session' since it contains connection secrets.
-        let s = f
-            .debug_struct("ConnectionParams")
-            .field("settings", &self.settings)
+        let mut s = f.debug_struct("ConnectionParams");
+        s.field("settings", &self.settings)
             .field("tls_cert", &self.tls_cert)
             .field("hooks", &self.hooks);
 
         #[cfg(feature = "custom-client-dcid")]
-        let s = s.field("dcid", &self.dcid);
+        s.field("dcid", &self.dcid);
 
         s.finish()
     }
