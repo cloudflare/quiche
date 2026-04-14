@@ -246,6 +246,28 @@ pub struct QuicSettings {
     /// [`verify_peer()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.verify_peer
     pub verify_peer: bool,
 
+    /// Specifies a file where trusted CA certificates are stored for the
+    /// purposes of certificate verification.
+    ///
+    /// The content of `file` is parsed as a PEM-encoded certificate chain.
+    ///
+    /// Defaults to `None`.
+    /// [`load_verify_locations_from_file()`] for more.
+    ///
+    /// [`load_verify_locations_from_file()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.load_verify_locations_from_file
+    pub verify_ca_bundle_path: Option<String>,
+
+    /// Specifies a directory where trusted CA certificates are stored for the
+    /// purposes of certificate verification.
+    ///
+    /// The content of `dir` a set of PEM-encoded certificate chains.
+    ///
+    /// Defaults to `None`.
+    /// [`load_verify_locations_from_directory()`] for more.
+    ///
+    /// [`load_verify_locations_from_directory()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.load_verify_locations_from_directory
+    pub verify_ca_directory_path: Option<String>,
+
     /// The maximum size of the receiver connection flow control window.
     ///
     /// Defaults to 24MB.
