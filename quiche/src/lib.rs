@@ -5953,7 +5953,7 @@ impl<F: BufFactory> Connection<F> {
     /// The application should retry the operation once the stream is
     /// reported as writable again.
     pub fn stream_send_zc(
-        &mut self, stream_id: u64, buf: F::Buf, len: Option<usize>, fin: bool,
+        &mut self, stream_id: u64, buf: F::Buf, fin: bool,
     ) -> Result<(usize, Option<F::Buf>)>
     where
         F::Buf: BufSplit,
@@ -5966,8 +5966,7 @@ impl<F: BufFactory> Connection<F> {
              buf: F::Buf,
              cap: usize,
              fin: bool| {
-                let len = len.unwrap_or(usize::MAX).min(cap);
-                let (sent, remaining) = stream.send.append_buf(buf, len, fin)?;
+                let (sent, remaining) = stream.send.append_buf(buf, cap, fin)?;
                 Ok((sent, (sent, remaining)))
             },
         )
@@ -6330,6 +6329,9 @@ impl<F: BufFactory> Connection<F> {
     }
 
     /// Returns the stream's send capacity in bytes.
+    ///
+    /// The returned capacity takes into account the stream's flow control limit
+    /// as well as connection level flow and congestion control.
     ///
     /// If the specified stream doesn't exist (including when it has already
     /// been completed and closed), the [`InvalidStreamState`] error will be
