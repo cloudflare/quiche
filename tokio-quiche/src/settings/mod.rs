@@ -83,6 +83,8 @@ impl<'a> ConnectionParams<'a> {
             tls_cert: Some(tls_cert),
             hooks,
             session: None,
+            #[cfg(feature = "custom-client-dcid")]
+            dcid: None,
         }
     }
 
