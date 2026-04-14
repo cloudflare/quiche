@@ -56,6 +56,14 @@ pub struct ConnectionParams<'a> {
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
     /// Custom destination connection ID to use for client connections.
+    ///
+    /// Be aware that [RFC 9000] places requirements for unpredictability and
+    /// length on the client DCID field. Setting this field is dangerous if
+    /// these requirements are not satisfied.
+    ///
+    /// Has no effect on server-side [`ConnectionParams`].
+    ///
+    /// [RFC 9000]: <https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3>
     #[cfg(feature = "custom-client-dcid")]
     pub dcid: Option<quiche::ConnectionId<'static>>,
 }
