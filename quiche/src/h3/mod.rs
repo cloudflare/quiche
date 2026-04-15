@@ -1588,19 +1588,28 @@ impl Connection {
                     body_len += header.len();
                 }
 
-                let (mut n, rem) = conn.stream_send_zc(
-                    stream_id,
-                    body.clone(),
-                    Some(body_len),
-                    fin,
-                )?;
+                let remainder = body.split_at(body_len);
+                // body now contains the first `body_len` bytes of the original
+                // buffer
+                debug_assert_eq!(body.as_ref().len(), body_len);
+
+                let (mut n, rem) =
+                    conn.stream_send_zc(stream_id, body.clone(), fin)?;
+                if rem.as_ref().is_some_and(|v| !v.as_ref().is_empty()) {
+                    // `rem` should always be None or empty.
+                    // `do_send_body()` should have checked the capacity and
+                    // ensured that there is enough capacity to write the header +
+                    // fully body.
+                    debug_assert!(false);
+                    return Err(Error::InternalError);
+                }
 
                 if with_prefix {
                     n -= header.len();
                 }
 
-                if let Some(rem) = rem {
-                    let _ = std::mem::replace(body, rem);
+                if !remainder.as_ref().is_empty() {
+                    let _ = std::mem::replace(body, remainder);
                 }
 
                 Ok((n, n))
@@ -1697,6 +1706,12 @@ impl Connection {
         // Sending body separately avoids unnecessary copy.
         let (written, ret) =
             write_fn(conn, &d[..off], stream_id, body, body_len, fin)?;
+        if written != body_len {
+            // This should never happen. If it does, it means we wrote an
+            // incorrect frame length and thus we can't really continue.
+            debug_assert!(false);
+            return Err(Error::InternalError);
+        }
 
         trace!(
             "{} tx frm DATA stream={} len={} fin={}",
