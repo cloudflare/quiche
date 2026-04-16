@@ -2213,6 +2213,26 @@ fn stream_left_reset_bidi(
 }
 
 #[rstest]
+fn acked_packet_counts(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let acked_before = pipe.client.stats().acked;
+
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+
+    // Run twice to make sure both data and the corresponding ACK are processed.
+    pipe.advance().unwrap();
+    pipe.advance().unwrap();
+
+    let stats = pipe.client.stats();
+    assert!(stats.acked > acked_before);
+    assert!(stats.acked <= stats.sent);
+}
+
+#[rstest]
 fn stream_reset_counts(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {

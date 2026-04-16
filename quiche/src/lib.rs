@@ -1384,6 +1384,9 @@ where
     /// Total number of sent packets.
     sent_count: usize,
 
+    /// Total number of acked packets.
+    acked_count: usize,
+
     /// Total number of lost packets.
     lost_count: usize,
 
@@ -2110,6 +2113,7 @@ impl<F: BufFactory> Connection<F> {
 
             recv_count: 0,
             sent_count: 0,
+            acked_count: 0,
             lost_count: 0,
             spurious_lost_count: 0,
             retrans_count: 0,
@@ -7785,6 +7789,7 @@ impl<F: BufFactory> Connection<F> {
         Stats {
             recv: self.recv_count,
             sent: self.sent_count,
+            acked: self.acked_count,
             lost: self.lost_count,
             spurious_lost: self.spurious_lost_count,
             retrans: self.retrans_count,
@@ -8299,6 +8304,7 @@ impl<F: BufFactory> Connection<F> {
                     let OnAckReceivedOutcome {
                         lost_packets,
                         lost_bytes,
+                        acked_packets,
                         acked_bytes,
                         spurious_losses,
                     } = p.recovery.on_ack_received(
@@ -8327,6 +8333,7 @@ impl<F: BufFactory> Connection<F> {
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
+                    self.acked_count += acked_packets;
                     self.acked_bytes += acked_bytes as u64;
                     self.spurious_lost_count += spurious_losses;
                 }
@@ -9354,6 +9361,9 @@ pub struct Stats {
 
     /// The number of QUIC packets sent.
     pub sent: usize,
+
+    /// The number of QUIC packets that were acked.
+    pub acked: usize,
 
     /// The number of QUIC packets that were lost.
     pub lost: usize,

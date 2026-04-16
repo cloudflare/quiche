@@ -507,6 +507,7 @@ mod tests {
         assert_eq!(ack_outcome, OnAckReceivedOutcome {
             lost_packets: 0,
             lost_bytes: 0,
+            acked_packets: packet_count,
             acked_bytes: mss * packet_count,
             spurious_losses: 0,
         });
