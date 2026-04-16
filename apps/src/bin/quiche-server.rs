@@ -542,11 +542,11 @@ fn main() {
         for client in clients.values_mut() {
             // Reduce max_send_burst by 25% if loss is increasing more than 0.1%.
             let stats = client.conn.stats();
-            let confirmed = stats.acked.saturating_add(stats.lost);
-            let loss_rate = if confirmed == 0 {
+            let finished = stats.acked.saturating_add(stats.lost);
+            let loss_rate = if finished == 0 {
                 0.0
             } else {
-                stats.lost as f64 / confirmed as f64
+                stats.lost as f64 / finished as f64
             };
 
             if loss_rate > client.loss_rate + 0.001 {
