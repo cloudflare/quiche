@@ -1228,23 +1228,20 @@ impl Datastore {
         if let Some(frames) = &pr.frames {
             for frame in frames {
                 match frame {
-                    QuicFrame::Ack { acked_ranges, .. } => {
-                        if process_acks {
-                            if let Some(ack_ranges) = acked_ranges {
-                                let ty = PacketType::from_qlog_packet_type(
-                                    &pr.header.packet_type,
-                                );
-                                if let Some(pkt_space) =
-                                    self.packet_sent.get_mut(&ty)
-                                {
-                                    for range in ack_ranges {
-                                        // TODO: check ack ranges and rust
-                                        // Range mapping is correct
-                                        pkt_space
-                                            .range_mut(range.as_range_inclusive())
-                                            .for_each(|e| e.1.acked = Some(true));
-                                    }
-                                }
+                    QuicFrame::Ack {
+                        acked_ranges: Some(ack_ranges),
+                        ..
+                    } if process_acks => {
+                        let ty = PacketType::from_qlog_packet_type(
+                            &pr.header.packet_type,
+                        );
+                        if let Some(pkt_space) = self.packet_sent.get_mut(&ty) {
+                            for range in ack_ranges {
+                                // TODO: check ack ranges and rust
+                                // Range mapping is correct
+                                pkt_space
+                                    .range_mut(range.as_range_inclusive())
+                                    .for_each(|e| e.1.acked = Some(true));
                             }
                         }
                     },
