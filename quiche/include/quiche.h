@@ -572,6 +572,9 @@ typedef struct {
     // The number of QUIC packets sent on this connection.
     size_t sent;
 
+    // The number of QUIC packets that were acked.
+    size_t acked;
+
     // The number of QUIC packets that were lost.
     size_t lost;
 
