@@ -3402,7 +3402,7 @@ impl<F: BufFactory> Connection<F> {
                 crypto_open: open_prev,
                 pn_on_update: pn,
                 update_acked: false,
-                timer: now + (recv_path.recovery.pto() * 3),
+                timer: now + recv_path.recovery.pto_timeout(),
             });
 
             self.key_phase = !self.key_phase;
@@ -5004,8 +5004,8 @@ impl<F: BufFactory> Connection<F> {
                         };
 
                         if push_frame_to_pkt!(b, frames, frame, left) {
-                            let pto = path.recovery.pto();
-                            self.draining_timer = Some(now + (pto * 3));
+                            self.draining_timer =
+                                Some(now + path.recovery.pto_timeout());
 
                             ack_eliciting = true;
                             in_flight = true;
@@ -5020,8 +5020,8 @@ impl<F: BufFactory> Connection<F> {
                     };
 
                     if push_frame_to_pkt!(b, frames, frame, left) {
-                        let pto = path.recovery.pto();
-                        self.draining_timer = Some(now + (pto * 3));
+                        self.draining_timer =
+                            Some(now + path.recovery.pto_timeout());
 
                         ack_eliciting = true;
                         in_flight = true;
@@ -8754,7 +8754,7 @@ impl<F: BufFactory> Connection<F> {
                 });
 
                 let path = self.paths.get_active()?;
-                self.draining_timer = Some(now + (path.recovery.pto() * 3));
+                self.draining_timer = Some(now + path.recovery.pto_timeout());
             },
 
             frame::Frame::ApplicationClose { error_code, reason } => {
@@ -8765,7 +8765,7 @@ impl<F: BufFactory> Connection<F> {
                 });
 
                 let path = self.paths.get_active()?;
-                self.draining_timer = Some(now + (path.recovery.pto() * 3));
+                self.draining_timer = Some(now + path.recovery.pto_timeout());
             },
 
             frame::Frame::HandshakeDone => {
