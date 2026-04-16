@@ -99,10 +99,9 @@ pub fn plot_pending(
                     }
                 },
 
-                (Some(dt), None, None) =>
-                    if x >= dt {
-                        pending += 1;
-                    },
+                (Some(dt), None, None) if x >= dt => {
+                    pending += 1;
+                },
 
                 (Some(dt), Some(hdrs_tx), None) =>
                     if x >= dt {

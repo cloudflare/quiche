@@ -501,6 +501,7 @@ where
 
                         for cmsg in cmsgs {
                             match cmsg {
+                                #[allow(clippy::collapsible_match)]
                                 ControlMessageOwned::RxqOvfl(c) => {
                                     if c != self.udp_drop_count {
                                         self.metrics_udp_drop_count.inc_by(
