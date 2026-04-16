@@ -543,7 +543,7 @@ fn main() {
             // Reduce max_send_burst by 25% if loss is increasing more than 0.1%.
             let stats = client.conn.stats();
             let loss_rate =
-                stats.lost as f64 / stats.acked as f64 + stats.lost as f64;
+                stats.lost as f64 / (stats.acked as f64 + stats.lost as f64);
             if loss_rate > client.loss_rate + 0.001 {
                 client.max_send_burst = client.max_send_burst / 4 * 3;
                 // Minimum bound of 10xMSS.
