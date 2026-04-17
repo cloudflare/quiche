@@ -249,6 +249,14 @@ void quiche_config_enable_hystart(quiche_config *config, bool v);
 // Configures whether to enable pacing (enabled by default).
 void quiche_config_enable_pacing(quiche_config *config, bool v);
 
+// Enables tracking unknown transport parameters.
+void quiche_config_enable_track_unknown_transport_parameters(quiche_config *config,
+                                                             size_t size);
+
+// Configure whether to enable relaxed loss detection on spurious loss.
+void quiche_config_set_enable_relaxed_loss_threshold(quiche_config *config,
+                                                     bool v);
+
 // Configures whether to enable the CUBIC idle restart fix (enabled by default).
 void quiche_config_set_enable_cubic_idle_restart_fix(quiche_config *config,
                                                      bool v);
@@ -275,6 +283,9 @@ void quiche_config_set_stateless_reset_token(quiche_config *config, const uint8_
 
 // Sets whether the QUIC connection should avoid reusing DCIDs over different paths.
 void quiche_config_set_disable_dcid_reuse(quiche_config *config, bool v);
+
+// Sets whether the initial max data value should be used as the initial flow control window.
+void quiche_config_set_use_initial_max_data_as_flow_control_win(quiche_config *config, bool v);
 
 // Configures the session ticket key material.
 int quiche_config_set_ticket_key(quiche_config *config, const uint8_t *key, size_t key_len);
