@@ -246,6 +246,8 @@ fn main() {
 
         println!("cargo:rustc-link-search=native={build_dir}");
 
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+
         let bssl_link_kind = std::env::var("QUICHE_BSSL_LINK_KIND")
             .unwrap_or("static".to_string());
         println!("cargo:rustc-link-lib={bssl_link_kind}=ssl");
