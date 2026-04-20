@@ -145,7 +145,7 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             "x86" => {
                 boringssl_cmake.define(
                     "CMAKE_TOOLCHAIN_FILE",
-                    pwd.join("deps/boringssl/src/util/32-bit-toolchain.cmake")
+                    pwd.join("deps/boringssl/util/32-bit-toolchain.cmake")
                         .as_os_str(),
                 );
 
@@ -160,7 +160,7 @@ fn get_boringssl_cmake_config() -> cmake::Config {
             if arch == "x86" && os != "windows" {
                 boringssl_cmake.define(
                     "CMAKE_TOOLCHAIN_FILE",
-                    pwd.join("deps/boringssl/src/util/32-bit-toolchain.cmake")
+                    pwd.join("deps/boringssl/util/32-bit-toolchain.cmake")
                         .as_os_str(),
                 );
             }
@@ -245,6 +245,8 @@ fn main() {
         }
 
         println!("cargo:rustc-link-search=native={build_dir}");
+        println!("cargo:rustc-link-search=native={build_dir}/ssl");
+        println!("cargo:rustc-link-search=native={build_dir}/crypto");
 
         let bssl_link_kind = std::env::var("QUICHE_BSSL_LINK_KIND")
             .unwrap_or("static".to_string());
