@@ -617,12 +617,15 @@ where
             to: pkt.local_addr,
         };
 
+        // A single UDP datagram may contain multiple coalesced QUIC packets
+        // (e.g. Initial + Handshake). `quiche::recv` only processes one packet
+        // per call, so loop until it signals Done to drain the whole datagram.
         if let Some(gro) = pkt.gro {
             for dgram in pkt.buf.chunks_mut(gro as usize) {
-                qconn.recv(dgram, recv_info)?;
+                recv_coalesced(qconn, dgram, recv_info)?;
             }
         } else {
-            qconn.recv(&mut pkt.buf, recv_info)?;
+            recv_coalesced(qconn, &mut pkt.buf, recv_info)?;
         }
 
         Ok(())
@@ -934,4 +937,25 @@ fn min_of_some<T: Ord>(v1: Option<T>, v2: Option<T>) -> Option<T> {
         (Some(v), _) | (_, Some(v)) => Some(v),
         (None, None) => None,
     }
+}
+
+/// Feed `buf` into `qconn.recv` repeatedly until quiche has consumed every
+/// coalesced QUIC packet in the datagram. `quiche::Connection::recv` only
+/// processes one packet per call; without this loop, any packets coalesced
+/// after the first (e.g. a server's Initial+Handshake) are silently dropped.
+fn recv_coalesced(
+    qconn: &mut QuicheConnection, buf: &mut [u8], recv_info: quiche::RecvInfo,
+) -> QuicResult<()> {
+    let mut rest: &mut [u8] = buf;
+    while !rest.is_empty() {
+        match qconn.recv(rest, recv_info) {
+            Ok(n) => {
+                let (_, tail) = std::mem::take(&mut rest).split_at_mut(n);
+                rest = tail;
+            },
+            Err(quiche::Error::Done) => break,
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
 }

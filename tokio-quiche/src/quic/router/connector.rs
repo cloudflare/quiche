@@ -155,14 +155,15 @@ where
             to: incoming.local_addr,
         };
 
+        // A single UDP datagram may contain multiple coalesced QUIC packets
+        // (e.g. a server can coalesce Initial + Handshake). `quiche::recv`
+        // only processes one packet per call, so loop until it signals Done.
         if let Some(gro) = incoming.gro {
             for dgram in incoming.buf.chunks_mut(gro as usize) {
-                // Log error here if recv fails
-                let _ = conn.recv(dgram, recv_info);
+                recv_coalesced(&mut conn, dgram, recv_info);
             }
         } else {
-            // Log error here if recv fails
-            let _ = conn.recv(&mut incoming.buf, recv_info);
+            recv_coalesced(&mut conn, &mut incoming.buf, recv_info);
         }
 
         // disarm the timer since we're either going to immediately rearm it or
@@ -287,6 +288,26 @@ fn simple_conn_send<Tx: DatagramSocketSend + Send + Sync + 'static>(
                 log::error!("error writing packets to quiche's internal buffer"; "scid" => ?scid, "error" => error.to_string());
                 break Err(std::io::Error::other(error));
             },
+        }
+    }
+}
+
+/// Feed `buf` into `conn.recv` repeatedly until quiche has consumed every
+/// coalesced QUIC packet in the datagram. `quiche::Connection::recv` only
+/// processes one packet per call; without this loop, any packets coalesced
+/// after the first (e.g. a server's Initial+Handshake) are silently dropped.
+fn recv_coalesced(
+    conn: &mut QuicheConnection, buf: &mut [u8], recv_info: quiche::RecvInfo,
+) {
+    let mut rest: &mut [u8] = buf;
+    while !rest.is_empty() {
+        match conn.recv(rest, recv_info) {
+            Ok(n) => {
+                let (_, tail) = std::mem::take(&mut rest).split_at_mut(n);
+                rest = tail;
+            },
+            Err(quiche::Error::Done) => break,
+            Err(_) => break,
         }
     }
 }
