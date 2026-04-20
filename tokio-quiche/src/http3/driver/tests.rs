@@ -5,6 +5,90 @@ use assert_matches::assert_matches;
 use super::test_utils::*;
 use super::*;
 
+/// Tests for connection close error metrics recorded by
+/// [`H3Driver::on_conn_close`].
+mod conn_close_metrics {
+    use crate::ApplicationOverQuic as _;
+
+    use super::*;
+
+    /// Peer sends a QUIC-level CONNECTION_CLOSE and the work loop
+    /// completes with Ok. Verifies the peer QUIC error counter is
+    /// incremented.
+    #[test]
+    fn peer_quic_error_on_ok_result() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+
+        // Peer (client) closes with a QUIC-level error
+        helper
+            .pipe
+            .client
+            .close(false, 0x1, b"internal error")
+            .unwrap();
+        helper.pipe.advance().unwrap();
+
+        let metrics = TestMetrics::default();
+        helper
+            .driver
+            .on_conn_close(&mut helper.pipe.server, &metrics, &Ok(()));
+
+        assert_eq!(metrics.peer_quic.get(), 1);
+        assert_eq!(metrics.peer_h3.get(), 0);
+        assert_eq!(metrics.local_quic.get(), 0);
+        assert_eq!(metrics.local_h3.get(), 0);
+    }
+
+    /// Peer sends an APPLICATION_CLOSE (H3-level) and the work loop
+    /// completes with Ok. Verifies the peer H3 error counter is
+    /// incremented.
+    #[test]
+    fn peer_h3_error_on_ok_result() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+
+        // Peer (client) closes with an H3-level error (is_app = true)
+        helper.pipe.client.close(true, 0x100, b"no error").unwrap();
+        helper.pipe.advance().unwrap();
+
+        let metrics = TestMetrics::default();
+        helper
+            .driver
+            .on_conn_close(&mut helper.pipe.server, &metrics, &Ok(()));
+
+        assert_eq!(metrics.peer_h3.get(), 1);
+        assert_eq!(metrics.peer_quic.get(), 0);
+        assert_eq!(metrics.local_quic.get(), 0);
+        assert_eq!(metrics.local_h3.get(), 0);
+    }
+
+    /// Work loop returns an error and the local side has a QUIC-level
+    /// error set. Verifies the local QUIC error counter is incremented.
+    #[test]
+    fn local_quic_error_on_err_result() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+
+        // Local side (server) closes with a QUIC-level error
+        helper
+            .pipe
+            .server
+            .close(false, 0x1, b"internal error")
+            .unwrap();
+
+        let err: crate::QuicResult<()> = Err(H3ConnectionError::GoAway.into());
+        let metrics = TestMetrics::default();
+        helper
+            .driver
+            .on_conn_close(&mut helper.pipe.server, &metrics, &err);
+
+        assert_eq!(metrics.local_quic.get(), 1);
+        assert_eq!(metrics.local_h3.get(), 0);
+        assert_eq!(metrics.peer_quic.get(), 0);
+        assert_eq!(metrics.peer_h3.get(), 0);
+    }
+}
+
 /// Tests that use an H3Driver for the client side. We mostly focus on testing
 /// the driver's handling of stream state, and data, rather than H3 semantics.
 /// Note that most of these tests could have just as easily been written for

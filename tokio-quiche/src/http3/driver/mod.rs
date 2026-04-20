@@ -1282,11 +1282,11 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
             .maximum_writable_streams()
             .observe(max_stream_seen as f64);
 
+        Self::record_quiche_error(quiche_conn, metrics);
+
         let Err(work_loop_error) = work_loop_result else {
             return;
         };
-
-        Self::record_quiche_error(quiche_conn, metrics);
 
         let Some(h3_err) = work_loop_error.downcast_ref::<H3ConnectionError>()
         else {
