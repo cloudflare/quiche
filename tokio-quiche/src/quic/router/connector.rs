@@ -307,7 +307,13 @@ fn recv_coalesced(
                 rest = tail;
             },
             Err(quiche::Error::Done) => break,
-            Err(_) => break,
+            Err(err) => {
+                log::debug!(
+                    "client connector recv error from {}: {err:?}",
+                    recv_info.from
+                );
+                break;
+            },
         }
     }
 }
