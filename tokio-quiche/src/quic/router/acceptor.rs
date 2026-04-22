@@ -32,6 +32,9 @@ use std::time::Instant;
 use datagram_socket::DatagramSocketSend;
 use datagram_socket::DatagramSocketSendExt;
 use datagram_socket::MAX_DATAGRAM_SIZE;
+use qlog::writer::make_qlog_writer_from_path;
+use qlog::writer::qlog_file_name;
+use qlog::writer::QlogCompression;
 use quiche::ConnectionId;
 use quiche::Header;
 use quiche::RetryConnectionIds;
@@ -42,7 +45,6 @@ use crate::metrics::labels;
 use crate::metrics::Metrics;
 use crate::quic::addr_validation_token::AddrValidationTokenManager;
 use crate::quic::connection::SharedConnectionIdGenerator;
-use crate::quic::make_qlog_writer;
 use crate::quic::router::NewConnection;
 use crate::quic::Incoming;
 use crate::QuicResultExt;
@@ -62,6 +64,7 @@ pub(crate) struct ConnectionAcceptor<S, M> {
 pub(crate) struct ConnectionAcceptorConfig {
     pub(crate) disable_client_ip_validation: bool,
     pub(crate) qlog_dir: Option<String>,
+    pub(crate) qlog_compression: QlogCompression,
     pub(crate) keylog_file: Option<File>,
     #[cfg(target_os = "linux")]
     pub(crate) with_pktinfo: bool,
@@ -114,9 +117,13 @@ where
 
         if let Some(qlog_dir) = &self.config.qlog_dir {
             let id = format!("{:?}", &scid);
-            if let Ok(writer) = make_qlog_writer(qlog_dir, &id) {
+            let path = std::path::Path::new(qlog_dir)
+                .join(qlog_file_name(&id, self.config.qlog_compression));
+            if let Ok(writer) =
+                make_qlog_writer_from_path(&path, self.config.qlog_compression)
+            {
                 conn.set_qlog(
-                    std::boxed::Box::new(writer),
+                    writer,
                     "tokio-quiche qlog".to_string(),
                     format!("tokio-quiche qlog id={id}"),
                 );
