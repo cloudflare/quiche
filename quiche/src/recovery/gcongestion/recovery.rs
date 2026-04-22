@@ -1144,20 +1144,25 @@ impl RecoveryOps for GRecovery {
         true
     }
 
-    fn bbr_check_if_app_limited(
-        &mut self, had_flushable_data_before_poll: bool, now: &Instant,
-    ) {
+    fn bbr_maybe_check_if_app_limited(&mut self, now: &Instant) {
         if !self.enable_bbr_app_limited_fix {
             return;
         }
 
-        // Implements CheckIfApplicationLimited from the BBR RFC.
-        //
-        // had_flushable_data_before_poll is used to check for `NoUnsentData()`
-        // and skips this check there is data on the connection's tx
-        // buffer. Retransmisions are done with the help of stream send
-        // buffers so the `NoUnsentData()` check also covers the
+        if !self.check_for_app_limited_next_iteration {
+            return;
+        }
+
+        // check_for_app_limited_next_iteration is only set after
+        // send_single returns Err::Done which implies that either
+        // cwnd is fully exhausted or there is no data in output
+        // buffers.  Retransmisions are done with the help of stream
+        // send buffers so the `NoUnsentData()` check also covers the
         // `C.lost_out <= C.retrans_out` check.
+        //
+        self.check_for_app_limited_next_iteration = false;
+
+        // Implements CheckIfApplicationLimited from the BBR RFC.
         //
         // The cwnd vs inflight check needs to take frame overheads
         // into account since due to these overheads it may not be
@@ -1175,9 +1180,7 @@ impl RecoveryOps for GRecovery {
         // exit the send loop earlier we should mark the connection in some way so
         // the next call to bbr_check_if_app_limited does not mark the
         // connection app-limited after yielding when C.pending_transmissions > 0.
-        if !had_flushable_data_before_poll &&
-            self.cwnd() >
-                self.bytes_in_flight.get() + frame::MAX_STREAM_OVERHEAD &&
+        if self.cwnd() > self.bytes_in_flight.get() + frame::MAX_STREAM_OVERHEAD &&
             !pacer_has_pending_transmissions(
                 &self.pacer.get_next_release_time(),
                 now,
@@ -1187,19 +1190,8 @@ impl RecoveryOps for GRecovery {
         }
     }
 
-    fn bbr_do_app_limited_check_next_iteration(
-        &mut self, has_flushable_data: bool,
-    ) {
-        if !has_flushable_data {
-            self.check_for_app_limited_next_iteration = true;
-        }
-    }
-
-    fn bbr_maybe_check_if_app_limited(&mut self, now: &Instant) {
-        if self.check_for_app_limited_next_iteration {
-            self.check_for_app_limited_next_iteration = false;
-            self.bbr_check_if_app_limited(false, now);
-        }
+    fn bbr_do_app_limited_check_next_iteration(&mut self) {
+        self.check_for_app_limited_next_iteration = true;
     }
 
     #[cfg(feature = "qlog")]

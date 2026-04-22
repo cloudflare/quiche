@@ -2847,12 +2847,6 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
-    /// Returns true if at least 1 stream has headers or body data to
-    /// write, or there are items in the DATAGRAM send queue.
-    pub fn has_flushable_data(&self) -> bool {
-        self.streams.has_flushable() || !self.dgram_send_queue.is_empty()
-    }
-
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
@@ -4120,9 +4114,7 @@ impl<F: BufFactory> Connection<F> {
 
                 Err(Error::Done) => {
                     let send_path = self.paths.get_mut(send_pid)?;
-                    send_path
-                        .recovery
-                        .bbr_do_app_limited_check_next_iteration(false);
+                    send_path.recovery.bbr_do_app_limited_check_next_iteration();
 
                     break;
                 },
