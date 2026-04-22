@@ -11,6 +11,8 @@ readme = "README.md"
 rust-version = "1.85"
 
 [features]
+default = ["qlog-gzip", "qlog-zstd"]
+
 # Forwarded quiche features for re-exports
 fuzzing = ["quiche/fuzzing"]
 quiche_internal = ["quiche/internal"]
@@ -40,6 +42,27 @@ capture_keylogs = []
 # Enable scheduling & poll duration histograms for tokio tasks.
 tokio-task-metrics = []
 
+# Enable gzip compression for QLOG output files. Forwards to the
+# `qlog` crate's `gzip` feature so `QuicSettings::qlog_compression =
+# QlogCompression::Gzip` is available at runtime and emits
+# `.sqlog.gz` files. Pulls in `flate2` with its crate-default backend
+# (consumers can override the backend by depending on `flate2`
+# directly).
+#
+# May be combined with `qlog-zstd`; the algorithm is selected per
+# connection at runtime via `QuicSettings::qlog_compression`.
+qlog-gzip = ["qlog/gzip"]
+
+# Enable zstd compression for QLOG output files. Forwards to the
+# `qlog` crate's `zstd` feature so `QuicSettings::qlog_compression =
+# QlogCompression::Zstd` is available at runtime and emits
+# `.sqlog.zst` files. Pulls in the `zstd` crate, which links against
+# `zstd-sys` (a C dependency).
+#
+# May be combined with `qlog-gzip`; the algorithm is selected per
+# connection at runtime via `QuicSettings::qlog_compression`.
+qlog-zstd = ["qlog/zstd"]
+
 [lints.rust]
 # capture_keylogs: enable SSLKEYLOGFILE capturing for QUIC connections.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(capture_keylogs)'] }
@@ -59,6 +82,7 @@ ipnetwork = { workspace = true }
 log = { workspace = true }
 octets = { workspace = true }
 pin-project = { workspace = true }
+qlog = { workspace = true, features = ["foundations"] }
 quiche = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_with = { workspace = true }
@@ -88,6 +112,7 @@ http-body = "1"
 http-body-util = "0.1"
 regex = { workspace = true }
 serde_json = { workspace = true }
+tempfile = "3"
 tokio = { workspace = true, features = ["time", "test-util", "rt-multi-thread"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

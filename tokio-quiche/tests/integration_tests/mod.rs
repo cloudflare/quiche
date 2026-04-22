@@ -44,6 +44,7 @@ pub mod async_callbacks;
 pub mod connection_close;
 pub mod headers;
 pub mod migration;
+pub mod qlog_compression;
 pub mod stream_limit;
 pub mod timeouts;
 pub mod zero_rtt;

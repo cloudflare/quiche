@@ -656,6 +656,7 @@ impl std::fmt::Display for HexSlice<'_> {
     }
 }
 
+pub mod compression;
 pub mod events;
 pub mod reader;
 pub mod streamer;
