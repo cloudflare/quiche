@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#![allow(clippy::collapsible_match)]
+
 //! Bridging the gap between [quiche] and [tokio].
 //!
 //! tokio-quiche connects [quiche::Connection]s and [quiche::h3::Connection]s to
