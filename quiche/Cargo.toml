@@ -28,7 +28,7 @@ include = [
 rust-version = "1.85"
 
 [features]
-default = ["boringssl-vendored"]
+default = ["boringssl-vendored", "boringssl-pq-patch"]
 
 # Allow client connections to provide a custom DCID when initiating a
 # connection. Be aware that RFC 9000 places requirements for unpredictability and
@@ -38,6 +38,13 @@ custom-client-dcid = []
 
 # Build the vendored BoringSSL library.
 boringssl-vendored = []
+
+# When building the vendored BoringSSL library, apply a patch that
+# enables post-quantum key shares (X25519MLKEM768, P256Kyber768Draft00)
+# in the default supported-groups list. This matches what `boring-sys`
+# vendors, so behavior is consistent across the two BoringSSL feature
+# paths. Has no effect without `boringssl-vendored`.
+boringssl-pq-patch = []
 
 # Use the BoringSSL library provided by the boring crate.
 boringssl-boring-crate = ["boring", "foreign-types-shared"]

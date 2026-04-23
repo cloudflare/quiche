@@ -67,12 +67,14 @@ fn get_boringssl_platform_output_path() -> String {
 /// Returns a new cmake::Config for building BoringSSL.
 ///
 /// It will add platform-specific parameters if needed.
-fn get_boringssl_cmake_config() -> cmake::Config {
+fn get_boringssl_cmake_config<P: AsRef<std::path::Path>>(
+    src: P,
+) -> cmake::Config {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
     let pwd = std::env::current_dir().unwrap();
 
-    let mut boringssl_cmake = cmake::Config::new("deps/boringssl");
+    let mut boringssl_cmake = cmake::Config::new(src);
 
     // Add platform-specific parameters.
     match os.as_ref() {
@@ -215,13 +217,163 @@ fn target_dir_path() -> std::path::PathBuf {
     unreachable!();
 }
 
+/// Copies `deps/boringssl` to a scratch directory under `$OUT_DIR` and
+/// applies `patches/boring-pq.patch` on top. Returns the path to the
+/// patched copy, suitable to pass to `cmake::Config::new`.
+///
+/// The copy is cached across builds: if the scratch directory already
+/// contains a sentinel file recording the submodule HEAD and patch
+/// contents, the copy is skipped.
+fn prepare_patched_boringssl() -> std::path::PathBuf {
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let manifest_dir = Path::new(&manifest_dir);
+    let src = manifest_dir.join("deps/boringssl");
+    let patch = manifest_dir.join("patches/boring-pq.patch");
+
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let patched = PathBuf::from(&out_dir).join("boringssl-patched");
+    let sentinel = patched.join(".quiche-pq-patch-applied");
+
+    // Re-run build.rs if either the patch file or the submodule HEAD
+    // changes. `HEAD` of a submodule is the contents of
+    // `.git/modules/.../HEAD` in the superproject, which we can't easily
+    // reference. `deps/boringssl/.git` is a gitlink file pointing into the
+    // superproject's .git/modules/... so rerun on that.
+    println!("cargo:rerun-if-changed={}", patch.display());
+    let gitlink = src.join(".git");
+    if gitlink.exists() {
+        println!("cargo:rerun-if-changed={}", gitlink.display());
+    }
+
+    // Compute a sentinel value that identifies this (source, patch) pair.
+    // We don't need cryptographic strength; a cheap hash of the patch
+    // contents plus the gitlink contents is enough to detect changes.
+    let patch_bytes = std::fs::read(&patch)
+        .unwrap_or_else(|e| panic!("reading {}: {e}", patch.display()));
+    let gitlink_bytes = std::fs::read(&gitlink).unwrap_or_default();
+    let sentinel_contents = format!(
+        "patch_len={} patch_hash={:x} gitlink={}",
+        patch_bytes.len(),
+        fxhash(&patch_bytes),
+        String::from_utf8_lossy(&gitlink_bytes).trim(),
+    );
+
+    if let Ok(existing) = std::fs::read_to_string(&sentinel) {
+        if existing == sentinel_contents {
+            return patched;
+        }
+    }
+
+    // Stale or missing: rebuild the patched tree from scratch.
+    if patched.exists() {
+        std::fs::remove_dir_all(&patched)
+            .unwrap_or_else(|e| panic!("cleaning {}: {e}", patched.display()));
+    }
+    copy_dir_recursive(&src, &patched);
+
+    // Initialize a fresh git repo in the copied tree. Without this, `git
+    // apply` walks up to the nearest ancestor `.git` (here, the quiche
+    // repo itself) and refuses to modify files that fall under that
+    // repo's `.gitignore` (e.g. `target/`). Same trick as `boring-sys`.
+    let init = std::process::Command::new("git")
+        .arg("init")
+        .arg("--quiet")
+        .current_dir(&patched)
+        .output()
+        .expect("running `git init` for patched BoringSSL copy");
+    if !init.status.success() {
+        panic!(
+            "`git init` failed in {}:\n{}",
+            patched.display(),
+            String::from_utf8_lossy(&init.stderr)
+        );
+    }
+
+    let out = std::process::Command::new("git")
+        .arg("apply")
+        .arg("--verbose")
+        .arg(&patch)
+        .current_dir(&patched)
+        .output()
+        .expect("running `git apply` for boring-pq.patch");
+    if !out.status.success() {
+        panic!(
+            "failed to apply {} to {}\nstdout:\n{}\nstderr:\n{}",
+            patch.display(),
+            patched.display(),
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
+
+    std::fs::write(&sentinel, sentinel_contents)
+        .unwrap_or_else(|e| panic!("writing {}: {e}", sentinel.display()));
+    patched
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
+    std::fs::create_dir_all(dst)
+        .unwrap_or_else(|e| panic!("mkdir {}: {e}", dst.display()));
+    for entry in std::fs::read_dir(src)
+        .unwrap_or_else(|e| panic!("readdir {}: {e}", src.display()))
+    {
+        let entry = entry.expect("readdir entry");
+        // Skip git metadata: submodules expose a `.git` gitlink file that
+        // would confuse `git apply` if copied over.
+        if entry.file_name() == ".git" || entry.file_name() == ".gitignore" {
+            continue;
+        }
+        let ty = entry.file_type().expect("file_type");
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path);
+        } else {
+            // `std::fs::copy` dereferences symlinks to regular files;
+            // BoringSSL's source tree doesn't rely on in-tree symlinks.
+            std::fs::copy(&src_path, &dst_path).unwrap_or_else(|e| {
+                panic!(
+                    "copy {} -> {}: {e}",
+                    src_path.display(),
+                    dst_path.display()
+                )
+            });
+        }
+    }
+}
+
+// Cheap FNV-1a 64-bit hash — no crypto strength required; only used as a
+// change detector for the sentinel file.
+fn fxhash(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 fn main() {
     if cfg!(feature = "boringssl-vendored") &&
         !cfg!(feature = "boringssl-boring-crate") &&
         !cfg!(feature = "openssl")
     {
+        // Select the BoringSSL source tree. When the `boringssl-pq-patch`
+        // feature is on, we copy the pristine submodule to `$OUT_DIR`,
+        // apply `boring-pq.patch`, and build from the copy. Otherwise we
+        // build directly from the submodule.
+        let bssl_src: std::path::PathBuf = if cfg!(feature = "boringssl-pq-patch")
+        {
+            prepare_patched_boringssl()
+        } else {
+            "deps/boringssl".into()
+        };
+
         let bssl_dir = std::env::var("QUICHE_BSSL_PATH").unwrap_or_else(|_| {
-            let mut cfg = get_boringssl_cmake_config();
+            let mut cfg = get_boringssl_cmake_config(&bssl_src);
 
             if cfg!(feature = "fuzzing") {
                 cfg.cxxflag("-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE")
@@ -250,6 +402,23 @@ fn main() {
             .unwrap_or("static".to_string());
         println!("cargo:rustc-link-lib={bssl_link_kind}=ssl");
         println!("cargo:rustc-link-lib={bssl_link_kind}=crypto");
+
+        // Recent BoringSSL revisions use the C++ standard library (exceptions,
+        // `operator new`/`delete`, etc.), so the final binary needs to link a
+        // C++ runtime. cmake's `ssl`/`crypto` static archives don't carry this
+        // dependency themselves. (Windows is a TODO; the C++ runtime is
+        // usually picked up implicitly from the MSVC toolchain.)
+        let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
+        let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap();
+        let target_family = std::env::var("CARGO_CFG_TARGET_FAMILY").unwrap();
+        let cxx_stdlib = match target_os.as_str() {
+            "macos" | "ios" | "freebsd" | "openbsd" | "android" => Some("c++"),
+            _ if target_family == "unix" || target_env == "gnu" => Some("stdc++"),
+            _ => None,
+        };
+        if let Some(lib) = cxx_stdlib {
+            println!("cargo:rustc-link-lib={lib}");
+        }
     }
 
     if cfg!(feature = "boringssl-boring-crate") {
