@@ -328,6 +328,21 @@ impl Context {
         })
     }
 
+    // Only used from the test-utils `config_no_pq` helpers; see the
+    // matching cfg gate on `Config::set_curves_list` in `lib.rs`.
+    #[cfg(any(test, feature = "internal"))]
+    pub fn set_curves_list(&mut self, curves: &str) -> Result<()> {
+        // Note: BoringSSL exports `SSL_CTX_set1_groups_list` as a real
+        // function; OpenSSL (and openssl-quictls) defines it as a macro
+        // that expands to `SSL_CTX_ctrl`. Each backend provides a
+        // `SSL_CTX_set1_groups_list` shim in the per-vendor module so this
+        // call site can be backend-agnostic.
+        let cstr = ffi::CString::new(curves).map_err(|_| Error::TlsFail)?;
+        map_result(unsafe {
+            SSL_CTX_set1_groups_list(self.as_mut_ptr(), cstr.as_ptr())
+        })
+    }
+
     fn as_mut_ptr(&mut self) -> *mut SSL_CTX {
         self.0
     }
