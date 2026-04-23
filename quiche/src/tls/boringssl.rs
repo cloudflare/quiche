@@ -310,6 +310,14 @@ extern "C" {
     ) -> c_int;
     fn SSL_CTX_set_early_data_enabled(ctx: *mut SSL_CTX, enabled: i32);
 
+    // BoringSSL exports `SSL_CTX_set1_groups_list` as a real symbol; on
+    // OpenSSL it is a header macro. See `openssl_quictls.rs` for the
+    // OpenSSL shim. Only used from test-utils helpers.
+    #[cfg(any(test, feature = "internal"))]
+    pub(super) fn SSL_CTX_set1_groups_list(
+        ctx: *mut SSL_CTX, groups: *const c_char,
+    ) -> c_int;
+
     pub(super) fn SSL_CTX_set_session_cache_mode(
         ctx: *mut SSL_CTX, mode: c_int,
     ) -> c_int;
