@@ -221,7 +221,37 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: ["aarch64-unknown-linux-gnu","armv7-unknown-linux-gnueabihf","i686-unknown-linux-gnu"]
+        include:
+          - target: aarch64-unknown-linux-gnu
+            apt_packages: crossbuild-essential-arm64
+            linker: aarch64-linux-gnu-gcc
+            qemu_runner: qemu-aarch64-static
+            qemu_ld_prefix: /usr/aarch64-linux-gnu
+          - target: armv7-unknown-linux-gnueabihf
+            apt_packages: crossbuild-essential-armhf
+            linker: arm-linux-gnueabihf-gcc
+            qemu_runner: qemu-arm-static
+            qemu_ld_prefix: /usr/arm-linux-gnueabihf
+          - target: i686-unknown-linux-gnu
+            # gcc-multilib gives us a 64-bit gcc that can target i686 via
+            # `-m32`. cc-rs already knows about this fallback for the
+            # `i686-unknown-linux-gnu` target, so no `CC` override is
+            # needed. The native i686 binaries run directly on the
+            # x86_64 host -- no QEMU required.
+            apt_packages: gcc-multilib g++-multilib
+            # BoringSSL's x86 assembly requires SSE2. The toolchain file
+            # in BoringSSL would set `-msse2`, but cmake-rs passes
+            # `-DCMAKE_CXX_FLAGS=...` on the command line which wins
+            # over the toolchain file's CACHE STRING. We set CXXFLAGS
+            # here so cmake-rs picks it up via cc-rs and propagates it
+            # into `CMAKE_CXX_FLAGS`. (Only `bcm.cc` and other C++
+            # sources include the relevant header that triggers the
+            # `#error "x86 assembly requires SSE2"`, so CFLAGS is not
+            # required.)
+            cxxflags: -msse2
+    env:
+      CXXFLAGS: ${{ matrix.cxxflags }}
+      QEMU_LD_PREFIX: ${{ matrix.qemu_ld_prefix }}
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -235,15 +265,31 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
+          targets: ${{ matrix.target }}
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+      - name: Install cross-compilation toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install --assume-yes ${{ matrix.apt_packages }} qemu-user-static
 
-      - name: Install cross
-        run: cargo-binstall -y cross
+      # Tell cargo which linker to use for the target binary and which
+      # runner (QEMU user-mode emulator) to use when invoking the test
+      # binary. i686 is omitted: cc-rs auto-detects
+      # `x86_64-linux-gnu-gcc -m32` from `gcc-multilib`, and the
+      # resulting binaries run natively on the x86_64 host.
+      - name: Configure cargo for cross-compilation
+        if: matrix.qemu_runner != ''
+        run: |
+          mkdir -p .cargo
+          cat <<EOF >> .cargo/config.toml
+          [target.${{ matrix.target }}]
+          linker = "${{ matrix.linker }}"
+          runner = "${{ matrix.qemu_runner }}"
+          EOF
+          cat .cargo/config.toml
 
-      - name: Run cargo test using cross
-        run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer
+      - name: Run cargo test
+        run: cargo test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer
 
   http3_test:
     runs-on: ubuntu-latest
