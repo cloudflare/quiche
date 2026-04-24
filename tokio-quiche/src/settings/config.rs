@@ -184,6 +184,14 @@ fn make_quiche_config(
         config.verify_peer(quic_settings.verify_peer);
     }
 
+    if let Some(path) = quic_settings.verify_ca_bundle_path.as_deref() {
+        config.load_verify_locations_from_file(path)?;
+    }
+
+    if let Some(path) = quic_settings.verify_ca_directory_path.as_deref() {
+        config.load_verify_locations_from_directory(path)?;
+    }
+
     config.set_max_connection_window(quic_settings.max_connection_window);
     config.set_max_stream_window(quic_settings.max_stream_window);
     config.set_enable_send_streams_blocked(
