@@ -157,6 +157,16 @@ fn get_boringssl_cmake_config<P: AsRef<std::path::Path>>(
                     src_abs.join("util/32-bit-toolchain.cmake").as_os_str(),
                 );
 
+                // BoringSSL's x86 assembly requires SSE2. The toolchain
+                // file sets `-msse2`, but cmake-rs passes
+                // `-DCMAKE_C_FLAGS=...` on the command line, which wins
+                // over the toolchain file's CACHE STRING. Add `-msse2`
+                // (and `-mfpmath=sse`) here so they make it into the
+                // final flags regardless.
+                boringssl_cmake.cflag("-msse2").cflag("-mfpmath=sse");
+                boringssl_cmake.cxxflag("-msse2").cxxflag("-mfpmath=sse");
+                boringssl_cmake.asmflag("-msse2");
+
                 boringssl_cmake
             },
 
