@@ -29,6 +29,8 @@ use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 use std::time::Duration;
 
+pub use qlog::compression::QlogCompression;
+
 /// QUIC configuration parameters.
 #[serde_as]
 #[settings]
@@ -151,6 +153,16 @@ pub struct QuicSettings {
 
     /// Path to a directory where QLOG files will be saved.
     pub qlog_dir: Option<String>,
+
+    /// Compression applied to QLOG output files.
+    ///
+    /// Defaults to [`QlogCompression::None`], preserving the historical
+    /// behavior of emitting raw `.sqlog` files. The `Gzip` and `Zstd`
+    /// variants require the `qlog-gzip` and `qlog-zstd` Cargo features
+    /// (both enabled by default); builds that disable those features
+    /// cannot reference the corresponding variant.
+    #[serde(default)]
+    pub qlog_compression: QlogCompression,
 
     /// Congestion control algorithm to use.
     ///

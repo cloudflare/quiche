@@ -74,8 +74,24 @@
 //! # Feature Flags
 //!
 //! tokio-quiche supports a number of feature flags to enable experimental
-//! features, performance enhancements, and additional telemetry. By default, no
-//! feature flags are enabled.
+//! features, performance enhancements, and additional telemetry.
+//!
+//! Enabled by default:
+//!
+//! - `qlog-gzip`: Forwards to the `qlog` crate's `gzip` feature so QLOG output
+//!   can be emitted as `.sqlog.gz` via `flate2`.
+//! - `qlog-zstd`: Forwards to the `qlog` crate's `zstd` feature so QLOG output
+//!   can be emitted as `.sqlog.zst`. Pulls in the `zstd` crate (C dependency
+//!   via `zstd-sys`).
+//!
+//! Both compression features may be enabled together; the algorithm
+//! is selected per connection at runtime via
+//! [`settings::QuicSettings::qlog_compression`]. Disable both with
+//! `default-features = false` to opt out of the extra dependencies;
+//! the default `QlogCompression::None` keeps writing raw `.sqlog`
+//! files in that configuration.
+//!
+//! Off by default:
 //!
 //! - `rpk`: Support for raw public keys (RPK) in QUIC handshakes (via
 //!   [boring]).

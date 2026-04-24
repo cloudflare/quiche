@@ -24,6 +24,10 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
+
 use crate::QlogSeq;
 
 /// Represents the format of the read event.
@@ -64,6 +68,52 @@ impl<'a> QlogSeqReader<'a> {
 
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Convenience constructor that opens `path` and picks a streaming
+    /// decoder based on the file extension:
+    ///
+    /// * `.sqlog` -> raw JSON-SEQ (always available).
+    /// * `.sqlog.gz` -> gzip via `flate2` (requires the `gzip` feature).
+    /// * `.sqlog.zst` -> zstd via `zstd` (requires the `zstd` feature).
+    ///
+    /// Unknown extensions, or compressed extensions whose matching
+    /// feature is not enabled, return an [`std::io::ErrorKind::Unsupported`]
+    /// error with a message pointing at the feature that is needed.
+    ///
+    /// This is the intended single entry point for reading a qlog
+    /// file regardless of compression.
+    pub fn with_file(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let path = path.as_ref();
+        let file = File::open(path)?;
+        let ext = path.extension().and_then(|s| s.to_str());
+
+        let reader: Box<dyn std::io::BufRead + Send + Sync> = match ext {
+            Some("sqlog") | None => Box::new(BufReader::new(file)),
+            #[cfg(feature = "gzip")]
+            Some("gz") =>
+                Box::new(BufReader::new(flate2::read::GzDecoder::new(file))),
+            #[cfg(feature = "zstd")]
+            Some("zst") => {
+                let decoder = zstd::Decoder::new(file)?;
+                Box::new(BufReader::new(decoder))
+            },
+            Some(other) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    format!(
+                        "qlog file extension {other:?} requires a \
+                         matching feature on the qlog crate (enable \
+                         `gzip` for .gz, `zstd` for .zst)"
+                    ),
+                )
+                .into());
+            },
+        };
+
+        Self::new(reader)
     }
 
     fn read_record(
