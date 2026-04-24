@@ -72,7 +72,14 @@ fn get_boringssl_cmake_config<P: AsRef<std::path::Path>>(
 ) -> cmake::Config {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let pwd = std::env::current_dir().unwrap();
+    let src = src.as_ref();
+    // Resolve to an absolute path so it works from any CMake working
+    // directory. `current_dir` gives us the Cargo build root.
+    let src_abs = if src.is_absolute() {
+        src.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap().join(src)
+    };
 
     let mut boringssl_cmake = cmake::Config::new(src);
 
@@ -147,8 +154,7 @@ fn get_boringssl_cmake_config<P: AsRef<std::path::Path>>(
             "x86" => {
                 boringssl_cmake.define(
                     "CMAKE_TOOLCHAIN_FILE",
-                    pwd.join("deps/boringssl/src/util/32-bit-toolchain.cmake")
-                        .as_os_str(),
+                    src_abs.join("util/32-bit-toolchain.cmake").as_os_str(),
                 );
 
                 boringssl_cmake
@@ -162,8 +168,7 @@ fn get_boringssl_cmake_config<P: AsRef<std::path::Path>>(
             if arch == "x86" && os != "windows" {
                 boringssl_cmake.define(
                     "CMAKE_TOOLCHAIN_FILE",
-                    pwd.join("deps/boringssl/src/util/32-bit-toolchain.cmake")
-                        .as_os_str(),
+                    src_abs.join("util/32-bit-toolchain.cmake").as_os_str(),
                 );
             }
 
