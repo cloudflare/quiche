@@ -32,6 +32,18 @@ use crate::Header;
 
 use rstest::rstest;
 
+/// Tolerance applied to byte-count assertions that depend on the
+/// post-handshake cwnd or `tx_cap` for BBR2 in Startup. BBR2 grows the
+/// cwnd by exactly `bytes_acked` per ACK, so these values reflect the
+/// total bytes the server sent during the handshake that have been
+/// acknowledged. ACK frames carry an `ack_delay` VarInt encoded from
+/// microsecond-level timing, which can shift by a byte or two between
+/// architectures (especially under QEMU emulation), so we allow a
+/// small upper-bound tolerance. This is well below a packet, so any
+/// regression that actually inflates the cwnd by a meaningful amount
+/// would still trip the assertion.
+const STREAM_SEND_TOLERANCE: usize = 4;
+
 #[test]
 fn transport_params() {
     // Server encodes, client decodes.
@@ -6436,15 +6448,27 @@ fn client_rst_stream_while_bytes_in_flight(
 
     // Server sends stream data bigger than cwnd.
     let send_buf = [0; 50000];
-    assert_eq!(
-        pipe.server.stream_send(4, &send_buf, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else if cfg!(feature = "openssl") {
-            Ok(13964)
-        } else {
-            Ok(15030)
-        }
+    let expected = if cc_algorithm_name == "cubic" {
+        12000
+    } else if cfg!(feature = "openssl") {
+        13964
+    } else {
+        15030
+    };
+    // For BBR2 in Startup the cwnd grows by `bytes_acked` per ACK, so
+    // the cwnd-limited `stream_send` return value depends on the
+    // exact byte count the peer has acknowledged. ACK frames carry an
+    // `ack_delay` VarInt encoded from microsecond-level timing, which
+    // varies by a few bytes across architectures (especially under
+    // QEMU emulation). Allow a small upper-bound tolerance so the
+    // test isn't flaky.
+    let sent = pipe.server.stream_send(4, &send_buf, false).unwrap();
+    assert!(
+        (expected..=expected + STREAM_SEND_TOLERANCE).contains(&sent),
+        "{} not in [{}, {}]",
+        sent,
+        expected,
+        expected + STREAM_SEND_TOLERANCE,
     );
     let server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -6533,15 +6557,22 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
 
     // Server sends stream data bigger than cwnd.
     let send_buf = [0; 50000];
-    assert_eq!(
-        pipe.server.stream_send(4, &send_buf, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else if cfg!(feature = "openssl") {
-            Ok(13964)
-        } else {
-            Ok(15030)
-        }
+    // See the same assertion in `client_rst_stream_while_bytes_in_flight`
+    // for why we accept a small tolerance.
+    let expected = if cc_algorithm_name == "cubic" {
+        12000
+    } else if cfg!(feature = "openssl") {
+        13964
+    } else {
+        15030
+    };
+    let sent = pipe.server.stream_send(4, &send_buf, false).unwrap();
+    assert!(
+        (expected..=expected + STREAM_SEND_TOLERANCE).contains(&sent),
+        "{} not in [{}, {}]",
+        sent,
+        expected,
+        expected + STREAM_SEND_TOLERANCE,
     );
     let mut server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -9078,20 +9109,28 @@ fn update_max_datagram_size(
             .max_datagram_size(),
         1200,
     );
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .cwnd(),
-        if cc_algorithm_name == "cubic" {
-            12000
-        } else if cfg!(feature = "openssl") {
-            13437
-        } else {
-            14573
-        },
+    // See the same assertion in `client_rst_stream_while_bytes_in_flight`
+    // for why we accept a small tolerance.
+    let expected = if cc_algorithm_name == "cubic" {
+        12000
+    } else if cfg!(feature = "openssl") {
+        13437
+    } else {
+        14573
+    };
+    let cwnd = pipe
+        .server
+        .paths
+        .get_active()
+        .expect("no active")
+        .recovery
+        .cwnd();
+    assert!(
+        (expected..=expected + STREAM_SEND_TOLERANCE).contains(&cwnd),
+        "{} not in [{}, {}]",
+        cwnd,
+        expected,
+        expected + STREAM_SEND_TOLERANCE,
     );
 }
 
@@ -9160,15 +9199,22 @@ fn send_capacity(
         Ok((6, true))
     );
 
-    assert_eq!(
+    // See the same assertion in `client_rst_stream_while_bytes_in_flight`
+    // for why we accept a small tolerance.
+    let expected = if cc_algorithm_name == "cubic" {
+        12000
+    } else if cfg!(feature = "openssl") {
+        13959
+    } else {
+        15025
+    };
+    assert!(
+        (expected..=expected + STREAM_SEND_TOLERANCE)
+            .contains(&pipe.server.tx_cap),
+        "{} not in [{}, {}]",
         pipe.server.tx_cap,
-        if cc_algorithm_name == "cubic" {
-            12000
-        } else if cfg!(feature = "openssl") {
-            13959
-        } else {
-            15025
-        }
+        expected,
+        expected + STREAM_SEND_TOLERANCE,
     );
 
     assert_eq!(pipe.server.stream_send(0, &buf[..5000], false), Ok(5000));
@@ -9698,8 +9744,13 @@ fn initial_cwnd(
             CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
         );
     } else {
-        // TODO understand where these adjustments come from and why they vary
-        // by TLS implementation and OS target.
+        // For BBR2 in Startup mode the congestion window grows by exactly
+        // `bytes_acked` on each ACK (see
+        // `BBRv2::update_congestion_window`), so `tx_cap` here equals
+        // `initial_cwnd` plus the bytes the server sent during the
+        // handshake that have already been acknowledged. See
+        // `STREAM_SEND_TOLERANCE` for why we allow a small upper-bound
+        // tolerance.
         let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 +
             if cfg!(feature = "openssl") {
                 1463
@@ -9714,10 +9765,10 @@ fn initial_cwnd(
             expected
         );
         assert!(
-            pipe.server.tx_cap <= expected + 1,
+            pipe.server.tx_cap <= expected + STREAM_SEND_TOLERANCE,
             "{} vs {}",
             pipe.server.tx_cap,
-            expected + 1
+            expected + STREAM_SEND_TOLERANCE
         );
     }
 
