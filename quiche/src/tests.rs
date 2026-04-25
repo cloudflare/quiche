@@ -1310,7 +1310,7 @@ fn empty_stream_frame(
     }];
 
     let pkt_type = Type::Short;
-    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(40));
 
     let mut readable = pipe.server.readable();
     assert_eq!(readable.next(), Some(4));
@@ -1326,7 +1326,7 @@ fn empty_stream_frame(
     }];
 
     let pkt_type = Type::Short;
-    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(40));
 
     let mut readable = pipe.server.readable();
     assert_eq!(readable.next(), Some(4));
@@ -3263,7 +3263,7 @@ fn reset_stream_data_recvd(
     }];
 
     let pkt_type = Type::Short;
-    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(40));
 
     // Server is notified of stream readability, due to reset.
     let mut r = pipe.server.readable();
@@ -3339,7 +3339,7 @@ fn reset_stream_data_not_recvd(
     }];
 
     let pkt_type = Type::Short;
-    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(40));
 
     // Server is notified of stream readability, due to reset.
     let mut r = pipe.server.readable();
@@ -3354,7 +3354,7 @@ fn reset_stream_data_not_recvd(
     assert!(pipe.server.stream_finished(0));
 
     // Sending RESET_STREAM again shouldn't make stream readable again.
-    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(40));
 
     let mut r = pipe.server.readable();
     assert_eq!(r.next(), None);
@@ -5818,7 +5818,7 @@ fn collect_streams(
     }];
 
     let pkt_type = Type::Short;
-    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(40));
 }
 
 #[test]
@@ -6735,7 +6735,7 @@ fn client_rst_stream_while_bytes_in_flight(
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(by_boring!(b4: 13878, b5: 15030))
+            Ok(by_boring!(b4: 13882, b5: 15035))
         }
     );
     let server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
@@ -6756,7 +6756,7 @@ fn client_rst_stream_while_bytes_in_flight(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 27756, b5: 30060),
+        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 27764, b5: 30070),
         _ => 24000,
     };
 
@@ -6824,7 +6824,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(by_boring!(b4: 13878, b5: 15030))
+            Ok(by_boring!(b4: 13882, b5: 15035))
         }
     );
     let mut server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
@@ -6844,7 +6844,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 26556, b5: 28860),
+        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 26564, b5: 28870),
         _ => 8400,
     };
 
@@ -6905,7 +6905,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(by_boring!(b4: 12299, b5: 13587))
+            Ok(by_boring!(b4: 12300, b5: 13589))
         }
     );
 
@@ -6980,7 +6980,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(by_boring!(b4: 12299, b5: 13587))
+            Ok(by_boring!(b4: 12300, b5: 13589))
         }
     );
 
@@ -7591,7 +7591,7 @@ fn stream_priority(
     #[values(true, false)] discard: bool,
 ) {
     // Limit 1-RTT packet size to avoid congestion control interference.
-    const MAX_TEST_PACKET_SIZE: usize = 540;
+    const MAX_TEST_PACKET_SIZE: usize = 541;
 
     let mut buf = [0; 65535];
 
@@ -9460,7 +9460,7 @@ fn update_max_datagram_size(
         if cc_algorithm_name == "cubic" {
             12000
         } else {
-            by_boring!(b4: 13421, b5: 14573)
+            by_boring!(b4: 13424, b5: 14577)
         },
     );
 }
@@ -9535,7 +9535,7 @@ fn send_capacity(
         if cc_algorithm_name == "cubic" {
             12000
         } else {
-            by_boring!(b4: 13873, b5: 15025)
+            by_boring!(b4: 13877, b5: 15030)
         }
     );
 
@@ -9550,7 +9550,7 @@ fn send_capacity(
         if cc_algorithm_name == "cubic" {
             Ok(2000)
         } else {
-            Ok(by_boring!(b4: 3873, b5: 5025))
+            Ok(by_boring!(b4: 3877, b5: 5030))
         }
     );
 
@@ -10007,7 +10007,7 @@ fn initial_cwnd(
         // `initial_cwnd`) is larger under boring 5 because the
         // ClientHello carries a post-quantum key share by default.
         let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 +
-            by_boring!(b4: 1447, b5: 2598);
+            by_boring!(b4: 1449, b5: 2600);
         const TOLERANCE: usize = 4;
 
         assert!(
@@ -11755,7 +11755,7 @@ fn resilience_against_migration_attack(
     let mut recv_buf = [0; DATA_BYTES];
     let send1_bytes = pipe.server.stream_send(1, &buf, true).unwrap();
     assert_eq!(send1_bytes, match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 13880, b5: 15032),
+        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 13884, b5: 15037),
         _ => 12000,
     });
     assert_eq!(
