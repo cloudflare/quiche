@@ -6793,16 +6793,22 @@ fn validate_peer_sent_ack_range(
 
     // Expected pkt counts below reflect the post-handshake state. When the
     // ClientHello spans multiple Initial packets (as with post-quantum
-    // keyshares) the handshake exchanges one extra packet per side compared
-    // to the classical case, which is why these counts are one higher than
-    // they would be for a single-Initial ClientHello.
-    let expected_max_active_pkt_sent = 4;
+    // keyshares enabled by our BoringSSL build) the handshake exchanges
+    // one extra packet per side compared to the classical case, so these
+    // counts are one higher than they would be for a single-Initial
+    // ClientHello. The `openssl` build doesn't use PQ keyshares.
+    let extra = if cfg!(feature = "openssl") { 0 } else { 1 };
+
+    let expected_max_active_pkt_sent = 3 + extra;
     let recovery = &pipe.server.paths.get_active().unwrap().recovery;
     assert_eq!(
         recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_active_pkt_sent
     );
-    assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 4);
+    assert_eq!(
+        recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        3 + extra
+    );
     assert_eq!(recovery.sent_packets_len(epoch), 0);
     // Verify largest sent on the connection
     assert_eq!(
@@ -6821,8 +6827,14 @@ fn validate_peer_sent_ack_range(
     pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
     let recovery = &pipe.server.paths.get_active().unwrap().recovery;
-    assert_eq!(recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 5);
-    assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 4);
+    assert_eq!(
+        recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        4 + extra
+    );
+    assert_eq!(
+        recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        3 + extra
+    );
     assert_eq!(recovery.sent_packets_len(epoch), 1);
 
     // Send an invalid ACK range to the server and expect server error
@@ -6881,26 +6893,39 @@ fn validate_peer_sent_ack_range_for_multi_path(
     let epoch = packet::Epoch::Application;
     let pkt_type = Type::Short;
 
+    // The post-handshake packet number on the active path is one
+    // higher when the BoringSSL ClientHello (with PQ keyshares) spans
+    // multiple Initial packets. The 1-RTT packet number space is
+    // shared across paths, so the non-active path's first probing
+    // packet number is also bumped by the same amount.
+    let extra = if cfg!(feature = "openssl") { 0 } else { 1 };
+
     // active path
-    let expected_max_active_pkt_sent = 8;
+    let expected_max_active_pkt_sent = 7 + extra;
     let active_path = &pipe.server.paths.get_mut(0).unwrap();
     let p1_recovery = &active_path.recovery;
     assert_eq!(
         p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_active_pkt_sent
     );
-    assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 7);
+    assert_eq!(
+        p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        6 + extra
+    );
     assert_eq!(p1_recovery.sent_packets_len(epoch), 1);
 
     // non-active path
-    let expected_max_second_pkt_sent = 6;
+    let expected_max_second_pkt_sent = 5 + extra;
     let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
     let p2_recovery = &second_path.recovery;
     assert_eq!(
         p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_second_pkt_sent
     );
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 6);
+    assert_eq!(
+        p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        5 + extra
+    );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Verify largest sent on the connection is the max of the two paths
@@ -6928,15 +6953,27 @@ fn validate_peer_sent_ack_range_for_multi_path(
     let active_path = &pipe.server.paths.get_mut(0).unwrap();
     assert!(active_path.active());
     let p1_recovery = &active_path.recovery;
-    assert_eq!(p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 8);
-    assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 8);
+    assert_eq!(
+        p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        7 + extra
+    );
+    assert_eq!(
+        p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        7 + extra
+    );
     assert_eq!(p1_recovery.sent_packets_len(epoch), 0);
 
     // non-active path
     let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
     let p2_recovery = &second_path.recovery;
-    assert_eq!(p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 6);
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 6);
+    assert_eq!(
+        p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        5 + extra
+    );
+    assert_eq!(
+        p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        5 + extra
+    );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Send a large invalid ACK range to the server. Range is not inclusive so
