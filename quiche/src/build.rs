@@ -383,10 +383,15 @@ fn main() {
             let mut cfg = get_boringssl_cmake_config(&bssl_src);
 
             if cfg!(feature = "fuzzing") {
-                cfg.cxxflag("-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE")
-                    .cxxflag("-DBORINGSSL_UNSAFE_FUZZER_MODE");
-                cfg.cflag("-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE")
-                    .cflag("-DBORINGSSL_UNSAFE_FUZZER_MODE");
+                // BoringSSL 5.x consolidated the older
+                // `BORINGSSL_UNSAFE_{DETERMINISTIC,FUZZER}_MODE`
+                // defines into the single
+                // `FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION` switch.
+                // Setting it makes BoringSSL build the deterministic
+                // RNG path (so `RAND_reset_for_fuzzing` is exported)
+                // and enables the fuzzer-mode TLS shortcuts.
+                cfg.cflag("-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION")
+                    .cxxflag("-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION");
             }
 
             cfg.build_target("ssl").build();
