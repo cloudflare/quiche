@@ -664,31 +664,29 @@ impl RecoveryOps for LegacyRecovery {
             (self.congestion.cc_ops.rollback)(&mut self.congestion);
         }
 
-        if self.newly_acked.is_empty() {
-            return Ok(OnAckReceivedOutcome::default());
-        }
+        let largest_ack_received = peer_sent_ack_ranges.last().unwrap();
 
-        let largest_newly_acked = self.newly_acked.last().unwrap();
-
-        // Update `largest_acked_packet` based on the validated `newly_acked`
+        // Update `largest_acked_packet` based on the `peer_sent_ack_ranges`
         // value.
         let largest_acked_pkt_num = self.epochs[epoch]
             .largest_acked_packet
             .unwrap_or(0)
-            .max(largest_newly_acked.pkt_num);
+            .max(largest_ack_received);
         self.epochs[epoch].largest_acked_packet = Some(largest_acked_pkt_num);
 
-        // Check if largest packet is newly acked.
-        if largest_newly_acked.pkt_num == largest_acked_pkt_num &&
-            has_ack_eliciting
-        {
-            let latest_rtt = now - largest_newly_acked.time_sent;
-            self.rtt_stats.update_rtt(
-                latest_rtt,
-                Duration::from_micros(ack_delay),
-                now,
-                handshake_status.completed,
-            );
+        if let Some(largest_newly_acked) = self.newly_acked.last() {
+            // Check if largest packet is newly acked.
+            if largest_newly_acked.pkt_num == largest_acked_pkt_num &&
+                has_ack_eliciting
+            {
+                let latest_rtt = now - largest_newly_acked.time_sent;
+                self.rtt_stats.update_rtt(
+                    latest_rtt,
+                    Duration::from_micros(ack_delay),
+                    now,
+                    handshake_status.completed,
+                );
+            }
         }
 
         // Detect and mark lost packets without removing them from the sent
@@ -696,16 +694,18 @@ impl RecoveryOps for LegacyRecovery {
         let (lost_packets, lost_bytes) =
             self.detect_lost_packets(epoch, now, trace_id);
 
-        self.congestion.on_packets_acked(
-            self.bytes_in_flight.get(),
-            &mut self.newly_acked,
-            &self.rtt_stats,
-            now,
-        );
+        if !self.newly_acked.is_empty() {
+            self.congestion.on_packets_acked(
+                self.bytes_in_flight.get(),
+                &mut self.newly_acked,
+                &self.rtt_stats,
+                now,
+            );
 
-        self.bytes_in_flight.saturating_subtract(acked_bytes, now);
+            self.bytes_in_flight.saturating_subtract(acked_bytes, now);
 
-        self.pto_count = 0;
+            self.pto_count = 0;
+        }
 
         self.set_loss_detection_timer(handshake_status, now);
 
