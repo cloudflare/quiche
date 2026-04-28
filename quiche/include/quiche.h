@@ -168,6 +168,9 @@ int quiche_config_load_verify_locations_from_file(quiche_config *config,
 int quiche_config_load_verify_locations_from_directory(quiche_config *config,
                                                        const char *path);
 
+// Configures the TLS curve preference list (colon-separated, e.g. "X25519MLKEM768:X25519:P-256:P-384").
+int quiche_config_set_curves_list(quiche_config *config, const char *curves);
+
 // Configures whether to verify the peer's certificate.
 void quiche_config_verify_peer(quiche_config *config, bool v);
 
