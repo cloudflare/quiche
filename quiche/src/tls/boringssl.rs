@@ -312,8 +312,7 @@ extern "C" {
 
     // BoringSSL exports `SSL_CTX_set1_groups_list` as a real symbol; on
     // OpenSSL it is a header macro. See `openssl_quictls.rs` for the
-    // OpenSSL shim. Only used from test-utils helpers.
-    #[cfg(any(test, feature = "internal"))]
+    // OpenSSL shim.
     pub(super) fn SSL_CTX_set1_groups_list(
         ctx: *mut SSL_CTX, groups: *const c_char,
     ) -> c_int;
