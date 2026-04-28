@@ -239,9 +239,7 @@ pub(super) unsafe fn SSL_CTX_set_tlsext_ticket_keys(
 
 // `SSL_CTX_set1_groups_list` is a header macro in OpenSSL/openssl-quictls;
 // shim it into a concrete function that matches the BoringSSL ABI. See
-// `boringssl.rs` for the BoringSSL counterpart. Only used from test-utils
-// helpers.
-#[cfg(any(test, feature = "internal"))]
+// `boringssl.rs` for the BoringSSL counterpart.
 #[allow(non_snake_case)]
 pub(super) unsafe fn SSL_CTX_set1_groups_list(
     ctx: *mut SSL_CTX, groups: *const c_char,
