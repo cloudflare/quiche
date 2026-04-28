@@ -201,6 +201,19 @@ pub extern "C" fn quiche_config_load_verify_locations_from_directory(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_curves_list(
+    config: &mut Config, curves: *const c_char,
+) -> c_int {
+    let curves = unsafe { ffi::CStr::from_ptr(curves).to_str().unwrap() };
+
+    match config.set_curves_list(curves) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_verify_peer(config: &mut Config, v: bool) {
     config.verify_peer(v);
 }
