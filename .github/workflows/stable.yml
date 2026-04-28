@@ -22,7 +22,6 @@ jobs:
     strategy:
       matrix:
         tls-feature:
-          - "" # default, boringssl-vendored
           - "boringssl-boring-crate"
           - "openssl"
     # Only run on "pull_request" event for external PRs. This is to avoid
@@ -31,8 +30,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -46,7 +43,7 @@ jobs:
           sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
 
       - name: Unused dependency check
-        if: ${{ matrix.tls-feature == '' }}
+        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
         uses: bnjbvr/cargo-machete@main
 
       - name: Build OpenSSL
@@ -65,10 +62,12 @@ jobs:
         run: cargo test --verbose --all-targets --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }}
 
       # tokio-quiche requires the `boring` crate, so don't run its tests when
-      # building without it.
+      # building without it. `--no-default-features` disables the
+      # `boringssl-boring-crate` default so the openssl backend is the only
+      # TLS backend in the build.
       - name: Run cargo test
         if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
-        run: cargo test --verbose --all-targets --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
+        run: cargo test --verbose --all-targets --no-default-features --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
@@ -80,10 +79,12 @@ jobs:
       # (https://github.com/rust-lang/cargo/issues/6669)
       #
       # tokio-quiche requires the `boring` crate, so don't run its tests when
-      # building without it.
+      # building without it. `--no-default-features` disables the
+      # `boringssl-boring-crate` default so the openssl backend is the only
+      # TLS backend in the build.
       - name: Run cargo doc test
         if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
-        run: cargo test --verbose --doc --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
+        run: cargo test --verbose --doc --no-default-features --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
 
       # NOTE: this is disabled as it fails when building changes that bump
       # version of local crates (e.g. when doing a `qlog` release) that have not
@@ -92,11 +93,21 @@ jobs:
       # - name: Run cargo package
       #   run: cargo package --verbose --workspace --exclude=quiche_apps --allow-dirty
 
-      - name: Run cargo clippy
+      - name: Run cargo clippy (boring)
+        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
         run: cargo clippy --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }} -- -D warnings
 
-      - name: Run cargo clippy on examples
+      - name: Run cargo clippy
+        if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
+        run: cargo clippy --no-default-features --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }} -- -D warnings
+
+      - name: Run cargo clippy on examples (boring)
+        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
         run: cargo clippy --examples --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }} -- -D warnings
+
+      - name: Run cargo clippy on examples
+        if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
+        run: cargo clippy --examples --no-default-features --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }} -- -D warnings
 
       - name: Run cargo doc
         run: cargo doc --no-deps --all-features --document-private-items
@@ -119,8 +130,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -148,8 +157,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -192,8 +199,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -275,8 +280,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -290,7 +293,7 @@ jobs:
         run: cargo-binstall -y cross
 
       - name: Run cargo test using cross
-        run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer
+        run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer --features=boringssl-boring-crate
 
   http3_test:
     runs-on: ubuntu-latest
@@ -300,8 +303,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -323,8 +324,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Build Docker images
         run: make docker-build
@@ -351,8 +350,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain for the target
         uses: dtolnay/rust-toolchain@master

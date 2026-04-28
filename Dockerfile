@@ -15,7 +15,10 @@ COPY quiche/ ./quiche/
 COPY task-killswitch ./task-killswitch/
 COPY tokio-quiche ./tokio-quiche/
 
-RUN apt-get update && apt-get install -y cmake && rm -rf /var/lib/apt/lists/*
+# `cmake` and `clang` are needed by `boring-sys`: it builds BoringSSL via
+# cmake and runs `bindgen` (which loads `libclang`) to generate FFI
+# bindings.
+RUN apt-get update && apt-get install -y cmake clang && rm -rf /var/lib/apt/lists/*
 
 RUN cargo build --release --manifest-path apps/Cargo.toml
 

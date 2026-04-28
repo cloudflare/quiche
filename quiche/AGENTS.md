@@ -35,11 +35,9 @@ src/
   minmax.rs                  Windowed min/max filter
   test_utils.rs              Pipe struct for in-memory QUIC pairs (pub via `internal` feature)
   tests.rs        (12k)      Integration tests
-  build.rs                   BoringSSL cmake build (NOTE: lives in src/, not crate root)
+  build.rs                   pkg-config / cdylib link plumbing (NOTE: lives in src/, not crate root)
 include/
   quiche.h        (1.2k)     C API header — mirrors ffi.rs
-deps/
-  boringssl/                 Git submodule
 ```
 
 ## WHERE TO LOOK
@@ -53,7 +51,7 @@ deps/
 | TLS handshake | `tls/mod.rs` — cfg-gated per backend |
 | C bindings | `ffi.rs` + `include/quiche.h` |
 | Test harness | `test_utils.rs` (`Pipe` struct) |
-| Build system | `src/build.rs` — BoringSSL cmake, cross-compile params |
+| Build system | `src/build.rs` — pkg-config + cdylib link plumbing |
 
 ## ANTI-PATTERNS
 
@@ -66,10 +64,9 @@ deps/
 ## NOTES
 
 - `build.rs` is at `src/build.rs` (Cargo.toml: `build = "src/build.rs"`), not crate root.
-- Three TLS backends: `boringssl-vendored` (default), `boringssl-boring-crate`, `openssl` — mutually exclusive features.
+- Two TLS backends: `boringssl-boring-crate` (default, via `boring` crate), `openssl` (quictls) — mutually exclusive features.
 - `quiche::Error` is `Copy + Clone` — intentional for hot-path ergonomics.
 - `test_utils::Pipe` exposed via `internal` feature for downstream crate integration tests.
 - Tests use `rstest` with `#[values("cubic", "bbr2_gcongestion")]` parameterization for CC coverage.
-- `QUICHE_BSSL_PATH` env var skips vendored BoringSSL build.
 - Crate-type: `lib` + `staticlib` + `cdylib` — the latter two for C consumers.
 - `BufFactory` trait (`buffers.rs`) enables zero-copy buffer creation; `Connection<F>` is generic over it.

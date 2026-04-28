@@ -56,7 +56,11 @@ octets = { version = "0.3.5", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
 qlog = { version = "0.17.0", path = "./qlog" }
-quiche = { version = "0.28.0", path = "./quiche" }
+# `default-features = false` so that workspace members can each pick the
+# TLS backend they want via their own feature flags. Members that want
+# the default backend (`boringssl-boring-crate`) opt back in by adding
+# `boringssl-boring-crate` to their feature list.
+quiche = { version = "0.28.0", path = "./quiche", default-features = false }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
 rstest = { version = "0.26.1" }

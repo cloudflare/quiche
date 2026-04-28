@@ -19,10 +19,13 @@ qlog = ["quiche/qlog"]
 # Use BoringSSL provided by the boring crate.
 boringssl-boring-crate = ["quiche/boringssl-boring-crate"]
 
+# Use OpenSSL/quictls.
+openssl = ["quiche/openssl"]
+
 # Enable sfv support.
 sfv = ["quiche/sfv"]
 
-default = ["qlog", "sfv"]
+default = ["qlog", "sfv", "boringssl-boring-crate"]
 
 [dependencies]
 docopt = "1"
