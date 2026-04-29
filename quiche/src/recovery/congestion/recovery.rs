@@ -956,7 +956,6 @@ impl RecoveryOps for LegacyRecovery {
         self.detect_lost_packets(epoch, now, "")
     }
 
-    // FIXME only used by gcongestion
     fn on_app_limited(&mut self) {
         // Not implemented for legacy recovery, update_app_limited and
         // delivery_rate_update_app_limited used instead.
@@ -1036,6 +1035,16 @@ impl RecoveryOps for LegacyRecovery {
 
     fn gcongestion_enabled(&self) -> bool {
         false
+    }
+
+    fn send_stopped_early(&mut self, _has_flushable_data: bool) {
+        // Not implemented -- only used by the BBR implementation
+        // which lives in the gcongestion directory.
+    }
+
+    fn bbr_check_if_app_limited(&mut self, _now: &Instant) {
+        // Not implemented -- only used by the BBR implementation
+        // which lives in the gcongestion directory.
     }
 
     fn lost_count(&self) -> usize {

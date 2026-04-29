@@ -573,6 +573,7 @@ pub struct Config {
     grease: bool,
 
     cc_algorithm: CongestionControlAlgorithm,
+    enable_bbr_app_limited_fix: bool,
     custom_bbr_params: Option<BbrParams>,
     initial_congestion_window_packets: usize,
     enable_relaxed_loss_threshold: bool,
@@ -658,6 +659,7 @@ impl Config {
             application_protos: Vec::new(),
             grease: true,
             cc_algorithm: CongestionControlAlgorithm::CUBIC,
+            enable_bbr_app_limited_fix: false,
             custom_bbr_params: None,
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
@@ -1084,6 +1086,15 @@ impl Config {
     /// The default value is `CongestionControlAlgorithm::CUBIC`.
     pub fn set_cc_algorithm(&mut self, algo: CongestionControlAlgorithm) {
         self.cc_algorithm = algo;
+    }
+
+    /// Enable a rework of how the BBR congestion control implementation
+    /// computes app-limited.  This config parameter will be removed after we
+    /// build confidence on the new implementation or decide to roll it back.
+    ///
+    /// Defaults to `false`.
+    pub fn set_enable_bbr_app_limited_fix(&mut self, value: bool) {
+        self.enable_bbr_app_limited_fix = value;
     }
 
     /// Sets custom BBR settings.
@@ -2509,6 +2520,32 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
+    /// Enable a rework of how the BBR congestion control implementation
+    /// computes app-limited.  This config parameter will be removed after we
+    /// build confidence on the new implementation or decide to roll it back.
+    ///
+    /// Currently this only applies if cc_algorithm is
+    /// `CongestionControlAlgorithm::Bbr2Gcongestion`.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_enable_bbr_app_limited_fix()`].
+    ///
+    /// [`Config::set_enable_bbr_app_limited_fix()`]: struct.Config.html#method.set_enable_bbr_app_limited_fix
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_enable_bbr_app_limited_fix_in_handshake(
+        ssl: &mut boring::ssl::SslRef, value: bool,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.recovery_config.enable_bbr_app_limited_fix = value;
+
+        Ok(())
+    }
+
     /// Sets the congestion control algorithm used by string.
     ///
     /// This function can only be called inside one of BoringSSL's handshake
@@ -2810,6 +2847,12 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
+    /// Returns true if at least 1 stream has headers or body data to
+    /// write, or there are items in the DATAGRAM send queue.
+    fn has_flushable_data(&self) -> bool {
+        self.streams.has_flushable() || !self.dgram_send_queue.is_empty()
+    }
+
     /// Processes QUIC packets received from the peer.
     ///
     /// On success the number of bytes processed from the input buffer is
@@ -2859,10 +2902,17 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::BufferTooShort);
         }
 
+        let now = Instant::now();
+
         let recv_pid = self.paths.path_id_from_addrs(&(info.to, info.from));
 
         if let Some(recv_pid) = recv_pid {
             let recv_path = self.paths.get_mut(recv_pid)?;
+
+            // Run the app limited check if the previous send loop ran out of data
+            // to send. Limit the check to the path where the packet
+            // was received.
+            recv_path.recovery.bbr_check_if_app_limited(&now);
 
             // Keep track of how many bytes we received from the client, so we
             // can limit bytes sent back before address validation, to a
@@ -2896,6 +2946,7 @@ impl<F: BufFactory> Connection<F> {
         // Process coalesced packets.
         while left > 0 {
             let read = match self.recv_single(
+                now,
                 &mut buf[len - left..len],
                 &info,
                 recv_pid,
@@ -2993,10 +3044,9 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     fn recv_single(
-        &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
+        &mut self, now: Instant, buf: &mut [u8], info: &RecvInfo,
+        recv_pid: Option<usize>,
     ) -> Result<usize> {
-        let now = Instant::now();
-
         if buf.is_empty() {
             return Err(Error::Done);
         }
@@ -4035,6 +4085,11 @@ impl<F: BufFactory> Connection<F> {
 
         let send_path = self.paths.get_mut(send_pid)?;
 
+        // Run the app limited check if the previous send loop ran out of data to
+        // send. Limit the check to the path where the connection is
+        // trying to send.
+        send_path.recovery.bbr_check_if_app_limited(&now);
+
         // Update max datagram size to allow path MTU discovery probe to be sent.
         if let Some(pmtud) = send_path.pmtud.as_mut() {
             if pmtud.should_probe() {
@@ -4068,7 +4123,15 @@ impl<F: BufFactory> Connection<F> {
             ) {
                 Ok(v) => v,
 
-                Err(Error::BufferTooShort) | Err(Error::Done) => break,
+                Err(Error::BufferTooShort) => break,
+
+                Err(Error::Done) => {
+                    let has_flushable_data = self.has_flushable_data();
+                    let send_path = self.paths.get_mut(send_pid)?;
+                    send_path.recovery.send_stopped_early(has_flushable_data);
+
+                    break;
+                },
 
                 Err(e) => return Err(e),
             };
@@ -7030,6 +7093,11 @@ impl<F: BufFactory> Connection<F> {
     /// If no timeout has occurred it does nothing.
     pub fn on_timeout(&mut self) {
         let now = Instant::now();
+
+        // Check for app limited on all paths when handling a timeout.
+        for (_, path) in self.paths.iter_mut() {
+            path.recovery.bbr_check_if_app_limited(&now);
+        }
 
         if let Some(draining_timer) = self.draining_timer {
             if draining_timer <= now {
