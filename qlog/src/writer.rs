@@ -54,13 +54,10 @@ use std::io;
 use std::io::Write;
 use std::path::Path;
 
-// Extension constants live at the crate root so they can be shared
-// between [`crate::writer`] and [`crate::reader`] without either
-// module depending on the other. Re-exported here for ergonomic
-// access via `qlog::writer::SQLOG_EXT` etc.
-pub use crate::SQLOG_EXT;
-pub use crate::SQLOG_GZ_EXT;
-pub use crate::SQLOG_ZST_EXT;
+
+use crate::SQLOG_EXT;
+use crate::SQLOG_GZ_EXT;
+use crate::SQLOG_ZST_EXT;
 
 /// Boxed `Write` returned by [`make_qlog_writer`] /
 /// [`make_qlog_writer_from_path`].
