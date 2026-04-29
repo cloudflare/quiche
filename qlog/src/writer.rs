@@ -54,9 +54,10 @@ use std::io;
 use std::io::Write;
 use std::path::Path;
 
-
 use crate::SQLOG_EXT;
+#[cfg(feature = "gzip")]
 use crate::SQLOG_GZ_EXT;
+#[cfg(feature = "zstd")]
 use crate::SQLOG_ZST_EXT;
 
 /// Boxed `Write` returned by [`make_qlog_writer`] /
