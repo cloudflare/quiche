@@ -190,6 +190,9 @@ fn make_quiche_config(
 
     config.set_max_connection_window(quic_settings.max_connection_window);
     config.set_max_stream_window(quic_settings.max_stream_window);
+    config.set_use_initial_max_data_as_flow_control_win(
+        quic_settings.use_initial_max_data_as_fc_window,
+    );
     config.set_enable_send_streams_blocked(
         quic_settings.enable_send_streams_blocked,
     );

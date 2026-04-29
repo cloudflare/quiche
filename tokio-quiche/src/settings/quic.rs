@@ -270,6 +270,16 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_max_stream_window")]
     pub max_stream_window: u64,
 
+    /// Whether to use the `initial_max_data` transport parameter as the
+    /// initial connection and stream flow control window.
+    ///
+    /// See [`set_use_initial_max_data_as_flow_control_win()`] for more.
+    ///
+    /// Defaults to `false`.
+    ///
+    /// [`set_use_initial_max_data_as_flow_control_win()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_use_initial_max_data_as_flow_control_win
+    pub use_initial_max_data_as_fc_window: bool,
+
     /// If true, send an advisory STREAMS_BLOCKED frame when the
     /// application's local stream creation attempts fail due to the
     /// peer advertised MAX_STREAMS limit.
