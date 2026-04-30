@@ -10,11 +10,48 @@ keywords = { workspace = true }
 categories = { workspace = true }
 readme = "README.md"
 
+[features]
+# Enable gzip compression / decompression of qlog streams via
+# [`flate2`]. Used by [`writer::make_qlog_writer`] and
+# [`reader::QlogSeqReader::with_file`].
+gzip = ["dep:flate2"]
+
+# Enable zstd compression / decompression of qlog streams via
+# [`zstd`]. Pulls in `zstd-sys` (C dependency). Used by
+# [`writer::make_qlog_writer`] and
+# [`reader::QlogSeqReader::with_file`].
+zstd = ["dep:zstd"]
+
+# Expose a `foundations::settings::Settings` impl for
+# [`writer::QlogCompression`] so it can be embedded as a field in a
+# `foundations`-annotated settings struct. Enabled by consumers that
+# use `foundations` (e.g. tokio-quiche); not pulled in by default so
+# the qlog crate stays lightweight for consumers that do not use
+# `foundations`.
+foundations = ["dep:foundations"]
+
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 humantime = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 serde_with = { workspace = true, features = ["macros"] }
 
+# Optional: gzip backend for the `gzip` feature. Uses `flate2`'s
+# default backend (pure-Rust `miniz_oxide`); consumers can select a
+# different backend by depending on `flate2` themselves.
+flate2 = { version = "1", optional = true }
+
+# Optional: zstd backend for the `zstd` feature. Depends on
+# `zstd-sys` (C).
+zstd = { version = "0.13", default-features = false, optional = true }
+
+# Optional: used only to implement `foundations::settings::Settings`
+# for [`writer::QlogCompression`] when the `foundations` feature is
+# enabled.
+foundations = { workspace = true, optional = true, default-features = false, features = [
+  "settings",
+] }
+
 [dev-dependencies]
 pretty_assertions = "1.4"
+tempfile = "3"

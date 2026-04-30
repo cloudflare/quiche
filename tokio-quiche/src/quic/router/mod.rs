@@ -924,6 +924,7 @@ mod tests {
             ConnectionAcceptorConfig {
                 disable_client_ip_validation: config.disable_client_ip_validation,
                 qlog_dir: config.qlog_dir.clone(),
+                qlog_compression: config.qlog_compression,
                 keylog_file: config
                     .keylog_file
                     .as_ref()
