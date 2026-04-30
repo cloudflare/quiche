@@ -98,7 +98,7 @@ quiche  datagram-socket  qlog-dancer        (Layer 1)
 ## FEATURE FLAGS
 
 ```
-quiche:        default=boringssl-vendored | boringssl-boring-crate | openssl
+quiche:        default=boringssl-boring-crate | openssl
                qlog, gcongestion, internal, ffi, fuzzing, sfv, custom-client-dcid
 tokio-quiche:  fuzzing, quiche_internal, gcongestion, zero-copy, rpk
                (hardcodes: quiche/boringssl-boring-crate + quiche/qlog)
@@ -109,12 +109,12 @@ h3i:           async (enables tokio-quiche dependency)
 
 ```bash
 # Dev
-cargo build                                           # build workspace (vendored BoringSSL)
+cargo build                                           # build workspace (BoringSSL via boring crate)
 cargo test --all-targets --features=async,ffi,qlog --workspace  # full test suite
 cargo test --doc --features=async,ffi,qlog --workspace          # doc tests (separate!)
 
 # Lint
-cargo clippy --features=boringssl-vendored --workspace -- -D warnings
+cargo clippy --features=boringssl-boring-crate --workspace -- -D warnings
 cargo +nightly fmt -- --check                                  
 
 # Fuzz
@@ -126,10 +126,9 @@ make docker-build                                     # quiche-base + quiche-qns
 
 ## NOTES
 
-- **Git submodules required**: `git submodule update --init --recursive` for BoringSSL.
 - **MSRV 1.85**: `rust-version` field in Cargo.toml.
 - **Doc tests are separate**: `cargo test --all-targets` does NOT run doc tests (cargo#6669).
-- **`QUICHE_BSSL_PATH`**: env var to skip vendored BoringSSL build (use pre-built).
+- **BoringSSL via boring crate**: `boring-sys` vendors and builds BoringSSL itself (cmake required).
 - **`RUSTFLAGS="-D warnings"`**: CI enforces; all warnings are errors.
 - **Cargo.lock is gitignored** (library project).
 - **Dual CI**: GitHub Actions (real) + GitLab CI (no-op stub).

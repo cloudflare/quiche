@@ -22,7 +22,6 @@ jobs:
     strategy:
       matrix:
         tls-feature:
-          - "" # default, boringssl-vendored
           - "boringssl-boring-crate"
           - "openssl"
     # Only run on "pull_request" event for external PRs. This is to avoid
@@ -31,8 +30,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -46,7 +43,7 @@ jobs:
           sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
 
       - name: Unused dependency check
-        if: ${{ matrix.tls-feature == '' }}
+        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
         uses: bnjbvr/cargo-machete@main
 
       - name: Build OpenSSL
@@ -65,10 +62,12 @@ jobs:
         run: cargo test --verbose --all-targets --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }}
 
       # tokio-quiche requires the `boring` crate, so don't run its tests when
-      # building without it.
+      # building without it. `--no-default-features` disables the
+      # `boringssl-boring-crate` default so the openssl backend is the only
+      # TLS backend in the build.
       - name: Run cargo test
         if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
-        run: cargo test --verbose --all-targets --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
+        run: cargo test --verbose --all-targets --no-default-features --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
@@ -80,10 +79,12 @@ jobs:
       # (https://github.com/rust-lang/cargo/issues/6669)
       #
       # tokio-quiche requires the `boring` crate, so don't run its tests when
-      # building without it.
+      # building without it. `--no-default-features` disables the
+      # `boringssl-boring-crate` default so the openssl backend is the only
+      # TLS backend in the build.
       - name: Run cargo doc test
         if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
-        run: cargo test --verbose --doc --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
+        run: cargo test --verbose --doc --no-default-features --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
 
       # NOTE: this is disabled as it fails when building changes that bump
       # version of local crates (e.g. when doing a `qlog` release) that have not
@@ -92,11 +93,21 @@ jobs:
       # - name: Run cargo package
       #   run: cargo package --verbose --workspace --exclude=quiche_apps --allow-dirty
 
-      - name: Run cargo clippy
+      - name: Run cargo clippy (boring)
+        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
         run: cargo clippy --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }} -- -D warnings
 
-      - name: Run cargo clippy on examples
+      - name: Run cargo clippy
+        if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
+        run: cargo clippy --no-default-features --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }} -- -D warnings
+
+      - name: Run cargo clippy on examples (boring)
+        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
         run: cargo clippy --examples --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }} -- -D warnings
+
+      - name: Run cargo clippy on examples
+        if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
+        run: cargo clippy --examples --no-default-features --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }} -- -D warnings
 
       - name: Run cargo doc
         run: cargo doc --no-deps --all-features --document-private-items
@@ -119,8 +130,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -148,8 +157,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -170,11 +177,21 @@ jobs:
       matrix:
         target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc", "x86_64-pc-windows-gnu", "i686-pc-windows-gnu"]
         include:
+          # i686 (32-bit) BoringSSL builds require SSE2 explicitly. The
+          # toolchain file in BoringSSL sets `-msse2`, but cmake-rs
+          # passes `-DCMAKE_C_FLAGS=...` on the command line which
+          # overrides that, so we re-add it here.
+          - target: "i686-pc-windows-msvc"
+            cxxflags: "-msse2"
           - target: "i686-pc-windows-gnu"
-            cflags: "-mlong-double-64" # bindgen detects that Rust doesn't support 80-bit long double
+            # `-mlong-double-64`: bindgen detects that Rust doesn't
+            # support 80-bit long double.
+            # `-msse2`: same reason as i686-pc-windows-msvc above.
+            cflags: "-mlong-double-64 -msse2"
+            cxxflags: "-mlong-double-64 -msse2"
     env:
       CFLAGS: ${{ matrix.cflags }}
-      CXXFLAGS: ${{ matrix.cflags }}
+      CXXFLAGS: ${{ matrix.cxxflags }}
       BINDGEN_EXTRA_CLANG_ARGS: ${{ matrix.cflags }}
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
@@ -182,8 +199,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -191,18 +206,55 @@ jobs:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
           targets: ${{ matrix.target }}
 
+      # The windows-2022 image preinstalls MSYS2 (gcc 14.2.0) at
+      # `C:\msys64` but doesn't put it on PATH. For x86_64-pc-windows-gnu
+      # we rely on these preinstalled tools and just point the C/C++
+      # toolchain at them, matching `boring`'s own CI workflow.
       - name: Set up MinGW for 64 bit
         if: matrix.target == 'x86_64-pc-windows-gnu'
-        uses: bwoodsend/setup-winlibs-action@v1.10
-        with:
-          tag: 12.2.0-16.0.0-10.0.0-msvcrt-r5
+        shell: bash
+        run: |
+          echo >> "$GITHUB_ENV" CC=gcc
+          echo >> "$GITHUB_ENV" CXX=g++
+          echo >> "$GITHUB_ENV" 'C_INCLUDE_PATH=C:\msys64\usr\include'
+          echo >> "$GITHUB_ENV" 'CPLUS_INCLUDE_PATH=C:\msys64\usr\include'
+          echo >> "$GITHUB_ENV" 'LIBRARY_PATH=C:\msys64\usr\lib'
 
+      # For i686 we install a fresh 32-bit MSYS2 toolchain (and a
+      # 32-bit cmake from MSYS2, since the system cmake is 64-bit and
+      # picks up the wrong `gcc`). Mirrors `boring`'s CI workflow.
       - name: Set up MinGW for 32 bit
         if: matrix.target == 'i686-pc-windows-gnu'
-        uses: bwoodsend/setup-winlibs-action@v1.10
+        uses: msys2/setup-msys2@v2
+        id: msys2
         with:
-          architecture: i686
-          tag: 12.2.0-16.0.0-10.0.0-msvcrt-r5
+          msystem: MINGW32
+          path-type: inherit
+          install: >-
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+
+      - name: Set up 32-bit MSYS2 env vars
+        if: matrix.target == 'i686-pc-windows-gnu'
+        shell: bash
+        run: |
+          MSYS_ROOT='${{ steps.msys2.outputs.msys2-location }}'
+          test -d "$MSYS_ROOT\\mingw32\\bin"
+          echo >> $GITHUB_PATH "$MSYS_ROOT\\mingw32\\bin"
+          echo >> $GITHUB_PATH "$MSYS_ROOT\\usr\\bin"
+          echo >> $GITHUB_ENV CC="$MSYS_ROOT\\mingw32\\bin\\gcc"
+          echo >> $GITHUB_ENV CXX="$MSYS_ROOT\\mingw32\\bin\\g++"
+          echo >> $GITHUB_ENV AR="$MSYS_ROOT\\mingw32\\bin\\ar"
+          echo >> $GITHUB_ENV CFLAGS="$CFLAGS -I$MSYS_ROOT\\mingw32\\include"
+          echo >> $GITHUB_ENV CXXFLAGS="$CXXFLAGS -I$MSYS_ROOT\\mingw32\\include"
+          echo >> $GITHUB_ENV BINDGEN_EXTRA_CLANG_ARGS="$BINDGEN_EXTRA_CLANG_ARGS -I$MSYS_ROOT\\mingw32\\include"
+          echo >> $GITHUB_ENV LIBRARY_PATH="$MSYS_ROOT\\mingw32\\lib"
+          echo >> $GITHUB_ENV LDFLAGS="-L$MSYS_ROOT\\mingw32\\lib"
+          # Force cmake-rs to use the MinGW Makefiles generator instead
+          # of MSYS Makefiles; cmake-rs's default for windows-gnu picks
+          # the latter, which then can't find `cl.exe` (cmake's default
+          # Windows compiler) and fails configuration.
+          echo >> $GITHUB_ENV "CMAKE_GENERATOR=MinGW Makefiles"
 
       - name: Install dependencies
         uses: crazy-max/ghaction-chocolatey@v3
@@ -228,8 +280,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -243,7 +293,7 @@ jobs:
         run: cargo-binstall -y cross
 
       - name: Run cargo test using cross
-        run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer
+        run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer --features=boringssl-boring-crate
 
   http3_test:
     runs-on: ubuntu-latest
@@ -253,8 +303,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -276,8 +324,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Build Docker images
         run: make docker-build
@@ -304,8 +350,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain for the target
         uses: dtolnay/rust-toolchain@master

@@ -25,7 +25,7 @@ mio = { workspace = true, features = ["net", "os-poll"] }
 multimap = "0.10"
 octets = { workspace = true }
 qlog = { workspace = true }
-quiche = { features = ["internal", "qlog"], workspace = true }
+quiche = { features = ["boringssl-boring-crate", "internal", "qlog"], workspace = true }
 ring = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

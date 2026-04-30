@@ -370,8 +370,6 @@ fn verify_client_anonymous() {
 fn missing_initial_source_connection_id(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut buf = [0; 65535];
-
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Reset initial_source_connection_id.
@@ -380,12 +378,14 @@ fn missing_initial_source_connection_id(
         .initial_source_connection_id = None;
     assert_eq!(pipe.client.encode_transport_params(), Ok(()));
 
-    // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    // Client sends initial flight. The ClientHello may span multiple Initial
+    // packets (e.g. when post-quantum key shares are advertised), so deliver
+    // the whole flight before checking the server's reaction.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server rejects transport parameters.
     assert_eq!(
-        pipe.server_recv(&mut buf[..len]),
+        test_utils::process_flight(&mut pipe.server, flight),
         Err(Error::InvalidTransportParam)
     );
 }
@@ -394,8 +394,6 @@ fn missing_initial_source_connection_id(
 fn invalid_initial_source_connection_id(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut buf = [0; 65535];
-
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Scramble initial_source_connection_id.
@@ -404,12 +402,14 @@ fn invalid_initial_source_connection_id(
         .initial_source_connection_id = Some(b"bogus value".to_vec().into());
     assert_eq!(pipe.client.encode_transport_params(), Ok(()));
 
-    // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    // Client sends initial flight. The ClientHello may span multiple Initial
+    // packets (e.g. when post-quantum key shares are advertised), so deliver
+    // the whole flight before checking the server's reaction.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server rejects transport parameters.
     assert_eq!(
-        pipe.server_recv(&mut buf[..len]),
+        test_utils::process_flight(&mut pipe.server, flight),
         Err(Error::InvalidTransportParam)
     );
 }
@@ -647,7 +647,9 @@ fn handshake_0rtt(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // Test assumes the server transitions to early-data state after a
+    // single `server_recv`, which requires a single-Initial ClientHello.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -712,7 +714,9 @@ fn handshake_0rtt_reordered(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // Test assumes the server transitions to early-data state after a
+    // single `server_recv`, which requires a single-Initial ClientHello.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -915,7 +919,12 @@ fn crypto_limit(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) 
 fn limit_handshake_data(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // This test relies on `cert-big.crt` forcing the server's handshake
+    // flight above the default `client_sent * MAX_AMPLIFICATION_FACTOR`
+    // anti-amplification cap, which in turn relies on the ClientHello
+    // fitting in a single Initial packet (so `client_sent` stays small).
+    // Use a no-PQ client config to guarantee that.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert-big.crt")
@@ -927,7 +936,7 @@ fn limit_handshake_data(
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
 
-    let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
     let client_sent = flight.iter().fold(0, |out, p| out + p.0.len());
@@ -972,7 +981,11 @@ fn custom_limit_handshake_data(
 
 #[rstest]
 fn amplification_limited_stat() {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // `cert-big.crt` is sized so the server's handshake flight exceeds the
+    // default `client_sent * MAX_AMPLIFICATION_FACTOR` anti-amplification
+    // cap; that only holds when the ClientHello fits in a single Initial,
+    // so use a no-PQ config.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     config
         .load_cert_chain_from_pem_file("examples/cert-big.crt")
         .unwrap();
@@ -983,7 +996,7 @@ fn amplification_limited_stat() {
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
 
-    let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
     test_utils::process_flight(&mut pipe.server, flight).unwrap();
@@ -1123,7 +1136,9 @@ fn streamio_mixed_actions(
 fn zero_rtt(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // Test assumes the server transitions to early-data state after a
+    // single `server_recv`, which requires a single-Initial ClientHello.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -5731,7 +5746,7 @@ fn retry_missing_original_destination_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server accepts connection and send first flight. But original
     // destination connection ID is ignored.
@@ -5744,7 +5759,7 @@ fn retry_missing_original_destination_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -5793,7 +5808,7 @@ fn retry_invalid_original_destination_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server accepts connection and send first flight. But original
     // destination connection ID is invalid.
@@ -5807,7 +5822,7 @@ fn retry_invalid_original_destination_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -5925,7 +5940,10 @@ fn retry_invalid_source_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    // `accept_with_retry` below needs a client source address; take it from
+    // the first client-emitted datagram of the flight.
+    let send_info = client_flight[0].1;
 
     // Server accepts connection and send first flight. But retry source
     // connection ID is invalid.
@@ -5943,7 +5961,7 @@ fn retry_invalid_source_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -6425,7 +6443,7 @@ fn client_rst_stream_while_bytes_in_flight(
         } else if cfg!(feature = "openssl") {
             Ok(13964)
         } else {
-            Ok(13878)
+            Ok(15030)
         }
     );
     let server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
@@ -6450,7 +6468,7 @@ fn client_rst_stream_while_bytes_in_flight(
             if cfg!(feature = "openssl") {
                 27928
             } else {
-                27756
+                30060
             },
         _ => 24000,
     };
@@ -6522,7 +6540,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         } else if cfg!(feature = "openssl") {
             Ok(13964)
         } else {
-            Ok(13878)
+            Ok(15030)
         }
     );
     let mut server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
@@ -6546,7 +6564,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
             if cfg!(feature = "openssl") {
                 26728
             } else {
-                26556
+                28860
             },
         _ => 8400,
     };
@@ -6611,7 +6629,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
         } else if cfg!(feature = "openssl") {
             Ok(12345)
         } else {
-            Ok(12299)
+            Ok(13587)
         }
     );
 
@@ -6688,7 +6706,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
         } else if cfg!(feature = "openssl") {
             Ok(12345)
         } else {
-            Ok(12299)
+            Ok(13587)
         }
     );
 
@@ -6773,13 +6791,24 @@ fn validate_peer_sent_ack_range(
     let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
     test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
-    let expected_max_active_pkt_sent = 3;
+    // Expected pkt counts below reflect the post-handshake state. When the
+    // ClientHello spans multiple Initial packets (as with post-quantum
+    // keyshares enabled by our BoringSSL build) the handshake exchanges
+    // one extra packet per side compared to the classical case, so these
+    // counts are one higher than they would be for a single-Initial
+    // ClientHello. The `openssl` build doesn't use PQ keyshares.
+    let extra = if cfg!(feature = "openssl") { 0 } else { 1 };
+
+    let expected_max_active_pkt_sent = 3 + extra;
     let recovery = &pipe.server.paths.get_active().unwrap().recovery;
     assert_eq!(
         recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_active_pkt_sent
     );
-    assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 3);
+    assert_eq!(
+        recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        3 + extra
+    );
     assert_eq!(recovery.sent_packets_len(epoch), 0);
     // Verify largest sent on the connection
     assert_eq!(
@@ -6798,8 +6827,14 @@ fn validate_peer_sent_ack_range(
     pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
     let recovery = &pipe.server.paths.get_active().unwrap().recovery;
-    assert_eq!(recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 4);
-    assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 3);
+    assert_eq!(
+        recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        4 + extra
+    );
+    assert_eq!(
+        recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        3 + extra
+    );
     assert_eq!(recovery.sent_packets_len(epoch), 1);
 
     // Send an invalid ACK range to the server and expect server error
@@ -6858,26 +6893,39 @@ fn validate_peer_sent_ack_range_for_multi_path(
     let epoch = packet::Epoch::Application;
     let pkt_type = Type::Short;
 
+    // The post-handshake packet number on the active path is one
+    // higher when the BoringSSL ClientHello (with PQ keyshares) spans
+    // multiple Initial packets. The 1-RTT packet number space is
+    // shared across paths, so the non-active path's first probing
+    // packet number is also bumped by the same amount.
+    let extra = if cfg!(feature = "openssl") { 0 } else { 1 };
+
     // active path
-    let expected_max_active_pkt_sent = 7;
+    let expected_max_active_pkt_sent = 7 + extra;
     let active_path = &pipe.server.paths.get_mut(0).unwrap();
     let p1_recovery = &active_path.recovery;
     assert_eq!(
         p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_active_pkt_sent
     );
-    assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 6);
+    assert_eq!(
+        p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        6 + extra
+    );
     assert_eq!(p1_recovery.sent_packets_len(epoch), 1);
 
     // non-active path
-    let expected_max_second_pkt_sent = 5;
+    let expected_max_second_pkt_sent = 5 + extra;
     let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
     let p2_recovery = &second_path.recovery;
     assert_eq!(
         p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_second_pkt_sent
     );
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 5);
+    assert_eq!(
+        p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        5 + extra
+    );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Verify largest sent on the connection is the max of the two paths
@@ -6905,15 +6953,27 @@ fn validate_peer_sent_ack_range_for_multi_path(
     let active_path = &pipe.server.paths.get_mut(0).unwrap();
     assert!(active_path.active());
     let p1_recovery = &active_path.recovery;
-    assert_eq!(p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 7);
-    assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 7);
+    assert_eq!(
+        p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        7 + extra
+    );
+    assert_eq!(
+        p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        7 + extra
+    );
     assert_eq!(p1_recovery.sent_packets_len(epoch), 0);
 
     // non-active path
     let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
     let p2_recovery = &second_path.recovery;
-    assert_eq!(p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 5);
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 5);
+    assert_eq!(
+        p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        5 + extra
+    );
+    assert_eq!(
+        p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        5 + extra
+    );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Send a large invalid ACK range to the server. Range is not inclusive so
@@ -7996,7 +8056,11 @@ fn coalesce_padding_short(
 ) {
     let mut buf = [0; 65535];
 
-    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    // Test asserts a specific coalesce/pad shape that assumes a
+    // single-Initial ClientHello.
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     // Client sends first flight.
     let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -8032,7 +8096,10 @@ fn handshake_anti_deadlock(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // Test drives the handshake one packet at a time and expects the
+    // server to have handshake keys after a single `server_recv`; that
+    // requires a single-Initial ClientHello.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert-big.crt")
@@ -8044,7 +8111,7 @@ fn handshake_anti_deadlock(
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
 
-    let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     assert!(!pipe.client.handshake_status().has_handshake_keys);
     assert!(!pipe.client.handshake_status().peer_verified_address);
@@ -8087,7 +8154,11 @@ fn handshake_packet_type_corruption(
 ) {
     let mut buf = [0; 65535];
 
-    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    // Test drives the handshake one packet at a time, which assumes a
+    // single-Initial ClientHello.
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     // Client sends padded Initial.
     let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -9056,7 +9127,7 @@ fn update_max_datagram_size(
         } else if cfg!(feature = "openssl") {
             13437
         } else {
-            13421
+            14573
         },
     );
 }
@@ -9133,20 +9204,24 @@ fn send_capacity(
         } else if cfg!(feature = "openssl") {
             13959
         } else {
-            13873
+            15025
         }
     );
 
     assert_eq!(pipe.server.stream_send(0, &buf[..5000], false), Ok(5000));
     assert_eq!(pipe.server.stream_send(4, &buf[..5000], false), Ok(5000));
+    // Offer enough bytes on the third stream that the connection-level
+    // `tx_cap` is the binding constraint rather than the input buffer;
+    // this keeps the test invariant "no connection send capacity left after
+    // three sends" true across backends with different handshake sizes.
     assert_eq!(
-        pipe.server.stream_send(8, &buf[..5000], false),
+        pipe.server.stream_send(8, &buf[..6000], false),
         if cc_algorithm_name == "cubic" {
             Ok(2000)
         } else if cfg!(feature = "openssl") {
             Ok(3959)
         } else {
-            Ok(3873)
+            Ok(5025)
         }
     );
 
@@ -9264,7 +9339,9 @@ fn in_handshake_config(
         Ok(())
     );
 
-    let mut client_config = Config::new(PROTOCOL_VERSION)?;
+    // Test drives the handshake one packet at a time; requires a
+    // single-Initial ClientHello.
+    let mut client_config = test_utils::config_no_pq(PROTOCOL_VERSION)?;
     client_config.load_cert_chain_from_pem_file("examples/cert.crt")?;
     client_config.load_priv_key_from_pem_file("examples/cert.key")?;
 
@@ -9351,8 +9428,10 @@ fn max_streams_threshold_after_handshake_callback_update(
     )
     .unwrap();
 
+    // Test drives the handshake one packet at a time; requires a
+    // single-Initial ClientHello.
     let mut client_config =
-        test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
 
     for config in [&mut client_config, &mut server_config] {
         config
@@ -9656,14 +9735,29 @@ fn initial_cwnd(
             CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
         );
     } else {
-        // TODO understand where these adjustments come from and why they vary
-        // by TLS implementation and OS target.
+        // For BBR2 in Startup mode the cwnd grows by exactly
+        // `bytes_acked` per ACK (see `BBRv2::update_congestion_window`),
+        // so `tx_cap` here equals `initial_cwnd` plus the bytes the
+        // server sent during the handshake that have already been
+        // acknowledged. That total varies by TLS backend (different
+        // cipher suites, signatures, key shares, transport parameters
+        // change the bytes on the wire) and within a single backend it
+        // varies by a byte or two across architectures, primarily
+        // because the ACK frame's `ack_delay` field is a VarInt of
+        // microseconds since receipt and the elapsed time differs by a
+        // tick or two between platforms.
+        //
+        // Pin the lower bound (catches gross regressions like initial
+        // cwnd not being honored) and allow a small upper-bound
+        // tolerance, well below a packet so any meaningful regression
+        // would still trip the assertion.
         let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 +
             if cfg!(feature = "openssl") {
                 1463
             } else {
-                1447
+                2598
             };
+        const TOLERANCE: usize = 4;
 
         assert!(
             pipe.server.tx_cap >= expected,
@@ -9672,10 +9766,10 @@ fn initial_cwnd(
             expected
         );
         assert!(
-            pipe.server.tx_cap <= expected + 1,
+            pipe.server.tx_cap <= expected + TOLERANCE,
             "{} vs {}",
             pipe.server.tx_cap,
-            expected + 1
+            expected + TOLERANCE
         );
     }
 
@@ -11382,11 +11476,11 @@ fn resilience_against_migration_attack(
         #[cfg(feature = "openssl")]
         "bbr2" => 13966,
         #[cfg(not(feature = "openssl"))]
-        "bbr2" => 13880,
+        "bbr2" => 15032,
         #[cfg(feature = "openssl")]
         "bbr2_gcongestion" => 13966,
         #[cfg(not(feature = "openssl"))]
-        "bbr2_gcongestion" => 13880,
+        "bbr2_gcongestion" => 15032,
         _ => 12000,
     });
     assert_eq!(

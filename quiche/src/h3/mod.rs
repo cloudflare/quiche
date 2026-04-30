@@ -3651,7 +3651,10 @@ mod tests {
     fn h3_handshake_0rtt() {
         let mut buf = [0; 65535];
 
-        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        // Test drives the handshake one Initial at a time; requires a
+        // single-Initial ClientHello.
+        let mut config =
+            crate::test_utils::config_no_pq(crate::PROTOCOL_VERSION).unwrap();
         config
             .load_cert_chain_from_pem_file("examples/cert.crt")
             .unwrap();
