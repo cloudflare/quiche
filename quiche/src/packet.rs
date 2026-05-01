@@ -182,38 +182,195 @@ impl Type {
     }
 }
 
+/// Special ranged u8 type for [`ConnectionIdInline`].
+/// Restricting the range of values allows the compiler to use free values as
+/// niches for enum size optimization. Additionally, range checks during
+/// indexing can be optimized away.
+#[derive(Clone, Copy, bytemuck::NoUninit)]
+#[repr(u8)]
+enum CidInlineLen {
+    Z   = 0,
+    P1  = 1,
+    P2  = 2,
+    P3  = 3,
+    P4  = 4,
+    P5  = 5,
+    P6  = 6,
+    P7  = 7,
+    P8  = 8,
+    P9  = 9,
+    P10 = 10,
+    P11 = 11,
+    P12 = 12,
+    P13 = 13,
+    P14 = 14,
+    P15 = 15,
+    P16 = 16,
+    P17 = 17,
+    P18 = 18,
+    P19 = 19,
+    P20 = 20,
+    P21 = 21,
+    P22 = 22,
+    P23 = 23,
+}
+
+impl CidInlineLen {
+    #[inline(always)]
+    const fn new(len: usize) -> Option<Self> {
+        match len {
+            0 => Some(Self::Z),
+            1 => Some(Self::P1),
+            2 => Some(Self::P2),
+            3 => Some(Self::P3),
+            4 => Some(Self::P4),
+            5 => Some(Self::P5),
+            6 => Some(Self::P6),
+            7 => Some(Self::P7),
+            8 => Some(Self::P8),
+            9 => Some(Self::P9),
+            10 => Some(Self::P10),
+            11 => Some(Self::P11),
+            12 => Some(Self::P12),
+            13 => Some(Self::P13),
+            14 => Some(Self::P14),
+            15 => Some(Self::P15),
+            16 => Some(Self::P16),
+            17 => Some(Self::P17),
+            18 => Some(Self::P18),
+            19 => Some(Self::P19),
+            20 => Some(Self::P20),
+            21 => Some(Self::P21),
+            22 => Some(Self::P22),
+            23 => Some(Self::P23),
+            _ => None,
+        }
+    }
+
+    #[inline(always)]
+    const fn slice(self, arr: &[u8; 23]) -> &[u8] {
+        // Can't use `arr.get(..idx)` because indexing is not const yet.
+        // Due to the limited value range, any range checks will be optimized away
+        // here.
+        let idx = self as usize;
+        arr.split_at(idx).0
+    }
+
+    #[inline(always)]
+    const fn slice_mut(self, arr: &mut [u8; 23]) -> &mut [u8] {
+        let idx = self as usize;
+        arr.split_at_mut(idx).0
+    }
+}
+
+const _: () = {
+    // Assert that all values in 0..=23 roundtrip successfully.
+    // This catches errors in the enum definition & constructor.
+    let mut v = 0;
+    while v <= 23 {
+        let len = CidInlineLen::new(v).unwrap();
+        assert!(len as usize == v);
+        v += 1
+    }
+
+    // Assert that values >23 are invalid
+    assert!(CidInlineLen::new(24).is_none());
+    assert!(CidInlineLen::new(0xFF).is_none());
+};
+
 /// A QUIC connection ID.
+#[derive(Clone)]
 pub struct ConnectionId<'a>(ConnectionIdInner<'a>);
 
+// Assert that ConnectionId maintains the minimum size possible (on x86-64).
+// We need at least a variant with `&[u8]` (16 bytes, 1 niche) and a variant
+// with a heap allocation (also 16 bytes). Due to both variants being 16 bytes
+// in size, with 8-byte alignment, and `&[u8]` only posessing a single niche,
+// the enum has to be at least 24 bytes in size.
+const _: () = assert!(size_of::<ConnectionId>() == 24);
+
+#[derive(Clone)]
 enum ConnectionIdInner<'a> {
-    Vec(Vec<u8>),
+    Box(Box<[u8]>),
     Ref(&'a [u8]),
+    // Invariant: we use inline storage whenever the CID fits into it. This
+    // allows faster comparisons and hashing in the common case.
+    Inline(ConnectionIdInline),
+}
+
+// Use `repr(C)` to control struct layout, and `align(8)` to ensure alignment
+// for access as u64 array.
+#[derive(Clone, Copy, bytemuck::NoUninit)]
+#[repr(C, align(8))]
+struct ConnectionIdInline {
+    storage: [u8; 23],
+    len: CidInlineLen,
+}
+
+// Assert that regular QUICv1 CIDs fit into ConnectionIdInline.
+const _: () =
+    assert!(ConnectionIdInline::new(&[0; crate::MAX_CONN_ID_LEN]).is_some());
+
+impl ConnectionIdInline {
+    #[inline]
+    const fn new(cid: &[u8]) -> Option<Self> {
+        let Some(len) = CidInlineLen::new(cid.len()) else {
+            return None;
+        };
+
+        let mut storage = [0; 23];
+        len.slice_mut(&mut storage).copy_from_slice(cid);
+
+        Some(Self { storage, len })
+    }
+
+    #[inline]
+    const fn cid_bytes(&self) -> &[u8] {
+        self.len.slice(&self.storage)
+    }
+
+    /// Access `self` as an array of u64s for efficient comparisons.
+    #[inline]
+    const fn raw_u64(&self) -> &[u64; 3] {
+        bytemuck::must_cast_ref(self)
+    }
 }
 
 impl<'a> ConnectionId<'a> {
     /// Creates a new connection ID from the given vector.
     #[inline]
-    pub const fn from_vec(cid: Vec<u8>) -> Self {
-        Self(ConnectionIdInner::Vec(cid))
+    pub fn from_vec(cid: Vec<u8>) -> Self {
+        Self(match ConnectionIdInline::new(&cid) {
+            Some(v) => ConnectionIdInner::Inline(v),
+            None => ConnectionIdInner::Box(cid.into_boxed_slice()),
+        })
     }
 
     /// Creates a new connection ID from the given slice.
     #[inline]
     pub const fn from_ref(cid: &'a [u8]) -> Self {
-        Self(ConnectionIdInner::Ref(cid))
+        Self(match ConnectionIdInline::new(cid) {
+            Some(v) => ConnectionIdInner::Inline(v),
+            None => ConnectionIdInner::Ref(cid),
+        })
     }
 
     /// Returns a new owning connection ID from the given existing one.
     #[inline]
     pub fn into_owned(self) -> ConnectionId<'static> {
-        ConnectionId::from_vec(self.into())
+        ConnectionId(match self.0 {
+            ConnectionIdInner::Box(v) => ConnectionIdInner::Box(v),
+            // Due to our invariant, we know v does not fit into inline storage
+            ConnectionIdInner::Ref(v) => ConnectionIdInner::Box(v.into()),
+            ConnectionIdInner::Inline(v) => ConnectionIdInner::Inline(v),
+        })
     }
 }
 
 impl Default for ConnectionId<'_> {
     #[inline]
     fn default() -> Self {
-        Self::from_vec(Vec::new())
+        const { Self::from_ref(&[]) }
     }
 }
 
@@ -228,35 +385,82 @@ impl From<ConnectionId<'_>> for Vec<u8> {
     #[inline]
     fn from(id: ConnectionId<'_>) -> Self {
         match id.0 {
-            ConnectionIdInner::Vec(cid) => cid,
-            ConnectionIdInner::Ref(cid) => cid.to_vec(),
+            ConnectionIdInner::Box(cid) => cid.into_vec(),
+            _ => id.as_ref().to_vec(),
         }
     }
 }
 
-impl PartialEq for ConnectionId<'_> {
+impl<'a, 'b> PartialEq<ConnectionId<'b>> for ConnectionId<'a> {
     #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.as_ref() == other.as_ref()
+    fn eq(&self, other: &ConnectionId<'b>) -> bool {
+        // If `self` is inline, `other` must be too for their lengths to match
+        match (&self.0, &other.0) {
+            (ConnectionIdInner::Inline(us), ConnectionIdInner::Inline(them)) =>
+                us.raw_u64() == them.raw_u64(),
+            (ConnectionIdInner::Inline(_), _) => false,
+            (_, ConnectionIdInner::Inline(_)) => false,
+            _ => self.as_ref() == other.as_ref(),
+        }
     }
 }
 
 impl Eq for ConnectionId<'_> {}
 
-impl AsRef<[u8]> for ConnectionId<'_> {
+impl std::hash::Hash for ConnectionId<'_> {
     #[inline]
-    fn as_ref(&self) -> &[u8] {
-        match &self.0 {
-            ConnectionIdInner::Vec(v) => v.as_ref(),
-            ConnectionIdInner::Ref(v) => v,
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self.0 {
+            // No prefix collision: Inline and non-inline variants pass different
+            // length prefixes
+            ConnectionIdInner::Inline(v) => v.raw_u64().hash(state),
+            _ => self.as_ref().hash(state),
         }
     }
 }
 
-impl std::hash::Hash for ConnectionId<'_> {
+impl Ord for ConnectionId<'_> {
     #[inline]
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.as_ref().hash(state);
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+
+        /// Sort slices by length first, then lexicographically.
+        #[inline]
+        fn cmp_length_then_lex(a: &[u8], b: &[u8]) -> Ordering {
+            match a.len().cmp(&b.len()) {
+                Ordering::Equal => a.cmp(b),
+                res => res,
+            }
+        }
+
+        // We _should_ be able to compare the AsRef slices directly, but the
+        // explicit match here generates better assembly
+        match (&self.0, &other.0) {
+            (ConnectionIdInner::Inline(us), ConnectionIdInner::Inline(them)) =>
+                cmp_length_then_lex(us.cid_bytes(), them.cid_bytes()),
+            // Inline's length is always less than the other variants' lengths
+            (ConnectionIdInner::Inline(_), _) => Ordering::Less,
+            (_, ConnectionIdInner::Inline(_)) => Ordering::Greater,
+            _ => cmp_length_then_lex(self.as_ref(), other.as_ref()),
+        }
+    }
+}
+
+impl PartialOrd for ConnectionId<'_> {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl AsRef<[u8]> for ConnectionId<'_> {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        match &self.0 {
+            ConnectionIdInner::Box(v) => v,
+            ConnectionIdInner::Ref(v) => v,
+            ConnectionIdInner::Inline(v) => v.cid_bytes(),
+        }
     }
 }
 
@@ -265,17 +469,7 @@ impl std::ops::Deref for ConnectionId<'_> {
 
     #[inline]
     fn deref(&self) -> &[u8] {
-        match &self.0 {
-            ConnectionIdInner::Vec(v) => v.as_ref(),
-            ConnectionIdInner::Ref(v) => v,
-        }
-    }
-}
-
-impl Clone for ConnectionId<'_> {
-    #[inline]
-    fn clone(&self) -> Self {
-        Self::from_vec(self.as_ref().to_vec())
+        self.as_ref()
     }
 }
 

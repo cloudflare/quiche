@@ -64,6 +64,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 cdylib-link-lines = { version = "0.1", optional = true }
 
 [dependencies]
+bytemuck = { workspace = true }
 bytes = { workspace = true }
 boring = { workspace = true, optional = true }
 debug_panic = { workspace = true }
