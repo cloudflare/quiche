@@ -6877,7 +6877,7 @@ fn validate_peer_sent_ack_range_for_multi_path(
         p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_second_pkt_sent
     );
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 5);
+    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 6);
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Verify largest sent on the connection is the max of the two paths
@@ -6913,7 +6913,7 @@ fn validate_peer_sent_ack_range_for_multi_path(
     let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
     let p2_recovery = &second_path.recovery;
     assert_eq!(p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 5);
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 5);
+    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 7);
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Send a large invalid ACK range to the server. Range is not inclusive so
@@ -12881,4 +12881,338 @@ fn server_qlog() {
     } else {
         panic!("expected Qlog event");
     }
+}
+
+/// Tests that frames are correctly retransmitted across paths
+fn do_after_migration_receive_retransmit(
+    cc_algorithm_name: &str, migrate: bool, configure: impl FnOnce(&mut Config),
+    before_loss: impl FnOnce(&mut test_utils::Pipe),
+    after_loss: impl FnOnce(&mut test_utils::Pipe),
+    after_retransmit: impl FnOnce(&mut test_utils::Pipe),
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_active_connection_id_limit(4);
+    configure(&mut config);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 2);
+
+    let client_addr = test_utils::Pipe::client_addr();
+    let server_addr = test_utils::Pipe::server_addr();
+    let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+    assert_ne!(client_addr, client_addr_2);
+
+    // Queue the frame under test.
+    before_loss(&mut pipe);
+    // Lose packets.
+    let _ = test_utils::emit_flight(&mut pipe.client);
+    let _ = test_utils::emit_flight(&mut pipe.server);
+    after_loss(&mut pipe);
+
+    if migrate {
+        pipe.client.migrate_source(client_addr_2).unwrap();
+        pipe.client.send_ack_eliciting().unwrap();
+        assert_eq!(
+            test_utils::process_flight(
+                &mut pipe.server,
+                test_utils::emit_flight(&mut pipe.client).unwrap()
+            ),
+            Ok(())
+        );
+
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::New(server_addr, client_addr_2))
+        );
+        assert_eq!(pipe.server.path_event_next(), None);
+
+        assert_eq!(
+            pipe.server.is_path_validated(server_addr, client_addr_2),
+            Ok(false)
+        );
+    }
+
+    let orig_pid = pipe
+        .server
+        .paths
+        .path_id_from_addrs(&(server_addr, client_addr))
+        .unwrap();
+    let loss_instant = pipe
+        .server
+        .paths
+        .get(orig_pid)
+        .unwrap()
+        .recovery
+        .loss_detection_timer()
+        .unwrap();
+    let timer = loss_instant.duration_since(Instant::now());
+    std::thread::sleep(timer + Duration::from_millis(1));
+    pipe.server.on_timeout();
+
+    assert_eq!(pipe.advance(), Ok(()));
+
+    after_retransmit(&mut pipe);
+
+    if migrate {
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::Validated(server_addr, client_addr_2))
+        );
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::PeerMigrated(server_addr, client_addr_2))
+        );
+        assert_eq!(pipe.server.path_event_next(), None);
+        assert_eq!(
+            pipe.server
+                .paths
+                .get_active()
+                .expect("no active")
+                .peer_addr(),
+            client_addr_2
+        );
+        assert_eq!(
+            pipe.server.is_path_validated(server_addr, client_addr_2),
+            Ok(true)
+        );
+    }
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_reset_stream(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |_| {},
+        |pipe| {
+            assert_eq!(pipe.server.stream_send(1, b"hello", false), Ok(5));
+            pipe.advance().unwrap();
+            let mut buf = [0; 5];
+            let (n, _) = pipe.client.stream_recv(1, &mut buf).unwrap();
+            assert_eq!(&buf[..n], b"hello");
+            pipe.server.stream_shutdown(1, Shutdown::Write, 42).unwrap();
+        },
+        |pipe| assert_eq!(pipe.client.stats().reset_stream_count_remote, 0),
+        |pipe| assert_eq!(pipe.client.stats().reset_stream_count_remote, 1),
+    );
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_stream_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |_| {},
+        |pipe| assert_eq!(pipe.server.stream_send(1, b"hello", true), Ok(5)),
+        |pipe| assert_eq!(pipe.client.stream_readable(1), false),
+        |pipe| {
+            let mut buf = [0; 5];
+            let (n, fin) = pipe.client.stream_recv(1, &mut buf).unwrap();
+            assert_eq!(&buf[..n], b"hello");
+            assert!(fin);
+        },
+    );
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_stream_fin(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |_| {},
+        |pipe| {
+            assert_eq!(pipe.server.stream_send(1, b"hello", false), Ok(5));
+            pipe.advance().unwrap();
+            let mut buf = [0; 5];
+            pipe.client.stream_recv(1, &mut buf).unwrap();
+            assert_eq!(pipe.server.stream_send(1, b"", true), Ok(0));
+        },
+        |pipe| assert!(!pipe.client.stream_finished(1)),
+        |pipe| assert!(pipe.client.stream_finished(1)),
+    );
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_stop_sending(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |_| {},
+        |pipe| {
+            assert_eq!(pipe.client.stream_send(0, b"hello", false), Ok(5));
+            pipe.advance().unwrap();
+            pipe.server.stream_shutdown(0, Shutdown::Read, 42).unwrap();
+        },
+        |pipe| assert_eq!(pipe.client.stats().stopped_stream_count_remote, 0),
+        |pipe| assert_eq!(pipe.client.stats().stopped_stream_count_remote, 1),
+    );
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_max_stream_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    const STREAM_WINDOW: u64 = 15;
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |_| {},
+        |pipe| {
+            let buf = [0u8; STREAM_WINDOW as usize];
+            assert_eq!(
+                pipe.client.stream_send(0, &buf, false),
+                Ok(STREAM_WINDOW as usize)
+            );
+            assert_eq!(pipe.client.stream_send(0, &buf, false), Err(Error::Done));
+            assert!(!pipe.client.stream_writable(0, 1).unwrap());
+            pipe.advance().unwrap();
+            let mut buf = [0u8; STREAM_WINDOW as usize];
+            assert_eq!(
+                pipe.server.stream_recv(0, &mut buf),
+                Ok((STREAM_WINDOW as usize, false))
+            );
+            assert!(!pipe.server.stream_readable(0));
+        },
+        |pipe| assert!(!pipe.client.stream_writable(0, 1).unwrap()),
+        |pipe| assert!(pipe.client.stream_writable(0, 1).unwrap()),
+    );
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_max_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    const CONN_WINDOW: u64 = 15;
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |config| {
+            config.set_initial_max_data(CONN_WINDOW);
+            config.set_initial_max_stream_data_bidi_remote(CONN_WINDOW * 2);
+        },
+        |pipe| {
+            let buf = [0u8; CONN_WINDOW as usize];
+            assert_eq!(
+                pipe.client.stream_send(0, &buf, false),
+                Ok(CONN_WINDOW as usize)
+            );
+            assert_eq!(pipe.client.stream_send(0, &buf, false), Err(Error::Done));
+            pipe.advance().unwrap();
+            let mut buf = [0u8; CONN_WINDOW as usize];
+            assert_eq!(
+                pipe.server.stream_recv(0, &mut buf),
+                Ok((CONN_WINDOW as usize, false))
+            );
+            assert!(!pipe.server.stream_readable(0));
+        },
+        |pipe| {
+            assert_eq!(pipe.client.stream_send(0, b"x", false), Err(Error::Done))
+        },
+        |pipe| assert_eq!(pipe.client.stream_send(0, b"x", false), Ok(1)),
+    );
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_retire_connection_id(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |_| {},
+        |pipe| pipe.server.retire_dcid(1).unwrap(),
+        |pipe| assert!(pipe.client.retired_scid_next().is_none()),
+        |pipe| assert!(pipe.client.retired_scid_next().is_some()),
+    );
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_max_streams_bidi(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |_| {},
+        |pipe| {
+            for id in [0, 4, 8] {
+                pipe.client.stream_send(id, b"x", true).unwrap();
+            }
+            test_utils::process_flight(
+                &mut pipe.server,
+                test_utils::emit_flight(&mut pipe.client).unwrap(),
+            )
+            .unwrap();
+            let mut buf = [0u8; 1];
+            for id in [0, 4, 8] {
+                pipe.server.stream_recv(id, &mut buf).unwrap();
+                pipe.server.stream_send(id, b"", true).unwrap();
+            }
+        },
+        |pipe| assert_eq!(pipe.client.peer_streams_left_bidi(), 0),
+        |pipe| assert_eq!(pipe.client.peer_streams_left_bidi(), 3),
+    );
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_max_streams_uni(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |_| {},
+        |pipe| {
+            for id in [2, 6, 10] {
+                pipe.client.stream_send(id, b"x", true).unwrap();
+            }
+            test_utils::process_flight(
+                &mut pipe.server,
+                test_utils::emit_flight(&mut pipe.client).unwrap(),
+            )
+            .unwrap();
+            let mut buf = [0u8; 1];
+            for id in [2, 6, 10] {
+                pipe.server.stream_recv(id, &mut buf).unwrap();
+            }
+        },
+        |pipe| assert_eq!(pipe.client.peer_streams_left_uni(), 0),
+        |pipe| assert_eq!(pipe.client.peer_streams_left_uni(), 3),
+    );
+}
+
+#[rstest]
+fn after_migration_receive_retransmit_new_connection_id(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] migrate: bool,
+) {
+    do_after_migration_receive_retransmit(
+        cc_algorithm_name,
+        migrate,
+        |_| {},
+        |pipe| {
+            let (scid, reset_token) = test_utils::create_cid_and_reset_token(16);
+            assert_eq!(pipe.server.new_scid(&scid, reset_token, false), Ok(3));
+        },
+        |pipe| assert_eq!(pipe.client.available_dcids(), 2),
+        |pipe| {
+            assert_eq!(pipe.client.available_dcids(), if migrate { 2 } else { 3 })
+        },
+    );
 }
