@@ -2008,7 +2008,7 @@ impl<F: BufFactory> Connection<F> {
         if let Some(client_dcid) = client_dcid {
             // The Minimum length is 8.
             // See https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
-            if client_dcid.to_vec().len() < 8 {
+            if client_dcid.len() < 8 {
                 return Err(Error::InvalidDcidInitialization);
             }
         }
@@ -2247,16 +2247,16 @@ impl<F: BufFactory> Connection<F> {
         if let Some(retry_cids) = retry_cids {
             conn.local_transport_params
                 .original_destination_connection_id =
-                Some(retry_cids.original_destination_cid.to_vec().into());
+                Some(retry_cids.original_destination_cid.clone().into_owned());
 
             conn.local_transport_params.retry_source_connection_id =
-                Some(retry_cids.retry_source_cid.to_vec().into());
+                Some(retry_cids.retry_source_cid.clone().into_owned());
 
             conn.did_retry = true;
         }
 
         conn.local_transport_params.initial_source_connection_id =
-            Some(conn.ids.get_scid(0)?.cid.to_vec().into());
+            Some(conn.ids.get_scid(0)?.cid.clone());
 
         conn.handshake.init(is_server)?;
 
@@ -2286,11 +2286,7 @@ impl<F: BufFactory> Connection<F> {
             )?;
 
             let reset_token = conn.peer_transport_params.stateless_reset_token;
-            conn.set_initial_dcid(
-                dcid.to_vec().into(),
-                reset_token,
-                active_path_id,
-            )?;
+            conn.set_initial_dcid(dcid.into(), reset_token, active_path_id)?;
 
             conn.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
             conn.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
@@ -3369,8 +3365,7 @@ impl<F: BufFactory> Connection<F> {
         // Now that we decrypted the packet, let's see if we can map it to an
         // existing path.
         let recv_pid = if hdr.ty == Type::Short && self.got_peer_conn_id {
-            let pkt_dcid = ConnectionId::from_ref(&hdr.dcid);
-            self.get_or_create_recv_path_id(recv_pid, &pkt_dcid, buf_len, info)?
+            self.get_or_create_recv_path_id(recv_pid, &hdr.dcid, buf_len, info)?
         } else {
             // During handshake, we are on the initial path.
             self.paths.get_active_path_id()?
@@ -3454,8 +3449,7 @@ impl<F: BufFactory> Connection<F> {
 
             if !self.did_retry {
                 self.local_transport_params
-                    .original_destination_connection_id =
-                    Some(hdr.dcid.to_vec().into());
+                    .original_destination_connection_id = Some(hdr.dcid.clone());
 
                 self.encode_transport_params()?;
             }
@@ -4426,11 +4420,10 @@ impl<F: BufFactory> Connection<F> {
 
         let dcid_seq = path.active_dcid_seq.ok_or(Error::OutOfIdentifiers)?;
 
-        let dcid =
-            ConnectionId::from_ref(self.ids.get_dcid(dcid_seq)?.cid.as_ref());
+        let dcid = self.ids.get_dcid(dcid_seq)?.cid.clone();
 
         let scid = if let Some(scid_seq) = path.active_scid_seq {
-            ConnectionId::from_ref(self.ids.get_scid(scid_seq)?.cid.as_ref())
+            self.ids.get_scid(scid_seq)?.cid.clone()
         } else if pkt_type == Type::Short {
             ConnectionId::default()
         } else {
@@ -7286,7 +7279,7 @@ impl<F: BufFactory> Connection<F> {
         &mut self, scid: &ConnectionId, reset_token: u128, retire_if_needed: bool,
     ) -> Result<u64> {
         self.ids.new_scid(
-            scid.to_vec().into(),
+            scid.clone().into_owned(),
             Some(reset_token),
             true,
             None,
@@ -7605,13 +7598,12 @@ impl<F: BufFactory> Connection<F> {
         if let Ok(path) = self.paths.get_active() {
             if let Some(active_scid_seq) = path.active_scid_seq {
                 if let Ok(e) = self.ids.get_scid(active_scid_seq) {
-                    return ConnectionId::from_ref(e.cid.as_ref());
+                    return e.cid.clone();
                 }
             }
         }
 
-        let e = self.ids.oldest_scid();
-        ConnectionId::from_ref(e.cid.as_ref())
+        self.ids.oldest_scid().cid.clone()
     }
 
     /// Returns all active source connection IDs.
@@ -7632,13 +7624,12 @@ impl<F: BufFactory> Connection<F> {
         if let Ok(path) = self.paths.get_active() {
             if let Some(active_dcid_seq) = path.active_dcid_seq {
                 if let Ok(e) = self.ids.get_dcid(active_dcid_seq) {
-                    return ConnectionId::from_ref(e.cid.as_ref());
+                    return e.cid.clone();
                 }
             }
         }
 
-        let e = self.ids.oldest_dcid();
-        ConnectionId::from_ref(e.cid.as_ref())
+        self.ids.oldest_dcid().cid.clone()
     }
 
     /// Returns the PMTU for the active path if it exists.
