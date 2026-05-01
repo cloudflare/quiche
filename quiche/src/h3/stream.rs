@@ -105,6 +105,57 @@ impl Type {
     }
 }
 
+/// Tracks the outgoing HEADERS send lifecycle for a request or response
+/// stream.
+///
+/// HTTP/3 allows multiple HEADERS frames per stream (RFC 9114 §4.1):
+///   - Client: one initial request HEADERS, then optional trailers.
+///   - Server: zero or more informational 1xx HEADERS, one final response
+///     HEADERS, optional trailers.
+///
+/// States generally progress forward. For servers sending informational
+/// responses, the state may cycle between `AdditionalHeadersInFlight` and
+/// `HeadersSent` before trailers are sent.
+///
+/// Illegal transitions (e.g. starting a new send while one is in flight)
+/// are prevented by matching on the current state before any mutation.
+#[derive(Debug)]
+pub enum OutgoingHeadersState {
+    /// No HEADERS have been sent yet.
+    Initial,
+
+    /// The very first HEADERS frame on this stream is partially written;
+    /// continuation is required via `continue_partial_headers()`.
+    InitialHeadersInFlight {
+        frame: Vec<u8>,
+        off: usize,
+        fin: bool,
+    },
+
+    /// The initial HEADERS have been fully sent; body, additional HEADERS
+    /// (e.g. informational 1xx responses), or trailers may follow.
+    HeadersSent,
+
+    /// A non-initial, non-trailer HEADERS frame (e.g. informational 1xx) is
+    /// partially written; continuation is required. The initial HEADERS have
+    /// already been fully sent.
+    AdditionalHeadersInFlight {
+        frame: Vec<u8>,
+        off: usize,
+        fin: bool,
+    },
+
+    /// Trailing HEADERS are partially written; continuation is required.
+    TrailersInFlight {
+        frame: Vec<u8>,
+        off: usize,
+        fin: bool,
+    },
+
+    /// Trailing HEADERS have been fully sent; the stream is done sending.
+    TrailersSent,
+}
+
 /// An HTTP/3 stream.
 ///
 /// This maintains the HTTP/3 state for streams of any type (control, request,
@@ -150,9 +201,6 @@ pub struct Stream {
     /// Whether the stream has been remotely initialized.
     remote_initialized: bool,
 
-    /// Whether the stream has been locally initialized.
-    local_initialized: bool,
-
     /// Whether a `Data` event has been triggered for this stream.
     data_event_triggered: bool,
 
@@ -165,11 +213,11 @@ pub struct Stream {
     /// Whether a DATA frame has been received.
     data_received: bool,
 
-    /// Whether a trailing HEADER field has been sent.
-    trailers_sent: bool,
-
     /// Whether a trailing HEADER field has been received.
     trailers_received: bool,
+
+    /// Outgoing HEADERS send lifecycle state.
+    pub outgoing_headers_state: OutgoingHeadersState,
 }
 
 impl Stream {
@@ -205,7 +253,6 @@ impl Stream {
 
             is_local,
             remote_initialized: false,
-            local_initialized: false,
 
             data_event_triggered: false,
 
@@ -215,8 +262,9 @@ impl Stream {
 
             data_received: false,
 
-            trailers_sent: false,
             trailers_received: false,
+
+            outgoing_headers_state: OutgoingHeadersState::Initial,
         }
     }
 
@@ -508,14 +556,40 @@ impl Stream {
         Ok(())
     }
 
-    /// Initialize the local part of the stream.
-    pub fn initialize_local(&mut self) {
-        self.local_initialized = true
+    /// Whether the initial HEADERS frame has been fully sent.
+    ///
+    /// Per RFC 9114 §4.1, this gates sending of DATA frames and trailers.
+    /// Returns true even when a subsequent (non-initial) send is in flight,
+    /// since the initial HEADERS were already completed.
+    pub fn initial_headers_sent(&self) -> bool {
+        matches!(
+            self.outgoing_headers_state,
+            OutgoingHeadersState::HeadersSent |
+                OutgoingHeadersState::AdditionalHeadersInFlight { .. } |
+                OutgoingHeadersState::TrailersInFlight { .. } |
+                OutgoingHeadersState::TrailersSent
+        )
     }
 
-    /// Whether the stream has been locally initialized.
-    pub fn local_initialized(&self) -> bool {
-        self.local_initialized
+    /// Whether a partial send is currently in progress.
+    pub fn headers_in_flight(&self) -> bool {
+        matches!(
+            self.outgoing_headers_state,
+            OutgoingHeadersState::InitialHeadersInFlight { .. } |
+                OutgoingHeadersState::AdditionalHeadersInFlight { .. } |
+                OutgoingHeadersState::TrailersInFlight { .. }
+        )
+    }
+
+    /// Whether DATA frames or additional HEADERS can be sent on the stream.
+    ///
+    /// Returns true only when the initial HEADERS have been fully sent and no
+    /// send is currently in flight — i.e. the stream is in HeadersSent state.
+    pub fn can_send_data_or_additional_headers(&self) -> bool {
+        matches!(
+            self.outgoing_headers_state,
+            OutgoingHeadersState::HeadersSent
+        )
     }
 
     pub fn increment_headers_received(&mut self) {
@@ -525,14 +599,6 @@ impl Stream {
 
     pub fn headers_received_count(&self) -> usize {
         self.headers_received_count
-    }
-
-    pub fn mark_trailers_sent(&mut self) {
-        self.trailers_sent = true;
-    }
-
-    pub fn trailers_sent(&self) -> bool {
-        self.trailers_sent
     }
 
     /// Tries to fill the state buffer by reading data from the given cursor.
