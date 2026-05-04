@@ -233,7 +233,13 @@ mod client_side_driver {
         // another 10 bytes. Should transparently use a new buffer
         helper.peer_server_send_body(0, &[5; 10], true).unwrap();
         helper.advance_and_run_loop().unwrap();
-        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![5; 10]);
+
+        let (body, fin, _) = helper.driver_try_recv_body(&mut from_server);
+        assert_eq!(body, vec![5; 10]);
+        // client receives the server FIN
+        assert!(fin);
+        // client should have cleaned up the stream as both directions have closed
+        assert_eq!(helper.driver.stream_map.len(), 0);
     }
 
     /// Test that dropping the OutboundFrame channel causes the driver to

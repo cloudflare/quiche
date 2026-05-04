@@ -214,6 +214,13 @@ impl ClientHooks {
         let (mut stream_ctx, send, recv) =
             StreamCtx::new(stream_id, STREAM_CAPACITY);
 
+        if body_finished {
+            // `send_request()` already sent FIN for bodyless requests, so
+            // mark the send side complete and drop the request-body receiver.
+            stream_ctx.fin_or_reset_sent = true;
+            stream_ctx.recv = None;
+        }
+
         if let Some(quarter_stream_id) =
             datagram::extract_quarter_stream_id(stream_id, &request.headers)
         {
