@@ -6433,12 +6433,12 @@ fn client_rst_stream_while_bytes_in_flight(
         _ => 24000,
     };
 
-    assert_eq!(pipe.server.tx_buffered, 0);
+    assert_eq!(pipe.server.streams.tx_buffered(), 0);
     assert_eq!(
         pipe.server.stream_send(8, &send_buf, false),
         Ok(expected_cwnd)
     );
-    assert_eq!(pipe.server.tx_buffered, expected_cwnd);
+    assert_eq!(pipe.server.streams.tx_buffered(), expected_cwnd);
     assert_eq!(
         pipe.server
             .paths
@@ -6522,7 +6522,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         _ => 8400,
     };
 
-    assert_eq!(pipe.server.tx_buffered, 0);
+    assert_eq!(pipe.server.streams.tx_buffered(), 0);
 
     let send_result = pipe.server.stream_send(8, &send_buf, false).unwrap();
     if cc_algorithm_name != "cubic" {
@@ -6532,7 +6532,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         // lost packet.  The exact send size varies.
         assert!((15000..17000).contains(&send_result));
     }
-    assert_eq!(pipe.server.tx_buffered, send_result);
+    assert_eq!(pipe.server.streams.tx_buffered(), send_result);
     assert_eq!(
         pipe.server
             .paths

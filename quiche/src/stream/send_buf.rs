@@ -320,17 +320,17 @@ impl<F: BufFactory> SendBuf<F> {
         self.acked.insert(off..off + len as u64);
     }
 
-    pub fn ack_and_drop(&mut self, off: u64, len: usize) {
+    pub fn ack_and_drop(&mut self, off: u64, len: usize) -> usize {
         self.ack(off, len);
 
         let ack_off = self.ack_off();
 
         if self.data.is_empty() {
-            return;
+            return 0;
         }
 
         if off > ack_off {
-            return;
+            return 0;
         }
 
         let mut drop_until = None;
@@ -354,26 +354,38 @@ impl<F: BufFactory> SendBuf<F> {
         }
 
         if let Some(drop) = drop_until {
+            // Calculate the total length of buffers being dropped and subtract
+            // from len.
+            let dropped_len: u64 =
+                (0..=drop).map(|i| self.data[i].len() as u64).sum();
+            self.len = self.len.saturating_sub(dropped_len);
+
             self.data.drain(..=drop);
 
             // When a buffer is marked for retransmission, but then acked before
             // it could be retransmitted, we might end up decreasing the SendBuf
             // position too much, so make sure that doesn't happen.
             self.pos = self.pos.saturating_sub(drop + 1);
+
+            dropped_len as usize
+        } else {
+            0
         }
     }
 
-    pub fn retransmit(&mut self, off: u64, len: usize) {
+    pub fn retransmit(&mut self, off: u64, len: usize) -> usize {
         let max_off = off + len as u64;
         let ack_off = self.ack_off();
 
         if self.data.is_empty() {
-            return;
+            return 0;
         }
 
         if max_off <= ack_off {
-            return;
+            return 0;
         }
+
+        let mut total_retransmitted = 0;
 
         for i in 0..self.data.len() {
             let buf = &mut self.data[i];
@@ -406,12 +418,16 @@ impl<F: BufFactory> SendBuf<F> {
 
             self.pos = cmp::min(self.pos, i);
 
-            self.len += (prev_pos - buf.pos) as u64;
+            let retransmitted = (prev_pos - buf.pos) as u64;
+            self.len += retransmitted;
+            total_retransmitted += retransmitted;
 
             if let Some(b) = new_buf {
                 self.data.insert(i + 1, b);
             }
         }
+
+        total_retransmitted as usize
     }
 
     /// Resets the stream at the current offset and clears all buffered data.
@@ -552,6 +568,11 @@ impl<F: BufFactory> SendBuf<F> {
     #[allow(dead_code)]
     pub fn bufs_count(&self) -> usize {
         self.data.len()
+    }
+
+    /// Returns the number of bytes currently buffered.
+    pub fn len(&self) -> u64 {
+        self.len
     }
 }
 

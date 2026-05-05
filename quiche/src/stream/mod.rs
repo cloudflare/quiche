@@ -202,6 +202,9 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     /// When `true`, the initial flow control window will be set to the
     /// `max_rx_data`, if false, it will be set to `DEFAULT_STREAM_WINDOW`
     use_initial_max_data_as_flow_control_win: bool,
+
+    /// Cached total number of bytes buffered across all streams.
+    tx_buffered_cache: usize,
 }
 
 impl<F: BufFactory> StreamMap<F> {
@@ -719,6 +722,61 @@ impl<F: BufFactory> StreamMap<F> {
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.streams.len()
+    }
+
+    /// Returns the total number of bytes buffered across all streams.
+    pub fn tx_buffered(&self) -> usize {
+        self.tx_buffered_cache
+    }
+
+    /// Computes the actual tx_buffered by summing across all streams.
+    /// This is used for debugging to verify the cache is accurate.
+    #[cfg(debug_assertions)]
+    fn tx_buffered_actual(&self) -> usize {
+        self.streams.values().map(|s| s.send.len() as usize).sum()
+    }
+
+    /// Updates the cached tx_buffered value by adding the delta.
+    pub(crate) fn add_tx_buffered(&mut self, delta: usize) {
+        self.tx_buffered_cache += delta;
+        self.check_tx_buffered_cache();
+    }
+
+    /// Updates the cached tx_buffered value by subtracting the delta.
+    pub(crate) fn sub_tx_buffered(&mut self, delta: usize) {
+        debug_assert!(self.tx_buffered_cache >= delta);
+        self.tx_buffered_cache = self.tx_buffered_cache.saturating_sub(delta);
+        self.check_tx_buffered_cache();
+    }
+
+    /// Verifies that the cached tx_buffered matches the actual value.
+    /// Enabled in debug builds to catch cache inconsistencies early.
+    #[cfg(debug_assertions)]
+    pub(crate) fn check_tx_buffered_cache(&self) {
+        let actual = self.tx_buffered_actual();
+        let cached = self.tx_buffered_cache;
+        if actual != cached {
+            // Print per-stream details to help debug
+            eprintln!("Stream buffer details:");
+            for (id, stream) in &self.streams {
+                let len = stream.send.len();
+                if len > 0 {
+                    eprintln!("  Stream {}: {} bytes", id, len);
+                }
+            }
+            panic!(
+                "tx_buffered cache mismatch: cached={}, actual={}, diff={}",
+                cached,
+                actual,
+                cached as i64 - actual as i64
+            );
+        }
+    }
+
+    /// No-op in release builds for performance.
+    #[cfg(not(debug_assertions))]
+    pub(crate) fn check_tx_buffered_cache(&self) {
+        // No-op in release builds
     }
 
     /// When `true`, the initial flow control window will be set to the
@@ -2203,6 +2261,200 @@ mod tests {
         let walk_2: Vec<u64> =
             prioritized_writable.iter().map(|s| s.id).collect();
         assert_eq!(walk_2, vec![0, 0, 4, 4, 8, 8, 12, 12]);
+    }
+
+    #[test]
+    fn retransmit_returns_zero_when_already_acked() {
+        let mut stream = <Stream>::new(0, 15, 15, true, 0, 15);
+
+        // Write and emit some data.
+        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        assert_eq!(stream.send.len(), 5);
+
+        let mut buf = [0; 10];
+        let (written, _) = stream.send.emit(&mut buf).unwrap();
+        assert_eq!(written, 5);
+        assert_eq!(stream.send.len(), 0);
+
+        // Mark data for retransmission.
+        let retransmitted = stream.send.retransmit(0, 5);
+        assert_eq!(retransmitted, 5);
+        assert_eq!(stream.send.len(), 5);
+
+        // Ack the data.
+        stream.send.ack_and_drop(0, 5);
+        assert_eq!(stream.send.len(), 0);
+
+        // Try to retransmit again - should return 0 since data is acked.
+        let retransmitted = stream.send.retransmit(0, 5);
+        assert_eq!(retransmitted, 0);
+        assert_eq!(stream.send.len(), 0);
+    }
+
+    #[test]
+    fn retransmit_returns_partial_when_some_acked() {
+        let mut stream = <Stream>::new(0, 15, 15, true, 0, 15);
+
+        // Write and emit 10 bytes.
+        assert_eq!(stream.send.write(b"helloworld", false), Ok(10));
+        assert_eq!(stream.send.len(), 10);
+
+        let mut buf = [0; 10];
+        let (written, _) = stream.send.emit(&mut buf).unwrap();
+        assert_eq!(written, 10);
+        assert_eq!(stream.send.len(), 0);
+
+        // Mark all data for retransmission.
+        let retransmitted = stream.send.retransmit(0, 10);
+        assert_eq!(retransmitted, 10);
+        assert_eq!(stream.send.len(), 10);
+
+        // Ack first 5 bytes and drop them.
+        let dropped = stream.send.ack_and_drop(0, 5);
+        assert_eq!(dropped, 5);
+        assert_eq!(stream.send.len(), 5);
+
+        // Try to retransmit all 10 bytes - should return 5 since first 5 are
+        // acked.
+        let retransmitted = stream.send.retransmit(0, 10);
+        assert_eq!(retransmitted, 0); // Already marked, so no change
+        assert_eq!(stream.send.len(), 5);
+    }
+
+    #[test]
+    fn ack_and_drop_decrements_len_and_returns_dropped() {
+        let mut stream = <Stream>::new(0, 15, 15, true, 0, 15);
+
+        // Write some data.
+        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        assert_eq!(stream.send.len(), 5);
+
+        // Emit it.
+        let mut buf = [0; 10];
+        let (written, _) = stream.send.emit(&mut buf).unwrap();
+        assert_eq!(written, 5);
+        assert_eq!(stream.send.len(), 0);
+
+        // Mark for retransmission.
+        let retransmitted = stream.send.retransmit(0, 5);
+        assert_eq!(retransmitted, 5);
+        assert_eq!(stream.send.len(), 5);
+
+        // Ack and drop - should decrement len and return dropped amount.
+        let dropped = stream.send.ack_and_drop(0, 5);
+        assert_eq!(dropped, 5);
+        assert_eq!(stream.send.len(), 0);
+    }
+
+    #[test]
+    fn ack_and_drop_partial_buffer() {
+        let mut stream = <Stream>::new(0, 30, 30, true, 0, 30);
+
+        // Write and emit two chunks.
+        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        assert_eq!(stream.send.write(b"world", false), Ok(5));
+        assert_eq!(stream.send.len(), 10);
+
+        let mut buf = [0; 10];
+        let (written, _) = stream.send.emit(&mut buf).unwrap();
+        assert_eq!(written, 10);
+        assert_eq!(stream.send.len(), 0);
+
+        // Mark both chunks for retransmission.
+        let retransmitted = stream.send.retransmit(0, 10);
+        assert_eq!(retransmitted, 10);
+        assert_eq!(stream.send.len(), 10);
+
+        // Ack and drop only first chunk.
+        let dropped = stream.send.ack_and_drop(0, 5);
+        assert_eq!(dropped, 5);
+        assert_eq!(stream.send.len(), 5);
+
+        // Ack and drop second chunk.
+        let dropped = stream.send.ack_and_drop(5, 5);
+        assert_eq!(dropped, 5);
+        assert_eq!(stream.send.len(), 0);
+    }
+
+    #[test]
+    fn ack_and_drop_returns_zero_when_nothing_dropped() {
+        let mut stream = <Stream>::new(0, 15, 15, true, 0, 15);
+
+        // Write and emit data.
+        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        let mut buf = [0; 10];
+        let (written, _) = stream.send.emit(&mut buf).unwrap();
+        assert_eq!(written, 5);
+
+        // Ack data that's already been fully emitted and not retransmitted.
+        // Nothing should be dropped since there's no buffered data.
+        let dropped = stream.send.ack_and_drop(0, 5);
+        assert_eq!(dropped, 0);
+        assert_eq!(stream.send.len(), 0);
+    }
+
+    #[test]
+    fn cache_consistency_through_full_lifecycle() {
+        // This test verifies that send.len() stays in sync with manual cache
+        // tracking through a full lifecycle: write → emit → retransmit → ack.
+        let mut stream = <Stream>::new(0, 15, 15, true, 0, 15);
+        let mut cache = 0usize;
+
+        // Write data: both len and cache increase.
+        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        cache += 5;
+        assert_eq!(stream.send.len(), 5);
+        assert_eq!(cache, 5);
+
+        // Emit data: both len and cache decrease.
+        let mut buf = [0; 10];
+        let (written, _) = stream.send.emit(&mut buf).unwrap();
+        assert_eq!(written, 5);
+        cache -= 5;
+        assert_eq!(stream.send.len(), 0);
+        assert_eq!(cache, 0);
+
+        // Retransmit: both len and cache increase by actual amount retransmitted.
+        let retransmitted = stream.send.retransmit(0, 5);
+        assert_eq!(retransmitted, 5);
+        cache += retransmitted;
+        assert_eq!(stream.send.len(), 5);
+        assert_eq!(cache, 5);
+
+        // Ack and drop: both len and cache decrease by actual amount dropped.
+        let dropped = stream.send.ack_and_drop(0, 5);
+        assert_eq!(dropped, 5);
+        cache -= dropped;
+        assert_eq!(stream.send.len(), 0);
+        assert_eq!(cache, 0);
+    }
+
+    #[test]
+    fn send_buf_len_reflects_buffered_data() {
+        let mut stream = <Stream>::new(0, 15, 15, true, 0, 15);
+
+        // Initially empty.
+        assert_eq!(stream.send.len(), 0);
+
+        // After write.
+        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        assert_eq!(stream.send.len(), 5);
+
+        // After emit.
+        let mut buf = [0; 10];
+        let (written, _) = stream.send.emit(&mut buf).unwrap();
+        assert_eq!(written, 5);
+        assert_eq!(stream.send.len(), 0);
+
+        // After retransmit.
+        let retransmitted = stream.send.retransmit(0, 5);
+        assert_eq!(retransmitted, 5);
+        assert_eq!(stream.send.len(), 5);
+
+        // After ack_and_drop.
+        let dropped = stream.send.ack_and_drop(0, 5);
+        assert_eq!(dropped, 5);
+        assert_eq!(stream.send.len(), 0);
     }
 }
 
