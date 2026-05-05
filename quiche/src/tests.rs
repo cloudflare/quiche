@@ -282,9 +282,6 @@ fn verify_custom_root() {
     assert_eq!(pipe.handshake(), Ok(()));
 }
 
-// Disable this for openssl as it seems to fail for some reason. It could be
-// because of the way the get_certs API differs from bssl.
-#[cfg(not(feature = "openssl"))]
 #[test]
 fn verify_client_invalid() {
     let mut server_config = Config::new(PROTOCOL_VERSION).unwrap();
@@ -544,14 +541,7 @@ fn handshake_confirmation(
 fn handshake_resumption(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    #[cfg(not(feature = "openssl"))]
     const SESSION_TICKET_KEY: [u8; 48] = [0xa; 48];
-
-    // 80-byte key(AES 256)
-    // TODO: We can set the default? or query the ticket size by calling
-    // the same API(SSL_CTX_set_tlsext_ticket_keys) twice to fetch the size.
-    #[cfg(feature = "openssl")]
-    const SESSION_TICKET_KEY: [u8; 80] = [0xa; 80];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -640,7 +630,6 @@ fn handshake_alpn_mismatch(
     assert_eq!(pipe.server.sent_count, 1);
 }
 
-#[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
 #[rstest]
 fn handshake_0rtt(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -705,7 +694,6 @@ fn handshake_0rtt(
     assert_eq!(&b[..5], b"aaaaa");
 }
 
-#[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
 #[rstest]
 fn handshake_0rtt_reordered(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -780,7 +768,6 @@ fn handshake_0rtt_reordered(
     assert_eq!(&b[..5], b"aaaaa");
 }
 
-#[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
 #[rstest]
 fn handshake_0rtt_truncated(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -1118,7 +1105,6 @@ fn streamio_mixed_actions(
     assert!(pipe.server.stream_finished(4));
 }
 
-#[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
 #[rstest]
 fn zero_rtt(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
@@ -3164,7 +3150,6 @@ fn path_challenge(
     );
 }
 
-#[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
 #[rstest]
 /// Simulates reception of an early 1-RTT packet on the server, by
 /// delaying the client's Handshake packet that completes the handshake.
@@ -6422,8 +6407,6 @@ fn client_rst_stream_while_bytes_in_flight(
         pipe.server.stream_send(4, &send_buf, false),
         if cc_algorithm_name == "cubic" {
             Ok(12000)
-        } else if cfg!(feature = "openssl") {
-            Ok(13964)
         } else {
             Ok(13878)
         }
@@ -6446,12 +6429,7 @@ fn client_rst_stream_while_bytes_in_flight(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" =>
-            if cfg!(feature = "openssl") {
-                27928
-            } else {
-                27756
-            },
+        "bbr2" | "bbr2_gcongestion" => 27756,
         _ => 24000,
     };
 
@@ -6519,8 +6497,6 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         pipe.server.stream_send(4, &send_buf, false),
         if cc_algorithm_name == "cubic" {
             Ok(12000)
-        } else if cfg!(feature = "openssl") {
-            Ok(13964)
         } else {
             Ok(13878)
         }
@@ -6542,12 +6518,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" =>
-            if cfg!(feature = "openssl") {
-                26728
-            } else {
-                26556
-            },
+        "bbr2" | "bbr2_gcongestion" => 26556,
         _ => 8400,
     };
 
@@ -6608,8 +6579,6 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
         pipe.client.stream_send(0, &send_buf1, false),
         if cc_algorithm_name == "cubic" {
             Ok(12000)
-        } else if cfg!(feature = "openssl") {
-            Ok(12345)
         } else {
             Ok(12299)
         }
@@ -6685,8 +6654,6 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
         pipe.client.stream_send(0, &send_buf1, false),
         if cc_algorithm_name == "cubic" {
             Ok(12000)
-        } else if cfg!(feature = "openssl") {
-            Ok(12345)
         } else {
             Ok(12299)
         }
@@ -8685,9 +8652,6 @@ fn app_close_by_client(
     );
 }
 
-// OpenSSL does not provide a straightforward interface to deal with custom
-// off-load key signing.
-#[cfg(not(feature = "openssl"))]
 #[rstest]
 fn app_close_by_server_during_handshake_private_key_failure(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -9053,8 +9017,6 @@ fn update_max_datagram_size(
             .cwnd(),
         if cc_algorithm_name == "cubic" {
             12000
-        } else if cfg!(feature = "openssl") {
-            13437
         } else {
             13421
         },
@@ -9130,8 +9092,6 @@ fn send_capacity(
         pipe.server.tx_cap,
         if cc_algorithm_name == "cubic" {
             12000
-        } else if cfg!(feature = "openssl") {
-            13959
         } else {
             13873
         }
@@ -9143,8 +9103,6 @@ fn send_capacity(
         pipe.server.stream_send(8, &buf[..5000], false),
         if cc_algorithm_name == "cubic" {
             Ok(2000)
-        } else if cfg!(feature = "openssl") {
-            Ok(3959)
         } else {
             Ok(3873)
         }
@@ -9657,13 +9615,8 @@ fn initial_cwnd(
         );
     } else {
         // TODO understand where these adjustments come from and why they vary
-        // by TLS implementation and OS target.
-        let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 +
-            if cfg!(feature = "openssl") {
-                1463
-            } else {
-                1447
-            };
+        // by OS target.
+        let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 + 1447;
 
         assert!(
             pipe.server.tx_cap >= expected,
@@ -11379,13 +11332,7 @@ fn resilience_against_migration_attack(
     let mut recv_buf = [0; DATA_BYTES];
     let send1_bytes = pipe.server.stream_send(1, &buf, true).unwrap();
     assert_eq!(send1_bytes, match cc_algorithm_name {
-        #[cfg(feature = "openssl")]
-        "bbr2" => 13966,
-        #[cfg(not(feature = "openssl"))]
         "bbr2" => 13880,
-        #[cfg(feature = "openssl")]
-        "bbr2_gcongestion" => 13966,
-        #[cfg(not(feature = "openssl"))]
         "bbr2_gcongestion" => 13880,
         _ => 12000,
     });

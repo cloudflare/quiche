@@ -42,9 +42,6 @@ boringssl-vendored = []
 # Use the BoringSSL library provided by the boring crate.
 boringssl-boring-crate = ["boring", "foreign-types-shared"]
 
-# Build quiche against OpenSSL instead of BoringSSL.
-openssl = ["pkg-config"]
-
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []
 
@@ -74,7 +71,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [build-dependencies]
 cmake = "0.1"
-pkg-config = { version = "0.3", optional = true }
 cdylib-link-lines = { version = "0.1", optional = true }
 
 [dependencies]

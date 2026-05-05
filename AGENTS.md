@@ -48,7 +48,7 @@ quiche  datagram-socket  qlog-dancer        (Layer 1)
 | QUIC connection logic | `quiche/src/lib.rs` | 9k lines, core `Connection` struct |
 | HTTP/3 protocol | `quiche/src/h3/mod.rs` | Own `Error`/`Result` types |
 | Congestion control | `quiche/src/recovery/` | Two impls: `congestion/` (legacy) + `gcongestion/` (BBR2) |
-| TLS/crypto backends | `quiche/src/tls/`, `quiche/src/crypto/` | BoringSSL + OpenSSL, cfg-gated |
+| TLS/crypto backends | `quiche/src/tls/`, `quiche/src/crypto/` | BoringSSL only |
 | C FFI | `quiche/src/ffi.rs` + `quiche/include/quiche.h` | Behind `ffi` feature |
 | Async server/client | `tokio-quiche/src/` | `ApplicationOverQuic` trait is the extension point |
 | H3 async driver | `tokio-quiche/src/http3/driver/` | `DriverHooks` sealed trait, channels |
@@ -98,7 +98,7 @@ quiche  datagram-socket  qlog-dancer        (Layer 1)
 ## FEATURE FLAGS
 
 ```
-quiche:        default=boringssl-vendored | boringssl-boring-crate | openssl
+quiche:        default=boringssl-vendored | boringssl-boring-crate
                qlog, gcongestion, internal, ffi, fuzzing, sfv, custom-client-dcid
 tokio-quiche:  fuzzing, quiche_internal, gcongestion, zero-copy, rpk
                (hardcodes: quiche/boringssl-boring-crate + quiche/qlog)
