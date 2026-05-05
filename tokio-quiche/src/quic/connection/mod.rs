@@ -42,7 +42,6 @@ use datagram_socket::QuicAuditStats;
 use datagram_socket::ShutdownConnection;
 use datagram_socket::SocketStats;
 use foundations::telemetry::log;
-use futures::future::BoxFuture;
 use futures::Future;
 use quiche::ConnectionId;
 use std::fmt;
@@ -277,7 +276,8 @@ where
     /// [boring]'s SSL object for this connection.
     #[doc(hidden)]
     pub fn ssl_mut(&mut self) -> &mut SslRef {
-        self.params.quiche_conn.as_mut()
+        // Deref to pick `Connection::as_mut` over `Box::as_mut`.
+        (*self.params.quiche_conn).as_mut()
     }
 
     /// A handle to the [`QuicAuditStats`] for this connection.
@@ -307,12 +307,11 @@ where
     /// This is a lower-level alternative to the `handshake` function which
     /// gives the caller more control over execution of the future. See
     /// `handshake` for details on the return values.
-    #[allow(clippy::type_complexity)]
     pub fn handshake_fut<A: ApplicationOverQuic>(
         self, app: A,
     ) -> (
         QuicConnection,
-        BoxFuture<'static, io::Result<Running<Arc<Tx>, M, A>>>,
+        impl Future<Output = io::Result<Running<Arc<Tx>, M, A>>> + Send + 'static,
     ) {
         self.params.metrics.connections_in_memory().inc();
 
@@ -367,7 +366,7 @@ where
             }
         };
 
-        (conn, Box::pin(handshake_fut))
+        (conn, handshake_fut)
     }
 
     /// Performs the QUIC handshake in a separate tokio task and awaits its
@@ -438,6 +437,9 @@ where
     pub fn start<A: ApplicationOverQuic>(self, app: A) -> QuicConnection {
         let task_metrics = self.params.metrics.clone();
         let (conn, handshake_fut) = Self::handshake_fut(self, app);
+        // Pin to the heap so the spawned task only carries a pointer to it
+        // instead of inlining the full future state across the await.
+        let handshake_fut = Box::pin(handshake_fut);
 
         let fut = async move {
             match handshake_fut.await {
@@ -473,7 +475,11 @@ where
     #[cfg(feature = "perf-quic-listener-metrics")]
     pub init_rx_time: Option<SystemTime>,
     pub handshake_info: HandshakeInfo,
-    pub quiche_conn: QuicheConnection,
+    /// Boxed because this value is moved by-value through several nested
+    /// async state machines. Inlining a [`QuicheConnection`] here would
+    /// duplicate its payload across the future state slots that hold it
+    /// across an `.await`.
+    pub quiche_conn: Box<QuicheConnection>,
     pub socket: Arc<Tx>,
     pub local_addr: SocketAddr,
     pub peer_addr: SocketAddr,
