@@ -130,8 +130,8 @@ pub static QUICHE_EX_DATA_INDEX: LazyLock<c_int> = LazyLock::new(|| unsafe {
 pub struct Context(*mut SSL_CTX);
 
 impl Context {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
     pub fn new() -> Result<Context> {
         unsafe {
             let ctx_raw = SSL_CTX_new(TLS_method());
@@ -356,8 +356,8 @@ pub struct Handshake {
 }
 
 impl Handshake {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
     #[cfg(any(feature = "ffi", feature = "boringssl-boring-crate"))]
     pub unsafe fn from_ptr(ssl: *mut c_void) -> Handshake {
         Handshake::new(ssl as *mut SSL)
@@ -941,12 +941,9 @@ extern "C" fn select_alpn(
     // SSL_TLSEXT_ERR_ALERT_FATAL 2
     // SSL_TLSEXT_ERR_NOACK 3
 
-    // Boringssl internally overwrite the return value from this callback, if the
-    // returned value is SSL_TLSEXT_ERR_NOACK and is quic, then the value gets
-    // overwritten to SSL_TLSEXT_ERR_ALERT_FATAL. In contrast openssl/quictls does
-    // not do that, so we need to explicitly respond with
-    // SSL_TLSEXT_ERR_ALERT_FATAL in case it is needed.
-    // TLS_ERROR is redefined for each vendor.
+    // Boringssl internally overwrite the return value from this callback, if
+    // the returned value is SSL_TLSEXT_ERR_NOACK and is quic, then the value
+    // gets overwritten to SSL_TLSEXT_ERR_ALERT_FATAL.
     let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
@@ -1082,8 +1079,8 @@ fn log_ssl_error() {
 }
 
 extern "C" {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
 
     // SSL_METHOD
     fn TLS_method() -> *const SSL_METHOD;
@@ -1248,12 +1245,5 @@ extern "C" {
 
 }
 
-#[cfg(not(feature = "openssl"))]
 mod boringssl;
-#[cfg(not(feature = "openssl"))]
 use boringssl::*;
-
-#[cfg(feature = "openssl")]
-mod openssl_quictls;
-#[cfg(feature = "openssl")]
-use openssl_quictls::*;

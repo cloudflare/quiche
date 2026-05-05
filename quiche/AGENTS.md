@@ -17,7 +17,7 @@ src/
     congestion/              Legacy CC (Cubic, Reno, Hystart++)
     gcongestion/             Google-derived CC (BBR2) — behind `gcongestion` feature
   stream/                    Stream state machine, flow control per-stream
-  tls/                       TLS backend abstraction (BoringSSL / OpenSSL)
+  tls/                       TLS backend abstraction (BoringSSL)
   crypto/                    Packet protection, key derivation
   packet.rs       (2.3k)     Packet parsing, ConnectionId, Header
   frame.rs                   QUIC frame encode/decode
@@ -66,7 +66,7 @@ deps/
 ## NOTES
 
 - `build.rs` is at `src/build.rs` (Cargo.toml: `build = "src/build.rs"`), not crate root.
-- Three TLS backends: `boringssl-vendored` (default), `boringssl-boring-crate`, `openssl` — mutually exclusive features.
+- Two TLS backends: `boringssl-vendored` (default), `boringssl-boring-crate` — mutually exclusive features.
 - `quiche::Error` is `Copy + Clone` — intentional for hot-path ergonomics.
 - `test_utils::Pipe` exposed via `internal` feature for downstream crate integration tests.
 - Tests use `rstest` with `#[values("cubic", "bbr2_gcongestion")]` parameterization for CC coverage.
