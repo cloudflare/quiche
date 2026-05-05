@@ -1425,9 +1425,6 @@ where
     /// The send capacity factor.
     tx_cap_factor: f64,
 
-    /// Number of bytes buffered in the send buffer.
-    tx_buffered: usize,
-
     /// Tracks the health of tx_buffered.
     tx_buffered_state: TxBufferTrackingState,
 
@@ -1457,7 +1454,7 @@ where
     lost_bytes: u64,
 
     /// Streams map, indexed by stream ID.
-    streams: stream::StreamMap<F>,
+    pub(crate) streams: stream::StreamMap<F>,
 
     /// Peer's original destination connection ID. Used by the client to
     /// validate the server's transport parameter.
@@ -2138,7 +2135,6 @@ impl<F: BufFactory> Connection<F> {
             tx_cap: 0,
             tx_cap_factor: config.tx_cap_factor,
 
-            tx_buffered: 0,
             tx_buffered_state: TxBufferTrackingState::Ok,
 
             tx_data: 0,
@@ -3633,12 +3629,9 @@ impl<F: BufFactory> Connection<F> {
                         length,
                         ..
                     } => {
-                        // Update tx_buffered and emit qlog before checking if the
-                        // stream still exists.  The client does need to ACK
-                        // frames that were received after the client sends a
-                        // ResetStream.
-                        self.tx_buffered =
-                            self.tx_buffered.saturating_sub(length);
+                        // Emit qlog before checking if the stream still exists.
+                        // The client does need to ACK frames that were received
+                        // after the client sends a ResetStream.
 
                         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
                             let ev_data = EventData::QuicStreamDataMoved(
@@ -3664,8 +3657,7 @@ impl<F: BufFactory> Connection<F> {
                             None => continue,
                         };
 
-                        stream.send.ack_and_drop(offset, length);
-
+                        let dropped = stream.send.ack_and_drop(offset, length);
                         let priority_key = Arc::clone(&stream.priority_key);
 
                         // Only collect the stream if it is complete and not
@@ -3697,6 +3689,13 @@ impl<F: BufFactory> Connection<F> {
                         if is_complete && !is_readable && !is_writable {
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
+                        }
+
+                        // Update cache to reflect any data that was dropped from
+                        // buffers (e.g., data marked for retransmission but then
+                        // acked before it could be resent).
+                        if dropped > 0 {
+                            self.streams.sub_tx_buffered(dropped);
                         }
                     },
 
@@ -4188,12 +4187,9 @@ impl<F: BufFactory> Connection<F> {
                             Some(v) if !v.send.is_stopped() => v,
 
                             // Data on a closed stream will not be retransmitted
-                            // or acked after it is declared lost, so update
-                            // tx_buffered and qlog.
+                            // or acked after it is declared lost, so just drop
+                            // it.
                             _ => {
-                                self.tx_buffered =
-                                    self.tx_buffered.saturating_sub(length);
-
                                 qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
                                     let ev_data = EventData::QuicStreamDataMoved(
                                         qlog::events::quic::StreamDataMoved {
@@ -4221,7 +4217,8 @@ impl<F: BufFactory> Connection<F> {
 
                         let empty_fin = length == 0 && fin;
 
-                        stream.send.retransmit(offset, length);
+                        let retransmitted =
+                            stream.send.retransmit(offset, length);
 
                         // If the stream is now flushable push it to the
                         // flushable queue, but only if it wasn't already
@@ -4235,6 +4232,13 @@ impl<F: BufFactory> Connection<F> {
                             let priority_key = Arc::clone(&stream.priority_key);
                             self.streams.insert_flushable(&priority_key);
                         }
+
+                        // Update tx_buffered cache when data is marked for
+                        // retransmission (it was decremented when emitted).
+                        // Only increment by the actual amount retransmitted,
+                        // which may be less than `length` if some data was
+                        // already acked.
+                        self.streams.add_tx_buffered(retransmitted);
 
                         self.stream_retrans_bytes += length as u64;
                         p.stream_retrans_bytes += length as u64;
@@ -4396,7 +4400,7 @@ impl<F: BufFactory> Connection<F> {
                 }
             }
         }
-        self.check_tx_buffered_invariant();
+        self.streams.check_tx_buffered_cache();
 
         let is_app_limited = self.delivery_rate_check_if_app_limited();
         let n_paths = self.paths.len();
@@ -5299,6 +5303,9 @@ impl<F: BufFactory> Connection<F> {
                     self.streams.insert_flushable(&priority_key);
                 }
 
+                // Update tx_buffered cache when data is emitted.
+                self.streams.sub_tx_buffered(len);
+
                 #[cfg(feature = "fuzzing")]
                 // Coalesce STREAM frames when fuzzing.
                 if left > frame::MAX_STREAM_OVERHEAD {
@@ -6136,8 +6143,7 @@ impl<F: BufFactory> Connection<F> {
 
         self.tx_data += sent as u64;
 
-        self.tx_buffered += sent;
-        self.check_tx_buffered_invariant();
+        self.streams.add_tx_buffered(sent);
 
         qlog_with_type!(QLOG_DATA_MV, self.qlog, q, {
             let ev_data = EventData::QuicStreamDataMoved(
@@ -6282,14 +6288,19 @@ impl<F: BufFactory> Connection<F> {
             },
 
             Shutdown::Write => {
+                // Save the buffered length before shutdown (shutdown clears the
+                // buffer).
+                let buffered_len = stream.send.len() as usize;
+
                 let (final_size, unsent) = stream.send.shutdown()?;
 
                 // Claw back some flow control allowance from data that was
                 // buffered but not actually sent before the stream was reset.
                 self.tx_data = self.tx_data.saturating_sub(unsent);
 
-                self.tx_buffered =
-                    self.tx_buffered.saturating_sub(unsent as usize);
+                // Update cache: subtract only the buffered data, not inflight
+                // data.
+                self.streams.sub_tx_buffered(buffered_len);
 
                 // These drops in qlog are a bit weird, but the only way to ensure
                 // that all bytes that are moved from App to Transport in
@@ -8459,6 +8470,10 @@ impl<F: BufFactory> Connection<F> {
 
                 let priority_key = Arc::clone(&stream.priority_key);
 
+                // Save the buffered length before stopping (stop clears the
+                // buffer).
+                let buffered_len = stream.send.len() as usize;
+
                 // Try stopping the stream.
                 if let Ok((final_size, unsent)) = stream.send.stop(error_code) {
                     // Claw back some flow control allowance from data that was
@@ -8469,8 +8484,9 @@ impl<F: BufFactory> Connection<F> {
                     // to touch it here.
                     self.tx_data = self.tx_data.saturating_sub(unsent);
 
-                    self.tx_buffered =
-                        self.tx_buffered.saturating_sub(unsent as usize);
+                    // Update cache: subtract only the buffered data, not inflight
+                    // data.
+                    self.streams.sub_tx_buffered(buffered_len);
 
                     // These drops in qlog are a bit weird, but the only way to
                     // ensure that all bytes that are moved from App to Transport
@@ -8958,30 +8974,11 @@ impl<F: BufFactory> Connection<F> {
             .map(|(_, p)| p.recovery.cwnd_available())
             .sum();
 
-        ((self.tx_buffered + self.dgram_send_queue_byte_size()) < cwin_available) &&
+        ((self.streams.tx_buffered() + self.dgram_send_queue_byte_size()) <
+            cwin_available) &&
             (self.tx_data.saturating_sub(self.last_tx_data)) <
                 cwin_available as u64 &&
             cwin_available > 0
-    }
-
-    fn check_tx_buffered_invariant(&mut self) {
-        // tx_buffered should track bytes queued in the stream buffers
-        // and unacked retransmitable bytes in the network.
-        // If tx_buffered > 0 mark the tx_buffered_state if there are no
-        // flushable streams and there no inflight bytes.
-        //
-        // It is normal to have tx_buffered == 0 while there are inflight bytes
-        // since not QUIC frames are retransmittable; inflight tracks all bytes
-        // on the network which are subject to congestion control.
-        if self.tx_buffered > 0 &&
-            !self.streams.has_flushable() &&
-            !self
-                .paths
-                .iter()
-                .any(|(_, p)| p.recovery.bytes_in_flight() > 0)
-        {
-            self.tx_buffered_state = TxBufferTrackingState::Inconsistent;
-        }
     }
 
     fn set_initial_dcid(
