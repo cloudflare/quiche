@@ -191,7 +191,7 @@ impl std::fmt::Debug for DgramBuffer {
         // Render payload bytes as two-char hex, underscore-separated after every
         // 4.
         for (i, byte) in self.as_slice().iter().enumerate() {
-            if i > 0 && i % 4 == 0 {
+            if i > 0 && i.is_multiple_of(4) {
                 f.write_str("_")?;
             }
             write!(f, "{:02x}", byte)?;

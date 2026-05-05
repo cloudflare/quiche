@@ -19,7 +19,7 @@ include = [
   "/quiche.svg",
   "/src",
 ]
-rust-version = "1.85"
+rust-version = "1.87"
 
 [features]
 default = ["boringssl-boring-crate"]

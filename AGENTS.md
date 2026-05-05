@@ -128,7 +128,7 @@ make docker-build                                     # quiche-base + quiche-qns
 ## NOTES
 
 - **No git submodules**: BoringSSL is built by `boring-sys`; `cmake` must be available.
-- **MSRV 1.85**: `rust-version` field in Cargo.toml.
+- **MSRV 1.87**: `rust-version` field in Cargo.toml.
 - **Doc tests are separate**: `cargo test --all-targets` does NOT run doc tests (cargo#6669).
 - **`BORING_BSSL_PATH`**: env var to point `boring-sys` at a custom BoringSSL source tree.
 - **`RUSTFLAGS="-D warnings"`**: CI enforces; all warnings are errors.

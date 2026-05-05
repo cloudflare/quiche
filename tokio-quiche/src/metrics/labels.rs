@@ -158,7 +158,7 @@ impl Serialize for H3Error {
         let code = self.0;
 
         // https://www.iana.org/assignments/http3-parameters/http3-parameters.xhtml
-        let v = if code > 0x21 && (code - 0x21) % 0x1f == 0 {
+        let v = if code > 0x21 && (code - 0x21).is_multiple_of(0x1f) {
             "H3_GREASE"
         } else {
             match code {
