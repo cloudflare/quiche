@@ -137,7 +137,7 @@ where
         }
 
         Ok(Some(NewConnection {
-            conn,
+            conn: Box::new(conn),
             handshake_start_time,
             pending_cid: Some(pending_cid),
             cid_generator: Some(Arc::clone(&self.cid_generator)),
