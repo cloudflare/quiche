@@ -5293,6 +5293,8 @@ impl<F: BufFactory> Connection<F> {
                     ack_eliciting = true;
                     in_flight = true;
                     has_data = true;
+                } else {
+                    debug_panic!("push_frame_to_pkt failed! max_len should have been computed so that the stream frame fits in bytes left");
                 }
 
                 let priority_key = Arc::clone(&stream.priority_key);
