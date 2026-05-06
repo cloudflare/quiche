@@ -1128,17 +1128,6 @@ pub struct ConnectionIdIter<'a> {
     index: usize,
 }
 
-impl<'a> Iterator for ConnectionIdIter<'a> {
-    type Item = ConnectionId<'a>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let v = self.cids.get(self.index)?;
-        self.index += 1;
-        Some(v.clone())
-    }
-}
-
 #[no_mangle]
 pub extern "C" fn quiche_conn_source_ids(
     conn: &Connection,
@@ -1154,10 +1143,11 @@ pub extern "C" fn quiche_conn_source_ids(
 pub extern "C" fn quiche_connection_id_iter_next(
     iter: &mut ConnectionIdIter, out: &mut *const u8, out_len: &mut size_t,
 ) -> bool {
-    if let Some(conn_id) = iter.next() {
+    if let Some(conn_id) = iter.cids.get(iter.index) {
         let id = conn_id.as_ref();
         *out = id.as_ptr();
         *out_len = id.len();
+        iter.index += 1;
         return true;
     }
 
@@ -2279,6 +2269,46 @@ mod tests {
                 .parse()
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn connection_id_iter_next() {
+        let cids = vec![
+            ConnectionId::from_vec(vec![1, 2, 3, 4]),
+            ConnectionId::from_vec(vec![5, 6]),
+        ];
+
+        let mut iter = ConnectionIdIter { cids, index: 0 };
+
+        let mut out: *const u8 = ptr::null();
+        let mut out_len: size_t = 0;
+
+        // First CID.
+        assert!(quiche_connection_id_iter_next(
+            &mut iter,
+            &mut out,
+            &mut out_len
+        ));
+        assert_eq!(out_len, 4);
+        let slice = unsafe { slice::from_raw_parts(out, out_len) };
+        assert_eq!(slice, &[1, 2, 3, 4]);
+
+        // Second CID.
+        assert!(quiche_connection_id_iter_next(
+            &mut iter,
+            &mut out,
+            &mut out_len
+        ));
+        assert_eq!(out_len, 2);
+        let slice = unsafe { slice::from_raw_parts(out, out_len) };
+        assert_eq!(slice, &[5, 6]);
+
+        // Exhausted.
+        assert!(!quiche_connection_id_iter_next(
+            &mut iter,
+            &mut out,
+            &mut out_len
+        ));
     }
 
     #[cfg(not(windows))]
