@@ -68,12 +68,15 @@ jobs:
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     # `quiche-fuzz` calls `RAND_reset_for_fuzzing`, which BoringSSL only
-    # exports when `BORINGSSL_UNSAFE_DETERMINISTIC_MODE` is defined.
-    # `boring-sys` doesn't expose a feature for that, but cmake-rs honors
-    # `CFLAGS`/`CXXFLAGS`, so inject the defines there.
+    # exports when built with `FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION`.
+    # BoringSSL 5.x consolidated the older
+    # `BORINGSSL_UNSAFE_{DETERMINISTIC,FUZZER}_MODE` defines into this
+    # single switch. `boring-sys` doesn't expose a feature for it, but
+    # cmake-rs (via cc-rs) honors `CFLAGS`/`CXXFLAGS`, so inject the
+    # define there.
     env:
-      CFLAGS: "-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE -DBORINGSSL_UNSAFE_FUZZER_MODE"
-      CXXFLAGS: "-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE -DBORINGSSL_UNSAFE_FUZZER_MODE"
+      CFLAGS: "-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION"
+      CXXFLAGS: "-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION"
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
