@@ -736,6 +736,14 @@ impl<F: BufFactory> StreamMap<F> {
         self.streams.values().map(|s| s.send.len() as usize).sum()
     }
 
+    /// Checks if the cached tx_buffered matches the actual value.
+    /// Returns true if they match, false otherwise.
+    pub(crate) fn tx_buffered_is_consistent(&self) -> bool {
+        let actual: usize =
+            self.streams.values().map(|s| s.send.len() as usize).sum();
+        self.tx_buffered_cache == actual
+    }
+
     /// Updates the cached tx_buffered value by adding the delta.
     pub(crate) fn add_tx_buffered(&mut self, delta: usize) {
         self.tx_buffered_cache += delta;

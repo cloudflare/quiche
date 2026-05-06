@@ -1425,9 +1425,6 @@ where
     /// The send capacity factor.
     tx_cap_factor: f64,
 
-    /// Tracks the health of tx_buffered.
-    tx_buffered_state: TxBufferTrackingState,
-
     /// Total number of bytes sent to the peer.
     tx_data: u64,
 
@@ -2134,8 +2131,6 @@ impl<F: BufFactory> Connection<F> {
 
             tx_cap: 0,
             tx_cap_factor: config.tx_cap_factor,
-
-            tx_buffered_state: TxBufferTrackingState::Ok,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -7857,7 +7852,11 @@ impl<F: BufFactory> Connection<F> {
             path_challenge_rx_count: self.path_challenge_rx_count,
             amplification_limited_count: self.amplification_limited_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
-            tx_buffered_state: self.tx_buffered_state,
+            tx_buffered_state: if self.streams.tx_buffered_is_consistent() {
+                TxBufferTrackingState::Ok
+            } else {
+                TxBufferTrackingState::Inconsistent
+            },
         }
     }
 
@@ -9471,6 +9470,10 @@ pub struct Stats {
     pub bytes_in_flight_duration: Duration,
 
     /// Health state of the connection's tx_buffered.
+    ///
+    /// Indicates whether the cached tx_buffered value is consistent with
+    /// the actual sum of bytes buffered across all stream send buffers.
+    /// Returns `Ok` if consistent, `Inconsistent` if there's a mismatch.
     pub tx_buffered_state: TxBufferTrackingState,
 }
 
