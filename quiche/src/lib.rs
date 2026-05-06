@@ -1274,6 +1274,16 @@ impl Config {
 }
 
 /// Tracks the health of the tx_buffered value.
+///
+/// # Deprecated
+/// This enum is deprecated and always returns `Ok`. The tx_buffered value is
+/// now calculated directly from stream buffers and validated in debug builds,
+/// making this tracking state obsolete.
+#[deprecated(
+    since = "0.28.0",
+    note = "tx_buffered is now calculated from stream buffers and validated in debug builds"
+)]
+#[allow(deprecated)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum TxBufferTrackingState {
     /// The send buffer is in a good state
@@ -1424,9 +1434,6 @@ where
 
     /// The send capacity factor.
     tx_cap_factor: f64,
-
-    /// Tracks the health of tx_buffered.
-    tx_buffered_state: TxBufferTrackingState,
 
     /// Total number of bytes sent to the peer.
     tx_data: u64,
@@ -2134,8 +2141,6 @@ impl<F: BufFactory> Connection<F> {
 
             tx_cap: 0,
             tx_cap_factor: config.tx_cap_factor,
-
-            tx_buffered_state: TxBufferTrackingState::Ok,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -7857,7 +7862,8 @@ impl<F: BufFactory> Connection<F> {
             path_challenge_rx_count: self.path_challenge_rx_count,
             amplification_limited_count: self.amplification_limited_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
-            tx_buffered_state: self.tx_buffered_state,
+            #[allow(deprecated)]
+            tx_buffered_state: TxBufferTrackingState::Ok,
         }
     }
 
@@ -9471,6 +9477,15 @@ pub struct Stats {
     pub bytes_in_flight_duration: Duration,
 
     /// Health state of the connection's tx_buffered.
+    ///
+    /// # Deprecated
+    /// This field is deprecated and always returns `Ok`. The tx_buffered value
+    /// is now validated in debug builds via StreamMap cache checks.
+    #[deprecated(
+        since = "0.28.0",
+        note = "tx_buffered is now validated via debug assertions in StreamMap"
+    )]
+    #[allow(deprecated)]
     pub tx_buffered_state: TxBufferTrackingState,
 }
 
