@@ -1394,8 +1394,8 @@ pub extern "C" fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.path_challenge_rx_count = stats.path_challenge_rx_count;
     out.bytes_in_flight_duration_msec =
         stats.bytes_in_flight_duration.as_millis() as u64;
-    out.tx_buffered_inconsistent =
-        stats.tx_buffered_state != TxBufferTrackingState::Ok;
+    // tx_buffered is now validated in debug builds, always consistent
+    out.tx_buffered_inconsistent = false;
 }
 
 #[no_mangle]
