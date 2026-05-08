@@ -76,7 +76,8 @@ mod conn_close_metrics {
             .close(false, 0x1, b"internal error")
             .unwrap();
 
-        let err: crate::QuicResult<()> = Err(H3ConnectionError::GoAway.into());
+        let err: crate::QuicResult<()> =
+            Err(H3ConnectionError::PostAcceptTimeout.into());
         let metrics = TestMetrics::default();
         helper
             .driver
@@ -567,6 +568,85 @@ mod client_side_driver {
         assert_eq!(audit_stats.sent_stream_fin(), StreamClosureKind::Explicit);
         assert_eq!(audit_stats.downstream_bytes_recvd(), 1);
         assert_eq!(audit_stats.downstream_bytes_sent(), 0);
+    }
+
+    /// Verify that a GOAWAY received mid-stream does not kill in-flight
+    /// request streams. The server sends GOAWAY with an ID above the
+    /// active stream, indicating the stream was accepted. The client
+    /// should continue receiving the remaining response body and
+    /// complete the stream normally.
+    #[test]
+    fn client_receives_goaway_during_streaming_response() {
+        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client sends a request with fin (GET, no body).
+        let stream_id = helper
+            .driver_send_request(make_request_headers("GET"), true)
+            .unwrap();
+        assert_eq!(stream_id, 0);
+
+        // Server sees the request and starts a streaming response.
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_server_poll().unwrap(),
+            (0, h3::Event::Headers { .. })
+        );
+        helper.peer_server_send_response(0, false).unwrap();
+        helper.peer_server_send_body(0, &[1; 10], false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client receives response headers.
+        let resp = assert_matches!(
+            helper.driver_recv_core_event().unwrap(),
+            H3Event::IncomingHeaders(headers) => { headers }
+        );
+        assert_eq!(resp.stream_id, stream_id);
+        assert!(!resp.read_fin);
+        let mut from_server = resp.recv;
+
+        // Client receives first body chunk.
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![1; 10]);
+
+        // Server sends GOAWAY with id = stream_id + 4 (our stream was
+        // accepted, but no future streams will be).
+        helper
+            .peer
+            .send_goaway(&mut helper.pipe.server, stream_id + 4)
+            .unwrap();
+        // Server continues sending body data on the existing stream.
+        helper.peer_server_send_body(0, &[2; 10], false).unwrap();
+
+        // Advance — the driver handles GOAWAY gracefully and keeps
+        // the connection alive.
+        helper.advance_and_run_loop().unwrap();
+
+        // Client should still receive the second body chunk.
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![2; 10]);
+
+        // Controller receives a GoAway event with the correct ID.
+        // Drain any BodyBytesReceived notifications first — the
+        // ordering between data and control stream events is not
+        // guaranteed.
+        loop {
+            match helper.driver_recv_core_event().unwrap() {
+                H3Event::GoAway { id } => {
+                    assert_eq!(id, stream_id + 4);
+                    break;
+                },
+                H3Event::BodyBytesReceived { .. } => continue,
+                other => panic!("unexpected event: {other:?}"),
+            }
+        }
+
+        // Server finishes the response.
+        helper.peer_server_send_body(0, &[3; 10], true).unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client receives the final chunk.
+        let (body, _fin, _err) = helper.driver_try_recv_body(&mut from_server);
+        assert_eq!(body, vec![3; 10]);
     }
 }
 
@@ -1638,5 +1718,102 @@ mod server_side_driver {
             audit_stats.sent_stop_sending_error_code(),
             READ_ERROR_CODE as i64
         );
+    }
+
+    /// Verify that a GOAWAY received from the client does not affect
+    /// in-flight response streams. The client sends GOAWAY with push
+    /// ID 0 (the only value currently supported, since server push is
+    /// not implemented). The server should surface the GoAway event
+    /// and continue sending response data normally.
+    ///
+    /// Per RFC 9114 Section 5.2, when a client sends GOAWAY, the ID
+    /// is a push ID indicating the range of pushes the client will
+    /// accept. Since server push is unimplemented, the client always
+    /// sends 0.
+    #[test]
+    fn server_receiving_goaway_keeps_connection_intact() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client sends a request.
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), true)
+            .unwrap();
+        assert_eq!(stream_id, 0);
+
+        // Server receives the request and starts a streaming response.
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        assert_eq!(req.stream_id, stream_id);
+        let to_client = req.send.get_ref().unwrap().clone();
+        to_client
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client receives response headers.
+        assert_matches!(
+            helper.peer_client_poll(),
+            Ok((0, h3::Event::Headers { .. }))
+        );
+
+        // Server sends first body chunk.
+        to_client
+            .try_send(OutboundFrame::Body(
+                Bytes::copy_from_slice(&[1; 10]),
+                false,
+            ))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client receives the first body chunk.
+        assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
+        assert_eq!(helper.peer_client_recv_body_vec(0, 1024), Ok(vec![1; 10]));
+
+        // Client sends GOAWAY with push ID 0 (graceful shutdown).
+        helper.peer.send_goaway(&mut helper.pipe.client, 0).unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Server driver surfaces the GoAway event.
+        loop {
+            match helper.driver_recv_core_event().unwrap() {
+                H3Event::GoAway { id } => {
+                    assert_eq!(id, 0);
+                    break;
+                },
+                H3Event::BodyBytesReceived { .. } => continue,
+                H3Event::StreamClosed { .. } => continue,
+                other => panic!("unexpected event: {other:?}"),
+            }
+        }
+
+        // Server continues sending response body — the connection is
+        // still alive.
+        to_client
+            .try_send(OutboundFrame::Body(
+                Bytes::copy_from_slice(&[2; 10]),
+                false,
+            ))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client still receives the data.
+        assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
+        assert_eq!(helper.peer_client_recv_body_vec(0, 1024), Ok(vec![2; 10]));
+
+        // Server finishes the response.
+        to_client
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[3; 10]), true))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client receives the final chunk and fin.
+        assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
+        assert_eq!(helper.peer_client_recv_body_vec(0, 1024), Ok(vec![3; 10]));
+        assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Finished)));
     }
 }

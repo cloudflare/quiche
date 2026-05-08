@@ -141,8 +141,6 @@ pub enum H3ConnectionError {
     ControllerWentAway,
     /// Other error at the connection, but not stream level.
     H3(h3::Error),
-    /// Received a GOAWAY frame from the peer.
-    GoAway,
     /// Received data for a stream that was closed or never opened.
     NonexistentStream,
     /// The server's post-accept timeout was hit.
@@ -169,7 +167,6 @@ impl fmt::Display for H3ConnectionError {
         let s: &dyn fmt::Display = match self {
             Self::ControllerWentAway => &"controller went away",
             Self::H3(e) => e,
-            Self::GoAway => &"goaway",
             Self::NonexistentStream => &"nonexistent stream",
             Self::PostAcceptTimeout => &"post accept timeout hit",
         };
@@ -261,6 +258,9 @@ pub enum H3Event {
     /// don't result from RST_STREAM frames, unlike the
     /// [`H3Event::ResetStream`] variant.
     StreamClosed { stream_id: u64 },
+    /// A GOAWAY frame was received from the peer containing `id`,
+    /// as described in https://datatracker.ietf.org/doc/html/rfc9114#section-5.2.
+    GoAway { id: u64 },
 }
 
 impl H3Event {
@@ -681,7 +681,12 @@ impl<H: DriverHooks> H3Driver<H> {
             },
 
             h3::Event::PriorityUpdate => Ok(()),
-            h3::Event::GoAway => Err(H3ConnectionError::GoAway),
+            h3::Event::GoAway => {
+                self.h3_event_sender
+                    .send(H3Event::GoAway { id: stream_id }.into())
+                    .map_err(|_| H3ConnectionError::ControllerWentAway)?;
+                Ok(())
+            },
         }
     }
 
