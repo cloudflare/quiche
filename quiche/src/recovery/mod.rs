@@ -2761,6 +2761,101 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn pto_overflow_reproduction() {
+        let cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        // Use LegacyRecovery (which is part of the default Recovery)
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+
+        // Scenario: Handshake not completed
+        let handshake_status = HandshakeStatus {
+            has_handshake_keys: true,
+            peer_verified_address: true,
+            completed: false,
+        };
+
+        // 1. Send Initial packet to arm the timer
+        let p_initial = Sent {
+            pkt_num: 0,
+            frames: smallvec::smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+            is_pmtud_probe: false,
+        };
+        r.on_packet_sent(
+            p_initial,
+            packet::Epoch::Initial,
+            handshake_status,
+            now,
+            "",
+        );
+
+        // The timer should now be set for the Initial packet.
+        assert!(r.loss_detection_timer().is_some());
+
+        // 2. Send Application packet (0-RTT)
+        let p_app = Sent {
+            pkt_num: 0, // Application space has its own packet numbers
+            frames: smallvec::smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 1000,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+
+            lost: 0,
+            has_data: true,
+            is_pmtud_probe: false,
+        };
+        r.on_packet_sent(
+            p_app,
+            packet::Epoch::Application,
+            handshake_status,
+            now,
+            "",
+        );
+
+        // 3. Acknowledge the Initial packet.
+        // This empties the Initial space, but Application space still has data in
+        // flight.
+        let mut ranges = RangeSet::default();
+        ranges.insert(0..1);
+        r.on_ack_received(
+            &ranges,
+            0,
+            packet::Epoch::Initial,
+            handshake_status,
+            now,
+            None,
+            "",
+        )
+        .unwrap();
+
+        // The timer should be cleared at this point.
+        // Although there is Application data in flight, the handshake is not
+        // confirmed, so it cannot be used to arm the PTO timer. Since there are
+        // no packets in flight in Initial or Handshake spaces either, no timer
+        // should be set.
+        assert!(r.loss_detection_timer().is_none());
+    }
 }
 
 mod bandwidth;

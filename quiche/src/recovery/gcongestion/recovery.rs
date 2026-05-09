@@ -649,6 +649,8 @@ impl GRecovery {
         if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now)
         {
             self.loss_timer.update(timeout);
+        } else {
+            self.loss_timer.clear();
         }
     }
 }
