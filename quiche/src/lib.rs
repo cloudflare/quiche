@@ -6542,6 +6542,39 @@ impl<F: BufFactory> Connection<F> {
         stream.recv.is_fin()
     }
 
+    /// Returns true if the specified stream is closed.
+    ///
+    /// For bidirectional streams this happens when both the receive and send
+    /// sides have signaled `fin`. For unidirectional streams only the
+    /// relevant direction is checked, depending on whether the stream was
+    /// created locally or not.
+    ///
+    /// This also returns true if the stream has already been collected.
+    #[inline]
+    pub fn stream_closed(&self, stream_id: u64) -> bool {
+        if self.streams.is_collected(stream_id) {
+            return true;
+        }
+
+        let Some(stream) = self.streams.get(stream_id) else {
+            return false;
+        };
+
+        match (stream.bidi, stream.local) {
+            // For bidirectional streams both directions must have signaled
+            // FIN.
+            (true, _) => stream.recv.is_fin() && stream.send.is_fin(),
+
+            // For unidirectional streams created locally, only the send side
+            // is checked.
+            (false, true) => stream.send.is_fin(),
+
+            // For unidirectional streams created by the peer, only the
+            // receive side is checked.
+            (false, false) => stream.recv.is_fin(),
+        }
+    }
+
     /// Returns the number of bidirectional streams that can be created
     /// before the peer's stream count limit is reached.
     ///

@@ -3187,13 +3187,11 @@ impl Connection {
                     return Err(Error::IdError);
                 }
 
-                // If the PRIORITY_UPDATE is valid, consider storing the latest
-                // contents. Due to reordering, it is possible that we might
-                // receive frames that reference streams that have not yet to
-                // been opened and that's OK because it's within our concurrency
-                // limit. However, we discard PRIORITY_UPDATE that refers to
-                // streams that we know have been collected.
-                if conn.streams.is_collected(prioritized_element_id) {
+                // PRIORITY_UPDATE can arrive before the request stream exists,
+                // so a missing transport stream is allowed. Ignore updates only
+                // once the transport stream was collected or both transport
+                // directions are finished.
+                if conn.stream_closed(prioritized_element_id) {
                     return Err(Error::Done);
                 }
 
@@ -5219,6 +5217,55 @@ mod tests {
 
         // No event generated at server
         assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    /// Send a PRIORITY_UPDATE for a request stream after H3 has collected it,
+    /// but before the transport stream has been collected.
+    fn priority_update_request_after_h3_collection() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let init_streams_server = s.server.streams.len();
+
+        let (stream, req) = s.send_request(true).unwrap();
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: false,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = vec![
+            Header::new(b":status", b"200"),
+            Header::new(b"server", b"quiche-test"),
+        ];
+
+        s.server
+            .send_response(&mut s.pipe.server, stream, &resp, true)
+            .unwrap();
+
+        assert_eq!(s.server.streams.len(), init_streams_server);
+        assert!(!s.pipe.server.streams.is_collected(stream));
+
+        s.client
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                stream,
+                &Priority {
+                    urgency: 3,
+                    incremental: false,
+                },
+            )
+            .unwrap();
+
+        let flight = crate::test_utils::emit_flight(&mut s.pipe.client).unwrap();
+        crate::test_utils::process_flight(&mut s.pipe.server, flight).unwrap();
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.server.streams.len(), init_streams_server);
     }
 
     #[test]
