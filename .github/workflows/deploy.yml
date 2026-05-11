@@ -14,8 +14,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -42,8 +40,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Build Docker images
         run: make docker-build
