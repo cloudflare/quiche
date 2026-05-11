@@ -426,7 +426,7 @@ impl LegacyRecovery {
     fn pto_time_and_space(
         &self, handshake_status: HandshakeStatus, now: Instant,
     ) -> (Option<Instant>, Epoch) {
-        let mut duration = self.pto() * 2_u32.pow(self.pto_count);
+        let mut duration = self.pto() * 2_u32.pow(self.pto_count.min(20));
 
         // Arm PTO from now when there are no inflight packets.
         if self.bytes_in_flight.is_zero() {
@@ -454,8 +454,8 @@ impl LegacyRecovery {
                 }
 
                 // Include max_ack_delay and backoff for Application Data.
-                duration +=
-                    self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
+                duration += self.rtt_stats.max_ack_delay
+                    * 2_u32.pow(self.pto_count.min(20));
             }
 
             let new_time = epoch
@@ -1093,4 +1093,30 @@ pub struct Acked {
     pub first_sent_time: Instant,
 
     pub is_app_limited: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recovery::HandshakeStatus;
+    use crate::recovery::RecoveryConfig;
+    use std::time::Instant;
+
+    #[test]
+    fn test_high_pto_count_no_panic() {
+        let config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut r = LegacyRecovery::new_with_config(&recovery_config);
+
+        r.pto_count = 99999;
+
+        let handshake_status = HandshakeStatus {
+            completed: true,
+            has_handshake_keys: true,
+            peer_verified_address: true,
+        };
+        let now = Instant::now();
+
+        let _ = r.pto_time_and_space(handshake_status, now);
+    }
 }
