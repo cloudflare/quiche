@@ -1049,10 +1049,14 @@ impl Config {
 
     /// Sets the `ack_delay_exponent` transport parameter.
     ///
+    /// Values above the RFC 9000 maximum of
+    /// [`MAX_ACK_DELAY_EXPONENT`] (20) are clamped to that
+    /// maximum.
+    ///
     /// The default value is `3`.
     pub fn set_ack_delay_exponent(&mut self, v: u64) {
         self.local_transport_params.ack_delay_exponent =
-            cmp::min(v, octets::MAX_VAR_INT);
+            cmp::min(v, MAX_ACK_DELAY_EXPONENT);
     }
 
     /// Sets the `max_ack_delay` transport parameter.
@@ -9486,6 +9490,7 @@ pub use crate::transport_params::TransportParams;
 pub use crate::transport_params::UnknownTransportParameter;
 pub use crate::transport_params::UnknownTransportParameterIterator;
 pub use crate::transport_params::UnknownTransportParameters;
+pub use crate::transport_params::MAX_ACK_DELAY_EXPONENT;
 
 pub use crate::buffers::BufFactory;
 pub use crate::buffers::BufSplit;

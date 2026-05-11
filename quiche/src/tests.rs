@@ -12224,7 +12224,7 @@ fn disable_pmtud_mid_handshake(
 }
 
 #[rstest]
-fn configuration_values_are_limited_to_max_varint() {
+fn configuration_values_clamping() {
     let mut config = Config::new(0x1).unwrap();
     config
         .set_application_protos(&[b"proto1", b"proto2"])
@@ -12285,7 +12285,7 @@ fn configuration_values_are_limited_to_max_varint() {
     );
     assert_eq!(
         pipe.client.local_transport_params.ack_delay_exponent,
-        octets::MAX_VAR_INT
+        MAX_ACK_DELAY_EXPONENT
     );
     assert_eq!(
         pipe.client.local_transport_params.active_conn_id_limit,
