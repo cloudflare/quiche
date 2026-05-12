@@ -2620,16 +2620,16 @@ impl Connection {
                         },
 
                         stream::Type::Push => {
-                            // Only clients can receive push stream.
-                            if self.is_server {
-                                conn.close(
-                                    true,
-                                    Error::StreamCreationError.to_wire(),
-                                    b"Server received push stream.",
-                                )?;
+                            // Server push is not supported, so push streams at
+                            // either client or server is a critical protocol
+                            // error.
+                            conn.close(
+                                true,
+                                Error::StreamCreationError.to_wire(),
+                                b"Received push stream.",
+                            )?;
 
-                                return Err(Error::StreamCreationError);
-                            }
+                            return Err(Error::StreamCreationError);
                         },
 
                         stream::Type::QpackEncoder => {
@@ -4706,6 +4706,43 @@ mod tests {
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
+    }
+
+    #[test]
+    /// Server push streams from client are not allowed by the protocol.
+    fn push_stream_from_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        s.client
+            .open_uni_stream(
+                &mut s.pipe.client,
+                stream::HTTP3_PUSH_STREAM_TYPE_ID,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Err(Error::StreamCreationError));
+    }
+
+    #[test]
+    /// Server push streams from server are not allowed since the client does
+    /// not advertise server push support by default.
+    fn push_stream_from_server() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        s.server
+            .open_uni_stream(
+                &mut s.pipe.server,
+                stream::HTTP3_PUSH_STREAM_TYPE_ID,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Err(Error::StreamCreationError));
     }
 
     #[test]
