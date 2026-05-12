@@ -504,6 +504,11 @@ const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
 // The send capacity factor.
 const TX_CAP_FACTOR: f64 = 1.0;
 
+// The upper cap on the exponent when using exponential backoff for probes. With a
+// value of 5, the maximum possible value is 2^5 = 32 times the minimum PTO. This
+// prevents arithmetic overflow.
+const MAX_PTO_EXPONENT: u32 = 5;
+
 /// Ancillary information about incoming packets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecvInfo {

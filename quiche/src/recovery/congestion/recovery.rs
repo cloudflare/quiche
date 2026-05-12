@@ -426,7 +426,8 @@ impl LegacyRecovery {
     fn pto_time_and_space(
         &self, handshake_status: HandshakeStatus, now: Instant,
     ) -> (Option<Instant>, Epoch) {
-        let mut duration = self.pto() * 2_u32.pow(self.pto_count.min(20));
+        let mut duration =
+            self.pto() * 2_u32.pow(self.pto_count.min(crate::MAX_PTO_EXPONENT));
 
         // Arm PTO from now when there are no inflight packets.
         if self.bytes_in_flight.is_zero() {
@@ -454,8 +455,8 @@ impl LegacyRecovery {
                 }
 
                 // Include max_ack_delay and backoff for Application Data.
-                duration += self.rtt_stats.max_ack_delay
-                    * 2_u32.pow(self.pto_count.min(20));
+                duration += self.rtt_stats.max_ack_delay *
+                    2_u32.pow(self.pto_count.min(crate::MAX_PTO_EXPONENT));
             }
 
             let new_time = epoch
