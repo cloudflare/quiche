@@ -19,7 +19,7 @@ include = [
   "/quiche.svg",
   "/src",
 ]
-rust-version = "1.85"
+rust-version = "1.87"
 
 [features]
 default = ["boringssl-boring-crate"]
@@ -64,6 +64,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 cdylib-link-lines = { version = "0.1", optional = true }
 
 [dependencies]
+bytemuck = { workspace = true }
 bytes = { workspace = true }
 boring = { workspace = true, optional = true }
 debug_panic = { workspace = true }

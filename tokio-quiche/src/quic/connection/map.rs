@@ -34,64 +34,15 @@ use quiche::MAX_CONN_ID_LEN;
 use std::collections::BTreeMap;
 use tokio::sync::mpsc;
 
-const U64_SZ: usize = std::mem::size_of::<u64>();
-const MAX_CONN_ID_QUADS: usize = MAX_CONN_ID_LEN.div_ceil(U64_SZ);
-const CONN_ID_USABLE_LEN: usize = min_usize(
-    // Last byte in CidOwned::Optimized stores CID length
-    MAX_CONN_ID_QUADS * U64_SZ - 1,
-    // CID length must fit in 1 byte
-    min_usize(MAX_CONN_ID_LEN, u8::MAX as _),
-);
-
-const fn min_usize(v1: usize, v2: usize) -> usize {
-    if v1 < v2 {
-        v1
-    } else {
-        v2
-    }
-}
-
-/// A non unique connection identifier, multiple Cids can map to the same
-/// conenction.
+/// Newtype wrapper for `ConnectionId<'static>` to allow `Borrow` with a
+/// different lifetime. This impl would conflict with `impl<T> Borrow<T> for T`
+/// directly on `ConnectionId`.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum CidOwned {
-    /// The QUIC connections IDs theoretically have unbounded length, so for the
-    /// generic case a boxed slice is used to store the ID.
-    Generic(Box<[u8]>),
-    /// For QUIC version 1 (the one that actually exists) the maximal ID size is
-    /// `20`, which should correspond to the `MAX_CONN_ID_LEN` value. For
-    /// this common case, we store the ID in a u64 array for faster
-    /// comparison (and therefore BTreeMap lookups).
-    Optimized([u64; MAX_CONN_ID_QUADS]),
-}
+struct CidOwned(ConnectionId<'static>);
 
-impl From<&ConnectionId<'_>> for CidOwned {
-    #[inline(always)]
-    fn from(value: &ConnectionId<'_>) -> Self {
-        if value.len() > CONN_ID_USABLE_LEN {
-            return CidOwned::Generic(value.as_ref().into());
-        }
-
-        let mut cid = [0; MAX_CONN_ID_QUADS];
-
-        value
-            .chunks(U64_SZ)
-            .map(|c| match c.try_into() {
-                Ok(v) => u64::from_le_bytes(v),
-                Err(_) => {
-                    let mut remainder = [0u8; U64_SZ];
-                    remainder[..c.len()].copy_from_slice(c);
-                    u64::from_le_bytes(remainder)
-                },
-            })
-            .enumerate()
-            .for_each(|(i, v)| cid[i] = v);
-
-        // In order to differentiate cids with zeroes as opposed to shorter cids,
-        // append the cid length.
-        *cid.last_mut().unwrap() |= (value.len() as u64) << 56;
-
-        CidOwned::Optimized(cid)
+impl<'a> std::borrow::Borrow<ConnectionId<'a>> for CidOwned {
+    fn borrow(&self) -> &ConnectionId<'a> {
+        &self.0
     }
 }
 
@@ -107,25 +58,27 @@ pub(crate) struct ConnectionMap {
 
 impl ConnectionMap {
     pub(crate) fn insert<Tx, M>(
-        &mut self, cid: &ConnectionId<'_>, conn: &InitialQuicConnection<Tx, M>,
+        &mut self, cid: ConnectionId<'static>,
+        conn: &InitialQuicConnection<Tx, M>,
     ) where
         Tx: DatagramSocketSend + Send + 'static,
         M: Metrics,
     {
         let ev_sender = conn.incoming_ev_sender.clone();
-        self.quic_id_map.insert(cid.into(), ev_sender);
+        self.quic_id_map.insert(CidOwned(cid), ev_sender);
     }
 
     pub(crate) fn map_cid(
-        &mut self, existing_cid: &ConnectionId<'_>, new_cid: &ConnectionId<'_>,
+        &mut self, existing_cid: &ConnectionId, new_cid: ConnectionId<'static>,
     ) {
-        if let Some(ev_sender) = self.quic_id_map.get(&existing_cid.into()) {
-            self.quic_id_map.insert(new_cid.into(), ev_sender.clone());
+        if let Some(ev_sender) = self.quic_id_map.get(existing_cid) {
+            self.quic_id_map
+                .insert(CidOwned(new_cid), ev_sender.clone());
         }
     }
 
-    pub(crate) fn unmap_cid(&mut self, cid: &ConnectionId<'_>) {
-        self.quic_id_map.remove(&cid.into());
+    pub(crate) fn unmap_cid(&mut self, cid: &ConnectionId) {
+        self.quic_id_map.remove(cid);
     }
 
     pub(crate) fn get(
@@ -135,32 +88,9 @@ impl ConnectionMap {
             // Although both branches run the same code, the one here will
             // generate an optimized version for the length we are
             // using, as opposed to temporary cids sent by clients.
-            self.quic_id_map.get(&id.into())
+            self.quic_id_map.get(id)
         } else {
-            self.quic_id_map.get(&id.into())
+            self.quic_id_map.get(id)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use quiche::ConnectionId;
-
-    #[test]
-    fn cid_storage() {
-        let max_v1_cid = ConnectionId::from_ref(&[0xfa; MAX_CONN_ID_LEN]);
-        let optimized = CidOwned::from(&max_v1_cid);
-        assert!(
-            matches!(optimized, CidOwned::Optimized(_)),
-            "QUIC v1 CID is not stored inline"
-        );
-
-        let oversize_cid = ConnectionId::from_ref(&[0x1b; MAX_CONN_ID_LEN + 20]);
-        let boxed = CidOwned::from(&oversize_cid);
-        assert!(
-            matches!(boxed, CidOwned::Generic(_)),
-            "Oversized CID is not boxed"
-        );
     }
 }

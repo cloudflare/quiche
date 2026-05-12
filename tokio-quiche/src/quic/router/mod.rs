@@ -354,13 +354,13 @@ where
                 handshake_start_time,
             ));
 
-        self.conns.insert(&scid, &conn);
+        self.conns.insert(scid.clone(), &conn);
 
         // Add the client-generated "pending" connection ID to the map as well.
         // This is only required for QUIC servers, because clients can send
         // Initial packets with arbitrary DCIDs to servers.
         if let Some(pending_cid) = pending_cid {
-            self.conns.map_cid(&scid, &pending_cid);
+            self.conns.map_cid(&scid, pending_cid);
         }
 
         self.metrics.accepted_initial_packet_count().inc();
@@ -632,7 +632,7 @@ where
                 ConnectionMapCommand::MapCid {
                     existing_cid,
                     new_cid,
-                } => self.conns.map_cid(&existing_cid, &new_cid),
+                } => self.conns.map_cid(&existing_cid, new_cid),
                 ConnectionMapCommand::UnmapCid(cid) => self.conns.unmap_cid(&cid),
             }
         }

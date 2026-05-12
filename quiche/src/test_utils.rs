@@ -502,12 +502,8 @@ pub fn encode_pkt<F: BufFactory>(
     let hdr = Header {
         ty: pkt_type,
         version: conn.version,
-        dcid: ConnectionId::from_ref(
-            conn.ids.get_dcid(*active_dcid_seq)?.cid.as_ref(),
-        ),
-        scid: ConnectionId::from_ref(
-            conn.ids.get_scid(*active_scid_seq)?.cid.as_ref(),
-        ),
+        dcid: conn.ids.get_dcid(*active_dcid_seq)?.cid.clone(),
+        scid: conn.ids.get_scid(*active_scid_seq)?.cid.clone(),
         pkt_num: pn,
         pkt_num_len: pn_len,
         token: conn.token.clone(),

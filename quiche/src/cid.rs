@@ -258,8 +258,7 @@ impl ConnectionIdentifiers {
         // Record the zero-length SCID status.
         let zero_length_scid = initial_scid.is_empty();
 
-        let initial_scid =
-            ConnectionId::from_ref(initial_scid.as_ref()).into_owned();
+        let initial_scid = initial_scid.clone().into_owned();
 
         // We need to track up to (2 * source_conn_id_limit - 1) source
         // Connection IDs when the host wants to force their renewal.

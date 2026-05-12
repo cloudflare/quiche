@@ -374,7 +374,7 @@ pub(crate) fn parse_streams<F: quiche::BufFactory, C: Client>(
 
     for stream in conn.readable() {
         // TODO: ignoring control streams
-        if stream % 4 != 0 {
+        if !stream.is_multiple_of(4) {
             continue;
         }
 

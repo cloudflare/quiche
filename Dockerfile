@@ -1,4 +1,4 @@
-FROM rust:1.86 AS build
+FROM rust:1.87 AS build
 
 WORKDIR /build
 
