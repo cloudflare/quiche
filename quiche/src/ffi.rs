@@ -2007,10 +2007,7 @@ fn optional_std_addr_from_c(
         return None;
     }
 
-    Some({
-        let addr = unsafe { slice::from_raw_parts(addr, addr_len as usize) };
-        std_addr_from_c(addr.first().unwrap(), addr_len)
-    })
+    Some(std_addr_from_c(unsafe { &*addr }, addr_len))
 }
 
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
