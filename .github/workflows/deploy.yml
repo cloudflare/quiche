@@ -10,6 +10,8 @@ env:
 
 jobs:
   docs:
+    permissions:
+      contents: write  # crazy-max/ghaction-github-pages pushes to gh-pages
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -36,6 +38,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   docker:
+    permissions:
+      contents: read  # DockerHub push uses DOCKER_USERNAME/DOCKER_TOKEN, not GITHUB_TOKEN
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
