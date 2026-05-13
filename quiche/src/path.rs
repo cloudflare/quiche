@@ -930,6 +930,7 @@ impl PathMap {
 ///
 /// [`path_stats()`]: struct.Connection.html#method.path_stats
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct PathStats {
     /// The local address of the path.
     pub local_addr: SocketAddr,
