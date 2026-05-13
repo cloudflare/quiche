@@ -1639,7 +1639,7 @@ impl Connection {
         let len = body.as_ref().len();
 
         // Validate that it is sane to send data on the stream.
-        if stream_id % 4 != 0 {
+        if !stream_id.is_multiple_of(4) {
             return Err(Error::FrameUnexpected);
         }
 
@@ -1917,7 +1917,7 @@ impl Connection {
             return Err(Error::FrameUnexpected);
         }
 
-        if stream_id % 4 != 0 {
+        if !stream_id.is_multiple_of(4) {
             return Err(Error::FrameUnexpected);
         }
 
@@ -2170,7 +2170,7 @@ impl Connection {
             id = 0;
         }
 
-        if self.is_server && id % 4 != 0 {
+        if self.is_server && !id.is_multiple_of(4) {
             return Err(Error::IdError);
         }
 
@@ -3101,7 +3101,7 @@ impl Connection {
                     return Err(Error::FrameUnexpected);
                 }
 
-                if stream_id % 4 != 0 {
+                if !stream_id.is_multiple_of(4) {
                     conn.close(
                         true,
                         Error::FrameUnexpected.to_wire(),
