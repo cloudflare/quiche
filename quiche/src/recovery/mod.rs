@@ -2761,10 +2761,12 @@ mod tests {
             );
         }
     }
-    #[test]
-    fn pto_overflow_reproduction() {
-        let cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
-        // Use LegacyRecovery (which is part of the default Recovery)
+    #[rstest]
+    fn pto_overflow_reproduction(
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
         let mut r = Recovery::new(&cfg);
         let now = Instant::now();
 
