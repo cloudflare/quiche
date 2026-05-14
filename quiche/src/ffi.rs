@@ -373,6 +373,13 @@ pub extern "C" fn quiche_config_set_enable_cubic_idle_restart_fix(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_use_initial_max_data_as_flow_control_win(
+    config: &mut Config, v: bool,
+) {
+    config.set_use_initial_max_data_as_flow_control_win(v);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_set_max_pacing_rate(config: &mut Config, v: u64) {
     config.set_max_pacing_rate(v);
 }
