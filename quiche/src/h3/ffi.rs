@@ -78,6 +78,17 @@ pub extern "C" fn quiche_h3_config_enable_extended_connect(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_h3_config_set_additional_setting(
+    config: &mut h3::Config, setting: u64, value: u64,
+) -> c_int {
+    let settings = vec![(setting, value)];
+    match config.set_additional_settings(settings) {
+        Ok(()) => 0,
+        Err(err) => err.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_h3_config_free(config: *mut h3::Config) {
     if !config.is_null() {
         drop(unsafe { Box::from_raw(config) });
