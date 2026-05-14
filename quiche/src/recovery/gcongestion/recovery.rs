@@ -38,6 +38,7 @@ use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
+use crate::recovery::MAX_PTO_EXPONENT;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
 use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 
@@ -582,7 +583,7 @@ impl GRecovery {
         &self, handshake_status: HandshakeStatus, now: Instant,
     ) -> (Option<Instant>, packet::Epoch) {
         let mut duration =
-            self.pto() * 2_u32.pow(self.pto_count.min(crate::MAX_PTO_EXPONENT));
+            self.pto() * 2_u32.pow(self.pto_count.min(MAX_PTO_EXPONENT));
 
         // Arm PTO from now when there are no inflight packets.
         if self.bytes_in_flight.is_zero() {
@@ -612,7 +613,7 @@ impl GRecovery {
 
                 // Include max_ack_delay and backoff for Application Data.
                 duration += self.rtt_stats.max_ack_delay *
-                    2_u32.pow(self.pto_count.min(crate::MAX_PTO_EXPONENT));
+                    2_u32.pow(self.pto_count.min(MAX_PTO_EXPONENT));
             }
 
             let new_time = self.epochs[e]
