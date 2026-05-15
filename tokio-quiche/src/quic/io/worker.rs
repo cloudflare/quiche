@@ -710,8 +710,7 @@ where
             // Poll the application to make progress.
             //
             // Once the connection has been established (i.e. the handshake is
-            // complete), or once 0-RTT keys are available, we only poll the
-            // application.
+            // complete), we only poll the application.
             //
             // The exception is 0-RTT in TLS 1.3, where the full handshake is
             // still in progress but we have 0-RTT keys to process early data.
