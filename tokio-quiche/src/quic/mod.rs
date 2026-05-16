@@ -262,7 +262,7 @@ where
         Arc::clone(&socket_tx),
         socket_rx,
         socket.local_addr,
-        ClientConnector::new(socket_tx, quiche_conn),
+        ClientConnector::new(socket_tx, Box::new(quiche_conn)),
         DefaultMetrics,
     );
 

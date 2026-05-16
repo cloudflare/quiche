@@ -112,10 +112,10 @@ fn h3_dgram_add_quarter_stream_id(
 fn h3_dgram_remove_quarter_stream_id(
     mut dgram: DgramBuffer,
 ) -> quiche::Result<(u64, DgramBuffer)> {
-    let quarter_stream_id =
-        octets::Octets::with_slice(dgram.as_slice()).get_varint()?;
-    let advance = octets::varint_len(quarter_stream_id);
+    let mut b = octets::Octets::with_slice(dgram.as_slice());
+    let quarter_stream_id = b.get_varint()?;
     // Advance the cursor past the varint prefix — zero copy.
+    let advance = b.off();
     dgram.advance(advance);
     Ok((quarter_stream_id, dgram))
 }
@@ -168,6 +168,23 @@ mod tests {
 
         assert_eq!(quarter_stream_id, 67);
         assert_eq!(rest.as_slice(), &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn h3_dgram_remove_quarter_stream_id_non_minimal_varint() {
+        // Quarter Stream ID = 0 encoded NON-minimally as a 2-byte varint (0x40
+        // 0x00), followed by application payload [1, 2, 3, 4].
+        // RFC 9000 §16 permits non-minimal encodings; quiche's get_varint()
+        // accepts them.
+        let dgram = DgramBuffer::from_slice(&[0x40, 0x00, 1, 2, 3, 4]);
+        let (qsid, rest) = h3_dgram_remove_quarter_stream_id(dgram).unwrap();
+        assert_eq!(qsid, 0);
+
+        assert_eq!(
+            rest.as_slice(),
+            &[1, 2, 3, 4],
+            "leftover non-minimal varint byte leaked into payload prefix"
+        );
     }
 
     /// remove_quarter_stream_id on an empty buffer returns an error (buffer too

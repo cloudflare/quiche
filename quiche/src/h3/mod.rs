@@ -925,6 +925,7 @@ struct QpackStreams {
 ///
 /// [`stats()`]: struct.Connection.html#method.stats
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct Stats {
     /// The number of bytes received on the QPACK encoder stream.
     pub qpack_encoder_stream_recv_bytes: u64,
@@ -1639,7 +1640,7 @@ impl Connection {
         let len = body.as_ref().len();
 
         // Validate that it is sane to send data on the stream.
-        if stream_id % 4 != 0 {
+        if !stream_id.is_multiple_of(4) {
             return Err(Error::FrameUnexpected);
         }
 
@@ -1917,7 +1918,7 @@ impl Connection {
             return Err(Error::FrameUnexpected);
         }
 
-        if stream_id % 4 != 0 {
+        if !stream_id.is_multiple_of(4) {
             return Err(Error::FrameUnexpected);
         }
 
@@ -2170,7 +2171,7 @@ impl Connection {
             id = 0;
         }
 
-        if self.is_server && id % 4 != 0 {
+        if self.is_server && !id.is_multiple_of(4) {
             return Err(Error::IdError);
         }
 
@@ -2620,16 +2621,16 @@ impl Connection {
                         },
 
                         stream::Type::Push => {
-                            // Only clients can receive push stream.
-                            if self.is_server {
-                                conn.close(
-                                    true,
-                                    Error::StreamCreationError.to_wire(),
-                                    b"Server received push stream.",
-                                )?;
+                            // Server push is not supported, so push streams at
+                            // either client or server is a critical protocol
+                            // error.
+                            conn.close(
+                                true,
+                                Error::StreamCreationError.to_wire(),
+                                b"Received push stream.",
+                            )?;
 
-                                return Err(Error::StreamCreationError);
-                            }
+                            return Err(Error::StreamCreationError);
                         },
 
                         stream::Type::QpackEncoder => {
@@ -3101,7 +3102,7 @@ impl Connection {
                     return Err(Error::FrameUnexpected);
                 }
 
-                if stream_id % 4 != 0 {
+                if !stream_id.is_multiple_of(4) {
                     conn.close(
                         true,
                         Error::FrameUnexpected.to_wire(),
@@ -4706,6 +4707,43 @@ mod tests {
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
+    }
+
+    #[test]
+    /// Server push streams from client are not allowed by the protocol.
+    fn push_stream_from_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        s.client
+            .open_uni_stream(
+                &mut s.pipe.client,
+                stream::HTTP3_PUSH_STREAM_TYPE_ID,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Err(Error::StreamCreationError));
+    }
+
+    #[test]
+    /// Server push streams from server are not allowed since the client does
+    /// not advertise server push support by default.
+    fn push_stream_from_server() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        s.server
+            .open_uni_stream(
+                &mut s.pipe.server,
+                stream::HTTP3_PUSH_STREAM_TYPE_ID,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Err(Error::StreamCreationError));
     }
 
     #[test]
@@ -6677,6 +6715,127 @@ mod tests {
             h3_config
                 .set_additional_settings(vec![(frame::SETTINGS_H3_DATAGRAM, 43)]),
             Err(Error::SettingsError)
+        );
+    }
+
+    #[test]
+    /// Tests that a client rejects a SETTINGS frame received on a request
+    /// stream.
+    fn settings_on_request_stream_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, _req) = s.send_request(true).unwrap();
+
+        let settings = frame::Frame::Settings {
+            max_field_section_size: None,
+            qpack_max_table_capacity: None,
+            qpack_blocked_streams: None,
+            connect_protocol_enabled: None,
+            h3_datagram: None,
+            grease: None,
+            additional_settings: Default::default(),
+            raw: Default::default(),
+        };
+
+        s.send_frame_server(settings, stream, false).unwrap();
+
+        // The client MUST treat this as H3_FRAME_UNEXPECTED.
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+        assert_eq!(
+            s.pipe.client.local_error(),
+            Some(&crate::ConnectionError {
+                is_app: true,
+                error_code: WireErrorCode::FrameUnexpected as u64,
+                reason: format!(
+                    "Unexpected frame type {}",
+                    frame::SETTINGS_FRAME_TYPE_ID
+                )
+                .into_bytes(),
+            })
+        );
+    }
+
+    #[test]
+    /// Tests that a client rejects a CANCEL_PUSH frame received on a request
+    /// stream.
+    fn cancel_push_on_request_stream_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, _req) = s.send_request(true).unwrap();
+        let cancel_push = frame::Frame::CancelPush { push_id: 0 };
+        s.send_frame_server(cancel_push, stream, false).unwrap();
+
+        // The client MUST treat this as H3_FRAME_UNEXPECTED.
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+        assert_eq!(
+            s.pipe.client.local_error(),
+            Some(&crate::ConnectionError {
+                is_app: true,
+                error_code: WireErrorCode::FrameUnexpected as u64,
+                reason: format!(
+                    "Unexpected frame type {}",
+                    frame::CANCEL_PUSH_FRAME_TYPE_ID
+                )
+                .into_bytes(),
+            })
+        );
+    }
+
+    #[test]
+    /// Tests that a client rejects a GOAWAY frame received on a request
+    /// stream.
+    fn goaway_on_request_stream_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, _req) = s.send_request(true).unwrap();
+        let goaway = frame::Frame::GoAway { id: 0 };
+
+        s.send_frame_server(goaway, stream, false).unwrap();
+
+        // The client MUST treat this as H3_FRAME_UNEXPECTED.
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+        assert_eq!(
+            s.pipe.client.local_error(),
+            Some(&crate::ConnectionError {
+                is_app: true,
+                error_code: WireErrorCode::FrameUnexpected as u64,
+                reason: format!(
+                    "Unexpected frame type {}",
+                    frame::GOAWAY_FRAME_TYPE_ID
+                )
+                .into_bytes(),
+            })
+        );
+    }
+
+    #[test]
+    /// Tests that a client rejects a MAX_PUSH_ID frame received on a request
+    /// stream.
+    fn max_push_id_on_request_stream_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, _req) = s.send_request(true).unwrap();
+        let max_push_id = frame::Frame::MaxPushId { push_id: 0 };
+
+        s.send_frame_server(max_push_id, stream, false).unwrap();
+
+        // The client MUST treat this as H3_FRAME_UNEXPECTED.
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+        assert_eq!(
+            s.pipe.client.local_error(),
+            Some(&crate::ConnectionError {
+                is_app: true,
+                error_code: WireErrorCode::FrameUnexpected as u64,
+                reason: format!(
+                    "Unexpected frame type {}",
+                    frame::MAX_PUSH_FRAME_TYPE_ID
+                )
+                .into_bytes(),
+            })
         );
     }
 

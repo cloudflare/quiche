@@ -1,6 +1,6 @@
 [package]
 name = "quiche"
-version = "0.28.0"
+version = "0.29.0"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 repository = { workspace = true }
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
@@ -19,7 +19,7 @@ include = [
   "/quiche.svg",
   "/src",
 ]
-rust-version = "1.85"
+rust-version = "1.88"
 
 [features]
 default = ["boringssl-boring-crate"]

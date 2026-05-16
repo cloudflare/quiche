@@ -38,6 +38,7 @@ use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
+use crate::recovery::MAX_PTO_EXPONENT;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
 use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 
@@ -586,7 +587,8 @@ impl GRecovery {
     fn pto_time_and_space(
         &self, handshake_status: HandshakeStatus, now: Instant,
     ) -> (Option<Instant>, packet::Epoch) {
-        let mut duration = self.pto() * (1 << self.pto_count);
+        let mut duration =
+            self.pto() * 2_u32.pow(self.pto_count.min(MAX_PTO_EXPONENT));
 
         // Arm PTO from now when there are no inflight packets.
         if self.bytes_in_flight.is_zero() {
@@ -615,8 +617,8 @@ impl GRecovery {
                 }
 
                 // Include max_ack_delay and backoff for Application Data.
-                duration +=
-                    self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
+                duration += self.rtt_stats.max_ack_delay *
+                    2_u32.pow(self.pto_count.min(MAX_PTO_EXPONENT));
             }
 
             let new_time = self.epochs[e]
@@ -652,6 +654,8 @@ impl GRecovery {
         if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now)
         {
             self.loss_timer.update(timeout);
+        } else {
+            self.loss_timer.clear();
         }
     }
 }
@@ -1319,5 +1323,24 @@ mod tests {
         // Time threshold is capped at 2.0.
         assert_eq!(loss_thresh.pkt_thresh(), None);
         assert_eq!(loss_thresh.time_thresh(), MAX_TIME_THRESHOLD);
+    }
+
+    #[test]
+    fn test_high_pto_count_no_panic() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Bbr2Gcongestion);
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut r = GRecovery::new(&recovery_config).unwrap();
+
+        r.pto_count = 99999;
+
+        let handshake_status = HandshakeStatus {
+            completed: true,
+            has_handshake_keys: true,
+            peer_verified_address: true,
+        };
+        let now = Instant::now();
+
+        let _ = r.pto_time_and_space(handshake_status, now);
     }
 }

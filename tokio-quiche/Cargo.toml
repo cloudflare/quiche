@@ -1,6 +1,6 @@
 [package]
 name = "tokio-quiche"
-version = "0.18.0"
+version = "0.19.0"
 description = "Asynchronous wrapper around quiche"
 repository = { workspace = true }
 edition = { workspace = true }
@@ -8,7 +8,7 @@ license = { workspace = true }
 keywords = ["quic", "http3", "tokio"]
 categories = { workspace = true }
 readme = "README.md"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [features]
 default = ["qlog-gzip", "qlog-zstd"]

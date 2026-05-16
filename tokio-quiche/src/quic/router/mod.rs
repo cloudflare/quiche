@@ -825,7 +825,8 @@ pub trait InitialPacketHandler {
 /// A [`NewConnection`] describes a new [`quiche::Connection`] that can be
 /// driven by an io worker.
 pub struct NewConnection {
-    conn: QuicheConnection,
+    /// See [`QuicConnectionParams::quiche_conn`].
+    conn: Box<QuicheConnection>,
     pending_cid: Option<ConnectionId<'static>>,
     initial_pkt: Option<Incoming>,
     cid_generator: Option<SharedConnectionIdGenerator>,
