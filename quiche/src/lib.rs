@@ -760,6 +760,16 @@ impl Config {
         self.tls_ctx.load_verify_locations_from_directory(dir)
     }
 
+    /// Configures the TLS curve preference list.
+    ///
+    /// `curves` is a colon-separated list of curve (a.k.a. group) names, in
+    /// order of preference, e.g. `"X25519MLKEM768:X25519:P-256:P-384"`.
+    /// Corresponds to `SSL_CTX_set1_curves_list` (a.k.a.
+    /// `SSL_CTX_set1_groups_list`).
+    pub fn set_curves_list(&mut self, curves: &str) -> Result<()> {
+        self.tls_ctx.set_curves_list(curves)
+    }
+
     /// Configures whether to verify the peer's certificate.
     ///
     /// This should usually be `true` for client-side connections and `false`

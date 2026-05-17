@@ -27,3 +27,15 @@ pre-build = [
     "ln -sf /usr/bin/gcc /usr/local/bin/i686-linux-gnu-gcc",
     "ln -sf /usr/bin/g++ /usr/local/bin/i686-linux-gnu-g++",
 ]
+
+# BoringSSL's x86 assembly requires SSE2. `boring-sys`'s cmake build
+# doesn't add `-msse2` for i686 targets (its 32-bit-toolchain.cmake
+# sets it as a CACHE STRING, but cmake-rs's `-DCMAKE_C_FLAGS=...` on
+# the command line wins), so inject it via the target-scoped
+# `CFLAGS`/`CXXFLAGS` env vars. `cc-rs` (and through it, `cmake-rs`)
+# honors these and passes them along to BoringSSL's cmake build.
+[target.i686-unknown-linux-gnu.env]
+passthrough = [
+    "CFLAGS_i686_unknown_linux_gnu=-msse2 -mfpmath=sse",
+    "CXXFLAGS_i686_unknown_linux_gnu=-msse2 -mfpmath=sse",
+]
