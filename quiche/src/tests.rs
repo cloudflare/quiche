@@ -10059,6 +10059,37 @@ fn lost_connection_id_frames(
 }
 
 #[rstest]
+fn duplicate_retire_connection_id(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_active_connection_id_limit(2);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let (cid, reset_token) = test_utils::create_cid_and_reset_token(16);
+    assert_eq!(pipe.client.new_scid(&cid, reset_token, false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut buf = [0u8; 65535];
+    let frames = [frame::Frame::RetireConnectionId { seq_num: 1 }];
+
+    for _ in 0..2 {
+        let len = test_utils::encode_pkt(
+            &mut pipe.server,
+            Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+        pipe.client_recv(&mut buf[..len]).unwrap();
+    }
+
+    assert!(pipe.client.retired_scid_next().is_some());
+}
+
+#[rstest]
 fn sending_duplicate_scids(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
