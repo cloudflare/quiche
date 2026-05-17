@@ -246,6 +246,12 @@ pub trait RecoveryOps {
 
     fn pto(&self) -> Duration;
 
+    /// Returns the PTO-based draining/closing timeout duration (3 * PTO),
+    /// as recommended in RFC 9000, Section 10.2.
+    fn pto_timeout(&self) -> Duration {
+        self.pto() * 3
+    }
+
     /// The most recent data delivery rate estimate.
     fn delivery_rate(&self) -> Bandwidth;
 
