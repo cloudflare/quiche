@@ -3,7 +3,7 @@ debugging and testing.
 
 HTTP/3 ([RFC 9114]) is the wire format for HTTP semantics ([RFC 9110]). The RFCs
 contain a range of requirements about how Request or Response messages are
-generated, serialized, sent, received, parsed, and consumed. QUIC ([RFC 900])
+generated, serialized, sent, received, parsed, and consumed. QUIC ([RFC 9000])
 streams are used for these messages along with other control and QPACK ([RFC
 9204]) header compression instructions.
 
