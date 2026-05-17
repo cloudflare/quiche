@@ -366,6 +366,20 @@ pub extern "C" fn quiche_config_enable_pacing(config: &mut Config, v: bool) {
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_enable_track_unknown_transport_parameters(
+    config: &mut Config, size: size_t,
+) {
+    config.enable_track_unknown_transport_parameters(size);
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_config_set_enable_relaxed_loss_threshold(
+    config: &mut Config, v: bool,
+) {
+    config.set_enable_relaxed_loss_threshold(v);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_set_enable_cubic_idle_restart_fix(
     config: &mut Config, v: bool,
 ) {
@@ -438,6 +452,13 @@ pub extern "C" fn quiche_config_set_disable_dcid_reuse(
     config: &mut Config, v: bool,
 ) {
     config.set_disable_dcid_reuse(v);
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_config_set_use_initial_max_data_as_flow_control_win(
+    config: &mut Config, v: bool,
+) {
+    config.set_use_initial_max_data_as_flow_control_win(v);
 }
 
 #[no_mangle]
