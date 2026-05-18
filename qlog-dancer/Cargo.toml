@@ -32,7 +32,7 @@ wirefilter-engine = { git = "https://github.com/cloudflare/wirefilter.git", rev=
 # This also requires that the backend is set via .cargo/config.toml.
 # For more information see: https://docs.rs/getrandom/#webassembly-support
 [target.'cfg(target_family = "wasm")'.dependencies]
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 plotters-canvas = "0.3"
 serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2"
