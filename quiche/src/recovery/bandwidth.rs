@@ -134,6 +134,7 @@ impl Bandwidth {
         Bandwidth::from_kbits_per_second(m_bits_per_second * 1_000)
     }
 
+    /// Returns a sentinel representing infinite bandwidth.
     pub const fn infinite() -> Self {
         Bandwidth {
             bits_per_second: u64::MAX,
@@ -144,21 +145,72 @@ impl Bandwidth {
         Bandwidth { bits_per_second: 0 }
     }
 
+    /// Returns the time to transfer `bytes` at this bandwidth.
+    ///
+    /// Returns `Duration::ZERO` for infinite or zero bandwidth.
+    /// Saturates to `Duration::from_nanos(u64::MAX)` if the
+    /// calculation would overflow.
     pub fn transfer_time(&self, bytes: usize) -> Duration {
-        #[allow(clippy::manual_checked_ops)]
-        if self.bits_per_second == 0 {
-            Duration::ZERO
-        } else {
-            Duration::from_nanos(
-                (bytes as u64 * 8 * NUM_NANOS_PER_SECOND) / self.bits_per_second,
-            )
+        // Handle infinite bandwidth sentinel: transfer is instantaneous
+        if self.bits_per_second == u64::MAX {
+            return Duration::ZERO;
         }
+
+        if self.bits_per_second == 0 {
+            return Duration::ZERO;
+        }
+
+        let bytes = bytes as u64;
+
+        // Fast path: try u64 arithmetic first. At typical packet sizes
+        // (< 10 KB) and bandwidths, this won't overflow.
+        if let Some(nanos) = bytes.checked_mul(8 * NUM_NANOS_PER_SECOND) {
+            return Duration::from_nanos(nanos / self.bits_per_second);
+        }
+
+        // Slow path: use u128 for intermediate calculation to avoid overflow.
+        // At very large byte counts, bytes * 8 * NUM_NANOS_PER_SECOND can
+        // overflow u64.
+        let nanos = (bytes as u128) * (8 * NUM_NANOS_PER_SECOND) as u128;
+        let nanos = nanos / (self.bits_per_second as u128);
+
+        // Saturate to Duration::MAX if result exceeds u64 range.
+        Duration::from_nanos(nanos.min(u64::MAX as u128) as u64)
     }
 
+    /// Returns the number of bytes that can be sent in
+    /// `time_period` at this bandwidth.
+    ///
+    /// Returns `u64::MAX` for infinite bandwidth (unless
+    /// `time_period` is zero). Saturates to `u64::MAX` if the
+    /// calculation would overflow.
     pub fn to_bytes_per_period(self, time_period: Duration) -> u64 {
-        self.bits_per_second * time_period.as_nanos() as u64 /
-            8 /
-            NUM_NANOS_PER_SECOND
+        // Handle infinite bandwidth sentinel.
+        if self.bits_per_second == u64::MAX {
+            if time_period != Duration::ZERO {
+                return u64::MAX;
+            } else {
+                return 0;
+            }
+        }
+
+        // Fast path: try u64 arithmetic first. At typical bandwidths (< 10
+        // Gbps) and short time periods (< 1 second), this won't overflow.
+        if let Ok(time_nanos) = u64::try_from(time_period.as_nanos()) {
+            if let Some(bits) = self.bits_per_second.checked_mul(time_nanos) {
+                return bits / (8 * NUM_NANOS_PER_SECOND);
+            }
+        }
+
+        // Slow path: use u128 for intermediate calculation to avoid overflow.
+        // At high bandwidths (e.g., 10+ Gbps) with non-trivial time periods,
+        // bits_per_second * time_period.as_nanos() can overflow u64.
+        let time_nanos = time_period.as_nanos();
+        let bits = (self.bits_per_second as u128).saturating_mul(time_nanos);
+        let bytes = bits / (8 * NUM_NANOS_PER_SECOND) as u128;
+
+        // Saturate to u64::MAX if result exceeds u64 range.
+        bytes.min(u64::MAX as u128) as u64
     }
 }
 
@@ -265,6 +317,48 @@ mod tests {
     }
 
     #[test]
+    fn transfer_time_overflow() {
+        // Test that large byte values that would overflow u64 are handled
+        // correctly using u128 arithmetic.
+        let low_bandwidth = Bandwidth::from_kbits_per_second(1);
+
+        // This value would overflow: (usize::MAX as u64) * 8 * 1_000_000_000
+        // which exceeds u64::MAX.
+        let large_bytes = usize::MAX;
+        let result = low_bandwidth.transfer_time(large_bytes);
+
+        // At 1 kbit/s = 125 bytes/s, transferring usize::MAX bytes would take
+        // an astronomically long time. Result should saturate to Duration::MAX
+        // (u64::MAX nanoseconds).
+        assert_eq!(result, Duration::from_nanos(u64::MAX));
+
+        // Test a more realistic large value: 10 GiB at 1 Gbps should work.
+        let one_gbps = Bandwidth::from_mbits_per_second(1_000); // 1 Gbps
+        let ten_gib = 10 * 1024 * 1024 * 1024;
+        // 10 GiB * 8 bits/byte / 1 Gbit/s = 85.899... seconds
+        let expected = Duration::from_nanos(85_899_345_920);
+        assert_eq!(one_gbps.transfer_time(ten_gib), expected);
+    }
+
+    #[test]
+    fn transfer_time_infinite() {
+        // Infinite bandwidth should have zero transfer time (instantaneous)
+        let inf = Bandwidth::infinite();
+
+        // Zero bytes
+        assert_eq!(inf.transfer_time(0), Duration::ZERO);
+
+        // Small transfers
+        assert_eq!(inf.transfer_time(1), Duration::ZERO);
+        assert_eq!(inf.transfer_time(100), Duration::ZERO);
+        assert_eq!(inf.transfer_time(1024), Duration::ZERO);
+
+        // Large transfers
+        assert_eq!(inf.transfer_time(1_000_000), Duration::ZERO);
+        assert_eq!(inf.transfer_time(usize::MAX), Duration::ZERO);
+    }
+
+    #[test]
     fn to_bytes_per_period() {
         let one_kbit_sec = Bandwidth::from_kbits_per_second(1);
         assert_eq!(
@@ -290,6 +384,123 @@ mod tests {
 
         // Mul<Duration> implementation.
         assert_eq!(one_kbit_sec * Duration::from_millis(10_000), 1250);
+    }
+
+    #[test]
+    fn to_bytes_per_period_high_bandwidth() {
+        // 10 Gbps with 1 second would overflow u64 in the old implementation.
+        let ten_gbps = Bandwidth::from_mbits_per_second(10_000);
+        assert_eq!(
+            ten_gbps.to_bytes_per_period(Duration::from_secs(1)),
+            1_250_000_000
+        );
+
+        // 100 Gbps with 100ms.
+        let hundred_gbps = Bandwidth::from_mbits_per_second(100_000);
+        assert_eq!(
+            hundred_gbps.to_bytes_per_period(Duration::from_millis(100)),
+            1_250_000_000
+        );
+
+        // 1 Tbps with 10ms.
+        let one_tbps = Bandwidth::from_mbits_per_second(1_000_000);
+        assert_eq!(
+            one_tbps.to_bytes_per_period(Duration::from_millis(10)),
+            1_250_000_000
+        );
+    }
+
+    #[test]
+    fn to_bytes_per_period_overflow_intermediate() {
+        // Test case that would overflow u64 in intermediate calculation:
+        // bits_per_second=10^19, time_period=1sec would give 10^19 * 10^9 =
+        // 10^28.
+        let huge_bw = Bandwidth {
+            bits_per_second: 10_000_000_000_000_000_000,
+        };
+        let result = huge_bw.to_bytes_per_period(Duration::from_secs(1));
+        assert_eq!(result, 1_250_000_000_000_000_000);
+    }
+
+    #[test]
+    fn to_bytes_per_period_saturate_very_high_bandwidth() {
+        // Test case where result exceeds u64::MAX and should saturate.
+        // 2^63 bits/sec * 100 seconds / 8 = 6.25 * u64::MAX bytes.
+        let very_high_bw = Bandwidth {
+            bits_per_second: 1u64 << 63, // 2^63
+        };
+        let result = very_high_bw.to_bytes_per_period(Duration::from_secs(100));
+        // Should saturate to u64::MAX since result exceeds u64 range.
+        assert_eq!(result, u64::MAX);
+    }
+
+    #[test]
+    fn to_bytes_per_period_saturate_long_period() {
+        // Test saturation case: high bandwidth, long period.
+        let high_bw = Bandwidth {
+            bits_per_second: u64::MAX / 2,
+        };
+        let result = high_bw.to_bytes_per_period(Duration::from_secs(100));
+        // Should saturate to u64::MAX.
+        assert_eq!(result, u64::MAX);
+    }
+
+    #[test]
+    fn to_bytes_per_period_large_no_saturate() {
+        // Test large but reasonable case that doesn't saturate.
+        let high_bw = Bandwidth::from_mbits_per_second(100_000); // 100 Gbps
+        let one_hour = Duration::from_secs(3600);
+        let result = high_bw.to_bytes_per_period(one_hour);
+        assert_eq!(result, 45_000_000_000_000); // 45 TB
+    }
+
+    #[test]
+    fn to_bytes_per_period_infinite() {
+        // Infinite bandwidth sentinel should return u64::MAX.
+        let inf = Bandwidth::infinite();
+        assert_eq!(inf.to_bytes_per_period(Duration::from_secs(1)), u64::MAX);
+        assert_eq!(inf.to_bytes_per_period(Duration::from_millis(1)), u64::MAX);
+        assert_eq!(inf.to_bytes_per_period(Duration::ZERO), 0);
+
+        // Mul<Duration> should also return u64::MAX.
+        assert_eq!(inf * Duration::from_secs(1), u64::MAX);
+    }
+
+    #[test]
+    fn to_bytes_per_period_duration_exceeds_u64_nanos() {
+        // Test case where duration.as_nanos() exceeds u64::MAX.
+        // u64::MAX nanoseconds is ~584 years. We can create a Duration larger
+        // than that. Duration::MAX is ~584 billion years.
+        let bw = Bandwidth::from_mbits_per_second(1000); // 1 Gbps
+
+        // Create a duration that exceeds u64::MAX nanoseconds.
+        // u64::MAX = 18_446_744_073_709_551_615 nanoseconds
+        // = 18_446_744_073 seconds + 709_551_615 nanoseconds
+        // So any duration > 18_446_744_073 seconds will exceed u64::MAX nanos.
+        let huge_duration = Duration::from_secs(20_000_000_000); // ~634 years
+
+        // Should fall back to u128 arithmetic and not panic.
+        // 1 Gbps * 20 billion seconds = 2.5 * 10^18 bytes
+        let result = bw.to_bytes_per_period(huge_duration);
+        assert_eq!(result, 2_500_000_000_000_000_000);
+    }
+
+    #[test]
+    fn to_bytes_per_period_u128_overflow() {
+        // Test case where even u128 multiplication would overflow.
+        // u128::MAX is ~3.4 * 10^38. Duration::MAX.as_nanos() is ~10^29.
+        // We need bits_per_second * time_nanos > u128::MAX.
+        // Use maximum possible values: u64::MAX - 1 bits/sec (since u64::MAX
+        // is infinite sentinel) and Duration::MAX.
+        let huge_bw = Bandwidth {
+            bits_per_second: u64::MAX - 1,
+        };
+        let max_duration = Duration::MAX;
+
+        // u128 multiplication should overflow and saturate to u64::MAX.
+        // (u64::MAX - 1) * Duration::MAX.as_nanos() > u128::MAX
+        let result = huge_bw.to_bytes_per_period(max_duration);
+        assert_eq!(result, u64::MAX);
     }
 
     #[test]
