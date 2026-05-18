@@ -248,9 +248,8 @@ pub(crate) fn capture_quiche_logs() {
 
         // The slog Drain becomes `slog::Discard` when the scope_guard is dropped,
         // and you can't set the global logger again because of a mandate
-        // in the `log` crate. We have to manually `forget` the scope
-        // guard so that the logger remains registered for the duration of the
-        // process.
-        std::mem::forget(scope_guard)
+        // in the `log` crate. We have to retain the scope guard so that the
+        // logger remains registered for the duration of the process.
+        let _scope_guard = std::mem::ManuallyDrop::new(scope_guard);
     });
 }
