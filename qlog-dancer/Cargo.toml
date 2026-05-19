@@ -10,6 +10,9 @@ keywords = { workspace = true }
 categories = { workspace = true }
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [dependencies]
 clap = "4"
 env_logger = { workspace = true }

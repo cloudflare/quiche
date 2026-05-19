@@ -10,6 +10,9 @@ keywords = ["quic", "http2", "http3"]
 categories = { workspace = true }
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [dependencies]
 log = { workspace = true }
 regex = { workspace = true }

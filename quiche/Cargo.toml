@@ -21,6 +21,9 @@ include = [
 ]
 rust-version = "1.88"
 
+[lints]
+workspace = true
+
 [features]
 default = ["boringssl-boring-crate"]
 
