@@ -1163,7 +1163,7 @@ impl HttpConn for Http3Conn {
                 },
             };
 
-            debug!("Sent HTTP request {:?}", &req.hdrs);
+            debug!("Sent HTTP request {:?}", req.hdrs);
 
             if let Some(priority) = &req.priority {
                 // If sending the priority fails, don't try again.
