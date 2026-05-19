@@ -9,6 +9,7 @@ keywords = ["quic", "http3", "tokio"]
 categories = { workspace = true }
 readme = "README.md"
 rust-version = "1.88"
+build = "build.rs"
 
 [features]
 default = ["qlog-gzip", "qlog-zstd"]
