@@ -7,7 +7,7 @@ permissions:
   pull-requests: write
 
 env:
-  DEFAULT_OPTIONS: "--features=async,ffi,qlog --workspace"
+  DEFAULT_OPTIONS: "--features=async,ffi,qlog,rpk --workspace"
   # Used by `quiche_multiarch`, which can't link `boring` for foreign targets.
   NO_BORING_OPTIONS: "--features=ffi,qlog --workspace --exclude h3i --exclude tokio-quiche"
   RUSTFLAGS: "-D warnings"
@@ -20,6 +20,10 @@ concurrency:
 jobs:
   quiche:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        boring_version: ["latest", "4"]
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -37,6 +41,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
+
+      - name: Maybe pin boring to MSRV (4.19.0)
+        if: matrix.boring_version == '4'
+        run: |
+          # Pin boring to the minimum supported 4.x. cargo's resolver
+          # normally picks the highest match (5.x); generate the
+          # lockfile first, then downgrade to the floor of the
+          # workspace dep range (`>= 4.19, < 6`) via `--precise`.
+          # Pinning to the floor (rather than the latest 4.x) catches
+          # accidental use of APIs added in later 4.x point releases.
+          # `quiche/src/build.rs` and `tokio-quiche/build.rs` then read
+          # the lockfile and flip `cfg(boring_v4)` on.
+          cargo generate-lockfile
+          cargo update -p boring --precise 4.19.0
 
       - name: Unused dependency check
         uses: bnjbvr/cargo-machete@main
