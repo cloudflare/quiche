@@ -150,7 +150,7 @@ impl Bandwidth {
     /// Returns `Duration::ZERO` for infinite or zero bandwidth.
     /// Saturates to `Duration::from_nanos(u64::MAX)` if the
     /// calculation would overflow.
-    pub fn transfer_time(&self, bytes: usize) -> Duration {
+    pub fn transfer_time(&self, bytes: u64) -> Duration {
         // Handle infinite bandwidth sentinel: transfer is instantaneous
         if self.bits_per_second == u64::MAX {
             return Duration::ZERO;
@@ -159,8 +159,6 @@ impl Bandwidth {
         if self.bits_per_second == 0 {
             return Duration::ZERO;
         }
-
-        let bytes = bytes as u64;
 
         // Fast path: try u64 arithmetic first. At typical packet sizes
         // (< 10 KB) and bandwidths, this won't overflow.
@@ -322,12 +320,12 @@ mod tests {
         // correctly using u128 arithmetic.
         let low_bandwidth = Bandwidth::from_kbits_per_second(1);
 
-        // This value would overflow: (usize::MAX as u64) * 8 * 1_000_000_000
+        // This value would overflow: u64::MAX * 8 * NUM_MICROS_PER_SECOND
         // which exceeds u64::MAX.
-        let large_bytes = usize::MAX;
+        let large_bytes = u64::MAX;
         let result = low_bandwidth.transfer_time(large_bytes);
 
-        // At 1 kbit/s = 125 bytes/s, transferring usize::MAX bytes would take
+        // At 1 kbit/s = 125 bytes/s, transferring u64::MAX bytes would take
         // an astronomically long time. Result should saturate to Duration::MAX
         // (u64::MAX nanoseconds).
         assert_eq!(result, Duration::from_nanos(u64::MAX));
@@ -355,7 +353,7 @@ mod tests {
 
         // Large transfers
         assert_eq!(inf.transfer_time(1_000_000), Duration::ZERO);
-        assert_eq!(inf.transfer_time(usize::MAX), Duration::ZERO);
+        assert_eq!(inf.transfer_time(u64::MAX), Duration::ZERO);
     }
 
     #[test]
