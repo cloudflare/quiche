@@ -9,6 +9,9 @@ keywords = { workspace = true }
 categories = { workspace = true }
 publish = false
 
+[lints]
+workspace = true
+
 [features]
 # Enable quiche's fuzzing mode.
 fuzzing = ["quiche/fuzzing"]

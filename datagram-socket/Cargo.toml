@@ -8,6 +8,9 @@ keywords = { workspace = true }
 categories = { workspace = true }
 description = "Utilities for working with datagram sockets"
 
+[lints]
+workspace = true
+
 [dependencies]
 bytes = { workspace = true }
 futures-util = { workspace = true }

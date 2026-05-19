@@ -13,6 +13,9 @@ keywords = { workspace = true }
 categories = { workspace = true }
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [features]
 async = ["dep:tokio", "dep:tokio-quiche"]
 
