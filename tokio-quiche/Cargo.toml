@@ -63,9 +63,8 @@ qlog-gzip = ["qlog/gzip"]
 # connection at runtime via `QuicSettings::qlog_compression`.
 qlog-zstd = ["qlog/zstd"]
 
-[lints.rust]
-# capture_keylogs: enable SSLKEYLOGFILE capturing for QUIC connections.
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(capture_keylogs)'] }
+[lints]
+workspace = true
 
 [dependencies]
 anyhow = { workspace = true }

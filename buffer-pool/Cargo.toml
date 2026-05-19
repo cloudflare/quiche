@@ -8,6 +8,9 @@ keywords = { workspace = true }
 categories = { workspace = true }
 description = "Pooled in-memory buffers"
 
+[lints]
+workspace = true
+
 [dependencies]
 crossbeam = { workspace = true, features = ["alloc"] }
 foundations = { workspace = true, default-features = false, features = [

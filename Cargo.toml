@@ -23,6 +23,12 @@ readme = "README.md"
 keywords = ["quic", "http3"]
 categories = ["network-programming"]
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(capture_keylogs)',
+  'cfg(test_invalid_len_compilation_fail)',
+] }
+
 [workspace.metadata.release]
 pre-release-commit-message = "{{crate_name}}: release {{version}}"
 consolidate-commits = false
