@@ -28,6 +28,22 @@ workspace = true
 default = ["boringssl-boring-crate"]
 
 # Use the BoringSSL library provided by the boring crate.
+#
+# Both `boring` 4.x (>= 4.19) and 5.x are supported. Cargo's resolver
+# picks the version based on the lockfile and downstream constraints;
+# `build.rs` detects which major version was selected at compile time
+# and emits a `cfg(boring_v4)` flag for the legacy 4.x case. The two
+# majors differ in their default TLS curve list (5.x advertises
+# post-quantum key shares) and in their Rust API for raw public
+# keys; see `tokio-quiche/src/settings/config.rs` for the per-version
+# code. `boring_v4` is a transitional cfg meant to be retired once
+# internal users have moved off 4.x.
+#
+# Downstream code that depends on `boring` directly (e.g. to construct
+# an `SslContextBuilder` for `Config::with_boring_ssl_ctx_builder`)
+# will resolve to the same `boring` version as quiche, since
+# `boring-sys` uses `links = "boringssl"` and cargo allows only one
+# copy in the dep graph.
 boringssl-boring-crate = ["boring", "foreign-types-shared"]
 
 # Allow client connections to provide a custom DCID when initiating a

@@ -32,6 +32,28 @@ use crate::Header;
 
 use rstest::rstest;
 
+/// Pick a numeric expectation based on the active `boring` major version.
+///
+/// `boring` 5.x ships BoringSSL with post-quantum (X25519MLKEM768) key
+/// shares enabled by default, which inflates the ClientHello and ripples
+/// through into byte counts and per-epoch packet numbers in several
+/// handshake-adjacent assertions below. `boring` 4.x doesn't, so each
+/// such assertion has two flavours. Wrap them in this macro so the
+/// per-version values stay side-by-side at the call site. The active
+/// version is detected by `build.rs` (see `cfg(boring_v4)`).
+macro_rules! by_boring {
+    (b4: $b4:expr, b5: $b5:expr $(,)?) => {{
+        #[cfg(boring_v4)]
+        {
+            $b4
+        }
+        #[cfg(not(boring_v4))]
+        {
+            $b5
+        }
+    }};
+}
+
 #[test]
 fn transport_params() {
     // Server encodes, client decodes.
@@ -6426,7 +6448,7 @@ fn client_rst_stream_while_bytes_in_flight(
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(15030)
+            Ok(by_boring!(b4: 13878, b5: 15030))
         }
     );
     let server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
@@ -6447,7 +6469,7 @@ fn client_rst_stream_while_bytes_in_flight(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => 30060,
+        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 27756, b5: 30060),
         _ => 24000,
     };
 
@@ -6516,7 +6538,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(15030)
+            Ok(by_boring!(b4: 13878, b5: 15030))
         }
     );
     let mut server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
@@ -6536,7 +6558,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => 28860,
+        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 26556, b5: 28860),
         _ => 8400,
     };
 
@@ -6598,7 +6620,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(13587)
+            Ok(by_boring!(b4: 12299, b5: 13587))
         }
     );
 
@@ -6673,7 +6695,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(13587)
+            Ok(by_boring!(b4: 12299, b5: 13587))
         }
     );
 
@@ -6760,16 +6782,19 @@ fn validate_peer_sent_ack_range(
 
     // Expected pkt counts below reflect the post-handshake state. When the
     // ClientHello spans multiple Initial packets (as with post-quantum
-    // keyshares) the handshake exchanges one extra packet per side compared
-    // to the classical case, which is why these counts are one higher than
-    // they would be for a single-Initial ClientHello.
-    let expected_max_active_pkt_sent = 4;
+    // keyshares, on boring 5) the handshake exchanges one extra packet
+    // per side compared to the classical (boring 4) case, which is why
+    // these counts are one higher under boring 5.
+    let expected_max_active_pkt_sent = by_boring!(b4: 3, b5: 4);
     let recovery = &pipe.server.paths.get_active().unwrap().recovery;
     assert_eq!(
         recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_active_pkt_sent
     );
-    assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 4);
+    assert_eq!(
+        recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 3, b5: 4)
+    );
     assert_eq!(recovery.sent_packets_len(epoch), 0);
     // Verify largest sent on the connection
     assert_eq!(
@@ -6788,8 +6813,14 @@ fn validate_peer_sent_ack_range(
     pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
     let recovery = &pipe.server.paths.get_active().unwrap().recovery;
-    assert_eq!(recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 5);
-    assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 4);
+    assert_eq!(
+        recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        by_boring!(b4: 4, b5: 5)
+    );
+    assert_eq!(
+        recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 3, b5: 4)
+    );
     assert_eq!(recovery.sent_packets_len(epoch), 1);
 
     // Send an invalid ACK range to the server and expect server error
@@ -6848,26 +6879,34 @@ fn validate_peer_sent_ack_range_for_multi_path(
     let epoch = packet::Epoch::Application;
     let pkt_type = Type::Short;
 
-    // active path
-    let expected_max_active_pkt_sent = 8;
+    // active path. Pkt counts are one higher under boring 5 because the
+    // ClientHello spans two Initial packets (post-quantum keyshares);
+    // see `validate_peer_sent_ack_range` above for details.
+    let expected_max_active_pkt_sent = by_boring!(b4: 7, b5: 8);
     let active_path = &pipe.server.paths.get_mut(0).unwrap();
     let p1_recovery = &active_path.recovery;
     assert_eq!(
         p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_active_pkt_sent
     );
-    assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 7);
+    assert_eq!(
+        p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 6, b5: 7)
+    );
     assert_eq!(p1_recovery.sent_packets_len(epoch), 1);
 
     // non-active path
-    let expected_max_second_pkt_sent = 6;
+    let expected_max_second_pkt_sent = by_boring!(b4: 5, b5: 6);
     let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
     let p2_recovery = &second_path.recovery;
     assert_eq!(
         p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_second_pkt_sent
     );
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 6);
+    assert_eq!(
+        p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 5, b5: 6)
+    );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Verify largest sent on the connection is the max of the two paths
@@ -6895,15 +6934,27 @@ fn validate_peer_sent_ack_range_for_multi_path(
     let active_path = &pipe.server.paths.get_mut(0).unwrap();
     assert!(active_path.active());
     let p1_recovery = &active_path.recovery;
-    assert_eq!(p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 8);
-    assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 8);
+    assert_eq!(
+        p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        by_boring!(b4: 7, b5: 8)
+    );
+    assert_eq!(
+        p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 7, b5: 8)
+    );
     assert_eq!(p1_recovery.sent_packets_len(epoch), 0);
 
     // non-active path
     let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
     let p2_recovery = &second_path.recovery;
-    assert_eq!(p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 6);
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 6);
+    assert_eq!(
+        p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        by_boring!(b4: 5, b5: 6)
+    );
+    assert_eq!(
+        p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 5, b5: 6)
+    );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Send a large invalid ACK range to the server. Range is not inclusive so
@@ -9052,7 +9103,7 @@ fn update_max_datagram_size(
         if cc_algorithm_name == "cubic" {
             12000
         } else {
-            14573
+            by_boring!(b4: 13421, b5: 14573)
         },
     );
 }
@@ -9127,7 +9178,7 @@ fn send_capacity(
         if cc_algorithm_name == "cubic" {
             12000
         } else {
-            15025
+            by_boring!(b4: 13873, b5: 15025)
         }
     );
 
@@ -9142,7 +9193,7 @@ fn send_capacity(
         if cc_algorithm_name == "cubic" {
             Ok(2000)
         } else {
-            Ok(5025)
+            Ok(by_boring!(b4: 3873, b5: 5025))
         }
     );
 
@@ -9669,7 +9720,11 @@ fn initial_cwnd(
         // cwnd not being honored) and allow a small upper-bound
         // tolerance, well below a packet so any meaningful regression
         // would still trip the assertion.
-        let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 + 2598;
+        // Handshake size (and hence the extra acked bytes on top of
+        // `initial_cwnd`) is larger under boring 5 because the
+        // ClientHello carries a post-quantum key share by default.
+        let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 +
+            by_boring!(b4: 1447, b5: 2598);
         const TOLERANCE: usize = 4;
 
         assert!(
@@ -11422,8 +11477,7 @@ fn resilience_against_migration_attack(
     let mut recv_buf = [0; DATA_BYTES];
     let send1_bytes = pipe.server.stream_send(1, &buf, true).unwrap();
     assert_eq!(send1_bytes, match cc_algorithm_name {
-        "bbr2" => 15032,
-        "bbr2_gcongestion" => 15032,
+        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 13880, b5: 15032),
         _ => 12000,
     });
     assert_eq!(
