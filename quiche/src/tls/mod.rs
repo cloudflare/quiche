@@ -25,6 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::ffi;
+use std::mem::ManuallyDrop;
 use std::ptr;
 use std::slice;
 
@@ -995,7 +996,9 @@ extern "C" fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
         None => return 0,
     };
 
-    let handshake = Handshake::new(ssl);
+    // This callback receives a borrowed `SSL*`, so the temporary `Handshake`
+    // must not free it on any return path.
+    let handshake = ManuallyDrop::new(Handshake::new(ssl));
     let peer_params = handshake.quic_transport_params();
 
     // Serialize session object into buffer.
@@ -1010,31 +1013,24 @@ extern "C" fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
     let session_bytes_len = session_bytes.len() as u64;
 
     if buffer.write(&session_bytes_len.to_be_bytes()).is_err() {
-        std::mem::forget(handshake);
         return 0;
     }
 
     if buffer.write(&session_bytes).is_err() {
-        std::mem::forget(handshake);
         return 0;
     }
 
     let peer_params_len = peer_params.len() as u64;
 
     if buffer.write(&peer_params_len.to_be_bytes()).is_err() {
-        std::mem::forget(handshake);
         return 0;
     }
 
     if buffer.write(peer_params).is_err() {
-        std::mem::forget(handshake);
         return 0;
     }
 
     *ex_data.session = Some(buffer);
-
-    // Prevent handshake from being freed, as we still need it.
-    std::mem::forget(handshake);
 
     0
 }

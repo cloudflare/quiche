@@ -2780,6 +2780,7 @@ impl<F: BufFactory> Connection<F> {
         params: TransportParams, is_server: bool, ssl: &mut boring::ssl::SslRef,
     ) -> Result<()> {
         use foreign_types_shared::ForeignTypeRef;
+        use std::mem::ManuallyDrop;
 
         // In order to apply the new parameter to the TLS state before TPs are
         // written into a TLS message, we need to re-encode all TPs immediately.
@@ -2787,17 +2788,14 @@ impl<F: BufFactory> Connection<F> {
         // Since we don't have direct access to the main `Connection` object, we
         // need to re-create the `Handshake` state from the `SslRef`.
         //
-        // SAFETY: the `Handshake` object must not be drop()ed, otherwise it
-        // would free the underlying BoringSSL structure.
-        let mut handshake =
-            unsafe { tls::Handshake::from_ptr(ssl.as_ptr() as _) };
-        handshake.set_quic_transport_params(&params, is_server)?;
+        // Wrap the temporary `Handshake` in `ManuallyDrop` because this is only
+        // a borrowed view of `ssl`. The caller retains ownership of the
+        // underlying BoringSSL object.
+        let mut handshake = ManuallyDrop::new(unsafe {
+            tls::Handshake::from_ptr(ssl.as_ptr() as _)
+        });
 
-        // Avoid running `drop(handshake)` as that would free the underlying
-        // handshake state.
-        std::mem::forget(handshake);
-
-        Ok(())
+        handshake.set_quic_transport_params(&params, is_server)
     }
 
     /// Sets the `use_initial_max_data_as_flow_control_win` flag during SSL

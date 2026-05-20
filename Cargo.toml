@@ -23,6 +23,9 @@ readme = "README.md"
 keywords = ["quic", "http3"]
 categories = ["network-programming"]
 
+[workspace.lints.clippy]
+mem_forget = "deny"
+
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(capture_keylogs)',
