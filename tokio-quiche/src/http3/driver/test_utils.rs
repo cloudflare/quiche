@@ -1,8 +1,14 @@
+use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Context;
 use bytes::BufMut;
 use bytes::BytesMut;
+use foundations::telemetry::metrics::Counter;
+use foundations::telemetry::metrics::Gauge;
+use foundations::telemetry::metrics::Histogram;
+use foundations::telemetry::metrics::TimeHistogram;
 use futures::FutureExt as _;
 use quiche::h3;
 use quiche::h3::Header;
@@ -23,6 +29,8 @@ use crate::http3::driver::NewClientRequest;
 use crate::http3::driver::OutboundFrameSender;
 use crate::http3::driver::ServerH3Event;
 use crate::http3::settings::Http3Settings;
+use crate::metrics::labels;
+use crate::metrics::Metrics;
 use crate::quic::HandshakeInfo;
 use crate::quic::QuicheConnection;
 use crate::ApplicationOverQuic as _;
@@ -410,5 +418,140 @@ impl DriverTestHelper<ServerHooks> {
         &mut self, stream_id: u64, max_read: usize,
     ) -> h3::Result<Vec<u8>> {
         self.peer_recv_body_vec(stream_id, max_read)
+    }
+}
+
+/// Minimal [`Metrics`] impl for unit tests. Tracks connection close error
+/// counters; all other metrics are discarded.
+#[derive(Clone)]
+pub struct TestMetrics {
+    pub local_h3: Counter,
+    pub local_quic: Counter,
+    pub peer_h3: Counter,
+    pub peer_quic: Counter,
+}
+
+impl Default for TestMetrics {
+    fn default() -> Self {
+        Self {
+            local_h3: Counter::default(),
+            local_quic: Counter::default(),
+            peer_h3: Counter::default(),
+            peer_quic: Counter::default(),
+        }
+    }
+}
+
+impl Metrics for TestMetrics {
+    fn local_h3_conn_close_error_count(
+        &self, _reason: labels::H3Error,
+    ) -> Counter {
+        self.local_h3.clone()
+    }
+
+    fn local_quic_conn_close_error_count(
+        &self, _reason: labels::QuicError,
+    ) -> Counter {
+        self.local_quic.clone()
+    }
+
+    fn peer_h3_conn_close_error_count(
+        &self, _reason: labels::H3Error,
+    ) -> Counter {
+        self.peer_h3.clone()
+    }
+
+    fn peer_quic_conn_close_error_count(
+        &self, _reason: labels::QuicError,
+    ) -> Counter {
+        self.peer_quic.clone()
+    }
+
+    // -- everything below is unused by the code under test --
+
+    fn connections_in_memory(&self) -> Gauge {
+        Gauge::default()
+    }
+
+    fn maximum_writable_streams(&self) -> Histogram {
+        Histogram::new(std::iter::empty())
+    }
+
+    fn handshake_time_seconds(
+        &self, _: labels::QuicHandshakeStage,
+    ) -> TimeHistogram {
+        TimeHistogram::new(std::iter::empty())
+    }
+
+    fn write_errors(&self, _: labels::QuicWriteError) -> Counter {
+        Counter::default()
+    }
+
+    fn send_to_wouldblock_duration_s(&self) -> TimeHistogram {
+        TimeHistogram::new(std::iter::empty())
+    }
+
+    fn skipped_mid_handshake_flush_count(&self) -> Counter {
+        Counter::default()
+    }
+
+    fn invalid_cid_packet_count(&self, _: crate::BoxError) -> Counter {
+        Counter::default()
+    }
+
+    fn accepted_initial_packet_count(&self) -> Counter {
+        Counter::default()
+    }
+
+    fn expensive_accepted_initial_packet_count(&self, _: IpAddr) -> Counter {
+        Counter::default()
+    }
+
+    fn rejected_initial_packet_count(
+        &self, _: labels::QuicInvalidInitialPacketError,
+    ) -> Counter {
+        Counter::default()
+    }
+
+    fn expensive_rejected_initial_packet_count(
+        &self, _: labels::QuicInvalidInitialPacketError, _: IpAddr,
+    ) -> Counter {
+        Counter::default()
+    }
+
+    fn utilized_bandwidth(&self) -> Gauge {
+        Gauge::default()
+    }
+
+    fn max_bandwidth_mbps(&self) -> Histogram {
+        Histogram::new(std::iter::empty())
+    }
+
+    fn max_loss_pct(&self) -> Histogram {
+        Histogram::new(std::iter::empty())
+    }
+
+    fn udp_drop_count(&self) -> Counter {
+        Counter::default()
+    }
+
+    fn failed_handshakes(&self, _: labels::HandshakeError) -> Counter {
+        Counter::default()
+    }
+
+    fn tokio_runtime_task_schedule_delay_histogram(
+        &self, _: &Arc<str>,
+    ) -> TimeHistogram {
+        TimeHistogram::new(std::iter::empty())
+    }
+
+    fn tokio_runtime_task_poll_duration_histogram(
+        &self, _: &Arc<str>,
+    ) -> TimeHistogram {
+        TimeHistogram::new(std::iter::empty())
+    }
+
+    fn tokio_runtime_task_total_poll_time_micros(&self, _: &Arc<str>) -> Counter {
+        Counter::default()
     }
 }

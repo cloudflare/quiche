@@ -304,62 +304,7 @@ impl Stream {
             },
 
             Some(Type::Request) => {
-                // Request stream starts uninitialized and only HEADERS is
-                // accepted. After initialization, DATA and HEADERS frames may
-                // be acceptable, depending on the role and HTTP message phase.
-                //
-                // Receiving some other types of known frames on the request
-                // stream is always an error.
-                if !self.is_local {
-                    match (ty, self.remote_initialized) {
-                        (frame::HEADERS_FRAME_TYPE_ID, false) => {
-                            self.remote_initialized = true;
-                        },
-
-                        (frame::DATA_FRAME_TYPE_ID, false) =>
-                            return Err(Error::FrameUnexpected),
-
-                        (frame::HEADERS_FRAME_TYPE_ID, true) => {
-                            if self.trailers_received {
-                                return Err(Error::FrameUnexpected);
-                            }
-
-                            if self.data_received {
-                                self.trailers_received = true;
-                            }
-                        },
-
-                        (frame::DATA_FRAME_TYPE_ID, true) => {
-                            if self.trailers_received {
-                                return Err(Error::FrameUnexpected);
-                            }
-
-                            self.data_received = true;
-                        },
-
-                        (frame::CANCEL_PUSH_FRAME_TYPE_ID, _) =>
-                            return Err(Error::FrameUnexpected),
-
-                        (frame::SETTINGS_FRAME_TYPE_ID, _) =>
-                            return Err(Error::FrameUnexpected),
-
-                        (frame::GOAWAY_FRAME_TYPE_ID, _) =>
-                            return Err(Error::FrameUnexpected),
-
-                        (frame::MAX_PUSH_FRAME_TYPE_ID, _) =>
-                            return Err(Error::FrameUnexpected),
-
-                        (frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID, _) =>
-                            return Err(Error::FrameUnexpected),
-
-                        (frame::PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID, _) =>
-                            return Err(Error::FrameUnexpected),
-
-                        // All other frames can be ignored regardless of stream
-                        // state.
-                        _ => (),
-                    }
-                }
+                self.validate_request_frame_type(ty)?;
             },
 
             Some(Type::Push) => {
@@ -390,6 +335,72 @@ impl Stream {
         self.frame_type = Some(ty);
 
         self.state_transition(State::FramePayloadLen, 1, true)?;
+
+        Ok(())
+    }
+
+    /// Validates a frame type received on a request stream and advances the
+    /// request-stream HTTP message phase tracking accordingly.
+    ///
+    /// Request streams start uninitialized and only HEADERS is accepted. After
+    /// initialization, DATA and HEADERS frames may be acceptable, depending on
+    /// the HTTP message phase (informational/final headers, body, trailers).
+    /// Receiving any other known frame type on a request stream is always an
+    /// error per RFC 9114, regardless of which endpoint opened the stream.
+    ///
+    /// HTTP message phase bookkeeping (`remote_initialized`, `data_received`,
+    /// `trailers_received`) only applies to peer-initiated streams, since it
+    /// tracks the receive direction.
+    fn validate_request_frame_type(&mut self, ty: u64) -> Result<()> {
+        // Frames that are never valid on a request stream, regardless of which
+        // endpoint opened it.
+        if matches!(
+            ty,
+            frame::CANCEL_PUSH_FRAME_TYPE_ID |
+                frame::SETTINGS_FRAME_TYPE_ID |
+                frame::GOAWAY_FRAME_TYPE_ID |
+                frame::MAX_PUSH_FRAME_TYPE_ID |
+                frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID |
+                frame::PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID
+        ) {
+            return Err(Error::FrameUnexpected);
+        }
+
+        // HTTP message phase bookkeeping only applies to peer-initiated
+        // streams, since it tracks the receive direction.
+        if self.is_local {
+            return Ok(());
+        }
+
+        match (ty, self.remote_initialized) {
+            (frame::HEADERS_FRAME_TYPE_ID, false) => {
+                self.remote_initialized = true;
+            },
+
+            (frame::DATA_FRAME_TYPE_ID, false) =>
+                return Err(Error::FrameUnexpected),
+
+            (frame::HEADERS_FRAME_TYPE_ID, true) => {
+                if self.trailers_received {
+                    return Err(Error::FrameUnexpected);
+                }
+
+                if self.data_received {
+                    self.trailers_received = true;
+                }
+            },
+
+            (frame::DATA_FRAME_TYPE_ID, true) => {
+                if self.trailers_received {
+                    return Err(Error::FrameUnexpected);
+                }
+
+                self.data_received = true;
+            },
+
+            // All other frames can be ignored regardless of stream state.
+            _ => (),
+        }
 
         Ok(())
     }

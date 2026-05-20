@@ -472,6 +472,7 @@ pub fn make_streamer(
         time::Instant::now(),
         trace,
         qlog::events::EventImportance::Extra,
+        qlog::streamer::EventTimePrecision::NanoSeconds,
         writer,
     );
 

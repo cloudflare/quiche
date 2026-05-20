@@ -359,17 +359,18 @@
 //! quiche defines a number of [feature flags] to reduce the amount of compiled
 //! code and dependencies:
 //!
-//! * `boringssl-vendored` (default): Build the vendored BoringSSL library.
-//!
-//! * `boringssl-boring-crate`: Use the BoringSSL library provided by the
-//!   [boring] crate. It takes precedence over `boringssl-vendored` if both
-//!   features are enabled.
+//! * `boringssl-boring-crate` (default): Use the BoringSSL library provided by
+//!   the [boring] crate.
 //!
 //! * `pkg-config-meta`: Generate pkg-config metadata file for libquiche.
 //!
 //! * `ffi`: Build and expose the FFI API.
 //!
 //! * `qlog`: Enable support for the [qlog] logging format.
+//!
+//! * `custom-client-dcid`: Allow clients to supply a custom DCID when
+//!   initiating a connection. Dangerous if the DCID does not meet QUIC's
+//!   unpredictability and length requirements.
 //!
 //! [feature flags]: https://doc.rust-lang.org/cargo/reference/manifest.html#the-features-section
 //! [boring]: https://crates.io/crates/boring
@@ -386,6 +387,8 @@ extern crate log;
 use std::cmp;
 
 use std::collections::VecDeque;
+
+use debug_panic::debug_panic;
 
 use std::net::SocketAddr;
 
@@ -1046,10 +1049,14 @@ impl Config {
 
     /// Sets the `ack_delay_exponent` transport parameter.
     ///
+    /// Values above the RFC 9000 maximum of
+    /// [`MAX_ACK_DELAY_EXPONENT`] (20) are clamped to that
+    /// maximum.
+    ///
     /// The default value is `3`.
     pub fn set_ack_delay_exponent(&mut self, v: u64) {
         self.local_transport_params.ack_delay_exponent =
-            cmp::min(v, octets::MAX_VAR_INT);
+            cmp::min(v, MAX_ACK_DELAY_EXPONENT);
     }
 
     /// Sets the `max_ack_delay` transport parameter.
@@ -1591,6 +1598,10 @@ where
     /// The number of STREAMS_BLOCKED frames received from the remote endpoint
     /// indicating the peer is blocked on opening new unidirectional streams.
     streams_blocked_uni_recv_count: u64,
+
+    /// The number of times send() was blocked because the anti-amplification
+    /// budget (bytes received × max_amplification_factor) was exhausted.
+    amplification_limited_count: u64,
 
     /// Tracks if the connection hit the peer's bidi or uni stream limit, and if
     /// STREAMS_BLOCKED frames are pending transmission.
@@ -2226,6 +2237,8 @@ impl<F: BufFactory> Connection<F> {
             streams_blocked_bidi_recv_count: 0,
             streams_blocked_uni_recv_count: 0,
 
+            amplification_limited_count: 0,
+
             streams_blocked_bidi_state: Default::default(),
             streams_blocked_uni_state: Default::default(),
 
@@ -2384,6 +2397,7 @@ impl<F: BufFactory> Connection<F> {
             now,
             trace,
             self.qlog.level,
+            qlog::streamer::EventTimePrecision::MicroSeconds,
             writer,
         );
 
@@ -2762,6 +2776,7 @@ impl<F: BufFactory> Connection<F> {
         params: TransportParams, is_server: bool, ssl: &mut boring::ssl::SslRef,
     ) -> Result<()> {
         use foreign_types_shared::ForeignTypeRef;
+        use std::mem::ManuallyDrop;
 
         // In order to apply the new parameter to the TLS state before TPs are
         // written into a TLS message, we need to re-encode all TPs immediately.
@@ -2769,17 +2784,14 @@ impl<F: BufFactory> Connection<F> {
         // Since we don't have direct access to the main `Connection` object, we
         // need to re-create the `Handshake` state from the `SslRef`.
         //
-        // SAFETY: the `Handshake` object must not be drop()ed, otherwise it
-        // would free the underlying BoringSSL structure.
-        let mut handshake =
-            unsafe { tls::Handshake::from_ptr(ssl.as_ptr() as _) };
-        handshake.set_quic_transport_params(&params, is_server)?;
+        // Wrap the temporary `Handshake` in `ManuallyDrop` because this is only
+        // a borrowed view of `ssl`. The caller retains ownership of the
+        // underlying BoringSSL object.
+        let mut handshake = ManuallyDrop::new(unsafe {
+            tls::Handshake::from_ptr(ssl.as_ptr() as _)
+        });
 
-        // Avoid running `drop(handshake)` as that would free the underlying
-        // handshake state.
-        std::mem::forget(handshake);
-
-        Ok(())
+        handshake.set_quic_transport_params(&params, is_server)
     }
 
     /// Sets the `use_initial_max_data_as_flow_control_win` flag during SSL
@@ -4261,9 +4273,10 @@ impl<F: BufFactory> Connection<F> {
 
                     // Retransmit HANDSHAKE_DONE only if it hasn't been acked at
                     // least once already.
-                    frame::Frame::HandshakeDone if !self.handshake_done_acked => {
-                        self.handshake_done_sent = false;
-                    },
+                    frame::Frame::HandshakeDone =>
+                        if !self.handshake_done_acked {
+                            self.handshake_done_sent = false;
+                        },
 
                     frame::Frame::MaxStreamData { stream_id, .. } => {
                         if self.streams.get(stream_id).is_some() {
@@ -4306,15 +4319,80 @@ impl<F: BufFactory> Connection<F> {
                         self.ids.mark_retire_dcid_seq(seq_num, true)?;
                     },
 
-                    frame::Frame::Ping {
-                        mtu_probe: Some(failed_probe),
-                    } =>
-                        if let Some(pmtud) = p.pmtud.as_mut() {
-                            trace!("pmtud probe dropped: {failed_probe}");
-                            pmtud.failed_probe(failed_probe);
-                        },
+                    frame::Frame::Ping { mtu_probe } => {
+                        // Ping frames are not retransmitted.
+                        if let Some(failed_probe) = mtu_probe {
+                            if let Some(pmtud) = p.pmtud.as_mut() {
+                                trace!("pmtud probe dropped: {failed_probe}");
+                                pmtud.failed_probe(failed_probe);
+                            }
+                        }
+                    },
 
-                    _ => (),
+                    // Sent as StreamHeader frames. Stream frames are never
+                    // generated by quiche.
+                    frame::Frame::Stream { .. } => {
+                        debug_panic!(
+                            "Unexpected frame lost: Stream. quiche should \
+                             have tracked retransmittable stream data as \
+                             StreamHeader frames."
+                        );
+                    },
+
+                    // Sent as CryptoHeader frames. Crypto frames are never
+                    // generated by quiche.
+                    frame::Frame::Crypto { .. } => {
+                        debug_panic!(
+                            "Unexpected frame lost: Crypto. quiche should \
+                             have tracked retransmittable crypto data as \
+                             CryptoHeader frames."
+                        );
+                    },
+
+                    // NewToken frames are never sent by quiche; they are not
+                    // implemented.
+                    frame::Frame::NewToken { .. } => {
+                        debug_panic!(
+                            "Unexpected frame lost: NewToken. quiche used to \
+                             not implement NewToken frames, retransmission of \
+                             these frames is not implemented."
+                        );
+                    },
+
+                    // Data blocked frames are an optional advisory
+                    // signal. We choose to not retransmit them to
+                    // avoid unnecessary network usage.
+                    frame::Frame::DataBlocked { .. } |
+                    frame::Frame::StreamDataBlocked { .. } => (),
+
+                    // Path challenge and response have their own
+                    // retry logic. They should not be retransmitted
+                    // normally since according to RFC 9000 Section
+                    // 8.2.2: "An endpoint MUST NOT send more than one
+                    // PATH_RESPONSE frame in response to one
+                    // PATH_CHALLENGE frame".
+                    frame::Frame::PathChallenge { .. } |
+                    frame::Frame::PathResponse { .. } => (),
+
+                    // From RFC 9000 Section 13.3: CONNECTION_CLOSE
+                    // frames, are not sent again when packet loss is
+                    // detected. Resending these signals is described
+                    // in Section 10.
+                    frame::Frame::ConnectionClose { .. } |
+                    frame::Frame::ApplicationClose { .. } => (),
+
+                    // Padding doesn't require retransmission.
+                    frame::Frame::Padding { .. } => (),
+
+                    frame::Frame::DatagramHeader { .. } |
+                    frame::Frame::Datagram { .. } => {
+                        // Datagrams do not require retransmission.  Just update
+                        // stats.
+                        p.dgram_lost_count = p.dgram_lost_count.saturating_add(1);
+                    },
+                    // IMPORTANT: Do not add an exhaustive catch
+                    // all. We want to add explicit handling for frame
+                    // types that can be safely ignored when lost.
                 }
             }
         }
@@ -5439,7 +5517,16 @@ impl<F: BufFactory> Connection<F> {
             path.recovery.update_app_limited(false);
         }
 
+        let had_send_budget = path.max_send_bytes > 0;
         path.max_send_bytes = path.max_send_bytes.saturating_sub(written);
+        if self.is_server &&
+            !path.verified_peer_address &&
+            had_send_budget &&
+            path.max_send_bytes == 0
+        {
+            self.amplification_limited_count =
+                self.amplification_limited_count.saturating_add(1);
+        }
 
         // On the client, drop initial state after sending an Handshake packet.
         if !self.is_server && hdr_ty == Type::Handshake {
@@ -5869,7 +5956,7 @@ impl<F: BufFactory> Connection<F> {
     /// The application should retry the operation once the stream is
     /// reported as writable again.
     pub fn stream_send_zc(
-        &mut self, stream_id: u64, buf: F::Buf, len: Option<usize>, fin: bool,
+        &mut self, stream_id: u64, buf: F::Buf, fin: bool,
     ) -> Result<(usize, Option<F::Buf>)>
     where
         F::Buf: BufSplit,
@@ -5882,8 +5969,7 @@ impl<F: BufFactory> Connection<F> {
              buf: F::Buf,
              cap: usize,
              fin: bool| {
-                let len = len.unwrap_or(usize::MAX).min(cap);
-                let (sent, remaining) = stream.send.append_buf(buf, len, fin)?;
+                let (sent, remaining) = stream.send.append_buf(buf, cap, fin)?;
                 Ok((sent, (sent, remaining)))
             },
         )
@@ -6246,6 +6332,9 @@ impl<F: BufFactory> Connection<F> {
     }
 
     /// Returns the stream's send capacity in bytes.
+    ///
+    /// The returned capacity takes into account the stream's flow control limit
+    /// as well as connection level flow and congestion control.
     ///
     /// If the specified stream doesn't exist (including when it has already
     /// been completed and closed), the [`InvalidStreamState`] error will be
@@ -7213,12 +7302,16 @@ impl<F: BufFactory> Connection<F> {
         self.ids.active_source_cids()
     }
 
-    /// Returns the number of source Connection IDs that should be provided
-    /// to the peer without exceeding the limit it advertised.
+    /// Returns the number of additional source Connection IDs that can be
+    /// provided to the peer without exceeding the limit it advertised.
     ///
-    /// This will automatically limit the number of Connection IDs to the
-    /// minimum between the locally configured active connection ID limit,
-    /// and the one sent by the peer.
+    /// The limit is the minimum of the locally configured active connection
+    /// ID limit and the one sent by the peer.
+    ///
+    /// Returns `0` when the peer's limit is already reached or temporarily
+    /// exceeded (e.g. during a SCID rotation where a retirement is in
+    /// flight and `active_scids()` transiently exceeds the advertised
+    /// limit).
     ///
     /// To obtain the maximum possible value allowed by the peer an application
     /// can instead inspect the [`peer_active_conn_id_limit`] value.
@@ -7231,7 +7324,7 @@ impl<F: BufFactory> Connection<F> {
             self.local_transport_params.active_conn_id_limit,
         ) as usize;
 
-        max_active_source_cids - self.active_scids()
+        max_active_source_cids.saturating_sub(self.active_scids())
     }
 
     /// Requests the retirement of the destination Connection ID used by the
@@ -7721,6 +7814,7 @@ impl<F: BufFactory> Connection<F> {
             streams_blocked_bidi_recv_count: self.streams_blocked_bidi_recv_count,
             streams_blocked_uni_recv_count: self.streams_blocked_uni_recv_count,
             path_challenge_rx_count: self.path_challenge_rx_count,
+            amplification_limited_count: self.amplification_limited_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
             tx_buffered_state: self.tx_buffered_state,
         }
@@ -9261,6 +9355,7 @@ impl std::fmt::Display for AddrTupleFmt {
 ///
 /// [`stats()`]: struct.Connection.html#method.stats
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct Stats {
     /// The number of QUIC packets received.
     pub recv: usize,
@@ -9340,6 +9435,10 @@ pub struct Stats {
     /// The total number of PATH_CHALLENGE frames that were received.
     pub path_challenge_rx_count: u64,
 
+    /// The number of times send() was blocked because the anti-amplification
+    /// budget (bytes received × max_amplification_factor) was exhausted.
+    pub amplification_limited_count: u64,
+
     /// Total duration during which this side of the connection was
     /// actively sending bytes or waiting for those bytes to be acked.
     pub bytes_in_flight_duration: Duration,
@@ -9394,6 +9493,7 @@ pub use crate::transport_params::TransportParams;
 pub use crate::transport_params::UnknownTransportParameter;
 pub use crate::transport_params::UnknownTransportParameterIterator;
 pub use crate::transport_params::UnknownTransportParameters;
+pub use crate::transport_params::MAX_ACK_DELAY_EXPONENT;
 
 pub use crate::buffers::BufFactory;
 pub use crate::buffers::BufSplit;

@@ -1,0 +1,29 @@
+# Use `cross`'s `edge` images instead of the default `latest` (pinned to
+# cross 0.2.5, published 2022). The stock `latest` images for these
+# targets ship pre-C++17 g++ toolchains, which can't build BoringSSL 5.x
+# (it requires C++17 headers like `<string_view>`). The `edge` images
+# are rebuilt regularly from cross's `main` branch and carry a newer
+# toolchain.
+
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"
+
+[target.armv7-unknown-linux-gnueabihf]
+image = "ghcr.io/cross-rs/armv7-unknown-linux-gnueabihf:edge"
+
+# The `edge` image for i686 is a 32-bit-native userspace and ships only
+# the unprefixed `gcc`/`g++` toolchain. We need:
+#   - 32-bit dev libraries (`Scrt1.o`, `crti.o`, etc.) so cmake's
+#     compiler-detection probe can link a trivial test program.
+#   - Symlinks for `i686-linux-gnu-{gcc,g++}` so `cross` (which sets
+#     `linker=i686-linux-gnu-gcc`) and `cc-rs`-based crates (e.g.,
+#     `ring`) can find a compiler under the cross-prefixed names they
+#     expect.
+[target.i686-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/i686-unknown-linux-gnu:edge"
+pre-build = [
+    "dpkg --add-architecture i386",
+    "apt-get update && apt-get install --assume-yes libc6-dev-i386 g++-multilib",
+    "ln -sf /usr/bin/gcc /usr/local/bin/i686-linux-gnu-gcc",
+    "ln -sf /usr/bin/g++ /usr/local/bin/i686-linux-gnu-g++",
+]

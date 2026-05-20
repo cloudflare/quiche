@@ -145,6 +145,7 @@ impl Bandwidth {
     }
 
     pub fn transfer_time(&self, bytes: usize) -> Duration {
+        #[allow(clippy::manual_checked_ops)]
         if self.bits_per_second == 0 {
             Duration::ZERO
         } else {

@@ -86,6 +86,8 @@ use std::time::Duration;
 use datagram_socket::DatagramSocketRecv;
 use datagram_socket::DatagramSocketSend;
 use foundations::telemetry::log;
+use qlog::writer::make_qlog_writer_from_path;
+use qlog::writer::qlog_file_name;
 
 use crate::http3::settings::Http3Settings;
 use crate::metrics::DefaultMetrics;
@@ -126,17 +128,6 @@ pub use self::hooks::ConnectionHook;
 
 /// Alias of [quiche::Connection] used internally by the crate.
 pub type QuicheConnection = quiche::Connection<crate::buf_factory::BufFactory>;
-
-fn make_qlog_writer(
-    dir: &str, id: &str,
-) -> std::io::Result<std::io::BufWriter<std::fs::File>> {
-    let mut path = std::path::PathBuf::from(dir);
-    let filename = format!("{id}.sqlog");
-    path.push(filename);
-
-    let f = std::fs::File::create(&path)?;
-    Ok(std::io::BufWriter::new(f))
-}
 
 /// Connects to an HTTP/3 server using `socket` and the default client
 /// configuration.
@@ -196,6 +187,27 @@ where
     let mut client_config = Config::new(params, socket.capabilities)?;
     let scid = SimpleConnectionIdGenerator.new_connection_id();
 
+    #[cfg(feature = "custom-client-dcid")]
+    let mut quiche_conn = if let Some(dcid) = &params.dcid {
+        quiche::connect_with_dcid_and_buffer_factory(
+            host,
+            &scid,
+            dcid,
+            socket.local_addr,
+            socket.peer_addr,
+            client_config.as_mut(),
+        )?
+    } else {
+        quiche::connect_with_buffer_factory(
+            host,
+            &scid,
+            socket.local_addr,
+            socket.peer_addr,
+            client_config.as_mut(),
+        )?
+    };
+
+    #[cfg(not(feature = "custom-client-dcid"))]
     let mut quiche_conn = quiche::connect_with_buffer_factory(
         host,
         &scid,
@@ -204,6 +216,9 @@ where
         client_config.as_mut(),
     )?;
 
+    #[cfg(feature = "custom-client-dcid")]
+    log::info!("created unestablished quiche::Connection"; "scid" => ?scid, "provided_dcid" => ?params.dcid);
+    #[cfg(not(feature = "custom-client-dcid"))]
     log::info!("created unestablished quiche::Connection"; "scid" => ?scid);
 
     if let Some(session) = &params.session {
@@ -218,9 +233,13 @@ where
     if let Some(qlog_dir) = &client_config.qlog_dir {
         log::info!("setting up qlogs"; "qlog_dir"=>qlog_dir);
         let id = format!("{:?}", &scid);
-        if let Ok(writer) = make_qlog_writer(qlog_dir, &id) {
+        let path = std::path::Path::new(qlog_dir)
+            .join(qlog_file_name(&id, client_config.qlog_compression));
+        if let Ok(writer) =
+            make_qlog_writer_from_path(&path, client_config.qlog_compression)
+        {
             quiche_conn.set_qlog(
-                std::boxed::Box::new(writer),
+                writer,
                 "tokio-quiche qlog".to_string(),
                 format!("tokio-quiche qlog id={id}"),
             );
@@ -243,7 +262,7 @@ where
         Arc::clone(&socket_tx),
         socket_rx,
         socket.local_addr,
-        ClientConnector::new(socket_tx, quiche_conn),
+        ClientConnector::new(socket_tx, Box::new(quiche_conn)),
         DefaultMetrics,
     );
 
@@ -286,6 +305,7 @@ where
         ConnectionAcceptorConfig {
             disable_client_ip_validation: config.disable_client_ip_validation,
             qlog_dir: config.qlog_dir.clone(),
+            qlog_compression: config.qlog_compression,
             keylog_file: config
                 .keylog_file
                 .as_ref()

@@ -23,6 +23,15 @@ readme = "README.md"
 keywords = ["quic", "http3"]
 categories = ["network-programming"]
 
+[workspace.lints.clippy]
+mem_forget = "deny"
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(capture_keylogs)',
+  'cfg(test_invalid_len_compilation_fail)',
+] }
+
 [workspace.metadata.release]
 pre-release-commit-message = "{{crate_name}}: release {{version}}"
 consolidate-commits = false
@@ -39,7 +48,8 @@ buffer-pool = { version = "0.2.1", path = "./buffer-pool" }
 bytes = { version = "1.11.1" }
 crossbeam = { version = "0.8.1", default-features = false }
 dashmap = { version = "6" }
-datagram-socket = { version = "0.7.0", path = "./datagram-socket" }
+datagram-socket = { version = "0.8.0", path = "./datagram-socket" }
+debug_panic = "0.2.1"
 env_logger = "0.11"
 foundations = { version = ">=4,<6", default-features = false }
 futures = { version = "0.3" }
@@ -54,14 +64,14 @@ netlog = { version = "0.1", path="./netlog" }
 octets = { version = "0.3.5", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
-qlog = { version = "0.16.0", path = "./qlog" }
-quiche = { version = "0.26.1", path = "./quiche" }
+qlog = { version = "0.18.0", path = "./qlog" }
+quiche = { version = "0.29.0", path = "./quiche" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
 rstest = { version = "0.26.1" }
 serde = { version = "1" }
 serde_json = { version = "1" }
-serde_with = { version = "~3.17", default-features = false }
+serde_with = { version = "3.20.0", default-features = false }
 slog-scope = { version = "4.0" }
 slog-stdlog = { version = "4.1.1" }
 smallvec = { version = "1.10", default-features = false }
@@ -69,7 +79,7 @@ task-killswitch = { version = "0.2.1", path = "./task-killswitch" }
 thiserror = { version = "2" }
 humantime = { version = "2" }
 tokio = { version = "1.44", default-features = false }
-tokio-quiche = { version = "0.16.1", path = "./tokio-quiche" }
+tokio-quiche = { version = "0.19.0", path = "./tokio-quiche" }
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.13" }
 url = { version = "2" }

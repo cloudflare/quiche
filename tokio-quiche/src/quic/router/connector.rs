@@ -58,7 +58,7 @@ pub(crate) struct ClientConnector<Tx> {
 /// State the connecting connection is in.
 enum ConnectionState {
     /// Connection hasn't had any initials sent for it
-    Queued(QuicheConnection),
+    Queued(Box<QuicheConnection>),
     /// It's currently in a QUIC handshake
     Pending(PendingConnection),
     /// It's been returned to the
@@ -67,7 +67,7 @@ enum ConnectionState {
 }
 
 impl ConnectionState {
-    fn take_if_queued(&mut self) -> Option<QuicheConnection> {
+    fn take_if_queued(&mut self) -> Option<Box<QuicheConnection>> {
         match mem::replace(self, Self::Returned) {
             Self::Queued(conn) => Some(conn),
             state => {
@@ -94,7 +94,7 @@ impl ConnectionState {
 /// A [`PendingConnection`] holds an internal [`quiche::Connection`] and an
 /// optional timeout [`Key`].
 struct PendingConnection {
-    conn: QuicheConnection,
+    conn: Box<QuicheConnection>,
     timeout_key: Option<Key>,
     handshake_start_time: Instant,
 }
@@ -103,7 +103,9 @@ impl<Tx> ClientConnector<Tx>
 where
     Tx: DatagramSocketSend + Send + 'static,
 {
-    pub(crate) fn new(socket_tx: Arc<Tx>, connection: QuicheConnection) -> Self {
+    pub(crate) fn new(
+        socket_tx: Arc<Tx>, connection: Box<QuicheConnection>,
+    ) -> Self {
         Self {
             socket_tx: MaybeConnectedSocket::new(socket_tx),
             connection: ConnectionState::Queued(connection),
@@ -115,7 +117,7 @@ where
     ///
     /// This sends any pending packets and arms the connection's timeout timer.
     fn set_connection_to_pending(
-        &mut self, mut conn: QuicheConnection,
+        &mut self, mut conn: Box<QuicheConnection>,
     ) -> io::Result<()> {
         simple_conn_send(&self.socket_tx, &mut conn)?;
 

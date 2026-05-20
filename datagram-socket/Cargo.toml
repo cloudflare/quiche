@@ -1,12 +1,15 @@
 [package]
 name = "datagram-socket"
-version = "0.7.0"
+version = "0.8.0"
 repository = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 description = "Utilities for working with datagram sockets"
+
+[lints]
+workspace = true
 
 [dependencies]
 bytes = { workspace = true }

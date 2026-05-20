@@ -301,8 +301,6 @@ use qlog::events::http3::Http3Frame;
 #[cfg(feature = "qlog")]
 use qlog::events::http3::Initiator;
 #[cfg(feature = "qlog")]
-use qlog::events::http3::PriorityTargetStreamType;
-#[cfg(feature = "qlog")]
 use qlog::events::http3::StreamType;
 #[cfg(feature = "qlog")]
 use qlog::events::http3::StreamTypeSet;
@@ -927,6 +925,7 @@ struct QpackStreams {
 ///
 /// [`stats()`]: struct.Connection.html#method.stats
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct Stats {
     /// The number of bytes received on the QPACK encoder stream.
     pub qpack_encoder_stream_recv_bytes: u64,
@@ -1105,8 +1104,10 @@ impl Connection {
     ///
     /// The [`StreamBlocked`] error is returned when the underlying QUIC stream
     /// doesn't have enough capacity for the operation to complete. When this
-    /// happens the application should retry the operation once the stream is
-    /// reported as writable again.
+    /// happens the application should retry the **entire** `send_request` call
+    /// once the stream is reported as writable again. Any partial state created
+    /// by the failed call is rolled back, so repeating the call with the same
+    /// arguments is safe.
     ///
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
@@ -1138,7 +1139,18 @@ impl Connection {
             return Err(e.into());
         };
 
-        self.send_headers(conn, stream_id, headers, fin)?;
+        if let Err(e) = self.send_headers(conn, stream_id, headers, fin) {
+            // If the stream was blocked before any header bytes were written,
+            // the QUIC stream exists but carries no H3 data yet. Roll back the
+            // H3-layer stream entry so the stream ID is not consumed and a
+            // subsequent retry of `send_request` starts from a clean state,
+            // consistent with the `StreamBlocked` path above.
+            if e == Error::StreamBlocked {
+                self.streams.remove(&stream_id);
+            }
+
+            return Err(e);
+        }
 
         // To avoid skipping stream IDs, we only calculate the next available
         // stream ID when a request has been successfully buffered.
@@ -1473,6 +1485,7 @@ impl Connection {
 
             let frame = Http3Frame::Headers {
                 headers: qlog_headers,
+                raw: None,
             };
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
                 stream_id,
@@ -1576,19 +1589,28 @@ impl Connection {
                     body_len += header.len();
                 }
 
-                let (mut n, rem) = conn.stream_send_zc(
-                    stream_id,
-                    body.clone(),
-                    Some(body_len),
-                    fin,
-                )?;
+                let remainder = body.split_at(body_len);
+                // body now contains the first `body_len` bytes of the original
+                // buffer
+                debug_assert_eq!(body.as_ref().len(), body_len);
+
+                let (mut n, rem) =
+                    conn.stream_send_zc(stream_id, body.clone(), fin)?;
+                if rem.as_ref().is_some_and(|v| !v.as_ref().is_empty()) {
+                    // `rem` should always be None or empty.
+                    // `do_send_body()` should have checked the capacity and
+                    // ensured that there is enough capacity to write the header +
+                    // fully body.
+                    debug_assert!(false);
+                    return Err(Error::InternalError);
+                }
 
                 if with_prefix {
                     n -= header.len();
                 }
 
-                if let Some(rem) = rem {
-                    let _ = std::mem::replace(body, rem);
+                if !remainder.as_ref().is_empty() {
+                    let _ = std::mem::replace(body, remainder);
                 }
 
                 Ok((n, n))
@@ -1618,7 +1640,7 @@ impl Connection {
         let len = body.as_ref().len();
 
         // Validate that it is sane to send data on the stream.
-        if stream_id % 4 != 0 {
+        if !stream_id.is_multiple_of(4) {
             return Err(Error::FrameUnexpected);
         }
 
@@ -1685,6 +1707,12 @@ impl Connection {
         // Sending body separately avoids unnecessary copy.
         let (written, ret) =
             write_fn(conn, &d[..off], stream_id, body, body_len, fin)?;
+        if written != body_len {
+            // This should never happen. If it does, it means we wrote an
+            // incorrect frame length and thus we can't really continue.
+            debug_assert!(false);
+            return Err(Error::InternalError);
+        }
 
         trace!(
             "{} tx frm DATA stream={} len={} fin={}",
@@ -1890,7 +1918,7 @@ impl Connection {
             return Err(Error::FrameUnexpected);
         }
 
-        if stream_id % 4 != 0 {
+        if !stream_id.is_multiple_of(4) {
             return Err(Error::FrameUnexpected);
         }
 
@@ -1948,9 +1976,10 @@ impl Connection {
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::PriorityUpdate {
-                target_stream_type: PriorityTargetStreamType::Request,
-                prioritized_element_id: stream_id,
+                stream_id: Some(stream_id),
+                push_id: None,
                 priority_field_value: field_value.clone(),
+                raw: None,
             };
 
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
@@ -2142,7 +2171,7 @@ impl Connection {
             id = 0;
         }
 
-        if self.is_server && id % 4 != 0 {
+        if self.is_server && !id.is_multiple_of(4) {
             return Err(Error::IdError);
         }
 
@@ -2323,7 +2352,10 @@ impl Connection {
         );
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-            let frame = Http3Frame::Reserved { length: Some(0) };
+            let frame = Http3Frame::Reserved {
+                frame_type_bytes: grease_frame1,
+                raw: None,
+            };
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
                 stream_id,
                 length: Some(0),
@@ -2352,7 +2384,8 @@ impl Connection {
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::Reserved {
-                length: Some(grease_payload.len() as u64),
+                frame_type_bytes: grease_frame2,
+                raw: None,
             };
             let ev_data = EventData::Http3FrameCreated(FrameCreated {
                 stream_id,
@@ -2588,16 +2621,16 @@ impl Connection {
                         },
 
                         stream::Type::Push => {
-                            // Only clients can receive push stream.
-                            if self.is_server {
-                                conn.close(
-                                    true,
-                                    Error::StreamCreationError.to_wire(),
-                                    b"Server received push stream.",
-                                )?;
+                            // Server push is not supported, so push streams at
+                            // either client or server is a critical protocol
+                            // error.
+                            conn.close(
+                                true,
+                                Error::StreamCreationError.to_wire(),
+                                b"Received push stream.",
+                            )?;
 
-                                return Err(Error::StreamCreationError);
-                            }
+                            return Err(Error::StreamCreationError);
                         },
 
                         stream::Type::QpackEncoder => {
@@ -2981,6 +3014,7 @@ impl Connection {
 
                     let frame = Http3Frame::Headers {
                         headers: qlog_headers,
+                        raw: None,
                     };
 
                     let ev_data = EventData::Http3FrameParsed(FrameParsed {
@@ -3068,7 +3102,7 @@ impl Connection {
                     return Err(Error::FrameUnexpected);
                 }
 
-                if stream_id % 4 != 0 {
+                if !stream_id.is_multiple_of(4) {
                     conn.close(
                         true,
                         Error::FrameUnexpected.to_wire(),
@@ -3613,7 +3647,6 @@ mod tests {
         assert!(grease_value() < 2u64.pow(62) - 1);
     }
 
-    #[cfg(not(feature = "openssl"))] // 0-RTT not supported when using openssl/quictls
     #[test]
     fn h3_handshake_0rtt() {
         let mut buf = [0; 65535];
@@ -4674,6 +4707,43 @@ mod tests {
 
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
+    }
+
+    #[test]
+    /// Server push streams from client are not allowed by the protocol.
+    fn push_stream_from_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        s.client
+            .open_uni_stream(
+                &mut s.pipe.client,
+                stream::HTTP3_PUSH_STREAM_TYPE_ID,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Err(Error::StreamCreationError));
+    }
+
+    #[test]
+    /// Server push streams from server are not allowed since the client does
+    /// not advertise server push support by default.
+    fn push_stream_from_server() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        s.server
+            .open_uni_stream(
+                &mut s.pipe.server,
+                stream::HTTP3_PUSH_STREAM_TYPE_ID,
+            )
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Err(Error::StreamCreationError));
     }
 
     #[test]
@@ -5945,6 +6015,76 @@ mod tests {
     }
 
     #[test]
+    /// Ensure that the connection does not consume a stream ID when
+    /// send_request fails with StreamBlocked due to hitting the
+    /// MAX_DATA flow control limit when attempting to send headers.
+    /// The headers are sent successfully after a MAX_DATA update.
+    fn headers_blocked_by_max_data_success_on_retry() {
+        let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(70);
+        config.set_initial_max_stream_data_bidi_local(150);
+        config.set_initial_max_stream_data_bidi_remote(150);
+        config.set_initial_max_stream_data_uni(150);
+        config.set_initial_max_streams_bidi(100);
+        config.set_initial_max_streams_uni(5);
+        config.verify_peer(false);
+
+        let h3_config = Config::new().unwrap();
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+
+        s.handshake().unwrap();
+
+        let req = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test/with/long/url"),
+        ];
+
+        // After the HTTP handshake, some bytes of connection flow
+        // control have been consumed.  The serialized request does
+        // not fit in the remaining connection-level flow control
+        // limit.  send_request fails without creating a stream.
+        assert_eq!(
+            s.client.send_request(&mut s.pipe.client, &req, true),
+            Err(Error::StreamBlocked)
+        );
+
+        // Verify that stream 0 does not exist in the H3 stream map after the
+        // failed attempt.
+        assert!(!s.client.streams.contains_key(&0));
+
+        // Emit the control stream data and drain it at the server to give back
+        // flow control.
+        s.advance().ok();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        s.advance().ok();
+
+        // Now we can send the request. The stream ID should be 0 (not 4),
+        // confirming that the blocked attempt did not consume the stream ID.
+        let stream_id = s.client.send_request(&mut s.pipe.client, &req, true);
+        assert_eq!(stream_id, Ok(0));
+        assert!(s.client.streams.contains_key(&0));
+        assert!(!s.client.streams.contains_key(&4));
+
+        // Subsequent request should use stream ID 4.
+        let stream_id2 = s.client.send_request(&mut s.pipe.client, &req, true);
+        assert_eq!(stream_id2, Ok(4));
+        assert!(s.client.streams.contains_key(&0));
+        assert!(s.client.streams.contains_key(&4));
+
+        s.advance().ok();
+    }
+
+    #[test]
     /// Ensure STREAM_DATA_BLOCKED is not emitted multiple times with the same
     /// offset when trying to send large bodies.
     fn send_body_truncation_stream_blocked() {
@@ -6575,6 +6715,127 @@ mod tests {
             h3_config
                 .set_additional_settings(vec![(frame::SETTINGS_H3_DATAGRAM, 43)]),
             Err(Error::SettingsError)
+        );
+    }
+
+    #[test]
+    /// Tests that a client rejects a SETTINGS frame received on a request
+    /// stream.
+    fn settings_on_request_stream_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, _req) = s.send_request(true).unwrap();
+
+        let settings = frame::Frame::Settings {
+            max_field_section_size: None,
+            qpack_max_table_capacity: None,
+            qpack_blocked_streams: None,
+            connect_protocol_enabled: None,
+            h3_datagram: None,
+            grease: None,
+            additional_settings: Default::default(),
+            raw: Default::default(),
+        };
+
+        s.send_frame_server(settings, stream, false).unwrap();
+
+        // The client MUST treat this as H3_FRAME_UNEXPECTED.
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+        assert_eq!(
+            s.pipe.client.local_error(),
+            Some(&crate::ConnectionError {
+                is_app: true,
+                error_code: WireErrorCode::FrameUnexpected as u64,
+                reason: format!(
+                    "Unexpected frame type {}",
+                    frame::SETTINGS_FRAME_TYPE_ID
+                )
+                .into_bytes(),
+            })
+        );
+    }
+
+    #[test]
+    /// Tests that a client rejects a CANCEL_PUSH frame received on a request
+    /// stream.
+    fn cancel_push_on_request_stream_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, _req) = s.send_request(true).unwrap();
+        let cancel_push = frame::Frame::CancelPush { push_id: 0 };
+        s.send_frame_server(cancel_push, stream, false).unwrap();
+
+        // The client MUST treat this as H3_FRAME_UNEXPECTED.
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+        assert_eq!(
+            s.pipe.client.local_error(),
+            Some(&crate::ConnectionError {
+                is_app: true,
+                error_code: WireErrorCode::FrameUnexpected as u64,
+                reason: format!(
+                    "Unexpected frame type {}",
+                    frame::CANCEL_PUSH_FRAME_TYPE_ID
+                )
+                .into_bytes(),
+            })
+        );
+    }
+
+    #[test]
+    /// Tests that a client rejects a GOAWAY frame received on a request
+    /// stream.
+    fn goaway_on_request_stream_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, _req) = s.send_request(true).unwrap();
+        let goaway = frame::Frame::GoAway { id: 0 };
+
+        s.send_frame_server(goaway, stream, false).unwrap();
+
+        // The client MUST treat this as H3_FRAME_UNEXPECTED.
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+        assert_eq!(
+            s.pipe.client.local_error(),
+            Some(&crate::ConnectionError {
+                is_app: true,
+                error_code: WireErrorCode::FrameUnexpected as u64,
+                reason: format!(
+                    "Unexpected frame type {}",
+                    frame::GOAWAY_FRAME_TYPE_ID
+                )
+                .into_bytes(),
+            })
+        );
+    }
+
+    #[test]
+    /// Tests that a client rejects a MAX_PUSH_ID frame received on a request
+    /// stream.
+    fn max_push_id_on_request_stream_client() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let (stream, _req) = s.send_request(true).unwrap();
+        let max_push_id = frame::Frame::MaxPushId { push_id: 0 };
+
+        s.send_frame_server(max_push_id, stream, false).unwrap();
+
+        // The client MUST treat this as H3_FRAME_UNEXPECTED.
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+        assert_eq!(
+            s.pipe.client.local_error(),
+            Some(&crate::ConnectionError {
+                is_app: true,
+                error_code: WireErrorCode::FrameUnexpected as u64,
+                reason: format!(
+                    "Unexpected frame type {}",
+                    frame::MAX_PUSH_FRAME_TYPE_ID
+                )
+                .into_bytes(),
+            })
         );
     }
 

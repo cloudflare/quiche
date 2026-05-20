@@ -141,8 +141,6 @@ pub enum H3ConnectionError {
     ControllerWentAway,
     /// Other error at the connection, but not stream level.
     H3(h3::Error),
-    /// Received a GOAWAY frame from the peer.
-    GoAway,
     /// Received data for a stream that was closed or never opened.
     NonexistentStream,
     /// The server's post-accept timeout was hit.
@@ -169,7 +167,6 @@ impl fmt::Display for H3ConnectionError {
         let s: &dyn fmt::Display = match self {
             Self::ControllerWentAway => &"controller went away",
             Self::H3(e) => e,
-            Self::GoAway => &"goaway",
             Self::NonexistentStream => &"nonexistent stream",
             Self::PostAcceptTimeout => &"post accept timeout hit",
         };
@@ -261,6 +258,9 @@ pub enum H3Event {
     /// don't result from RST_STREAM frames, unlike the
     /// [`H3Event::ResetStream`] variant.
     StreamClosed { stream_id: u64 },
+    /// A GOAWAY frame was received from the peer containing `id`,
+    /// as described in https://datatracker.ietf.org/doc/html/rfc9114#section-5.2.
+    GoAway { id: u64 },
 }
 
 impl H3Event {
@@ -330,6 +330,10 @@ pub struct H3Driver<H: DriverHooks> {
     h3_event_sender: mpsc::UnboundedSender<H::Event>,
     /// Receives [`H3Command`]s from the [H3Controller] paired with this driver.
     cmd_recv: mpsc::UnboundedReceiver<H::Command>,
+    /// A sender that feeds back into `cmd_recv`. Used by hooks that need to
+    /// re-queue commands (e.g. retrying blocked requests) without access to
+    /// the [H3Controller]'s copy of the sender.
+    cmd_sender: mpsc::UnboundedSender<H::Command>,
 
     /// A map of stream IDs to their [StreamCtx]. This is mainly used to
     /// retrieve the internal Tokio channels associated with the stream.
@@ -378,6 +382,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 hooks: H::new(&http3_settings),
                 h3_event_sender,
                 cmd_recv,
+                cmd_sender: cmd_sender.clone(),
 
                 stream_map: BTreeMap::new(),
                 flow_map: BTreeMap::new(),
@@ -398,6 +403,15 @@ impl<H: DriverHooks> H3Driver<H> {
                 h3_event_recv: Some(h3_event_recv),
             },
         )
+    }
+
+    /// Returns a sender that feeds back into this driver's own `cmd_recv`.
+    ///
+    /// Hooks that need to re-queue commands (e.g. retrying a request that
+    /// was temporarily blocked) can use this sender without needing access
+    /// to the paired [H3Controller].
+    pub(crate) fn self_cmd_sender(&self) -> &mpsc::UnboundedSender<H::Command> {
+        &self.cmd_sender
     }
 
     /// Retrieve the [FlowCtx] associated with the given `flow_id`. If no
@@ -667,7 +681,12 @@ impl<H: DriverHooks> H3Driver<H> {
             },
 
             h3::Event::PriorityUpdate => Ok(()),
-            h3::Event::GoAway => Err(H3ConnectionError::GoAway),
+            h3::Event::GoAway => {
+                self.h3_event_sender
+                    .send(H3Event::GoAway { id: stream_id }.into())
+                    .map_err(|_| H3ConnectionError::ControllerWentAway)?;
+                Ok(())
+            },
         }
     }
 
@@ -1268,11 +1287,11 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
             .maximum_writable_streams()
             .observe(max_stream_seen as f64);
 
+        Self::record_quiche_error(quiche_conn, metrics);
+
         let Err(work_loop_error) = work_loop_result else {
             return;
         };
-
-        Self::record_quiche_error(quiche_conn, metrics);
 
         let Some(h3_err) = work_loop_error.downcast_ref::<H3ConnectionError>()
         else {

@@ -344,10 +344,15 @@ impl Frame {
             // Qlog expects the `headers` to be represented as an array of
             // name:value pairs. At this stage, we only have the qpack block, so
             // populate the field with an empty vec.
-            Frame::Headers { .. } => Http3Frame::Headers { headers: vec![] },
+            Frame::Headers { .. } => Http3Frame::Headers {
+                headers: vec![],
+                raw: None,
+            },
 
-            Frame::CancelPush { push_id } =>
-                Http3Frame::CancelPush { push_id: *push_id },
+            Frame::CancelPush { push_id } => Http3Frame::CancelPush {
+                push_id: *push_id,
+                raw: None,
+            },
 
             Frame::Settings {
                 max_field_section_size,
@@ -421,7 +426,10 @@ impl Frame {
                     }
                 }
 
-                Http3Frame::Settings { settings }
+                Http3Frame::Settings {
+                    settings,
+                    raw: None,
+                }
             },
 
             // Qlog expects the `headers` to be represented as an array of
@@ -430,41 +438,44 @@ impl Frame {
             Frame::PushPromise { push_id, .. } => Http3Frame::PushPromise {
                 push_id: *push_id,
                 headers: vec![],
+                raw: None,
             },
 
-            Frame::GoAway { id } => Http3Frame::Goaway { id: *id },
+            Frame::GoAway { id } => Http3Frame::Goaway { id: *id, raw: None },
 
-            Frame::MaxPushId { push_id } =>
-                Http3Frame::MaxPushId { push_id: *push_id },
+            Frame::MaxPushId { push_id } => Http3Frame::MaxPushId {
+                push_id: *push_id,
+                raw: None,
+            },
 
             Frame::PriorityUpdateRequest {
                 prioritized_element_id,
                 priority_field_value,
             } => Http3Frame::PriorityUpdate {
-                target_stream_type:
-                    qlog::events::http3::PriorityTargetStreamType::Request,
-                prioritized_element_id: *prioritized_element_id,
+                stream_id: Some(*prioritized_element_id),
+                push_id: None,
                 priority_field_value: String::from_utf8_lossy(
                     priority_field_value,
                 )
                 .into_owned(),
+                raw: None,
             },
 
             Frame::PriorityUpdatePush {
                 prioritized_element_id,
                 priority_field_value,
             } => Http3Frame::PriorityUpdate {
-                target_stream_type:
-                    qlog::events::http3::PriorityTargetStreamType::Push,
-                prioritized_element_id: *prioritized_element_id,
+                stream_id: None,
+                push_id: Some(*prioritized_element_id),
                 priority_field_value: String::from_utf8_lossy(
                     priority_field_value,
                 )
                 .into_owned(),
+                raw: None,
             },
 
             Frame::Unknown { raw_type, payload } => Http3Frame::Unknown {
-                frame_type_value: *raw_type,
+                frame_type_bytes: *raw_type,
                 raw: Some(RawInfo {
                     data: None,
                     payload_length: Some(payload.len() as u64),
@@ -635,8 +646,9 @@ fn parse_settings_frame(
 fn parse_push_promise(
     payload_length: u64, b: &mut octets::Octets,
 ) -> Result<Frame> {
+    let before = b.off();
     let push_id = b.get_varint()?;
-    let header_block_length = payload_length - octets::varint_len(push_id) as u64;
+    let header_block_length = payload_length - (b.off() - before) as u64;
     let header_block = b.get_bytes(header_block_length as usize)?.to_vec();
 
     Ok(Frame::PushPromise {
@@ -648,9 +660,9 @@ fn parse_push_promise(
 fn parse_priority_update(
     frame_type: u64, payload_length: u64, b: &mut octets::Octets,
 ) -> Result<Frame> {
+    let before = b.off();
     let prioritized_element_id = b.get_varint()?;
-    let priority_field_value_length =
-        payload_length - octets::varint_len(prioritized_element_id) as u64;
+    let priority_field_value_length = payload_length - (b.off() - before) as u64;
     let priority_field_value =
         b.get_bytes(priority_field_value_length as usize)?.to_vec();
 
@@ -1214,6 +1226,28 @@ mod tests {
     }
 
     #[test]
+    fn push_promise_non_minimal_varint() {
+        // A regression test for a bug handling varints in frame processing.
+
+        // Value 37 minimally encodes as 1 byte [0x25]. Non-minimal
+        // 2-byte encoding: [0x40, 0x25] (2-byte varint prefix 0b01).
+        let header_block = b"\x00\x01\x02";
+        let mut payload = vec![0x40u8, 0x25]; // non-minimal push_id = 37
+        payload.extend_from_slice(header_block);
+        let payload_length = payload.len() as u64;
+        let frame = Frame::from_bytes(
+            PUSH_PROMISE_FRAME_TYPE_ID,
+            payload_length,
+            &payload,
+        )
+        .expect("non-minimal varint was parsed correctly");
+        assert_eq!(frame, Frame::PushPromise {
+            push_id: 37,
+            header_block: header_block.to_vec(),
+        });
+    }
+
+    #[test]
     fn goaway() {
         let mut d = [42; 128];
 
@@ -1329,6 +1363,30 @@ mod tests {
             .unwrap(),
             frame
         );
+    }
+
+    #[test]
+    fn priority_update_non_minimal_varint() {
+        // A regression test for a bug handling varints in frame processing.
+
+        // Value 37 minimally encodes as 1 byte [0x25]. Non-minimal
+        // 2-byte encoding: [0x40, 0x25] (2-byte varint prefix 0b01).
+        let priority_field = b"u=3";
+        let mut payload = vec![0x40u8, 0x25];
+        payload.extend_from_slice(priority_field);
+        let payload_length = payload.len() as u64;
+
+        let frame = Frame::from_bytes(
+            PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID,
+            payload_length,
+            &payload,
+        )
+        .expect("non-minimal varint was parsed correctly");
+
+        assert_eq!(frame, Frame::PriorityUpdateRequest {
+            prioritized_element_id: 37,
+            priority_field_value: priority_field.to_vec(),
+        });
     }
 
     #[test]

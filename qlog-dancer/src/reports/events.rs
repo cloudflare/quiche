@@ -25,7 +25,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use qlog::events::http3::Http3Frame;
-use qlog::events::quic::AckedRanges;
 use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
 use tabled::Table;
@@ -91,20 +90,9 @@ pub fn frames_to_string(frames: &[QuicFrame]) -> String {
             },
             QuicFrame::Ack { acked_ranges, .. } => {
                 s += " ACK {";
-                if let Some(ar) = acked_ranges {
-                    match ar {
-                        AckedRanges::Single(items) => {
-                            for a in items {
-                                for b in a {
-                                    s += &format!{"{b}, "};
-                                }
-                            }
-                        },
-                        AckedRanges::Double(items) => {
-                            for a in items {
-                                s += &format!{"{}-{}, ", a.0, a.1};
-                            }
-                        },
+                if let Some(acked_ranges) = acked_ranges {
+                    for range in acked_ranges {
+                        s += &format!("{}, ", range);
                     }
                 }
                 s += "}";
@@ -195,7 +183,7 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
                 printyo!("len", r.length, s);
             }
         },
-        Http3Frame::Headers { headers } => {
+        Http3Frame::Headers { headers, .. } => {
             s += " HEADERS {";
 
             for header in headers {
@@ -206,7 +194,7 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
 
             s += "}";
         },
-        Http3Frame::CancelPush { push_id } => {
+        Http3Frame::CancelPush { push_id , ..} => {
             s += &format!(" CANCEL_PUSH {{id={push_id}}}");
         },
         Http3Frame::Settings { /* settings */ ..} => {
@@ -215,10 +203,10 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
         Http3Frame::PushPromise { /*push_id, headers */ ..} => {
             s += " PUSH_PROMISE {{todo}}";
         }
-        Http3Frame::Goaway { id } => {
+        Http3Frame::Goaway { id , ..} => {
             s += &format!(" GOAWAY {{id={id}}}");
         }
-        Http3Frame::MaxPushId { push_id } => {
+        Http3Frame::MaxPushId { push_id , ..} => {
             s += &format!(" MAX_PUSH_ID {{id={push_id}}}");
         }
         Http3Frame::PriorityUpdate { /*target_stream_type, prioritized_element_id, priority_field_value*/ .. } => {
@@ -227,8 +215,8 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
         Http3Frame::Reserved { /*length*/ .. } => {
             s += " GREASE {{todo}}";
         },
-        Http3Frame::Unknown { frame_type_value, .. } => {
-            s += &format!(" UNKNOWN {{ty={frame_type_value}}}");
+        Http3Frame::Unknown { frame_type_bytes, .. } => {
+            s += &format!(" UNKNOWN {{ty={frame_type_bytes}}}");
         }
     }
 

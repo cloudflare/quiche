@@ -35,7 +35,6 @@ use std::fmt::Display;
 use log::error;
 use log::trace;
 use qlog::events::http3::Http3Frame;
-use qlog::events::quic::AckedRanges;
 use qlog::events::quic::QuicFrame;
 use qlog::events::quic::TransportInitiator;
 use qlog::events::EventData;
@@ -1238,50 +1237,12 @@ impl Datastore {
                                 if let Some(pkt_space) =
                                     self.packet_sent.get_mut(&ty)
                                 {
-                                    match ack_ranges {
-                                        AckedRanges::Single(ranges) => {
-                                            // TODO: qlog deserializer seems to
-                                            // get confused (bug?) so work
-                                            // around it detecting single or
-                                            // pairs
-
-                                            for pkt_nums in ranges {
-                                                if pkt_nums.len() == 1 {
-                                                    if let Some(pkt) = pkt_space
-                                                        .get_mut(&pkt_nums[0])
-                                                    {
-                                                        pkt.acked = Some(true);
-                                                    }
-                                                } else if pkt_nums.len() == 2 {
-                                                    // TODO: check ack ranges and
-                                                    // rust
-                                                    // Range mapping is correct
-                                                    let actual_range = pkt_nums
-                                                        [0]..
-                                                        pkt_nums[1] + 1;
-
-                                                    pkt_space
-                                                        .range_mut(actual_range)
-                                                        .for_each(|e| {
-                                                            e.1.acked = Some(true)
-                                                        });
-                                                }
-                                            }
-                                        },
-                                        AckedRanges::Double(ranges) => {
-                                            for range in ranges {
-                                                // TODO: check ack ranges and rust
-                                                // Range mapping is correct
-                                                let actual_range =
-                                                    range.0..range.1 + 1;
-
-                                                pkt_space
-                                                    .range_mut(actual_range)
-                                                    .for_each(|e| {
-                                                        e.1.acked = Some(true)
-                                                    });
-                                            }
-                                        },
+                                    for range in ack_ranges {
+                                        // TODO: check ack ranges and rust
+                                        // Range mapping is correct
+                                        pkt_space
+                                            .range_mut(range.as_range_inclusive())
+                                            .for_each(|e| e.1.acked = Some(true));
                                     }
                                 }
                             }
@@ -1560,7 +1521,7 @@ impl Datastore {
         &mut self, fc: &qlog::events::http3::FrameCreated, ev_time: f64,
     ) {
         match &fc.frame {
-            Http3Frame::Headers { headers } => {
+            Http3Frame::Headers { headers, .. } => {
                 let req = self.get_or_insert_http_req(fc.stream_id);
                 req.time_first_headers_tx.get_or_insert(ev_time);
                 req.set_request_info_from_qlog(headers);
@@ -1582,11 +1543,12 @@ impl Datastore {
             },
 
             Http3Frame::PriorityUpdate {
-                prioritized_element_id,
+                stream_id: Some(stream_id),
                 priority_field_value,
                 ..
             } => {
-                let req = self.get_or_insert_http_req(*prioritized_element_id);
+                let req: &mut HttpRequestStub =
+                    self.get_or_insert_http_req(*stream_id);
                 req.priority_updates.push(priority_field_value.clone());
             },
 
@@ -1599,7 +1561,7 @@ impl Datastore {
         &mut self, fc: &qlog::events::http3::FrameCreated, ev_time: f64,
     ) {
         match &fc.frame {
-            Http3Frame::Headers { headers } => {
+            Http3Frame::Headers { headers, .. } => {
                 let req = self.get_or_insert_http_req(fc.stream_id);
                 req.time_first_headers_tx.get_or_insert(ev_time);
                 req.set_response_info_from_qlog(headers);
@@ -1629,7 +1591,7 @@ impl Datastore {
         &mut self, fp: &qlog::events::http3::FrameParsed, ev_time: f64,
     ) {
         match &fp.frame {
-            Http3Frame::Headers { headers } => {
+            Http3Frame::Headers { headers, .. } => {
                 let req = self.get_or_insert_http_req(fp.stream_id);
                 req.time_first_headers_rx.get_or_insert(ev_time);
 
@@ -1666,7 +1628,7 @@ impl Datastore {
         &mut self, fp: &qlog::events::http3::FrameParsed, ev_time: f64,
     ) {
         match &fp.frame {
-            Http3Frame::Headers { headers } => {
+            Http3Frame::Headers { headers, .. } => {
                 let req = self.get_or_insert_http_req(fp.stream_id);
                 req.time_first_headers_rx.get_or_insert(ev_time);
                 req.path = NaOption::new(find_header_value(headers, ":path"));
@@ -1690,11 +1652,11 @@ impl Datastore {
             },
 
             Http3Frame::PriorityUpdate {
-                prioritized_element_id,
+                stream_id: Some(stream_id),
                 priority_field_value,
                 ..
             } => {
-                let req = self.get_or_insert_http_req(*prioritized_element_id);
+                let req = self.get_or_insert_http_req(*stream_id);
                 req.priority_updates.push(priority_field_value.clone());
             },
 

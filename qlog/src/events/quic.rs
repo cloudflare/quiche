@@ -24,8 +24,14 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use serde::de;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
+use serde::Serializer;
+
+use std::fmt;
+use std::ops::RangeInclusive;
 
 use super::ExData;
 use crate::HexSlice;
@@ -39,6 +45,64 @@ use crate::events::Token;
 use crate::events::TupleEndpointInfo;
 use crate::Bytes;
 use crate::StatelessResetToken;
+
+/// A single ACK range with inclusive start and end packet numbers.
+///
+/// Serializes as a 1-element JSON array `[n]` when `start == end`, and as a
+/// 2-element JSON array `[start, end]` otherwise. Both forms are accepted
+/// during deserialization.
+///
+/// *Note*, the draft-ietf-quic-qlog-quic-events-12 specifies that the
+/// range is a closed interval, i.e., `range.end` is part of the range.
+#[derive(Clone, PartialEq, Debug, Copy)]
+pub struct AckRange {
+    /// The first packet number in the range (inclusive).
+    pub start: u64,
+    /// The last packet number in the range (inclusive).
+    pub end: u64,
+}
+
+impl AckRange {
+    /// Creates a new `AckRange` spanning `[start, end]` (both inclusive).
+    pub fn new(start: u64, end: u64) -> Self {
+        AckRange { start, end }
+    }
+
+    pub fn as_range_inclusive(&self) -> RangeInclusive<u64> {
+        self.start..=self.end
+    }
+}
+
+impl fmt::Display for AckRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.start == self.end {
+            write!(f, "{}", self.start)
+        } else {
+            write!(f, "{}-{}", self.start, self.end)
+        }
+    }
+}
+
+impl Serialize for AckRange {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if self.start == self.end {
+            [self.start].serialize(s)
+        } else {
+            [self.start, self.end].serialize(s)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AckRange {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Vec::<u64>::deserialize(d)?;
+        match v.as_slice() {
+            [x] => Ok(AckRange::new(*x, *x)),
+            [a, b] => Ok(AckRange::new(*a, *b)),
+            _ => Err(de::Error::custom("ack range must have 1 or 2 elements")),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
@@ -408,13 +472,6 @@ pub enum PacketBufferedTrigger {
     KeysUnavailable,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-#[serde(untagged)]
-pub enum AckedRanges {
-    Single(Vec<Vec<u64>>),
-    Double(Vec<(u64, u64)>),
-}
-
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum QuicFrameTypeName {
@@ -463,7 +520,7 @@ pub enum QuicFrame {
 
     Ack {
         ack_delay: Option<f32>,
-        acked_ranges: Option<AckedRanges>,
+        acked_ranges: Option<Vec<AckRange>>,
 
         ect1: Option<u64>,
         ect0: Option<u64>,

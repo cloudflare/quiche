@@ -773,12 +773,14 @@ enum WaitForDataOrHandshakeDirective {
 pub struct Running<Tx, M, A> {
     pub(crate) params: IoWorkerParams<Tx, M>,
     pub(crate) context: ConnectionStageContext<A>,
-    pub(crate) qconn: QuicheConnection,
+    /// See [`QuicConnectionParams::quiche_conn`].
+    pub(crate) qconn: Box<QuicheConnection>,
 }
 
 impl<Tx, M, A> Running<Tx, M, A> {
     pub fn ssl(&mut self) -> &mut SslRef {
-        self.qconn.as_mut()
+        // Deref to pick `Connection::as_mut` over `Box::as_mut`.
+        (*self.qconn).as_mut()
     }
 }
 
@@ -786,7 +788,8 @@ pub(crate) struct Closing<Tx, M, A> {
     pub(crate) params: IoWorkerParams<Tx, M>,
     pub(crate) context: ConnectionStageContext<A>,
     pub(crate) work_loop_result: QuicResult<()>,
-    pub(crate) qconn: QuicheConnection,
+    /// See [`QuicConnectionParams::quiche_conn`].
+    pub(crate) qconn: Box<QuicheConnection>,
 }
 
 pub enum RunningOrClosing<Tx, M, A> {
@@ -800,7 +803,8 @@ where
     M: Metrics,
 {
     pub(crate) async fn run<A>(
-        mut self, mut qconn: QuicheConnection, mut ctx: ConnectionStageContext<A>,
+        mut self, mut qconn: Box<QuicheConnection>,
+        mut ctx: ConnectionStageContext<A>,
     ) -> RunningOrClosing<Tx, M, A>
     where
         A: ApplicationOverQuic,
@@ -811,7 +815,8 @@ where
         // cause issues as this waker will then be stale and attempt to
         // wake the wrong task.
         std::future::poll_fn(|cx| {
-            let ssl = qconn.as_mut();
+            // Deref to pick `Connection::as_mut` over `Box::as_mut`.
+            let ssl = (*qconn).as_mut();
             ssl.set_task_waker(Some(cx.waker().clone()));
 
             Poll::Ready(())
@@ -908,7 +913,8 @@ where
     M: Metrics,
 {
     pub(crate) async fn run<A: ApplicationOverQuic>(
-        mut self, mut qconn: QuicheConnection, mut ctx: ConnectionStageContext<A>,
+        mut self, mut qconn: Box<QuicheConnection>,
+        mut ctx: ConnectionStageContext<A>,
     ) -> Closing<Tx, M, A> {
         // Perform a single call to process_reads()/process_writes(),
         // unconditionally, to ensure that any application data (e.g.

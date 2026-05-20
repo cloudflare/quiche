@@ -56,13 +56,6 @@ pub enum PushDecision {
     Abandoned,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum PriorityTargetStreamType {
-    Request,
-    Push,
-}
-
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Http3EventType {
@@ -124,41 +117,49 @@ pub enum Http3Frame {
 
     Headers {
         headers: Vec<HttpHeader>,
+        raw: Option<RawInfo>,
     },
 
     CancelPush {
         push_id: u64,
+        raw: Option<RawInfo>,
     },
 
     Settings {
         settings: Vec<Setting>,
+        raw: Option<RawInfo>,
     },
 
     PushPromise {
         push_id: u64,
         headers: Vec<HttpHeader>,
+        raw: Option<RawInfo>,
     },
 
     Goaway {
         id: u64,
+        raw: Option<RawInfo>,
     },
 
     MaxPushId {
         push_id: u64,
+        raw: Option<RawInfo>,
     },
 
     PriorityUpdate {
-        target_stream_type: PriorityTargetStreamType,
-        prioritized_element_id: u64,
+        stream_id: Option<u64>,
+        push_id: Option<u64>,
         priority_field_value: String,
+        raw: Option<RawInfo>,
     },
 
     Reserved {
-        length: Option<u64>,
+        frame_type_bytes: u64,
+        raw: Option<RawInfo>,
     },
 
     Unknown {
-        frame_type_value: u64,
+        frame_type_bytes: u64,
         raw: Option<RawInfo>,
     },
 }
@@ -166,7 +167,7 @@ pub enum Http3Frame {
 impl Default for Http3Frame {
     fn default() -> Self {
         Self::Unknown {
-            frame_type_value: 0,
+            frame_type_bytes: 0,
             raw: None,
         }
     }
