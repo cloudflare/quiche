@@ -232,7 +232,7 @@ where
     // missing logs from early in the connection
     if let Some(qlog_dir) = &client_config.qlog_dir {
         log::info!("setting up qlogs"; "qlog_dir"=>qlog_dir);
-        let id = format!("{:?}", &scid);
+        let id = format!("{:?}", scid);
         let path = std::path::Path::new(qlog_dir)
             .join(qlog_file_name(&id, client_config.qlog_compression));
         if let Ok(writer) =

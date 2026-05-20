@@ -143,7 +143,7 @@ fn packet_sent_event_some_frames() {
 
     let ev_data = EventData::QuicPacketSent(PacketSent {
         header: pkt_hdr,
-        frames: Some(frames.into()),
+        frames: Some(frames),
         raw: Some(RawInfo {
             length: Some(1251),
             payload_length: Some(1224),
@@ -308,11 +308,11 @@ fn ack_range_as_range_inclusive() {
 #[test]
 fn ack_range_serialize() {
     assert_eq!(
-        serde_json::to_value(&AckRange::new(5, 5)).unwrap(),
+        serde_json::to_value(AckRange::new(5, 5)).unwrap(),
         serde_json::json!([5])
     );
     assert_eq!(
-        serde_json::to_value(&AckRange::new(0, 9)).unwrap(),
+        serde_json::to_value(AckRange::new(0, 9)).unwrap(),
         serde_json::json!([0, 9])
     );
 }

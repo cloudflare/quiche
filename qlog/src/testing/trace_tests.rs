@@ -134,7 +134,7 @@ fn trace_single_transport_event() {
     }];
     let event_data = EventData::QuicPacketSent(PacketSent {
         header: pkt_hdr,
-        frames: Some(frames.into()),
+        frames: Some(frames),
         raw: Some(RawInfo {
             length: Some(1251),
             payload_length: Some(1224),

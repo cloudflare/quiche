@@ -423,23 +423,12 @@ impl DriverTestHelper<ServerHooks> {
 
 /// Minimal [`Metrics`] impl for unit tests. Tracks connection close error
 /// counters; all other metrics are discarded.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TestMetrics {
     pub local_h3: Counter,
     pub local_quic: Counter,
     pub peer_h3: Counter,
     pub peer_quic: Counter,
-}
-
-impl Default for TestMetrics {
-    fn default() -> Self {
-        Self {
-            local_h3: Counter::default(),
-            local_quic: Counter::default(),
-            peer_h3: Counter::default(),
-            peer_quic: Counter::default(),
-        }
-    }
 }
 
 impl Metrics for TestMetrics {

@@ -116,7 +116,7 @@ where
         .into_io()?;
 
         if let Some(qlog_dir) = &self.config.qlog_dir {
-            let id = format!("{:?}", &scid);
+            let id = format!("{:?}", scid);
             let path = std::path::Path::new(qlog_dir)
                 .join(qlog_file_name(&id, self.config.qlog_compression));
             if let Ok(writer) =
@@ -174,7 +174,7 @@ where
 
             #[cfg(target_os = "linux")]
             {
-                let from = Some(incoming.local_addr).filter(|_| with_pktinfo);
+                let from = with_pktinfo.then_some(incoming.local_addr);
                 let _ = crate::quic::io::gso::send_to(
                     udp,
                     to,
