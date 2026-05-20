@@ -314,10 +314,10 @@ mod tests {
         assert_eq!(one_kbit_sec.transfer_time(100), Duration::from_millis(800));
     }
 
+    // Test that large byte values that would overflow u64 are handled
+    // correctly using u128 arithmetic.
     #[test]
     fn transfer_time_overflow() {
-        // Test that large byte values that would overflow u64 are handled
-        // correctly using u128 arithmetic.
         let low_bandwidth = Bandwidth::from_kbits_per_second(1);
 
         // This value would overflow: u64::MAX * 8 * NUM_MICROS_PER_SECOND
