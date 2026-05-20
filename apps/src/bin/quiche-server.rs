@@ -378,7 +378,7 @@ fn main() {
                 #[cfg(feature = "qlog")]
                 {
                     if let Some(dir) = std::env::var_os("QLOGDIR") {
-                        let id = format!("{:?}", &scid);
+                        let id = format!("{:?}", scid);
                         let writer = make_qlog_writer(&dir, "server", &id);
 
                         conn.set_qlog(

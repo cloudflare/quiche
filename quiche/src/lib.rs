@@ -8103,7 +8103,7 @@ impl<F: BufFactory> Connection<F> {
             self.undecryptable_pkts.clear();
 
             trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-                   &self.trace_id,
+                   self.trace_id,
                    std::str::from_utf8(self.application_proto()),
                    self.handshake.cipher(),
                    self.handshake.curve(),

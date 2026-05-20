@@ -227,7 +227,7 @@ mod tests {
 
         let event_data = QuicPacketSent(PacketSent {
             header: pkt_hdr.clone(),
-            frames: Some(frames.into()),
+            frames: Some(frames),
             stateless_reset_token: None,
             supported_versions: None,
             raw: Some(raw.clone()),
@@ -249,7 +249,7 @@ mod tests {
 
         let event_data = QuicPacketSent(PacketSent {
             header: pkt_hdr.clone(),
-            frames: Some(frames.into()),
+            frames: Some(frames),
             stateless_reset_token: None,
             supported_versions: None,
             raw: Some(raw.clone()),
@@ -270,7 +270,7 @@ mod tests {
 
         let event_data = QuicPacketSent(PacketSent {
             header: pkt_hdr,
-            frames: Some(frames.into()),
+            frames: Some(frames),
             stateless_reset_token: None,
             supported_versions: None,
             raw: Some(raw),
