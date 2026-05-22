@@ -40,14 +40,15 @@ use rstest::rstest;
 /// handshake-adjacent assertions below. `boring` 4.x doesn't, so each
 /// such assertion has two flavours. Wrap them in this macro so the
 /// per-version values stay side-by-side at the call site. The active
-/// version is detected by `build.rs` (see `cfg(boring_v4)`).
+/// version is detected by `build.rs` (see `cfg(boring_v5)`); 4.x is
+/// the assumed default.
 macro_rules! by_boring {
     (b4: $b4:expr, b5: $b5:expr $(,)?) => {{
-        #[cfg(boring_v4)]
+        #[cfg(not(boring_v5))]
         {
             $b4
         }
-        #[cfg(not(boring_v4))]
+        #[cfg(boring_v5)]
         {
             $b5
         }
