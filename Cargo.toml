@@ -30,7 +30,7 @@ mem_forget = "deny"
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(capture_keylogs)',
   'cfg(test_invalid_len_compilation_fail)',
-  'cfg(boring_v4)',
+  'cfg(boring_v5)',
 ] }
 
 [workspace.metadata.release]
@@ -47,13 +47,12 @@ assert_matches = { version = "1" }
 # Accept both `boring` 4.x (>= 4.19, the MSRV for the APIs we use)
 # and `boring` 5.x. The active version is picked by cargo's resolver
 # based on the lockfile / downstream constraints; quiche's `build.rs`
-# detects which one was selected and emits `cfg(boring_v4)` for the
-# legacy 4.x case so source code can switch on it. The `boring_v4`
-# cfg is meant to be a transitional flag; new code should live in the
-# `not(boring_v4)` arm so the cfg can be retired by simply deleting
-# the legacy arms once internal users have moved off 4.x. See
-# `quiche/src/build.rs` and the `boringssl-boring-crate` feature in
-# `quiche/Cargo.toml`.
+# detects which one was selected and emits `cfg(boring_v5)` for the
+# 5.x case so source code can switch on it. 4.x is the assumed
+# default — if the lockfile is missing or unparseable, `build.rs`
+# leaves `boring_v5` off, and version-conditional source uses the
+# `not(boring_v5)` arm by default. See `quiche/src/build.rs` and the
+# `boringssl-boring-crate` feature in `quiche/Cargo.toml`.
 #
 # `boring-sys` uses `links = "boringssl"`, so only one major version
 # can ever be in the dep graph at a time.

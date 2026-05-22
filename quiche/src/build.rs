@@ -30,7 +30,7 @@ Cflags: -I${{includedir}}
     out_file.write_all(output.as_bytes()).unwrap();
 }
 
-/// Returns true if cargo resolved `boring` to a 4.x version.
+/// Returns true if cargo resolved `boring` to a 5.x version.
 ///
 /// Walks up from `OUT_DIR` looking for a `Cargo.lock`, then scans it
 /// for the `boring` package. We use `Cargo.lock` rather than shelling
@@ -38,14 +38,20 @@ Cflags: -I${{includedir}}
 /// exist at this point in the build, (b) parsing it is cheap and has
 /// no extra dependencies, and (c) it avoids re-entering cargo from a
 /// build script.
-fn detect_boring_v4() -> bool {
+///
+/// 4.x is the *default* branch (assumed when the lockfile is missing
+/// or unparseable); `cfg(boring_v5)` opts into 5.x-specific code
+/// paths. New non-version-specific code should live in the
+/// `not(boring_v5)` arm — i.e. compile under the default 4.x — so
+/// the cfg can be flipped to the forward-looking side later without
+/// churn.
+fn detect_boring_v5() -> bool {
     let Some(lockfile) = find_cargo_lock() else {
         // No lockfile (shouldn't happen in normal cargo builds, but
-        // be conservative). Assume 5.x — the default and forward-
-        // looking version. Downstream can fix this by generating a
-        // lockfile (`cargo generate-lockfile`).
+        // be conservative). Assume 4.x — the default. Downstream can
+        // fix this by generating a lockfile (`cargo generate-lockfile`).
         println!(
-            "cargo:warning=quiche: Cargo.lock not found; assuming boring 5.x"
+            "cargo:warning=quiche: Cargo.lock not found; assuming boring 4.x"
         );
         return false;
     };
@@ -56,7 +62,7 @@ fn detect_boring_v4() -> bool {
         Ok(s) => s,
         Err(e) => {
             println!(
-                "cargo:warning=quiche: failed to read {}: {e}; assuming boring 5.x",
+                "cargo:warning=quiche: failed to read {}: {e}; assuming boring 4.x",
                 lockfile.display(),
             );
             return false;
@@ -81,7 +87,7 @@ fn detect_boring_v4() -> bool {
             if let Some(rest) = line.strip_prefix("version = \"") {
                 let version = rest.trim_end_matches('"');
                 let major = version.split('.').next().unwrap_or("");
-                return major == "4";
+                return major == "5";
             }
         }
     }
@@ -121,17 +127,17 @@ fn target_dir_path() -> std::path::PathBuf {
 }
 
 fn main() {
-    // Emit `cfg(boring_v4)` if boring version 4.x is detected. This is used to
+    // Emit `cfg(boring_v5)` if boring version 5.x is detected. This is used to
     // pick which APIs to expect and to guide test expectations. (Larger post
     // quantum key shares are enabled by default in boring 5.x but not boring
-    // 4.x.)
+    // 4.x.) 4.x is the assumed default.
     //
     // The cfg is always registered (even when the backend feature is
     // off) so rustc doesn't warn about unknown cfg names.
-    println!("cargo::rustc-check-cfg=cfg(boring_v4)");
+    println!("cargo::rustc-check-cfg=cfg(boring_v5)");
     if cfg!(feature = "boringssl-boring-crate") {
-        if detect_boring_v4() {
-            println!("cargo:rustc-cfg=boring_v4");
+        if detect_boring_v5() {
+            println!("cargo:rustc-cfg=boring_v5");
         }
         println!("cargo:rustc-link-lib=static=ssl");
         println!("cargo:rustc-link-lib=static=crypto");

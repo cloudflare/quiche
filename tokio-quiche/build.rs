@@ -1,19 +1,19 @@
 fn main() {
-    // Emit `cfg(boring_v4)` if boring version 4.x is detected. This is used to
+    // Emit `cfg(boring_v5)` if boring version 5.x is detected. This is used to
     // pick which APIs to expect and to guide test expectations. (Larger post
     // quantum key shares are enabled by default in boring 5.x but not boring
-    // 4.x.) Mirrors `quiche/src/build.rs`.
-    println!("cargo::rustc-check-cfg=cfg(boring_v4)");
-    if detect_boring_v4() {
-        println!("cargo:rustc-cfg=boring_v4");
+    // 4.x.) 4.x is the assumed default. Mirrors `quiche/src/build.rs`.
+    println!("cargo::rustc-check-cfg=cfg(boring_v5)");
+    if detect_boring_v5() {
+        println!("cargo:rustc-cfg=boring_v5");
     }
 }
 
-/// Returns true if cargo resolved `boring` to a 4.x version.
-fn detect_boring_v4() -> bool {
+/// Returns true if cargo resolved `boring` to a 5.x version.
+fn detect_boring_v5() -> bool {
     let Some(lockfile) = find_cargo_lock() else {
         println!(
-            "cargo:warning=tokio-quiche: Cargo.lock not found; assuming boring 5.x"
+            "cargo:warning=tokio-quiche: Cargo.lock not found; assuming boring 4.x"
         );
         return false;
     };
@@ -24,7 +24,7 @@ fn detect_boring_v4() -> bool {
         Ok(s) => s,
         Err(e) => {
             println!(
-                "cargo:warning=tokio-quiche: failed to read {}: {e}; assuming boring 5.x",
+                "cargo:warning=tokio-quiche: failed to read {}: {e}; assuming boring 4.x",
                 lockfile.display(),
             );
             return false;
@@ -46,7 +46,7 @@ fn detect_boring_v4() -> bool {
             if let Some(rest) = line.strip_prefix("version = \"") {
                 let version = rest.trim_end_matches('"');
                 let major = version.split('.').next().unwrap_or("");
-                return major == "4";
+                return major == "5";
             }
         }
     }
