@@ -4132,33 +4132,13 @@ impl<F: BufFactory> Connection<F> {
         Ok((done, info))
     }
 
-    fn send_single(
-        &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
-        now: Instant,
-    ) -> Result<(Type, usize)> {
-        if out.is_empty() {
-            return Err(Error::BufferTooShort);
-        }
-
-        if self.is_draining() {
-            return Err(Error::Done);
-        }
-
-        let is_closing = self.local_error.is_some();
-
-        let out_len = out.len();
-
-        let mut b = octets::OctetsMut::with_slice(out);
-
-        let pkt_type = self.write_pkt_type(send_pid)?;
-
-        let max_dgram_len = if !self.dgram_send_queue.is_empty() {
-            self.dgram_max_writable_len()
-        } else {
-            None
-        };
-
-        let epoch = pkt_type.to_epoch()?;
+    /// Process lost frames for a given epoch across all paths.
+    ///
+    /// This function iterates through all paths and processes any lost frames
+    /// that need to be retransmitted or handled according to their type.
+    fn process_lost_frames(
+        &mut self, epoch: packet::Epoch, _now: Instant,
+    ) -> Result<()> {
         let pkt_space = &mut self.pkt_num_spaces[epoch];
         let crypto_ctx = &mut self.crypto_ctx[epoch];
 
@@ -4209,7 +4189,7 @@ impl<F: BufFactory> Connection<F> {
                                         },
                                     );
 
-                                    q.add_event_data_with_instant(ev_data, now)
+                                    q.add_event_data_with_instant(ev_data, _now)
                                         .ok();
                                 });
 
@@ -4396,6 +4376,41 @@ impl<F: BufFactory> Connection<F> {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    fn send_single(
+        &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
+        now: Instant,
+    ) -> Result<(Type, usize)> {
+        if out.is_empty() {
+            return Err(Error::BufferTooShort);
+        }
+
+        if self.is_draining() {
+            return Err(Error::Done);
+        }
+
+        let is_closing = self.local_error.is_some();
+
+        let out_len = out.len();
+
+        let mut b = octets::OctetsMut::with_slice(out);
+
+        let pkt_type = self.write_pkt_type(send_pid)?;
+
+        let max_dgram_len = if !self.dgram_send_queue.is_empty() {
+            self.dgram_max_writable_len()
+        } else {
+            None
+        };
+
+        let epoch = pkt_type.to_epoch()?;
+
+        // Process lost frames. There might be several paths having lost frames.
+        self.process_lost_frames(epoch, now)?;
+
         self.check_tx_buffered_invariant();
 
         let is_app_limited = self.delivery_rate_check_if_app_limited();
