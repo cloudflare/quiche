@@ -185,6 +185,17 @@ impl Mode {
         Mode::ProbeRTT(ProbeRTT::new(model, cycle))
     }
 
+    #[cfg(test)]
+    pub(super) fn name(&self) -> &str {
+        match self {
+            Mode::Startup(_) => "Startup",
+            Mode::Drain(_) => "Drain",
+            Mode::ProbeBW(_) => "ProbeBw",
+            Mode::ProbeRTT(_) => "ProbeRTT",
+            Mode::Placheolder(_) => unreachable!(),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn do_on_congestion_event(
         &mut self, prior_in_flight: usize, event_time: Instant,

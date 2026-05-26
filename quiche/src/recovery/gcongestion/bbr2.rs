@@ -877,26 +877,30 @@ mod tests {
             None,
         );
         assert_eq!(sender.cc.bytes_in_flight(), 0);
-        sender.send_packet(
-            size,
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-        );
+        for _ in 0..100 {
+            sender.send_packet(
+                size,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+            );
 
-        sender.advance_time(rtt);
+            sender.advance_time(rtt);
 
-        sender.ack_n_packets(
-            1,
-            size,
-            300,
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-            None,
-        );
-        // bytes in flight is 0, which was previously understood as quiescence,
-        // thus the connection is understood to be idle
-        assert_eq!(sender.cc.bytes_in_flight(), 0);
-        assert_ne!(sender.cc.pacer.sender.last_quiescence_start, None);
+            sender.ack_n_packets(
+                1,
+                size,
+                300,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                None,
+            );
+            // bytes in flight is 0, which was previously understood as
+            // quiescence, thus the connection is understood to be
+            // idle
+            assert_eq!(sender.cc.bytes_in_flight(), 0);
+            assert_ne!(sender.cc.pacer.sender.last_quiescence_start, None);
+            assert_ne!(sender.cc.pacer.sender.mode.name(),"ProbeRTT");
+        }
     }
 
     #[rstest]
