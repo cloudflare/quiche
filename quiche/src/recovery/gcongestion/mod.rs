@@ -28,6 +28,8 @@ mod bbr;
 mod bbr2;
 pub mod pacer;
 mod recovery;
+#[cfg(test)]
+mod test_sender;
 
 use std::fmt::Debug;
 use std::str::FromStr;
@@ -45,10 +47,11 @@ pub struct Lost {
     pub(super) bytes_lost: usize,
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct Acked {
-    pub(super) pkt_num: u64,
-    pub(super) time_sent: Instant,
+    pub pkt_num: u64,
+
+    pub time_sent: Instant,
 }
 
 pub(super) trait CongestionControl: Debug {
@@ -94,7 +97,7 @@ pub(super) trait CongestionControl: Debug {
         &mut self, rtt_updated: bool, prior_in_flight: usize,
         bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
         lost_packets: &[Lost], least_unacked: u64, rtt_stats: &RttStats,
-        recovery_stats: &mut RecoveryStats,
+        recovery_stats: &mut RecoveryStats, last_ack_time: Option<Instant>,
     );
 
     /// Called when an RTO fires.  Resets the retransmission alarm if there are
