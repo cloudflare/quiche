@@ -123,6 +123,14 @@ impl ModeImpl for ProbeBW {
                     congestion_event,
                     params,
                 );
+                if !self.model.enable_bbr_fix() {
+                    if self.cycle.phase != CyclePhase::Down &&
+                        self.model
+                            .maybe_expire_min_rtt(congestion_event, params)
+                    {
+                        switch_to_probe_rtt = true;
+                    }
+                }
             },
             CyclePhase::Cruise => self.update_probe_cruise(
                 target_bytes_inflight,
@@ -135,10 +143,12 @@ impl ModeImpl for ProbeBW {
                 params,
             ),
         }
-        if self.cycle.phase != CyclePhase::Down &&
-            self.model.maybe_expire_min_rtt(congestion_event, params)
-        {
-            switch_to_probe_rtt = true;
+        if self.model.enable_bbr_fix() {
+            if self.cycle.phase != CyclePhase::Down &&
+                self.model.maybe_expire_min_rtt(congestion_event, params)
+            {
+                switch_to_probe_rtt = true;
+            }
         }
 
         // Do not need to set the gains if switching to PROBE_RTT, they will be

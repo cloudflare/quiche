@@ -488,6 +488,7 @@ impl GRecovery {
                 MAX_WINDOW_PACKETS,
                 recovery_config.max_send_udp_payload_size,
                 recovery_config.initial_rtt,
+                recovery_config.enable_bbr_fix,
                 recovery_config.custom_bbr_params.as_ref(),
             ),
             _ => return None,

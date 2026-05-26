@@ -578,6 +578,7 @@ pub struct Config {
     initial_congestion_window_packets: usize,
     enable_relaxed_loss_threshold: bool,
     enable_cubic_idle_restart_fix: bool,
+    enable_bbr_fix: bool,
     enable_send_streams_blocked: bool,
 
     pmtud: bool,
@@ -692,6 +693,7 @@ impl Config {
             initial_rtt: DEFAULT_INITIAL_RTT,
 
             use_initial_max_data_as_flow_control_win: false,
+            enable_bbr_fix: true,
         })
     }
 
@@ -1146,6 +1148,11 @@ impl Config {
     /// The default value is `true`.
     pub fn set_enable_cubic_idle_restart_fix(&mut self, enable: bool) {
         self.enable_cubic_idle_restart_fix = enable;
+    }
+
+    /// Configure whether or not the BBR fix should be enabled
+    pub fn set_enable_bbr_fix(&mut self, enable: bool) {
+        self.enable_bbr_fix = enable;
     }
 
     /// Configure whether to enable sending STREAMS_BLOCKED frames.

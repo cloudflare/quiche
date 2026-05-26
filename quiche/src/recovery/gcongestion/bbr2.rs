@@ -208,6 +208,8 @@ struct Params {
     /// 1/8th of an RTT into the future, so the error introduced by
     /// setting `time_sent` to `now` is bounded.
     time_sent_set_to_now: bool,
+
+    enable_bbr_fix: bool,
 }
 
 impl Params {
@@ -252,6 +254,7 @@ impl Params {
         apply_override!(scale_pacing_rate_by_mss);
         apply_override!(disable_probe_down_early_exit);
         apply_override!(time_sent_set_to_now);
+        apply_override!(enable_bbr_fix);
         apply_optional_override!(initial_pacing_rate_bytes_per_second);
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
@@ -348,6 +351,8 @@ const DEFAULT_PARAMS: Params = Params {
     disable_probe_down_early_exit: false,
 
     time_sent_set_to_now: true,
+
+    enable_bbr_fix: true,
 };
 
 #[derive(Debug, PartialEq)]
@@ -508,16 +513,17 @@ impl BBRv2CongestionEvent {
 impl BBRv2 {
     pub fn new(
         initial_congestion_window: usize, max_congestion_window: usize,
-        max_segment_size: usize, smoothed_rtt: Duration,
+        max_segment_size: usize, smoothed_rtt: Duration, enable_bbr_fix: bool,
         custom_bbr_params: Option<&BbrParams>,
     ) -> Self {
         let cwnd = initial_congestion_window * max_segment_size;
 
-        let params = if let Some(custom_bbr_settings) = custom_bbr_params {
+        let mut params = if let Some(custom_bbr_settings) = custom_bbr_params {
             DEFAULT_PARAMS.with_overrides(custom_bbr_settings)
         } else {
             DEFAULT_PARAMS
         };
+        params.enable_bbr_fix=enable_bbr_fix;
 
         BBRv2 {
             mode: Mode::startup(BBRv2NetworkModel::new(&params, smoothed_rtt)),
@@ -746,13 +752,18 @@ impl CongestionControl for BBRv2 {
         if !self.last_sample_is_app_limited {
             self.has_non_app_limited_sample = true;
         }
+
         if congestion_event.bytes_in_flight == 0 &&
             self.params.avoid_unnecessary_probe_rtt
         {
-            let delta = event_time -
-                self.idle_start.unwrap_or(event_time) -
-                rtt_stats.latest_rtt;
-            if delta.as_nanos() > 0 {
+            if network_model.enable_bbr_fix() {
+                let delta = event_time -
+                    self.idle_start.unwrap_or(event_time) -
+                    rtt_stats.latest_rtt;
+                if delta.as_nanos() > 0 {
+                    self.on_enter_quiescence(event_time);
+                }
+            } else {
                 self.on_enter_quiescence(event_time);
             }
         }
@@ -836,17 +847,65 @@ mod tests {
     const MAX_DATAGRAM_SIZE: usize = 1350;
     use super::*;
 
-    fn test_sender() -> TestSender {
-        TestSender::new(CongestionControlAlgorithm::Bbr2Gcongestion, false)
+    fn test_sender(enabled: bool) -> TestSender {
+        TestSender::new(CongestionControlAlgorithm::Bbr2Gcongestion, enabled)
+    }
+
+    #[rstest]
+    fn bbr_wrong_plateau() {
+        let mut sender = test_sender(false);
+        let size = MAX_DATAGRAM_SIZE;
+        let rtt = Duration::from_millis(1000);
+
+        // Fill the pipe.
+        for _ in 0..DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS {
+            sender.send_packet(
+                size,
+                packet::Epoch::Handshake,
+                HandshakeStatus::default(),
+            );
+        }
+        sender.advance_time(rtt);
+
+        // ack all inflight data
+        sender.ack_n_packets(
+            DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
+            size,
+            300,
+            packet::Epoch::Handshake,
+            HandshakeStatus::default(),
+            None,
+        );
+        assert_eq!(sender.cc.bytes_in_flight(), 0);
+        // Now simulate the problematic pattern: send a small burst at
+        // minimum cwnd, ACK it (bif drops to 0), advance one RTT, repeat. --> bif
+        // at 0
+
+        sender.send_packet(
+            size,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+        );
+
+        sender.advance_time(rtt);
+
+        sender.ack_n_packets(
+            1,
+            size,
+            300,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            None,
+        );
+        // eventhough bytes in flight is 0, the connection is clearly not
+        // idle, thus no quiescence has been detected
+        assert_eq!(sender.cc.bytes_in_flight(), 0);
+        assert_eq!(sender.cc.pacer.sender.last_quiescence_start, None);
     }
 
     #[rstest]
     fn bbr_plateau_no_quiescence() {
-        // Reproduces the bug where cwnd stays pinned at minimum after a
-        // loss event because the idle-time epoch shift pushes
-        // congestion_recovery_start_time into the future on every
-        // send -> ACK -> send cycle when bif transiently hits 0.
-        let mut sender = test_sender();
+        let mut sender = test_sender(true);
         let size = MAX_DATAGRAM_SIZE;
         let rtt = Duration::from_millis(1000);
 
@@ -902,7 +961,7 @@ mod tests {
         // loss event because the idle-time epoch shift pushes
         // congestion_recovery_start_time into the future on every
         // send -> ACK -> send cycle when bif transiently hits 0.
-        let mut sender = test_sender();
+        let mut sender = test_sender(true);
         let size = MAX_DATAGRAM_SIZE;
         let rtt = Duration::from_millis(1000);
 
@@ -976,6 +1035,7 @@ mod tests {
             MAX_WINDOW_PACKETS,
             INIT_PACKET_SIZE,
             initial_rtt,
+            true,
             Some(bbr_params),
         );
 

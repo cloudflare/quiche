@@ -51,10 +51,15 @@ pub(crate) struct TestSender {
 }
 
 impl TestSender {
-    pub(crate) fn new(algo: CongestionControlAlgorithm, hystart: bool) -> Self {
+    pub(crate) fn new(
+        algo: CongestionControlAlgorithm, enable_bbr_fix: bool,
+    ) -> Self {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(algo);
-        cfg.enable_hystart(hystart);
+        cfg.enable_hystart(false);
+
+        cfg.set_enable_bbr_fix(enable_bbr_fix);
+        println!("config, set enabled: {:?}", cfg.enable_bbr_fix);
         let _ = fs::remove_file("saved_params.csv");
         TestSender {
             next_pkt: 0,

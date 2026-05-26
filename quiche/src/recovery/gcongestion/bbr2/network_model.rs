@@ -191,10 +191,13 @@ pub(super) struct BBRv2NetworkModel {
     latest_send_rate: Option<Bandwidth>,
     /// The most recent ack rate from the BandwidthSampler.
     latest_ack_rate: Option<Bandwidth>,
+
+    enable_bbr_fix:bool,
 }
 
 impl BBRv2NetworkModel {
     pub(super) fn new(params: &Params, initial_rtt: Duration) -> Self {
+        println!("enable fix: {:?}", params.enable_bbr_fix);
         BBRv2NetworkModel {
             min_bytes_in_flight_in_round: usize::MAX,
             inflight_hi_limited_in_round: false,
@@ -238,6 +241,7 @@ impl BBRv2NetworkModel {
 
             latest_send_rate: None,
             latest_ack_rate: None,
+            enable_bbr_fix:params.enable_bbr_fix
         }
     }
 
@@ -249,6 +253,10 @@ impl BBRv2NetworkModel {
     #[cfg(feature = "qlog")]
     pub(super) fn ack_rate(&self) -> Option<Bandwidth> {
         self.latest_ack_rate
+    }
+
+    pub(super) fn enable_bbr_fix(&self)->bool{
+        self.enable_bbr_fix
     }
 
     pub(super) fn max_ack_height(&self) -> usize {

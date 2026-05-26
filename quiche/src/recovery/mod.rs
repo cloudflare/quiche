@@ -144,6 +144,7 @@ pub struct RecoveryConfig {
     pub initial_congestion_window_packets: usize,
     pub enable_relaxed_loss_threshold: bool,
     pub enable_cubic_idle_restart_fix: bool,
+    pub enable_bbr_fix: bool,
 }
 
 impl RecoveryConfig {
@@ -161,6 +162,7 @@ impl RecoveryConfig {
                 .initial_congestion_window_packets,
             enable_relaxed_loss_threshold: config.enable_relaxed_loss_threshold,
             enable_cubic_idle_restart_fix: config.enable_cubic_idle_restart_fix,
+            enable_bbr_fix: config.enable_bbr_fix,
         }
     }
 }
