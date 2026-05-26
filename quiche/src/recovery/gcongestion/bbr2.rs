@@ -523,7 +523,7 @@ impl BBRv2 {
         } else {
             DEFAULT_PARAMS
         };
-        params.enable_bbr_fix=enable_bbr_fix;
+        params.enable_bbr_fix = enable_bbr_fix;
 
         BBRv2 {
             mode: Mode::startup(BBRv2NetworkModel::new(&params, smoothed_rtt)),
@@ -853,7 +853,7 @@ mod tests {
 
     #[rstest]
     fn bbr_wrong_plateau() {
-        let mut sender = test_sender(false);
+        let mut sender = test_sender(false); // force the sender to use the old code without the bbr fix enabled
         let size = MAX_DATAGRAM_SIZE;
         let rtt = Duration::from_millis(1000);
 
@@ -877,10 +877,6 @@ mod tests {
             None,
         );
         assert_eq!(sender.cc.bytes_in_flight(), 0);
-        // Now simulate the problematic pattern: send a small burst at
-        // minimum cwnd, ACK it (bif drops to 0), advance one RTT, repeat. --> bif
-        // at 0
-
         sender.send_packet(
             size,
             packet::Epoch::Application,
@@ -897,10 +893,10 @@ mod tests {
             HandshakeStatus::default(),
             None,
         );
-        // eventhough bytes in flight is 0, the connection is clearly not
-        // idle, thus no quiescence has been detected
+        // bytes in flight is 0, which was previously understood as quiescence,
+        // thus the connection is understood to be idle
         assert_eq!(sender.cc.bytes_in_flight(), 0);
-        assert_eq!(sender.cc.pacer.sender.last_quiescence_start, None);
+        assert_ne!(sender.cc.pacer.sender.last_quiescence_start, None);
     }
 
     #[rstest]
@@ -929,10 +925,6 @@ mod tests {
             None,
         );
         assert_eq!(sender.cc.bytes_in_flight(), 0);
-        // Now simulate the problematic pattern: send a small burst at
-        // minimum cwnd, ACK it (bif drops to 0), advance one RTT, repeat. --> bif
-        // at 0
-
         sender.send_packet(
             size,
             packet::Epoch::Application,

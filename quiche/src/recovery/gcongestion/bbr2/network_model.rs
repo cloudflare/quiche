@@ -197,7 +197,6 @@ pub(super) struct BBRv2NetworkModel {
 
 impl BBRv2NetworkModel {
     pub(super) fn new(params: &Params, initial_rtt: Duration) -> Self {
-        println!("enable fix: {:?}", params.enable_bbr_fix);
         BBRv2NetworkModel {
             min_bytes_in_flight_in_round: usize::MAX,
             inflight_hi_limited_in_round: false,

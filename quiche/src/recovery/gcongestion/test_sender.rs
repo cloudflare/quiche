@@ -39,7 +39,6 @@ use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryOps;
 use crate::recovery::Sent;
 use crate::CongestionControlAlgorithm;
-use std::fs;
 
 pub(crate) struct TestSender {
     pub(crate) cc: GRecovery,
@@ -59,8 +58,6 @@ impl TestSender {
         cfg.enable_hystart(false);
 
         cfg.set_enable_bbr_fix(enable_bbr_fix);
-        println!("config, set enabled: {:?}", cfg.enable_bbr_fix);
-        let _ = fs::remove_file("saved_params.csv");
         TestSender {
             next_pkt: 0,
             next_ack: 0,
