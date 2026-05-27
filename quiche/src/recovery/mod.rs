@@ -95,9 +95,9 @@ const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
 // The upper cap on the exponent when using exponential backoff for probes. With
-// a value of 5, the maximum possible value is 2^5 = 32 times the minimum PTO.
-// This prevents arithmetic overflow.
-const MAX_PTO_EXPONENT: u32 = 5;
+// a value of 20, the maximum possible value is 2^20 = 1,048,576 times the
+// minimum PTO. This prevents arithmetic overflow.
+const MAX_PTO_EXPONENT: u32 = 20;
 
 #[derive(Default)]
 struct LossDetectionTimer {
