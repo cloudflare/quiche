@@ -498,6 +498,12 @@ impl<F: BufFactory> SendBuf<F> {
         false
     }
 
+    /// Returns true if the next call to [`Self::emit`] will emit an empty
+    /// FIN.
+    pub fn empty_fin_next(&self) -> bool {
+        self.fin_off == Some(self.off_front())
+    }
+
     /// Returns true if the send-side of the stream is complete.
     ///
     /// This happens when the stream's send final size is known, and the peer

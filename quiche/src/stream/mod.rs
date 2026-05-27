@@ -1684,6 +1684,78 @@ mod tests {
     }
 
     #[test]
+    /// Tests that `is_flushable()` returns false when `off_front` reaches the
+    /// stream-level flow control limit (`max_off`).
+    /// This prevents zero-length stream frames when a stream is at the stream
+    /// level flow control limit.
+    fn is_flushable_at_flow_control_limit() {
+        let max_tx_data = 5;
+        let mut stream =
+            <Stream>::new(0, 0, max_tx_data, true, 0, DEFAULT_STREAM_WINDOW);
+
+        // Nothing written yet: not flushable.
+        assert!(!stream.is_flushable());
+
+        // Write up to the flow control limit.
+        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        assert!(stream.is_flushable());
+
+        // Emit all 5 bytes.
+        let mut buf = [0u8; 5];
+        assert_eq!(stream.send.emit(&mut buf), Ok((5, false)));
+        assert_eq!(stream.send.off_front(), 5);
+
+        // off_front (5) == max_off (5): NOT flushable.
+        assert!(!stream.is_flushable());
+
+        // Raise the flow control limit to allow 5 more bytes.
+        stream.send.update_max_data(10);
+
+        // But the send buffer is empty, so still not flushable.
+        assert!(!stream.is_flushable());
+
+        // Write more data; now flushable.
+        assert_eq!(stream.send.write(b"world", false), Ok(5));
+        assert!(stream.is_flushable());
+    }
+
+    #[test]
+    /// Tests the state transitions of [`SendBuf::empty_fin_next`].
+    fn send_buf_empty_fin_next() {
+        let mut stream = <Stream>::new(0, 0, 20, true, 0, DEFAULT_STREAM_WINDOW);
+
+        // No data, no FIN: empty_fin_next is false.
+        assert!(!stream.send.empty_fin_next());
+
+        // Write data without FIN: still false.
+        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        assert!(!stream.send.empty_fin_next());
+
+        // Emit all data: FIN not set yet, so still false.
+        let mut buf = [0u8; 5];
+        assert_eq!(stream.send.emit(&mut buf), Ok((5, false)));
+        assert!(!stream.send.empty_fin_next());
+
+        // Now set the FIN with an empty write: empty_fin_next becomes true.
+        assert_eq!(stream.send.write(b"", true), Ok(0));
+        assert!(stream.send.empty_fin_next());
+
+        // Emit with a zero-length buffer: returns (0, true) — the empty FIN.
+        let mut empty: [u8; 0] = [];
+        assert_eq!(stream.send.emit(&mut empty), Ok((0, true)));
+
+        // The predicate is still true — it only resets once the stream is
+        // removed from the flushable queue by the caller (lib.rs), not by
+        // emit() itself.
+        assert!(stream.send.empty_fin_next());
+
+        // After retransmit the data is re-queued ahead of the FIN offset,
+        // so the next emit will produce data bytes rather than an empty FIN.
+        stream.send.retransmit(0, 5);
+        assert!(!stream.send.empty_fin_next());
+    }
+
+    #[test]
     fn rangebuf_split_off() {
         let mut buf = <RangeBuf>::from(b"helloworld", 5, true);
         assert_eq!(buf.start, 0);

@@ -42,9 +42,12 @@ use qlog::events::quic::QuicFrame;
 #[cfg(feature = "qlog")]
 use qlog::events::quic::StreamType;
 
-pub const MAX_CRYPTO_OVERHEAD: usize = 8;
+/// Maximum CRYPTO frame overhead:
+/// 1-byte type + varint-encoded offset (bounded by `MAX_CRYPTO_STREAM_OFFSET`)
+/// + 2-byte length (we always encode as 2 bytes)
+pub const MAX_CRYPTO_OVERHEAD: usize =
+    1 + octets::varint_len(crate::MAX_CRYPTO_STREAM_OFFSET) + 2;
 pub const MAX_DGRAM_OVERHEAD: usize = 2;
-pub const MAX_STREAM_OVERHEAD: usize = 12;
 pub const MAX_STREAM_SIZE: u64 = 1 << 62;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
