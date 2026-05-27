@@ -122,7 +122,18 @@ impl RecvBuf {
         }
 
         // No need to store empty buffer that doesn't carry the fin flag.
+        //
+        // However, we must still advance the max received offset. A
+        // zero-length non-FIN STREAM frame at offset N implies the peer has
+        // data at that offset.
+        //
+        // NOTE: connection level flow control accounting also expects this.
         if !buf.fin() && buf.is_empty() {
+            self.len = cmp::max(self.len, buf.max_off());
+            if self.drain {
+                // we are not storing any data, off == len
+                self.off = self.len;
+            }
             return Ok(());
         }
 
@@ -510,16 +521,31 @@ mod tests {
 
         assert_emit_discard(&mut recv, emit, 32, 5, false, None);
 
-        // Don't store non-fin empty buffer.
+        // Empty non-FIN frame advances the high-water mark but stores no data.
         let buf = RangeBuf::from(b"", 10, false);
         assert!(recv.write(buf).is_ok());
-        assert_eq!(recv.len, 5);
+        assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 0);
 
-        // Check flow control for empty buffer.
+        // Check flow control for empty non-FIN buffer past the limit.
         let buf = RangeBuf::from(b"", 16, false);
         assert_eq!(recv.write(buf), Err(Error::FlowControl));
+    }
+
+    #[rstest]
+    fn empty_fin_stream_frame(#[values(true, false)] emit: bool) {
+        let mut recv =
+            RecvBuf::new(15, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
+        assert_eq!(recv.len, 0);
+
+        let buf = RangeBuf::from(b"hello", 0, false);
+        assert!(recv.write(buf).is_ok());
+        assert_eq!(recv.len, 5);
+        assert_eq!(recv.off, 0);
+        assert_eq!(recv.data.len(), 1);
+
+        assert_emit_discard(&mut recv, emit, 32, 5, false, None);
 
         // Store fin empty buffer.
         let buf = RangeBuf::from(b"", 5, true);
@@ -643,6 +669,52 @@ mod tests {
         assert_eq!(recv.data.len(), 0);
 
         assert_emit_discard_done(&mut recv, emit);
+    }
+
+    /// Tests that an empty non-FIN frame written to a draining `RecvBuf`
+    /// advances `off` along with `len`, so that a subsequent `reset()` with
+    /// the same final size returns zero deltas (no double-counting).
+    #[rstest]
+    fn drain_empty_non_fin_frame_then_reset(#[values(true, false)] emit: bool) {
+        let mut recv =
+            RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
+
+        // Write and consume 5 bytes so that the stream has some history.
+        let buf = RangeBuf::from(b"hello", 0, false);
+        assert!(recv.write(buf).is_ok());
+        assert_eq!(recv.len, 5);
+        assert_eq!(recv.off, 0);
+
+        assert_emit_discard(&mut recv, emit, 32, 5, false, Some(b"hello"));
+        assert_eq!(recv.off, 5);
+
+        // Shut down — enters drain mode. All data was already consumed, so
+        // no buffered bytes need to be released.
+        assert_eq!(recv.shutdown(), Ok(0));
+        assert!(recv.is_draining());
+        assert_eq!(recv.len, 5);
+        assert_eq!(recv.off, 5);
+        assert_eq!(recv.data.len(), 0);
+
+        // Receive an empty non-FIN STREAM frame at offset 10. In drain mode
+        // the fix must advance `off` to match `len`.
+        let buf = RangeBuf::from(b"", 10, false);
+        assert!(recv.write(buf).is_ok());
+        assert_eq!(recv.len, 10);
+        assert_eq!(recv.off, 10);
+        assert_eq!(recv.data.len(), 0);
+
+        // A RESET_STREAM with final_size == 10 should produce zero deltas
+        // because off already equals final_size — nothing to reclaim.
+        assert_eq!(
+            recv.reset(42, 10),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 0,
+                consumed_flowcontrol: 0,
+            })
+        );
+        assert_eq!(recv.len, 10);
+        assert_eq!(recv.off, 10);
     }
 
     #[rstest]
