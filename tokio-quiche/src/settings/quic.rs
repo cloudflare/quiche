@@ -29,6 +29,8 @@ use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 use std::time::Duration;
 
+pub use qlog::writer::QlogCompression;
+
 /// QUIC configuration parameters.
 #[serde_as]
 #[settings]
@@ -151,6 +153,16 @@ pub struct QuicSettings {
 
     /// Path to a directory where QLOG files will be saved.
     pub qlog_dir: Option<String>,
+
+    /// Compression applied to QLOG output files.
+    ///
+    /// Defaults to [`QlogCompression::None`], preserving the historical
+    /// behavior of emitting raw `.sqlog` files. The `Gzip` and `Zstd`
+    /// variants require the `qlog-gzip` and `qlog-zstd` Cargo features
+    /// (both enabled by default); builds that disable those features
+    /// cannot reference the corresponding variant.
+    #[serde(default)]
+    pub qlog_compression: QlogCompression,
 
     /// Congestion control algorithm to use.
     ///
@@ -279,6 +291,16 @@ pub struct QuicSettings {
     /// Defaults to 16MB.
     #[serde(default = "QuicSettings::default_max_stream_window")]
     pub max_stream_window: u64,
+
+    /// Whether to use the `initial_max_data` transport parameter as the
+    /// initial connection and stream flow control window.
+    ///
+    /// See [`set_use_initial_max_data_as_flow_control_win()`] for more.
+    ///
+    /// Defaults to `false`.
+    ///
+    /// [`set_use_initial_max_data_as_flow_control_win()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_use_initial_max_data_as_flow_control_win
+    pub use_initial_max_data_as_fc_window: bool,
 
     /// If true, send an advisory STREAMS_BLOCKED frame when the
     /// application's local stream creation attempts fail due to the

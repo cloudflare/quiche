@@ -29,6 +29,8 @@ use std::borrow::Cow;
 use std::fs::File;
 use std::time::Duration;
 
+use qlog::writer::QlogCompression;
+
 use crate::result::QuicResult;
 use crate::settings::CertificateKind;
 use crate::settings::ConnectionParams;
@@ -45,6 +47,7 @@ pub(crate) struct Config {
     pub quiche_config: quiche::Config,
     pub disable_client_ip_validation: bool,
     pub qlog_dir: Option<String>,
+    pub qlog_compression: QlogCompression,
     pub has_gso: bool,
     pub pacing_offload: bool,
     pub enable_expensive_packet_count_metrics: bool,
@@ -95,6 +98,7 @@ impl Config {
             disable_client_ip_validation: quic_settings
                 .disable_client_ip_validation,
             qlog_dir: quic_settings.qlog_dir.clone(),
+            qlog_compression: quic_settings.qlog_compression,
             has_gso,
             pacing_offload,
             enable_expensive_packet_count_metrics: quic_settings
@@ -194,6 +198,9 @@ fn make_quiche_config(
 
     config.set_max_connection_window(quic_settings.max_connection_window);
     config.set_max_stream_window(quic_settings.max_stream_window);
+    config.set_use_initial_max_data_as_flow_control_win(
+        quic_settings.use_initial_max_data_as_fc_window,
+    );
     config.set_enable_send_streams_blocked(
         quic_settings.enable_send_streams_blocked,
     );

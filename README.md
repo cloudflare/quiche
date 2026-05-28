@@ -305,14 +305,14 @@ is disabled by default), by passing ``--features ffi`` to ``cargo``.
 Building
 --------
 
-quiche requires Rust 1.85 or later to build. The latest stable Rust release can
+quiche requires Rust 1.88 or later to build. The latest stable Rust release can
 be installed using [rustup](https://rustup.rs/).
 
 Once the Rust build environment is setup, the quiche source code can be fetched
 using git:
 
 ```bash
- $ git clone --recursive https://github.com/cloudflare/quiche
+ $ git clone https://github.com/cloudflare/quiche
 ```
 
 and then built using cargo:
@@ -329,26 +329,22 @@ cargo can also be used to run the testsuite:
 
 Note that [BoringSSL], which is used to implement QUIC's cryptographic handshake
 based on TLS, needs to be built and linked to quiche. This is done automatically
-when building quiche using cargo, but requires the `cmake` command to be
-available during the build process. On Windows you also need
-[NASM](https://www.nasm.us/). The [official BoringSSL
+by the [boring-sys] crate when building with cargo, but requires the `cmake`
+command to be available during the build process.
+
+On Windows [NASM](https://www.nasm.us/) is also required. The [official BoringSSL
 documentation](https://github.com/google/boringssl/blob/master/BUILDING.md) has
 more details.
 
 In alternative you can use your own custom build of BoringSSL by configuring
-the BoringSSL directory with the ``QUICHE_BSSL_PATH`` environment variable:
+the BoringSSL directory with the ``BORING_BSSL_PATH`` environment variable:
 
 ```bash
- $ QUICHE_BSSL_PATH="/path/to/boringssl" cargo build --examples
+ $ BORING_BSSL_PATH="/path/to/boringssl" cargo build --examples
 ```
 
-Alternatively you can use [OpenSSL/quictls]. To enable quiche to use this vendor
-the ``openssl`` feature can be added to the ``--feature`` list. Be aware that
-``0-RTT`` is not supported if this vendor is used.
-
 [BoringSSL]: https://boringssl.googlesource.com/boringssl/
-
-[OpenSSL/quictls]: https://github.com/quictls/openssl
+[boring-sys]: https://crates.io/crates/boring-sys
 
 ### Building for Android
 

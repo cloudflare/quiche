@@ -439,6 +439,19 @@ impl std::convert::From<std::io::Error> for Error {
 pub const QLOGFILE_URI: &str = "urn:ietf:params:qlog:file:contained";
 pub const QLOGFILESEQ_URI: &str = "urn:ietf:params:qlog:file:sequential";
 
+/// File extension for an uncompressed qlog stream (JSON-SEQ).
+///
+/// Includes the leading dot so it can be concatenated as a suffix
+/// (`format!("{id}{SQLOG_EXT}")`) and matched as a path suffix
+/// (`name.ends_with(SQLOG_EXT)`).
+pub const SQLOG_EXT: &str = ".sqlog";
+
+/// File extension for a gzip-compressed qlog stream.
+pub const SQLOG_GZ_EXT: &str = ".sqlog.gz";
+
+/// File extension for a zstd-compressed qlog stream.
+pub const SQLOG_ZST_EXT: &str = ".sqlog.zst";
+
 pub type Bytes = String;
 pub type StatelessResetToken = Bytes;
 
@@ -661,6 +674,7 @@ pub mod reader;
 pub mod streamer;
 #[doc(hidden)]
 pub mod testing;
+pub mod writer;
 
 #[cfg(test)]
 mod tests {

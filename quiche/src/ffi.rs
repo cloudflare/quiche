@@ -373,6 +373,13 @@ pub extern "C" fn quiche_config_set_enable_cubic_idle_restart_fix(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_use_initial_max_data_as_flow_control_win(
+    config: &mut Config, v: bool,
+) {
+    config.set_use_initial_max_data_as_flow_control_win(v);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_set_max_pacing_rate(config: &mut Config, v: u64) {
     config.set_max_pacing_rate(v);
 }
@@ -448,7 +455,9 @@ pub extern "C" fn quiche_config_set_ticket_key(
 
 #[no_mangle]
 pub extern "C" fn quiche_config_free(config: *mut Config) {
-    drop(unsafe { Box::from_raw(config) });
+    if !config.is_null() {
+        drop(unsafe { Box::from_raw(config) });
+    }
 }
 
 #[no_mangle]
@@ -1157,7 +1166,9 @@ pub extern "C" fn quiche_connection_id_iter_next(
 
 #[no_mangle]
 pub extern "C" fn quiche_connection_id_iter_free(iter: *mut ConnectionIdIter) {
-    drop(unsafe { Box::from_raw(iter) });
+    if !iter.is_null() {
+        drop(unsafe { Box::from_raw(iter) });
+    }
 }
 
 #[no_mangle]
@@ -1315,7 +1326,9 @@ pub extern "C" fn quiche_stream_iter_next(
 
 #[no_mangle]
 pub extern "C" fn quiche_stream_iter_free(iter: *mut StreamIter) {
-    drop(unsafe { Box::from_raw(iter) });
+    if !iter.is_null() {
+        drop(unsafe { Box::from_raw(iter) });
+    }
 }
 
 #[repr(C)]
@@ -1633,7 +1646,9 @@ pub extern "C" fn quiche_conn_send_ack_eliciting_on_path(
 
 #[no_mangle]
 pub extern "C" fn quiche_conn_free(conn: *mut Connection) {
-    drop(unsafe { Box::from_raw(conn) });
+    if !conn.is_null() {
+        drop(unsafe { Box::from_raw(conn) });
+    }
 }
 
 #[no_mangle]
@@ -1756,7 +1771,9 @@ pub extern "C" fn quiche_socket_addr_iter_next(
 
 #[no_mangle]
 pub extern "C" fn quiche_socket_addr_iter_free(iter: *mut SocketAddrIter) {
-    drop(unsafe { Box::from_raw(iter) });
+    if !iter.is_null() {
+        drop(unsafe { Box::from_raw(iter) });
+    }
 }
 
 #[no_mangle]
@@ -1949,7 +1966,9 @@ pub extern "C" fn quiche_path_event_peer_migrated(
 
 #[no_mangle]
 pub extern "C" fn quiche_path_event_free(ev: *mut PathEvent) {
-    drop(unsafe { Box::from_raw(ev) });
+    if !ev.is_null() {
+        drop(unsafe { Box::from_raw(ev) });
+    }
 }
 
 #[no_mangle]
@@ -1995,10 +2014,7 @@ fn optional_std_addr_from_c(
         return None;
     }
 
-    Some({
-        let addr = unsafe { slice::from_raw_parts(addr, addr_len as usize) };
-        std_addr_from_c(addr.first().unwrap(), addr_len)
-    })
+    Some(std_addr_from_c(unsafe { &*addr }, addr_len))
 }
 
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {

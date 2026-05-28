@@ -825,7 +825,8 @@ pub trait InitialPacketHandler {
 /// A [`NewConnection`] describes a new [`quiche::Connection`] that can be
 /// driven by an io worker.
 pub struct NewConnection {
-    conn: QuicheConnection,
+    /// See [`QuicConnectionParams::quiche_conn`].
+    conn: Box<QuicheConnection>,
     pending_cid: Option<ConnectionId<'static>>,
     initial_pkt: Option<Incoming>,
     cid_generator: Option<SharedConnectionIdGenerator>,
@@ -924,6 +925,7 @@ mod tests {
             ConnectionAcceptorConfig {
                 disable_client_ip_validation: config.disable_client_ip_validation,
                 qlog_dir: config.qlog_dir.clone(),
+                qlog_compression: config.qlog_compression,
                 keylog_file: config
                     .keylog_file
                     .as_ref()

@@ -38,9 +38,9 @@ pub fn report(log_file: &LogFileParseResult, config: &AppConfig) {
             if let Some(table) = text::request_timing_table(data, config) {
                 println!(
                     "Request timing table for session ID: {:?}, app proto: {:?}, host: {:?}",
-                    &data.datastore.session_id.unwrap_or(-1),
-                    &data.datastore.application_proto,
-                    &data.datastore
+                    data.datastore.session_id.unwrap_or(-1),
+                    data.datastore.application_proto,
+                    data.datastore
                         .host
                         .clone()
                         .unwrap_or("ERROR UNKNOWN".to_string())

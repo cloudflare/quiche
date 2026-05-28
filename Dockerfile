@@ -1,4 +1,4 @@
-FROM rust:1.86 AS build
+FROM rust:1.88 AS build
 
 WORKDIR /build
 
@@ -15,7 +15,8 @@ COPY quiche/ ./quiche/
 COPY task-killswitch ./task-killswitch/
 COPY tokio-quiche ./tokio-quiche/
 
-RUN apt-get update && apt-get install -y cmake && rm -rf /var/lib/apt/lists/*
+# clang and cmake are required by boring-sys to build BoringSSL.
+RUN apt-get update && apt-get install -y clang cmake && rm -rf /var/lib/apt/lists/*
 
 RUN cargo build --release --manifest-path apps/Cargo.toml
 

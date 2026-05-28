@@ -141,8 +141,6 @@ pub enum H3ConnectionError {
     ControllerWentAway,
     /// Other error at the connection, but not stream level.
     H3(h3::Error),
-    /// Received a GOAWAY frame from the peer.
-    GoAway,
     /// Received data for a stream that was closed or never opened.
     NonexistentStream,
     /// The server's post-accept timeout was hit.
@@ -169,7 +167,6 @@ impl fmt::Display for H3ConnectionError {
         let s: &dyn fmt::Display = match self {
             Self::ControllerWentAway => &"controller went away",
             Self::H3(e) => e,
-            Self::GoAway => &"goaway",
             Self::NonexistentStream => &"nonexistent stream",
             Self::PostAcceptTimeout => &"post accept timeout hit",
         };
@@ -261,6 +258,9 @@ pub enum H3Event {
     /// don't result from RST_STREAM frames, unlike the
     /// [`H3Event::ResetStream`] variant.
     StreamClosed { stream_id: u64 },
+    /// A GOAWAY frame was received from the peer containing `id`,
+    /// as described in https://datatracker.ietf.org/doc/html/rfc9114#section-5.2.
+    GoAway { id: u64 },
 }
 
 impl H3Event {
@@ -362,6 +362,9 @@ pub struct H3Driver<H: DriverHooks> {
     /// Tracks whether we have forwarded the HTTP/3 SETTINGS frame
     /// to the [H3Controller] once.
     settings_received_and_forwarded: bool,
+    /// Tracks whether the H3 event receiver has been dropped.
+    /// Used to avoid busy-looping on `h3_event_sender.closed()`.
+    h3_event_receiver_dropped: bool,
 }
 
 impl<H: DriverHooks> H3Driver<H> {
@@ -397,6 +400,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 waiting_streams: FuturesUnordered::new(),
 
                 settings_received_and_forwarded: false,
+                h3_event_receiver_dropped: false,
             },
             H3Controller {
                 cmd_sender,
@@ -681,7 +685,12 @@ impl<H: DriverHooks> H3Driver<H> {
             },
 
             h3::Event::PriorityUpdate => Ok(()),
-            h3::Event::GoAway => Err(H3ConnectionError::GoAway),
+            h3::Event::GoAway => {
+                self.h3_event_sender
+                    .send(H3Event::GoAway { id: stream_id }.into())
+                    .map_err(|_| H3ConnectionError::ControllerWentAway)?;
+                Ok(())
+            },
         }
     }
 
@@ -915,6 +924,7 @@ impl<H: DriverHooks> H3Driver<H> {
                         },
                     )?;
                     self.flow_map.remove(&flow_id);
+                    self.close_if_idle(qconn);
                     break;
                 },
                 Ok(_) => unreachable!("Flows can't send frame of other types"),
@@ -988,7 +998,21 @@ impl<H: DriverHooks> H3Driver<H> {
                 .send(H3Event::StreamClosed { stream_id }.into());
         }
 
+        self.close_if_idle(qconn);
+
         Ok(())
+    }
+
+    /// Closes the connection with `NoError` if the H3 event receiver
+    /// has been dropped and there are no active streams or flows.
+    fn close_if_idle(&self, qconn: &mut QuicheConnection) {
+        if self.h3_event_receiver_dropped &&
+            self.stream_map.is_empty() &&
+            self.flow_map.is_empty()
+        {
+            let _ =
+                qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
+        }
     }
 
     /// Shuts down the indicated HTTP/3 stream by sending frames and cleaning
@@ -1077,9 +1101,13 @@ impl<H: DriverHooks> H3Driver<H> {
     ) -> H3ConnectionResult<()> {
         loop {
             match datagram::receive_h3_dgram(qconn) {
-                Ok((flow_id, dgram)) => {
+                Ok((flow_id, dgram))
+                    if !qconn.is_server() ||
+                        self.hooks.extended_connect_enabled() =>
+                {
                     self.get_or_insert_flow(flow_id)?.send_best_effort(dgram);
                 },
+                Ok(_) => {},
                 Err(quiche::Error::Done) => return Ok(()),
                 Err(err) => return Err(H3ConnectionError::from(err)),
             }
@@ -1282,11 +1310,11 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
             .maximum_writable_streams()
             .observe(max_stream_seen as f64);
 
+        Self::record_quiche_error(quiche_conn, metrics);
+
         let Err(work_loop_error) = work_loop_result else {
             return;
         };
-
-        Self::record_quiche_error(quiche_conn, metrics);
 
         let Some(h3_err) = work_loop_error.downcast_ref::<H3ConnectionError>()
         else {
@@ -1319,6 +1347,11 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
             Some(dgram) = self.dgram_recv.recv() => self.dgram_ready(qconn, dgram),
             Some(cmd) = self.cmd_recv.recv() => H::conn_command(self, qconn, cmd),
             r = self.hooks.wait_for_action(qconn), if H::has_wait_action(self) => r,
+            _ = self.h3_event_sender.closed(), if !self.h3_event_receiver_dropped => {
+                self.h3_event_receiver_dropped = true;
+                self.close_if_idle(qconn);
+                Ok(())
+            }
         }?;
 
         // Make sure controller is not starved, but also not prioritized in the

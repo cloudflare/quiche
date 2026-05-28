@@ -25,8 +25,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@master
@@ -39,15 +37,15 @@ jobs:
           sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
 
       - name: Run cargo test
-        run: cargo test --verbose --all-targets --features=boringssl-boring-crate,${{ env.FEATURES }}
+        run: cargo test --verbose --all-targets --features=${{ env.FEATURES }}
 
       - name: Run cargo test with custom-client-dcid feature enabled
-        run: cargo test --verbose --all-targets --features=boringssl-boring-crate,custom-client-dcid,${{ env.FEATURES }}
+        run: cargo test --verbose --all-targets --features=custom-client-dcid,${{ env.FEATURES }}
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
-        run: cargo test --verbose --doc --features=boringssl-boring-crate,${{ env.FEATURES }}
+        run: cargo test --verbose --doc --features=${{ env.FEATURES }}
 
       # NOTE: this is disabled as it fails when building changes that bump
       # version of local crates (e.g. when doing a `qlog` release) that have not
@@ -69,11 +67,16 @@ jobs:
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    # `quiche-fuzz` calls `RAND_reset_for_fuzzing`, which BoringSSL only
+    # exports when `BORINGSSL_UNSAFE_DETERMINISTIC_MODE` is defined.
+    # `boring-sys` doesn't expose a feature for that, but cmake-rs honors
+    # `CFLAGS`/`CXXFLAGS`, so inject the defines there.
+    env:
+      CFLAGS: "-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE -DBORINGSSL_UNSAFE_FUZZER_MODE"
+      CXXFLAGS: "-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE -DBORINGSSL_UNSAFE_FUZZER_MODE"
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@master
@@ -100,8 +103,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@master
@@ -119,8 +120,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@master

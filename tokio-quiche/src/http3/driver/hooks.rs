@@ -83,6 +83,12 @@ pub trait DriverHooks: Sized + Send + 'static {
         cmd: Self::Command,
     ) -> H3ConnectionResult<()>;
 
+    /// Whether the extended CONNECT protocol is enabled. Used to gate
+    /// datagram flow creation.
+    fn extended_connect_enabled(&self) -> bool {
+        false
+    }
+
     /// Determines whether the hook's `wait_for_action` future will be polled
     /// as part of `ApplicationOverQuic::wait_for_data`. Defaults to `false` and
     /// must be overridden if `wait_for_action` is overridden.

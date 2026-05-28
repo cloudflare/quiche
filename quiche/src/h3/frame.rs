@@ -646,8 +646,9 @@ fn parse_settings_frame(
 fn parse_push_promise(
     payload_length: u64, b: &mut octets::Octets,
 ) -> Result<Frame> {
+    let before = b.off();
     let push_id = b.get_varint()?;
-    let header_block_length = payload_length - octets::varint_len(push_id) as u64;
+    let header_block_length = payload_length - (b.off() - before) as u64;
     let header_block = b.get_bytes(header_block_length as usize)?.to_vec();
 
     Ok(Frame::PushPromise {
@@ -659,9 +660,9 @@ fn parse_push_promise(
 fn parse_priority_update(
     frame_type: u64, payload_length: u64, b: &mut octets::Octets,
 ) -> Result<Frame> {
+    let before = b.off();
     let prioritized_element_id = b.get_varint()?;
-    let priority_field_value_length =
-        payload_length - octets::varint_len(prioritized_element_id) as u64;
+    let priority_field_value_length = payload_length - (b.off() - before) as u64;
     let priority_field_value =
         b.get_bytes(priority_field_value_length as usize)?.to_vec();
 
@@ -1225,6 +1226,28 @@ mod tests {
     }
 
     #[test]
+    fn push_promise_non_minimal_varint() {
+        // A regression test for a bug handling varints in frame processing.
+
+        // Value 37 minimally encodes as 1 byte [0x25]. Non-minimal
+        // 2-byte encoding: [0x40, 0x25] (2-byte varint prefix 0b01).
+        let header_block = b"\x00\x01\x02";
+        let mut payload = vec![0x40u8, 0x25]; // non-minimal push_id = 37
+        payload.extend_from_slice(header_block);
+        let payload_length = payload.len() as u64;
+        let frame = Frame::from_bytes(
+            PUSH_PROMISE_FRAME_TYPE_ID,
+            payload_length,
+            &payload,
+        )
+        .expect("non-minimal varint was parsed correctly");
+        assert_eq!(frame, Frame::PushPromise {
+            push_id: 37,
+            header_block: header_block.to_vec(),
+        });
+    }
+
+    #[test]
     fn goaway() {
         let mut d = [42; 128];
 
@@ -1340,6 +1363,30 @@ mod tests {
             .unwrap(),
             frame
         );
+    }
+
+    #[test]
+    fn priority_update_non_minimal_varint() {
+        // A regression test for a bug handling varints in frame processing.
+
+        // Value 37 minimally encodes as 1 byte [0x25]. Non-minimal
+        // 2-byte encoding: [0x40, 0x25] (2-byte varint prefix 0b01).
+        let priority_field = b"u=3";
+        let mut payload = vec![0x40u8, 0x25];
+        payload.extend_from_slice(priority_field);
+        let payload_length = payload.len() as u64;
+
+        let frame = Frame::from_bytes(
+            PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID,
+            payload_length,
+            &payload,
+        )
+        .expect("non-minimal varint was parsed correctly");
+
+        assert_eq!(frame, Frame::PriorityUpdateRequest {
+            prioritized_element_id: 37,
+            priority_field_value: priority_field.to_vec(),
+        });
     }
 
     #[test]

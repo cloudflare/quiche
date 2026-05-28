@@ -24,7 +24,14 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
+
 use crate::QlogSeq;
+use crate::SQLOG_EXT;
+use crate::SQLOG_GZ_EXT;
+use crate::SQLOG_ZST_EXT;
 
 /// Represents the format of the read event.
 #[allow(clippy::large_enum_variant)]
@@ -64,6 +71,92 @@ impl<'a> QlogSeqReader<'a> {
 
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Convenience constructor that opens `path` and picks a streaming
+    /// decoder based on the file's compound extension:
+    ///
+    /// * `*.sqlog` -> raw JSON-SEQ (always available).
+    /// * `*.sqlog.gz` -> gzip via `flate2` (requires the `gzip` feature).
+    /// * `*.sqlog.zst` -> zstd via `zstd` (requires the `zstd` feature).
+    ///
+    /// The dispatch tests the *compound* suffix (`.sqlog.gz`,
+    /// `.sqlog.zst`, `.sqlog`) on the full filename, in that order.
+    /// This rejects bare `.gz` or `.zst` names that do not also carry
+    /// the `.sqlog` segment, and avoids the trap where
+    /// [`Path::extension`] strips only the last component (which
+    /// would silently accept `something.tar.gz`).
+    ///
+    /// Unknown extensions, or compressed extensions whose matching
+    /// feature is not enabled, return an [`std::io::ErrorKind::Unsupported`]
+    /// error with a message pointing at the feature that is needed.
+    ///
+    /// This is the intended single entry point for reading a qlog
+    /// file regardless of compression.
+    pub fn with_file(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let path = path.as_ref();
+        let file = File::open(path)?;
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+
+        // Order matters: `.sqlog.gz` and `.sqlog.zst` must be tested
+        // before `.sqlog` (every compressed suffix also ends with
+        // `.sqlog` if you only look at the last extension).
+        //
+        // Each compound suffix is matched exactly once. The
+        // `#[cfg(feature = "...")]` lives inside the `if` body so the
+        // disabled-feature path can return a helpful error rather
+        // than falling through to the unknown-extension branch.
+        if name.ends_with(SQLOG_GZ_EXT) {
+            #[cfg(feature = "gzip")]
+            {
+                let reader: Box<dyn std::io::BufRead + Send + Sync> =
+                    Box::new(BufReader::new(flate2::read::GzDecoder::new(file)));
+                return Self::new(reader);
+            }
+            #[cfg(not(feature = "gzip"))]
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                format!(
+                    "qlog file {name:?} requires the `gzip` feature on \
+                     the qlog crate to decode"
+                ),
+            )
+            .into());
+        }
+        if name.ends_with(SQLOG_ZST_EXT) {
+            #[cfg(feature = "zstd")]
+            {
+                let decoder = zstd::Decoder::new(file)?;
+                let reader: Box<dyn std::io::BufRead + Send + Sync> =
+                    Box::new(BufReader::new(decoder));
+                return Self::new(reader);
+            }
+            #[cfg(not(feature = "zstd"))]
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                format!(
+                    "qlog file {name:?} requires the `zstd` feature on \
+                     the qlog crate to decode"
+                ),
+            )
+            .into());
+        }
+        if name.ends_with(SQLOG_EXT) {
+            let reader: Box<dyn std::io::BufRead + Send + Sync> =
+                Box::new(BufReader::new(file));
+            return Self::new(reader);
+        }
+
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            format!(
+                "qlog file {name:?} does not match a known qlog \
+                 extension ({SQLOG_EXT}, {SQLOG_GZ_EXT}, {SQLOG_ZST_EXT})"
+            ),
+        )
+        .into())
     }
 
     fn read_record(
