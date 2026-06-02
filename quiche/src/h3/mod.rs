@@ -308,8 +308,6 @@ use qlog::events::http3::StreamTypeSet;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 #[cfg(feature = "qlog")]
-use qlog::events::EventImportance;
-#[cfg(feature = "qlog")]
 use qlog::events::EventType;
 
 use crate::buffers::BufFactory;

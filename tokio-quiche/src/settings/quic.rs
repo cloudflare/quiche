@@ -152,6 +152,11 @@ pub struct QuicSettings {
     pub keylog_file: Option<String>,
 
     /// Path to a directory where QLOG files will be saved.
+    ///
+    /// Ignored for a given connection if
+    /// [`ConnectionHook::create_qlog_sink`](crate::quic::ConnectionHook::create_qlog_sink)
+    /// returns `Some` for it. The hook takes precedence over this writer-backed
+    /// path.
     pub qlog_dir: Option<String>,
 
     /// Compression applied to QLOG output files.

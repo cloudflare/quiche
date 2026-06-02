@@ -79,6 +79,46 @@ pub fn make_trace_seq() -> TraceSeq {
     )
 }
 
+/// Shared in-memory writer for test sinks.
+///
+/// Cloned references see the same underlying buffer. Tests typically
+/// hold one handle and hand a clone to a writer-based qlog sink, then
+/// read bytes through the original handle after the streamer has
+/// flushed.
+#[derive(Clone, Default)]
+pub struct SharedWriter {
+    bytes: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+}
+
+impl SharedWriter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns a snapshot of the bytes written so far.
+    pub fn bytes(&self) -> Vec<u8> {
+        self.bytes.lock().unwrap().clone()
+    }
+
+    /// Returns the bytes as a UTF-8 string.
+    ///
+    /// Panics if the buffer contains non-UTF-8 bytes.
+    pub fn as_string(&self) -> String {
+        String::from_utf8(self.bytes()).expect("non-UTF-8 bytes in SharedWriter")
+    }
+}
+
+impl std::io::Write for SharedWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.bytes.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod event_tests;
 #[cfg(test)]

@@ -381,8 +381,10 @@ fn main() {
                         let id = format!("{:?}", scid);
                         let writer = make_qlog_writer(&dir, "server", &id);
 
-                        conn.set_qlog(
-                            std::boxed::Box::new(writer),
+                        conn.set_qlog_sink(
+                            std::boxed::Box::new(quiche::QlogWriterSink::new(
+                                writer,
+                            )),
                             "quiche-server qlog".to_string(),
                             format!("{} id={}", "quiche-server qlog", id),
                         );
