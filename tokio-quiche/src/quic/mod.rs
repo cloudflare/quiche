@@ -125,6 +125,7 @@ pub use self::connection::QuicCommand;
 pub use self::connection::QuicConnectionStats;
 pub use self::connection::SimpleConnectionIdGenerator;
 pub use self::hooks::ConnectionHook;
+pub use self::hooks::QlogSinkContext;
 
 /// Alias of [quiche::Connection] used internally by the crate.
 pub type QuicheConnection = quiche::Connection<crate::buf_factory::BufFactory>;
@@ -228,18 +229,33 @@ where
         })?;
     }
 
-    // Set the qlog writer here instead of in the `ClientConnector` to avoid
-    // missing logs from early in the connection
-    if let Some(qlog_dir) = &client_config.qlog_dir {
+    // Set the qlog sink/writer here instead of in the `ClientConnector` to
+    // avoid missing logs from early in the connection.
+    let id = format!("{:?}", scid);
+    let hook_sink = client_config.connection_hook.as_ref().and_then(|hook| {
+        hook.create_qlog_sink(QlogSinkContext {
+            id: &id,
+            is_server: false,
+            local_addr: socket.local_addr,
+            peer_addr: socket.peer_addr,
+        })
+    });
+
+    if let Some(sink) = hook_sink {
+        quiche_conn.set_qlog_sink(
+            sink,
+            "tokio-quiche qlog".to_string(),
+            format!("tokio-quiche qlog id={id}"),
+        );
+    } else if let Some(qlog_dir) = &client_config.qlog_dir {
         log::info!("setting up qlogs"; "qlog_dir"=>qlog_dir);
-        let id = format!("{:?}", scid);
         let path = std::path::Path::new(qlog_dir)
             .join(qlog_file_name(&id, client_config.qlog_compression));
         if let Ok(writer) =
             make_qlog_writer_from_path(&path, client_config.qlog_compression)
         {
-            quiche_conn.set_qlog(
-                writer,
+            quiche_conn.set_qlog_sink(
+                Box::new(qlog::QlogWriterSink::new(writer)),
                 "tokio-quiche qlog".to_string(),
                 format!("tokio-quiche qlog id={id}"),
             );
@@ -306,6 +322,7 @@ where
             disable_client_ip_validation: config.disable_client_ip_validation,
             qlog_dir: config.qlog_dir.clone(),
             qlog_compression: config.qlog_compression,
+            connection_hook: config.connection_hook.clone(),
             keylog_file: config
                 .keylog_file
                 .as_ref()

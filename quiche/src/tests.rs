@@ -32,6 +32,11 @@ use crate::Header;
 
 use rstest::rstest;
 
+#[cfg(feature = "qlog")]
+use std::sync::Arc;
+#[cfg(feature = "qlog")]
+use std::sync::Mutex;
+
 #[test]
 fn transport_params() {
     // Server encodes, client decodes.
@@ -12791,8 +12796,13 @@ fn server_qlog() {
 
     let mut pipe = test_utils::Pipe::new("cubic").unwrap();
 
+    let writer = qlog::testing::SharedWriter::new();
+
+    // Intentional: cover the deprecated writer-based path to ensure
+    // backward compatibility.
+    #[allow(deprecated)]
     pipe.server.set_qlog(
-        Box::new(std::io::Cursor::new(Vec::<u8>::new())),
+        Box::new(writer.clone()),
         "test qlog".to_string(),
         "test qlog description".to_string(),
     );
@@ -12801,10 +12811,7 @@ fn server_qlog() {
 
     pipe.server.qlog_streamer().unwrap().finish_log().unwrap();
 
-    let raw = pipe.server.qlog_streamer().unwrap().writer();
-    #[allow(clippy::borrowed_box)]
-    let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(raw) };
-    let bytes = w.get_ref().clone();
+    let bytes = writer.bytes();
 
     let mut reader = QlogSeqReader::new(Box::new(std::io::BufReader::new(
         std::io::Cursor::new(bytes),
@@ -12835,4 +12842,153 @@ fn server_qlog() {
     } else {
         panic!("expected Qlog event");
     }
+}
+
+#[cfg(feature = "qlog")]
+#[derive(Clone, Default)]
+struct RecordingQlogSink {
+    inner: Arc<Mutex<RecordingQlogSinkInner>>,
+    rejected_event_type: Option<EventType>,
+}
+
+#[cfg(feature = "qlog")]
+#[derive(Default)]
+struct RecordingQlogSinkInner {
+    header_title: Option<String>,
+    event_types: Vec<EventType>,
+    finish_log_calls: u32,
+}
+
+#[cfg(feature = "qlog")]
+impl QlogSink for RecordingQlogSink {
+    fn start_log(&mut self, qlog: &qlog::QlogSeq) -> qlog::Result<()> {
+        self.inner.lock().unwrap().header_title = qlog.title.clone();
+
+        Ok(())
+    }
+
+    fn add_event(&mut self, event: Event) -> qlog::Result<()> {
+        self.inner
+            .lock()
+            .unwrap()
+            .event_types
+            .push(EventType::from(&event.data));
+
+        Ok(())
+    }
+
+    fn add_json_event(
+        &mut self, _event: qlog::events::JsonEvent,
+    ) -> qlog::Result<()> {
+        Ok(())
+    }
+
+    fn finish_log(&mut self) -> qlog::Result<()> {
+        self.inner.lock().unwrap().finish_log_calls += 1;
+        Ok(())
+    }
+
+    fn should_log(&self, event_type: EventType) -> bool {
+        Some(event_type) != self.rejected_event_type
+    }
+}
+
+#[cfg(feature = "qlog")]
+#[test]
+fn server_qlog_sink_receives_header_and_initial_event() {
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+    let sink = RecordingQlogSink::default();
+    let recorded = sink.inner.clone();
+
+    pipe.server.set_qlog_sink(
+        Box::new(sink),
+        "test qlog sink".to_string(),
+        "test qlog sink description".to_string(),
+    );
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let recorded = recorded.lock().unwrap();
+    assert_eq!(recorded.header_title.as_deref(), Some("test qlog sink"));
+    assert!(recorded
+        .event_types
+        .contains(&EventType::QuicEventType(QuicEventType::ParametersSet,)));
+}
+
+#[cfg(feature = "qlog")]
+#[test]
+fn server_qlog_sink_filters_packet_sent() {
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+    let sink = RecordingQlogSink {
+        rejected_event_type: Some(EventType::QuicEventType(
+            QuicEventType::PacketSent,
+        )),
+        ..Default::default()
+    };
+    let recorded = sink.inner.clone();
+
+    pipe.server.set_qlog_sink(
+        Box::new(sink),
+        "test qlog sink".to_string(),
+        "test qlog sink description".to_string(),
+    );
+
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let recorded = recorded.lock().unwrap();
+    assert!(recorded
+        .event_types
+        .contains(&EventType::QuicEventType(QuicEventType::ParametersSet,)));
+    assert!(!recorded
+        .event_types
+        .contains(&EventType::QuicEventType(QuicEventType::PacketSent,)));
+}
+
+#[cfg(feature = "qlog")]
+#[test]
+fn server_qlog_sink_unset_detaches_streamer() {
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+    let sink = RecordingQlogSink::default();
+    let recorded = sink.inner.clone();
+
+    pipe.server.set_qlog_sink(
+        Box::new(sink),
+        "test qlog sink".to_string(),
+        "test qlog sink description".to_string(),
+    );
+
+    // Drive enough of the handshake for at least one event to land in
+    // the sink, then detach.
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    {
+        let recorded = recorded.lock().unwrap();
+        assert!(recorded.header_title.is_some());
+        assert!(!recorded.event_types.is_empty());
+        assert_eq!(recorded.finish_log_calls, 0);
+    }
+
+    pipe.server.unset_qlog_sink();
+
+    // Streamer is gone, so qlog_streamer() returns None and Drop has
+    // already flushed via finish_log.
+    assert!(pipe.server.qlog_streamer().is_none());
+    {
+        let recorded = recorded.lock().unwrap();
+        assert_eq!(recorded.finish_log_calls, 1);
+    }
+
+    let events_before = recorded.lock().unwrap().event_types.len();
+
+    // Exchange application data so the server would normally emit
+    // additional qlog events. With the streamer detached, the sink
+    // must not see anything new.
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    pipe.advance().unwrap();
+    let mut recv_buf = [0; 16];
+    let _ = pipe.server.stream_recv(4, &mut recv_buf);
+
+    let recorded = recorded.lock().unwrap();
+    assert_eq!(recorded.event_types.len(), events_before);
+    assert_eq!(recorded.finish_log_calls, 1);
 }

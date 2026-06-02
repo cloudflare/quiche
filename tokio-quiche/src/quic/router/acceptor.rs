@@ -46,7 +46,9 @@ use crate::metrics::Metrics;
 use crate::quic::addr_validation_token::AddrValidationTokenManager;
 use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::quic::router::NewConnection;
+use crate::quic::ConnectionHook;
 use crate::quic::Incoming;
+use crate::quic::QlogSinkContext;
 use crate::QuicResultExt;
 
 use super::InitialPacketHandler;
@@ -65,6 +67,8 @@ pub(crate) struct ConnectionAcceptorConfig {
     pub(crate) disable_client_ip_validation: bool,
     pub(crate) qlog_dir: Option<String>,
     pub(crate) qlog_compression: QlogCompression,
+    pub(crate) connection_hook:
+        Option<Arc<dyn ConnectionHook + Send + Sync + 'static>>,
     pub(crate) keylog_file: Option<File>,
     #[cfg(target_os = "linux")]
     pub(crate) with_pktinfo: bool,
@@ -115,15 +119,30 @@ where
         }
         .into_io()?;
 
-        if let Some(qlog_dir) = &self.config.qlog_dir {
-            let id = format!("{:?}", scid);
+        let id = format!("{:?}", scid);
+        let hook_sink = self.config.connection_hook.as_ref().and_then(|hook| {
+            hook.create_qlog_sink(QlogSinkContext {
+                id: &id,
+                is_server: true,
+                local_addr: incoming.local_addr,
+                peer_addr: incoming.peer_addr,
+            })
+        });
+
+        if let Some(sink) = hook_sink {
+            conn.set_qlog_sink(
+                sink,
+                "tokio-quiche qlog".to_string(),
+                format!("tokio-quiche qlog id={id}"),
+            );
+        } else if let Some(qlog_dir) = &self.config.qlog_dir {
             let path = std::path::Path::new(qlog_dir)
                 .join(qlog_file_name(&id, self.config.qlog_compression));
             if let Ok(writer) =
                 make_qlog_writer_from_path(&path, self.config.qlog_compression)
             {
-                conn.set_qlog(
-                    writer,
+                conn.set_qlog_sink(
+                    Box::new(qlog::QlogWriterSink::new(writer)),
                     "tokio-quiche qlog".to_string(),
                     format!("tokio-quiche qlog id={id}"),
                 );
