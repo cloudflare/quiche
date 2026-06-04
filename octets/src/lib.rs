@@ -55,6 +55,31 @@ impl std::error::Error for BufferTooShortError {
     }
 }
 
+/// A byte sink for encoders in this crate.
+///
+/// This lets callers use octets encoders with output targets other than a
+/// single contiguous [`OctetsMut`] buffer.
+pub trait OctetsWriter {
+    /// The error returned by the output sink.
+    type Error;
+
+    /// Writes `v` to the output sink.
+    fn put_bytes(&mut self, v: &[u8]) -> std::result::Result<(), Self::Error>;
+
+    /// Writes `v` to the output sink after HPACK Huffman-encoding it.
+    ///
+    /// The Huffman code implemented is the one defined for HPACK (RFC7541).
+    #[cfg(feature = "huffman_hpack")]
+    fn put_huffman_encoded<const LOWER_CASE: bool>(
+        &mut self, v: &[u8],
+    ) -> std::result::Result<(), Self::Error>
+    where
+        Self: Sized,
+    {
+        huffman_encode_with::<LOWER_CASE, _, _>(v, |chunk| self.put_bytes(chunk))
+    }
+}
+
 /// Helper macro that asserts at compile time. It requires that
 /// `cond` is a const expression.
 macro_rules! static_assert {
@@ -649,59 +674,7 @@ impl<'a> OctetsMut<'a> {
     pub fn put_huffman_encoded<const LOWER_CASE: bool>(
         &mut self, v: &[u8],
     ) -> Result<()> {
-        use self::huffman_table::ENCODE_TABLE;
-
-        let mut bits: u64 = 0;
-        let mut pending = 0;
-
-        for &b in v {
-            let b = if LOWER_CASE {
-                b.to_ascii_lowercase()
-            } else {
-                b
-            };
-            let (nbits, code) = ENCODE_TABLE[b as usize];
-
-            pending += nbits;
-
-            if pending < 64 {
-                // Have room for the new token
-                bits |= code << (64 - pending);
-                continue;
-            }
-
-            pending -= 64;
-            // Take only the bits that fit
-            bits |= code >> pending;
-            self.put_u64(bits)?;
-
-            bits = if pending == 0 {
-                0
-            } else {
-                code << (64 - pending)
-            };
-        }
-
-        if pending == 0 {
-            return Ok(());
-        }
-
-        bits |= u64::MAX >> pending;
-        // TODO: replace with `next_multiple_of(8)` when stable
-        pending = (pending + 7) & !7; // Round up to a byte
-        bits >>= 64 - pending;
-
-        if pending >= 32 {
-            pending -= 32;
-            self.put_u32((bits >> pending) as u32)?;
-        }
-
-        while pending > 0 {
-            pending -= 8;
-            self.put_u8((bits >> pending) as u8)?;
-        }
-
-        Ok(())
+        <Self as OctetsWriter>::put_huffman_encoded::<LOWER_CASE>(self, v)
     }
 
     /// Rewinds the buffer offset by `len` elements.
@@ -805,6 +778,14 @@ impl AsMut<[u8]> for OctetsMut<'_> {
     }
 }
 
+impl OctetsWriter for OctetsMut<'_> {
+    type Error = BufferTooShortError;
+
+    fn put_bytes(&mut self, v: &[u8]) -> Result<()> {
+        OctetsMut::put_bytes(self, v)
+    }
+}
+
 /// Returns how many bytes it would take to encode `v` as a variable-length
 /// integer.
 pub const fn varint_len(v: u64) -> usize {
@@ -863,6 +844,68 @@ pub fn huffman_encoding_len<const LOWER_CASE: bool>(src: &[u8]) -> Result<usize>
     }
 
     Ok(len)
+}
+
+#[cfg(feature = "huffman_hpack")]
+fn huffman_encode_with<const LOWER_CASE: bool, F, E>(
+    src: &[u8], mut write: F,
+) -> std::result::Result<(), E>
+where
+    F: FnMut(&[u8]) -> std::result::Result<(), E>,
+{
+    use self::huffman_table::ENCODE_TABLE;
+
+    let mut bits: u64 = 0;
+    let mut pending = 0;
+
+    for &b in src {
+        let b = if LOWER_CASE {
+            b.to_ascii_lowercase()
+        } else {
+            b
+        };
+        let (nbits, code) = ENCODE_TABLE[b as usize];
+
+        pending += nbits;
+
+        if pending < 64 {
+            // Have room for the new token.
+            bits |= code << (64 - pending);
+            continue;
+        }
+
+        pending -= 64;
+        // Take only the bits that fit.
+        bits |= code >> pending;
+        write(&bits.to_be_bytes())?;
+
+        bits = if pending == 0 {
+            0
+        } else {
+            code << (64 - pending)
+        };
+    }
+
+    if pending == 0 {
+        return Ok(());
+    }
+
+    bits |= u64::MAX >> pending;
+    // TODO: replace with `next_multiple_of(8)` when stable.
+    pending = (pending + 7) & !7; // Round up to a byte.
+    bits >>= 64 - pending;
+
+    if pending >= 32 {
+        pending -= 32;
+        write(&((bits >> pending) as u32).to_be_bytes())?;
+    }
+
+    while pending > 0 {
+        pending -= 8;
+        write(&[(bits >> pending) as u8])?;
+    }
+
+    Ok(())
 }
 
 /// The functions in this mod test the compile time assertions in the

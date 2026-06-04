@@ -26,7 +26,12 @@
 
 #![cfg(feature = "huffman_hpack")]
 
+use octets::huffman_encoding_len;
+use octets::BufferTooShortError;
 use octets::Octets;
+use octets::OctetsMut;
+use octets::OctetsWriter;
+use octets::Result;
 
 #[test]
 fn invalid_huffman() {
@@ -45,4 +50,112 @@ fn invalid_huffman() {
         b"\x00\x85\xf2\xb2\x4a\x84\xff\x87\x49\x51\xff\xff\xff\xfa\x7f",
     );
     assert!(b.get_huffman_decoded().is_err());
+}
+
+#[test]
+fn octets_writer_huffman_matches_rfc_vectors() {
+    assert_octets_writer_huffman_matches::<false>(
+        b"www.example.com",
+        b"\xf1\xe3\xc2\xe5\xf2\x3a\x6b\xa0\xab\x90\xf4\xff",
+    );
+
+    assert_octets_writer_huffman_matches::<false>(
+        b"no-cache",
+        b"\xa8\xeb\x10\x64\x9c\xbf",
+    );
+
+    assert_octets_writer_huffman_matches::<false>(
+        b"custom-key",
+        b"\x25\xa8\x49\xe9\x5b\xa9\x7d\x7f",
+    );
+
+    assert_octets_writer_huffman_matches::<false>(
+        b"custom-value",
+        b"\x25\xa8\x49\xe9\x5b\xb8\xe8\xb4\xbf",
+    );
+
+    assert_octets_writer_huffman_matches::<true>(
+        b"WWW.EXAMPLE.COM",
+        b"\xf1\xe3\xc2\xe5\xf2\x3a\x6b\xa0\xab\x90\xf4\xff",
+    );
+}
+
+fn assert_octets_writer_huffman_matches<const LOWER_CASE: bool>(
+    input: &[u8], expected: &[u8],
+) {
+    assert_eq!(
+        huffman_encoding_len::<LOWER_CASE>(input).unwrap(),
+        expected.len()
+    );
+
+    let mut actual = [0u8; 64];
+    let len = {
+        let mut sink = ByteAtATimeSink::new(&mut actual);
+        sink.put_huffman_encoded::<LOWER_CASE>(input).unwrap();
+        sink.off
+    };
+
+    assert_eq!(len, expected.len());
+    assert_eq!(&actual[..len], expected);
+
+    let mut actual = [0u8; 64];
+    let len = {
+        let mut buf = OctetsMut::with_slice(&mut actual);
+        buf.put_huffman_encoded::<LOWER_CASE>(input).unwrap();
+        buf.off()
+    };
+
+    assert_eq!(len, expected.len());
+    assert_eq!(&actual[..len], expected);
+}
+
+struct ByteAtATimeSink<'a> {
+    buf: &'a mut [u8],
+    off: usize,
+}
+
+impl<'a> ByteAtATimeSink<'a> {
+    fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, off: 0 }
+    }
+}
+
+impl OctetsWriter for ByteAtATimeSink<'_> {
+    type Error = BufferTooShortError;
+
+    fn put_bytes(&mut self, v: &[u8]) -> Result<()> {
+        for &b in v {
+            if self.off == self.buf.len() {
+                return Err(BufferTooShortError);
+            }
+
+            self.buf[self.off] = b;
+            self.off += 1;
+        }
+
+        Ok(())
+    }
+}
+
+#[test]
+fn octets_writer_huffman_propagates_sink_error() {
+    #[derive(Debug, PartialEq, Eq)]
+    struct SinkError;
+
+    struct FailingSink;
+
+    impl OctetsWriter for FailingSink {
+        type Error = SinkError;
+
+        fn put_bytes(
+            &mut self, _v: &[u8],
+        ) -> std::result::Result<(), Self::Error> {
+            Err(SinkError)
+        }
+    }
+
+    let mut sink = FailingSink;
+    let err = sink.put_huffman_encoded::<false>(b"abcdefghijklmnopqrstuvwxyz");
+
+    assert_eq!(err, Err(SinkError));
 }
