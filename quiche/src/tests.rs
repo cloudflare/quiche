@@ -7830,6 +7830,78 @@ fn early_retransmit(
 }
 
 #[rstest]
+/// Tests that sub_tx_buffered() is called when data marked for retransmission
+/// is acknowledged before being fully re-emitted.
+///
+/// Send 11KB, trigger PTO timeout, call send() which marks data for retransmit
+/// but can't emit it all due to cwnd limits. Then deliver the original packets
+/// and process ACKs. The ack_and_drop() for data still in the retransmit buffer
+/// must call sub_tx_buffered() to maintain correct accounting.
+fn retransmit_data_acked_before_fully_retransmitted(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(100000);
+    config.set_initial_max_stream_data_bidi_remote(100000);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Establish stream.
+    assert_eq!(pipe.client.stream_send(0, b"init", false), Ok(4));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Send 11KB.
+    let data_size = 11000;
+    let large_data = vec![0xAB; data_size];
+    assert_eq!(
+        pipe.client.stream_send(0, &large_data, false),
+        Ok(data_size)
+    );
+
+    // Emit but don't deliver (simulating loss).
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(pipe.client.streams.tx_buffered(), 0);
+
+    // Trigger PTO timeout.
+    let timer = pipe.client.timeout().unwrap();
+    std::thread::sleep(timer + Duration::from_millis(1));
+    pipe.client.on_timeout();
+
+    // Send PTO probe. retransmit() adds data to tx_buffered, but PTO cwnd
+    // limits prevent emitting all of it.
+    pipe.client.send(&mut buf).unwrap();
+
+    assert!(
+        pipe.client.streams.tx_buffered() > 0,
+        "Expected data in tx_buffered after retransmit"
+    );
+
+    // Deliver original packets (delayed arrival).
+    let server_path = &pipe.server.paths.get_active().unwrap();
+    let server_info = RecvInfo {
+        to: server_path.local_addr(),
+        from: server_path.peer_addr(),
+    };
+    for (pkt, _) in &flight {
+        let mut pkt_mut = pkt.clone();
+        pipe.server.recv(&mut pkt_mut, server_info).unwrap();
+    }
+
+    // Process ACKs. ack_and_drop() returns non-zero for data in retransmit
+    // buffer and sub_tx_buffered() must be called.
+    pipe.advance().ok();
+
+    assert_eq!(
+        pipe.client.streams.tx_buffered(),
+        0,
+        "tx_buffered should be 0 after ACK"
+    );
+}
+
+#[rstest]
 /// Tests that MAX_DATA, STREAM_MAX_DATA frames are retransmitted if lost
 fn max_data_frames_retransmit(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
