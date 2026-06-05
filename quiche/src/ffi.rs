@@ -1358,6 +1358,8 @@ pub struct Stats {
     streams_blocked_uni_recv_count: u64,
     path_challenge_rx_count: u64,
     bytes_in_flight_duration_msec: u64,
+    tx_cap: usize,
+    tx_buffered: usize,
     tx_buffered_inconsistent: bool,
 }
 
@@ -1407,6 +1409,8 @@ pub extern "C" fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.path_challenge_rx_count = stats.path_challenge_rx_count;
     out.bytes_in_flight_duration_msec =
         stats.bytes_in_flight_duration.as_millis() as u64;
+    out.tx_cap = stats.tx_cap;
+    out.tx_buffered = stats.tx_buffered;
     // tx_buffered is now validated in debug builds, always consistent
     out.tx_buffered_inconsistent = false;
 }
@@ -1463,6 +1467,7 @@ pub struct PathStats {
     max_rtt: u64,
     rttvar: u64,
     cwnd: usize,
+    inflight: usize,
     sent_bytes: u64,
     recv_bytes: u64,
     lost_bytes: u64,
@@ -1497,6 +1502,7 @@ pub extern "C" fn quiche_conn_path_stats(
     out.min_rtt = stats.min_rtt.unwrap_or_default().as_nanos() as u64;
     out.rttvar = stats.rttvar.as_nanos() as u64;
     out.cwnd = stats.cwnd;
+    out.inflight = stats.inflight;
     out.sent_bytes = stats.sent_bytes;
     out.recv_bytes = stats.recv_bytes;
     out.lost_bytes = stats.lost_bytes;

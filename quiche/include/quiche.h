@@ -653,6 +653,13 @@ typedef struct {
     // actively sending bytes or waiting for those bytes to be acked.
     uint64_t bytes_in_flight_duration_msec;
 
+    // The connection-level send capacity available for the application.
+    // This is the minimum of the congestion window and flow control window.
+    size_t tx_cap;
+
+    // The number of bytes buffered in streams for transmission.
+    size_t tx_buffered;
+
     // True if the send buffer is in an inconsistent state, which could lead to
     // connection stalls  or excess buffering.
     bool tx_buffered_inconsistent;
@@ -761,6 +768,9 @@ typedef struct {
 
     // The size of the path's congestion window in bytes.
     size_t cwnd;
+
+    // The number of bytes in flight (sent but not yet acked or declared lost).
+    size_t inflight;
 
     // The number of sent bytes on this path.
     uint64_t sent_bytes;

@@ -569,6 +569,7 @@ impl Path {
             max_rtt: self.recovery.max_rtt(),
             rttvar: self.recovery.rttvar(),
             cwnd: self.recovery.cwnd(),
+            inflight: self.recovery.bytes_in_flight(),
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
             lost_bytes: self.recovery.bytes_lost(),
@@ -988,6 +989,9 @@ pub struct PathStats {
 
     /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
+
+    /// The number of bytes in flight (sent but not yet acked or declared lost).
+    pub inflight: usize,
 
     /// The number of sent bytes.
     pub sent_bytes: u64,

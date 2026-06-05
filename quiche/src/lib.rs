@@ -7862,6 +7862,8 @@ impl<F: BufFactory> Connection<F> {
             path_challenge_rx_count: self.path_challenge_rx_count,
             amplification_limited_count: self.amplification_limited_count,
             bytes_in_flight_duration: self.bytes_in_flight_duration(),
+            tx_cap: self.tx_cap,
+            tx_buffered: self.streams.tx_buffered(),
             #[allow(deprecated)]
             tx_buffered_state: TxBufferTrackingState::Ok,
         }
@@ -9475,6 +9477,13 @@ pub struct Stats {
     /// Total duration during which this side of the connection was
     /// actively sending bytes or waiting for those bytes to be acked.
     pub bytes_in_flight_duration: Duration,
+
+    /// The connection-level send capacity available for the application.
+    /// This is the minimum of the congestion window and flow control window.
+    pub tx_cap: usize,
+
+    /// The number of bytes buffered in streams for transmission.
+    pub tx_buffered: usize,
 
     /// Health state of the connection's tx_buffered.
     ///
