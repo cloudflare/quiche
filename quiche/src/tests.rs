@@ -1013,6 +1013,61 @@ fn streamio(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     assert!(pipe.server.stream_finished(4));
 }
 
+#[rstest]
+fn stream_closed_bidi(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert!(!pipe.client.stream_closed(0));
+    assert!(!pipe.server.stream_closed(0));
+
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(!pipe.client.stream_closed(0));
+    assert!(!pipe.server.stream_closed(0));
+
+    let mut buf = [0; 5];
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((5, true)));
+
+    assert!(!pipe.server.stream_closed(0));
+
+    assert_eq!(pipe.server.stream_send(0, b"world", true), Ok(5));
+    assert!(pipe.server.stream_closed(0));
+
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(!pipe.client.stream_closed(0));
+    assert_eq!(pipe.client.stream_recv(0, &mut buf), Ok((5, true)));
+    assert!(pipe.client.stream_closed(0));
+}
+
+#[rstest]
+fn stream_closed_uni(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert!(!pipe.client.stream_closed(2));
+    assert!(!pipe.server.stream_closed(2));
+
+    assert_eq!(pipe.client.stream_send(2, b"hello", true), Ok(5));
+
+    assert!(pipe.client.stream_closed(2));
+
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(!pipe.server.stream_closed(2));
+
+    let mut buf = [0; 5];
+    assert_eq!(pipe.server.stream_recv(2, &mut buf), Ok((5, true)));
+
+    assert!(pipe.server.stream_closed(2));
+}
+
 /// Test receiving into `BufMut`
 #[rstest]
 fn stream_recv_buf(

@@ -89,7 +89,12 @@ struct RecoveryEpoch {
     in_flight_count: usize,
 
     acked_frames: Vec<frame::Frame>,
-    lost_frames: Vec<frame::Frame>,
+
+    // Frames scheduled for retransmission due to PTO are tracked
+    // separately so we can check that frames were drained before
+    // generating more PTO probes.
+    lost_frames_ack: Vec<frame::Frame>,
+    lost_frames_pto: Vec<frame::Frame>,
 
     /// The largest packet number sent in the packet number space so far.
     #[cfg(test)]
@@ -252,7 +257,7 @@ impl RecoveryEpoch {
             if unacked.time_sent <= lost_send_time ||
                 largest_acked >= unacked.pkt_num + pkt_thresh
             {
-                self.lost_frames.extend(unacked.frames.drain(..));
+                self.lost_frames_ack.extend(unacked.frames.drain(..));
 
                 unacked.time_lost = Some(now);
 
@@ -325,6 +330,31 @@ impl RecoveryEpoch {
 
             self.sent_packets.pop_front();
         }
+    }
+
+    /// Returns the next lost frame, trying ACK-based lost frames first,
+    /// then PTO-based lost frames.
+    fn next_lost_frame(&mut self) -> Option<frame::Frame> {
+        self.lost_frames_ack
+            .pop()
+            .or_else(|| self.lost_frames_pto.pop())
+    }
+
+    /// Returns true if there are any lost frames (ACK or PTO).
+    fn has_lost_frames(&self) -> bool {
+        !self.lost_frames_ack.is_empty() || !self.lost_frames_pto.is_empty()
+    }
+
+    /// Returns the total count of lost frames (ACK + PTO).
+    #[cfg(test)]
+    fn lost_frames_count(&self) -> usize {
+        self.lost_frames_ack.len() + self.lost_frames_pto.len()
+    }
+
+    /// Clears all lost frames (both ACK and PTO).
+    fn clear_lost_frames(&mut self) {
+        self.lost_frames_ack.clear();
+        self.lost_frames_pto.clear();
     }
 }
 
@@ -562,7 +592,7 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn next_lost_frame(&mut self, epoch: Epoch) -> Option<frame::Frame> {
-        self.epochs[epoch].lost_frames.pop()
+        self.epochs[epoch].next_lost_frame()
     }
 
     fn get_largest_acked_on_epoch(&self, epoch: Epoch) -> Option<u64> {
@@ -570,7 +600,7 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn has_lost_frames(&self, epoch: Epoch) -> bool {
-        !self.epochs[epoch].lost_frames.is_empty()
+        self.epochs[epoch].has_lost_frames()
     }
 
     fn loss_probes(&self, epoch: Epoch) -> usize {
@@ -580,6 +610,11 @@ impl RecoveryOps for LegacyRecovery {
     #[cfg(test)]
     fn inc_loss_probes(&mut self, epoch: Epoch) {
         self.epochs[epoch].loss_probes += 1;
+    }
+
+    #[cfg(test)]
+    fn lost_frames_count(&self, epoch: Epoch) -> usize {
+        self.epochs[epoch].lost_frames_count()
     }
 
     fn ping_sent(&mut self, epoch: Epoch) {
@@ -775,8 +810,17 @@ impl RecoveryOps for LegacyRecovery {
         epoch.loss_probes =
             cmp::min(self.pto_count as usize, MAX_PTO_PROBES_COUNT);
 
+        let sent_packets_iter_limit = if !epoch.lost_frames_pto.is_empty() {
+            // Skip the search for frames to add to PTO probes if frames
+            // added in a prior PTO haven't been processed yet.
+            0
+        } else {
+            usize::MAX
+        };
+
         let unacked_iter = epoch.sent_packets
-            .iter_mut()
+            .iter()
+            .take(sent_packets_iter_limit)
             // Skip packets that have already been acked or lost, and packets
             // that don't contain either CRYPTO or STREAM frames.
             .filter(|p| p.has_data && p.time_acked.is_none() && p.time_lost.is_none())
@@ -792,7 +836,7 @@ impl RecoveryOps for LegacyRecovery {
         // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
         // to CRYPTO and STREAM, if the original packet carried them.
         for unacked in unacked_iter {
-            epoch.lost_frames.extend_from_slice(&unacked.frames);
+            epoch.lost_frames_pto.extend_from_slice(&unacked.frames);
         }
 
         self.set_loss_detection_timer(handshake_status, now);
@@ -821,7 +865,7 @@ impl RecoveryOps for LegacyRecovery {
         self.bytes_in_flight.saturating_subtract(unacked_bytes, now);
 
         epoch.sent_packets.clear();
-        epoch.lost_frames.clear();
+        epoch.clear_lost_frames();
         epoch.acked_frames.clear();
 
         epoch.time_of_last_ack_eliciting_packet = None;

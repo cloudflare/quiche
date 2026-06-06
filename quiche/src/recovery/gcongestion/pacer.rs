@@ -161,7 +161,7 @@ impl Pacer {
         // packet.
         let delay = self
             .pacing_rate(bytes_in_flight + bytes, rtt_stats)
-            .transfer_time(bytes);
+            .transfer_time(bytes as u64);
 
         if !self.pacing_limited || self.lumpy_tokens == 0 {
             // Reset lumpy_tokens_ if either application or cwnd throttles sending
