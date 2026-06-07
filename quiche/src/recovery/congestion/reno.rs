@@ -61,11 +61,11 @@ pub fn on_packet_sent(
 }
 
 fn on_packets_acked(
-    r: &mut Congestion, _bytes_in_flight: usize, packets: &mut Vec<Acked>,
+    r: &mut Congestion, _bytes_in_flight: usize, packets: &mut [Acked],
     now: Instant, rtt_stats: &RttStats,
 ) {
-    for pkt in packets.drain(..) {
-        on_packet_acked(r, &pkt, now, rtt_stats);
+    for pkt in packets.iter() {
+        on_packet_acked(r, pkt, now, rtt_stats);
     }
 }
 

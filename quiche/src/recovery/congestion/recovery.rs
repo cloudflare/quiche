@@ -458,7 +458,7 @@ impl LegacyRecovery {
         &self, handshake_status: HandshakeStatus, now: Instant,
     ) -> (Option<Instant>, Epoch) {
         let mut duration =
-            self.pto() * 2_u32.pow(self.pto_count.min(MAX_PTO_EXPONENT));
+            self.pto() * (1_u32 << self.pto_count.min(MAX_PTO_EXPONENT));
 
         // Arm PTO from now when there are no inflight packets.
         if self.bytes_in_flight.is_zero() {

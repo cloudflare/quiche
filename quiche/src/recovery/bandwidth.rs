@@ -84,6 +84,10 @@ impl std::ops::Mul<Duration> for Bandwidth {
     }
 }
 
+const BITS_NANOS_PER_BYTE: u64 = 8 * NUM_NANOS_PER_SECOND;
+const BITS_NANOS_PER_BYTE_U128: u128 = BITS_NANOS_PER_BYTE as u128;
+const U64_MAX_U128: u128 = u64::MAX as u128;
+
 impl Bandwidth {
     pub const fn from_bytes_and_time_delta(
         bytes: usize, time_delta: Duration,
@@ -150,65 +154,65 @@ impl Bandwidth {
     /// Returns `Duration::ZERO` for infinite or zero bandwidth.
     /// Saturates to `Duration::from_nanos(u64::MAX)` if the
     /// calculation would overflow.
+    #[inline]
     pub fn transfer_time(&self, bytes: u64) -> Duration {
-        // Handle infinite bandwidth sentinel: transfer is instantaneous
-        if self.bits_per_second == u64::MAX {
+        let bps = self.bits_per_second;
+
+        if bytes == 0 || bps == 0 || bps == u64::MAX {
             return Duration::ZERO;
         }
 
-        if self.bits_per_second == 0 {
-            return Duration::ZERO;
+        // Fast path: exact u64 calculation.
+        if bytes <= u64::MAX / BITS_NANOS_PER_BYTE {
+            let nanos = bytes * BITS_NANOS_PER_BYTE / bps;
+            return Duration::from_nanos(nanos);
         }
 
-        // Fast path: try u64 arithmetic first. At typical packet sizes
-        // (< 10 KB) and bandwidths, this won't overflow.
-        if let Some(nanos) = bytes.checked_mul(8 * NUM_NANOS_PER_SECOND) {
-            return Duration::from_nanos(nanos / self.bits_per_second);
-        }
-
-        // Slow path: use u128 for intermediate calculation to avoid overflow.
-        // At very large byte counts, bytes * 8 * NUM_NANOS_PER_SECOND can
-        // overflow u64.
-        let nanos = (bytes as u128) * (8 * NUM_NANOS_PER_SECOND) as u128;
-        let nanos = nanos / (self.bits_per_second as u128);
-
-        // Saturate to Duration::MAX if result exceeds u64 range.
-        Duration::from_nanos(nanos.min(u64::MAX as u128) as u64)
+        // Slow path: exact u128 intermediate, then saturate.
+        let nanos = (bytes as u128) * BITS_NANOS_PER_BYTE_U128 / (bps as u128);
+        Duration::from_nanos(nanos.min(U64_MAX_U128) as u64)
     }
 
-    /// Returns the number of bytes that can be sent in
-    /// `time_period` at this bandwidth.
+    /// Returns the number of bytes that can be sent in `time_period`.
     ///
-    /// Returns `u64::MAX` for infinite bandwidth (unless
-    /// `time_period` is zero). Saturates to `u64::MAX` if the
-    /// calculation would overflow.
+    /// Returns `u64::MAX` for infinite bandwidth and non-zero duration.
+    /// Saturates to `u64::MAX` on overflow.
+    #[inline]
     pub fn to_bytes_per_period(self, time_period: Duration) -> u64 {
-        // Handle infinite bandwidth sentinel.
-        if self.bits_per_second == u64::MAX {
-            if time_period != Duration::ZERO {
-                return u64::MAX;
-            } else {
-                return 0;
+        let bps = self.bits_per_second;
+        let nanos = time_period.as_nanos();
+
+        if bps == 0 || nanos == 0 {
+            return 0;
+        }
+
+        if bps == u64::MAX {
+            return u64::MAX;
+        }
+
+        // Fast path: exact u64 calculation.
+        if nanos <= u64::MAX as u128 {
+            let nanos_u64 = nanos as u64;
+
+            if bps <= u64::MAX / nanos_u64 {
+                return bps * nanos_u64 / BITS_NANOS_PER_BYTE;
             }
         }
 
-        // Fast path: try u64 arithmetic first. At typical bandwidths (< 10
-        // Gbps) and short time periods (< 1 second), this won't overflow.
-        if let Ok(time_nanos) = u64::try_from(time_period.as_nanos()) {
-            if let Some(bits) = self.bits_per_second.checked_mul(time_nanos) {
-                return bits / (8 * NUM_NANOS_PER_SECOND);
-            }
+        // If the final result must exceed u64::MAX, saturate before multiplying.
+        //
+        // floor((bps * nanos) / BITS_NANOS_PER_BYTE) > u64::MAX
+        // iff bps * nanos >= (u64::MAX + 1) * BITS_NANOS_PER_BYTE
+        let saturation_threshold = ((u64::MAX as u128) + 1) * BITS_NANOS_PER_BYTE_U128;
+
+        if (bps as u128) > (saturation_threshold - 1) / nanos {
+            return u64::MAX;
         }
 
-        // Slow path: use u128 for intermediate calculation to avoid overflow.
-        // At high bandwidths (e.g., 10+ Gbps) with non-trivial time periods,
-        // bits_per_second * time_period.as_nanos() can overflow u64.
-        let time_nanos = time_period.as_nanos();
-        let bits = (self.bits_per_second as u128).saturating_mul(time_nanos);
-        let bytes = bits / (8 * NUM_NANOS_PER_SECOND) as u128;
-
-        // Saturate to u64::MAX if result exceeds u64 range.
-        bytes.min(u64::MAX as u128) as u64
+        // Slow path: exact u128 arithmetic once the fast-path bounds no longer
+        // hold but the final result still fits in u64.
+        let bytes = (bps as u128) * nanos / BITS_NANOS_PER_BYTE_U128;
+        bytes as u64
     }
 }
 

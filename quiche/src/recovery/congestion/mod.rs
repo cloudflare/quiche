@@ -237,10 +237,11 @@ impl Congestion {
         (self.cc_ops.on_packets_acked)(
             self,
             bytes_in_flight,
-            acked,
+            acked.as_mut_slice(),
             now,
             rtt_stats,
         );
+        acked.clear();
     }
 }
 
@@ -257,7 +258,7 @@ pub(crate) struct CongestionControlOps {
     pub on_packets_acked: fn(
         r: &mut Congestion,
         bytes_in_flight: usize,
-        packets: &mut Vec<Acked>,
+        packets: &mut [Acked],
         now: Instant,
         rtt_stats: &RttStats,
     ),

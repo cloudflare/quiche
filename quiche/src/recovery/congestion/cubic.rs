@@ -198,13 +198,13 @@ fn on_packet_sent(
 }
 
 fn on_packets_acked(
-    r: &mut Congestion, bytes_in_flight: usize, packets: &mut Vec<Acked>,
+    r: &mut Congestion, bytes_in_flight: usize, packets: &mut [Acked],
     now: Instant, rtt_stats: &RttStats,
 ) {
     r.cubic_state.last_ack_time = Some(now);
 
-    for pkt in packets.drain(..) {
-        on_packet_acked(r, bytes_in_flight, &pkt, now, rtt_stats);
+    for pkt in packets.iter() {
+        on_packet_acked(r, bytes_in_flight, pkt, now, rtt_stats);
     }
 }
 

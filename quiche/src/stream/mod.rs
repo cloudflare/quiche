@@ -909,7 +909,7 @@ impl Ord for StreamPriorityKey {
     }
 }
 
-intrusive_adapter!(pub StreamWritablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { writable: RBTreeAtomicLink });
+intrusive_adapter!(pub StreamWritablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { writable => RBTreeAtomicLink });
 
 impl KeyAdapter<'_> for StreamWritablePriorityAdapter {
     type Key = StreamPriorityKey;
@@ -919,7 +919,7 @@ impl KeyAdapter<'_> for StreamWritablePriorityAdapter {
     }
 }
 
-intrusive_adapter!(pub StreamReadablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { readable: RBTreeAtomicLink });
+intrusive_adapter!(pub StreamReadablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { readable => RBTreeAtomicLink });
 
 impl KeyAdapter<'_> for StreamReadablePriorityAdapter {
     type Key = StreamPriorityKey;
@@ -929,7 +929,7 @@ impl KeyAdapter<'_> for StreamReadablePriorityAdapter {
     }
 }
 
-intrusive_adapter!(pub StreamFlushablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { flushable: RBTreeAtomicLink });
+intrusive_adapter!(pub StreamFlushablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { flushable => RBTreeAtomicLink });
 
 impl KeyAdapter<'_> for StreamFlushablePriorityAdapter {
     type Key = StreamPriorityKey;
