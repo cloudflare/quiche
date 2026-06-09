@@ -203,8 +203,8 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     /// `max_rx_data`, if false, it will be set to `DEFAULT_STREAM_WINDOW`
     use_initial_max_data_as_flow_control_win: bool,
 
-    /// Cached total number of bytes buffered across all streams.
-    tx_buffered_cache: usize,
+    /// Total number of bytes in send buffers across all streams.
+    tx_buffered: usize,
 }
 
 impl<F: BufFactory> StreamMap<F> {
@@ -726,65 +726,61 @@ impl<F: BufFactory> StreamMap<F> {
 
     /// Returns the total number of bytes buffered across all streams.
     pub(crate) fn tx_buffered(&self) -> usize {
-        self.tx_buffered_cache
+        self.tx_buffered
     }
 
-    /// Computes the actual tx_buffered by summing across all streams.
-    /// This is used for debugging to verify the cache is accurate.
-    #[cfg(debug_assertions)]
+    /// Computes the actual number of bytes in send buffers by summing across
+    /// all streams. This is used for debugging to verify that tx_buffered
+    /// is accurate.
     fn tx_buffered_actual(&self) -> usize {
         self.streams.values().map(|s| s.send.len() as usize).sum()
     }
 
-    /// Checks if the cached tx_buffered matches the actual value.
+    /// Checks if the stored tx_buffered matches the actual value.
     /// Returns true if they match, false otherwise.
     pub(crate) fn tx_buffered_is_consistent(&self) -> bool {
-        let actual: usize =
-            self.streams.values().map(|s| s.send.len() as usize).sum();
-        self.tx_buffered_cache == actual
+        self.tx_buffered == self.tx_buffered_actual()
     }
 
-    /// Updates the cached tx_buffered value by adding the delta.
+    /// Updates the tx_buffered value by adding the delta.
     pub(crate) fn add_tx_buffered(&mut self, delta: usize) {
-        self.tx_buffered_cache += delta;
-        self.check_tx_buffered_cache();
+        self.tx_buffered += delta;
+
+        #[cfg(debug_assertions)]
+        self.debug_check_tx_buffered_consistency();
     }
 
-    /// Updates the cached tx_buffered value by subtracting the delta.
+    /// Updates the tx_buffered value by subtracting the delta.
     pub(crate) fn sub_tx_buffered(&mut self, delta: usize) {
-        debug_assert!(self.tx_buffered_cache >= delta);
-        self.tx_buffered_cache = self.tx_buffered_cache.saturating_sub(delta);
-        self.check_tx_buffered_cache();
+        debug_assert!(self.tx_buffered >= delta);
+        self.tx_buffered = self.tx_buffered.saturating_sub(delta);
+
+        #[cfg(debug_assertions)]
+        self.debug_check_tx_buffered_consistency();
     }
 
-    /// Verifies that the cached tx_buffered matches the actual value.
-    /// Enabled in debug builds to catch cache inconsistencies early.
+    /// Verifies that the stored tx_buffered value matches the actual bytes in
+    /// send buffers across all streams. Enabled in debug builds to catch
+    /// inconsistencies early.
     #[cfg(debug_assertions)]
-    pub(crate) fn check_tx_buffered_cache(&self) {
-        let actual = self.tx_buffered_actual();
-        let cached = self.tx_buffered_cache;
-        if actual != cached {
-            // Print per-stream details to help debug
-            eprintln!("Stream buffer details:");
-            for (id, stream) in &self.streams {
-                let len = stream.send.len();
-                if len > 0 {
-                    eprintln!("  Stream {}: {} bytes", id, len);
-                }
-            }
+    pub(crate) fn debug_check_tx_buffered_consistency(&self) {
+        if !self.tx_buffered_is_consistent() {
+            let buffered_per_stream = self
+                .streams
+                .iter()
+                .map(|(id, s)| (*id, s.send.len()))
+                .collect::<Vec<_>>();
+
+            let actual = self.tx_buffered_actual();
+            let stored = self.tx_buffered;
             panic!(
-                "tx_buffered cache mismatch: cached={}, actual={}, diff={}",
-                cached,
+                "tx_buffered mismatch: stored={}, actual={}, diff={}, buffered_per_stream={:?}",
+                stored,
                 actual,
-                cached as i64 - actual as i64
+                stored as i64 - actual as i64,
+                buffered_per_stream
             );
         }
-    }
-
-    /// No-op in release builds for performance.
-    #[cfg(not(debug_assertions))]
-    pub(crate) fn check_tx_buffered_cache(&self) {
-        // No-op in release builds
     }
 
     /// When `true`, the initial flow control window will be set to the
@@ -2403,38 +2399,83 @@ mod tests {
 
     #[test]
     fn cache_consistency_through_full_lifecycle() {
-        // This test verifies that send.len() stays in sync with manual cache
-        // tracking through a full lifecycle: write → emit → retransmit → ack.
-        let mut stream = <Stream>::new(0, 15, 15, true, 0, 15);
-        let mut cache = 0usize;
+        // This test verifies that StreamMap.tx_buffered stays in sync with
+        // actual buffered data through a full lifecycle: write → emit →
+        // retransmit → ack.
+        let mut streams = <StreamMap>::new(5, 5, 15);
 
-        // Write data: both len and cache increase.
-        assert_eq!(stream.send.write(b"hello", false), Ok(5));
-        cache += 5;
-        assert_eq!(stream.send.len(), 5);
-        assert_eq!(cache, 5);
+        // Create a stream using low-level StreamMap interface.
+        let local_params = crate::TransportParams {
+            initial_max_data: 30,
+            initial_max_stream_data_bidi_local: 15,
+            initial_max_stream_data_bidi_remote: 15,
+            initial_max_stream_data_uni: 10,
+            initial_max_streams_bidi: 5,
+            initial_max_streams_uni: 5,
+            ..Default::default()
+        };
+        let peer_params = local_params.clone();
 
-        // Emit data: both len and cache decrease.
+        // Update peer stream limits to allow locally-initiated streams.
+        streams.update_peer_max_streams_bidi(5);
+        streams.update_peer_max_streams_uni(5);
+
+        let stream_id = 0u64;
+
+        // Write data: both stream.send.len() and tx_buffered increase.
+        {
+            let stream = streams
+                .get_or_create(
+                    stream_id,
+                    &local_params,
+                    &peer_params,
+                    true,
+                    false,
+                )
+                .unwrap();
+            assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        }
+        streams.add_tx_buffered(5);
+        assert_eq!(streams.get(stream_id).unwrap().send.len(), 5);
+        assert_eq!(streams.tx_buffered(), 5);
+        assert!(streams.tx_buffered_is_consistent());
+
+        // Emit data: both stream.send.len() and tx_buffered decrease.
         let mut buf = [0; 10];
-        let (written, _) = stream.send.emit(&mut buf).unwrap();
+        let written = {
+            let stream = streams.get_mut(stream_id).unwrap();
+            let (written, _) = stream.send.emit(&mut buf).unwrap();
+            written
+        };
         assert_eq!(written, 5);
-        cache -= 5;
-        assert_eq!(stream.send.len(), 0);
-        assert_eq!(cache, 0);
+        streams.sub_tx_buffered(5);
+        assert_eq!(streams.get(stream_id).unwrap().send.len(), 0);
+        assert_eq!(streams.tx_buffered(), 0);
+        assert!(streams.tx_buffered_is_consistent());
 
-        // Retransmit: both len and cache increase by actual amount retransmitted.
-        let retransmitted = stream.send.retransmit(0, 5);
+        // Retransmit: both stream.send.len() and tx_buffered increase by actual
+        // amount retransmitted.
+        let retransmitted = {
+            let stream = streams.get_mut(stream_id).unwrap();
+            stream.send.retransmit(0, 5)
+        };
         assert_eq!(retransmitted, 5);
-        cache += retransmitted;
-        assert_eq!(stream.send.len(), 5);
-        assert_eq!(cache, 5);
+        streams.add_tx_buffered(retransmitted);
+        assert_eq!(streams.get(stream_id).unwrap().send.len(), 5);
+        assert_eq!(streams.tx_buffered(), 5);
+        assert!(streams.tx_buffered_is_consistent());
 
-        // Ack and drop: both len and cache decrease by actual amount dropped.
-        let dropped = stream.send.ack_and_drop(0, 5);
+        // Ack and drop: both stream.send.len() and tx_buffered decrease by
+        // actual amount dropped.
+        let dropped = {
+            let stream = streams.get_mut(stream_id).unwrap();
+            stream.send.ack_and_drop(0, 5)
+        };
         assert_eq!(dropped, 5);
-        cache -= dropped;
-        assert_eq!(stream.send.len(), 0);
-        assert_eq!(cache, 0);
+        streams.sub_tx_buffered(dropped);
+        assert_eq!(streams.get(stream_id).unwrap().send.len(), 0);
+        assert_eq!(streams.tx_buffered(), 0);
+        assert!(streams.tx_buffered_is_consistent());
     }
 
     #[test]

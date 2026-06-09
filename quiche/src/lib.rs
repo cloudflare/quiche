@@ -3686,8 +3686,9 @@ impl<F: BufFactory> Connection<F> {
                             self.streams.collect(stream_id, local);
                         }
 
-                        // Update cache to reflect any data that was dropped from
-                        // buffers (e.g., data marked for retransmission but then
+                        // Update tx_bufferd to reflect any data that was dropped
+                        // from stream buffers (e.g., data
+                        // marked for retransmission but then
                         // acked before it could be resent).
                         if dropped > 0 {
                             self.streams.sub_tx_buffered(dropped);
@@ -4228,7 +4229,7 @@ impl<F: BufFactory> Connection<F> {
                             self.streams.insert_flushable(&priority_key);
                         }
 
-                        // Update tx_buffered cache when data is marked for
+                        // Update tx_buffered when data is marked for
                         // retransmission (it was decremented when emitted).
                         // Only increment by the actual amount retransmitted,
                         // which may be less than `length` if some data was
@@ -4395,7 +4396,9 @@ impl<F: BufFactory> Connection<F> {
                 }
             }
         }
-        self.streams.check_tx_buffered_cache();
+
+        #[cfg(debug_assertions)]
+        self.streams.debug_check_tx_buffered_consistency();
 
         let is_app_limited = self.delivery_rate_check_if_app_limited();
         let n_paths = self.paths.len();
@@ -5298,7 +5301,7 @@ impl<F: BufFactory> Connection<F> {
                     self.streams.insert_flushable(&priority_key);
                 }
 
-                // Update tx_buffered cache when data is emitted.
+                // Update tx_buffered when data is emitted.
                 self.streams.sub_tx_buffered(len);
 
                 #[cfg(feature = "fuzzing")]
@@ -6293,8 +6296,8 @@ impl<F: BufFactory> Connection<F> {
                 // buffered but not actually sent before the stream was reset.
                 self.tx_data = self.tx_data.saturating_sub(unsent);
 
-                // Update cache: subtract only the buffered data, not inflight
-                // data.
+                // Update tx_buffered: subtract only the buffered data, not
+                // inflight data.
                 self.streams.sub_tx_buffered(buffered_len);
 
                 // These drops in qlog are a bit weird, but the only way to ensure
@@ -8483,8 +8486,8 @@ impl<F: BufFactory> Connection<F> {
                     // to touch it here.
                     self.tx_data = self.tx_data.saturating_sub(unsent);
 
-                    // Update cache: subtract only the buffered data, not inflight
-                    // data.
+                    // Update tx_buffered: subtract only the buffered data, not
+                    // inflight data.
                     self.streams.sub_tx_buffered(buffered_len);
 
                     // These drops in qlog are a bit weird, but the only way to
@@ -9471,7 +9474,7 @@ pub struct Stats {
 
     /// Health state of the connection's tx_buffered.
     ///
-    /// Indicates whether the cached tx_buffered value is consistent with
+    /// Indicates whether the streams.tx_buffered value is consistent with
     /// the actual sum of bytes buffered across all stream send buffers.
     /// Returns `Ok` if consistent, `Inconsistent` if there's a mismatch.
     pub tx_buffered_state: TxBufferTrackingState,
