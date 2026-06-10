@@ -25,7 +25,6 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use packet_sent::draw_packet_sent_received_plot;
-use plotters::prelude::*;
 
 use crate::plots::*;
 
