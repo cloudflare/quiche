@@ -6288,7 +6288,7 @@ impl<F: BufFactory> Connection<F> {
             Shutdown::Write => {
                 // Save the buffered length before shutdown (shutdown clears the
                 // buffer).
-                let buffered_len = stream.send.len() as usize;
+                let buffered_len = stream.send.buffered_bytes() as usize;
 
                 let (final_size, unsent) = stream.send.shutdown()?;
 
@@ -8474,7 +8474,7 @@ impl<F: BufFactory> Connection<F> {
 
                 // Save the buffered length before stopping (stop clears the
                 // buffer).
-                let buffered_len = stream.send.len() as usize;
+                let buffered_len = stream.send.buffered_bytes() as usize;
 
                 // Try stopping the stream.
                 if let Ok((final_size, unsent)) = stream.send.stop(error_code) {

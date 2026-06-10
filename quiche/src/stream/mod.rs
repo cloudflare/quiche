@@ -733,7 +733,10 @@ impl<F: BufFactory> StreamMap<F> {
     /// all streams. This is used for debugging to verify that tx_buffered
     /// is accurate.
     fn tx_buffered_actual(&self) -> usize {
-        self.streams.values().map(|s| s.send.len() as usize).sum()
+        self.streams
+            .values()
+            .map(|s| s.send.buffered_bytes() as usize)
+            .sum()
     }
 
     /// Checks if the stored tx_buffered matches the actual value.
@@ -768,7 +771,7 @@ impl<F: BufFactory> StreamMap<F> {
             let buffered_per_stream = self
                 .streams
                 .iter()
-                .map(|(id, s)| (*id, s.send.len()))
+                .map(|(id, s)| (*id, s.send.buffered_bytes()))
                 .collect::<Vec<_>>();
 
             let actual = self.tx_buffered_actual();
@@ -2273,26 +2276,26 @@ mod tests {
 
         // Write and emit some data.
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
-        assert_eq!(stream.send.len(), 5);
+        assert_eq!(stream.send.buffered_bytes(), 5);
 
         let mut buf = [0; 10];
         let (written, _) = stream.send.emit(&mut buf).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
 
         // Mark data for retransmission.
         let retransmitted = stream.send.retransmit(0, 5);
         assert_eq!(retransmitted, 5);
-        assert_eq!(stream.send.len(), 5);
+        assert_eq!(stream.send.buffered_bytes(), 5);
 
         // Ack the data.
         stream.send.ack_and_drop(0, 5);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
 
         // Try to retransmit again - should return 0 since data is acked.
         let retransmitted = stream.send.retransmit(0, 5);
         assert_eq!(retransmitted, 0);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
     }
 
     #[test]
@@ -2301,28 +2304,28 @@ mod tests {
 
         // Write and emit 10 bytes.
         assert_eq!(stream.send.write(b"helloworld", false), Ok(10));
-        assert_eq!(stream.send.len(), 10);
+        assert_eq!(stream.send.buffered_bytes(), 10);
 
         let mut buf = [0; 10];
         let (written, _) = stream.send.emit(&mut buf).unwrap();
         assert_eq!(written, 10);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
 
         // Mark all data for retransmission.
         let retransmitted = stream.send.retransmit(0, 10);
         assert_eq!(retransmitted, 10);
-        assert_eq!(stream.send.len(), 10);
+        assert_eq!(stream.send.buffered_bytes(), 10);
 
         // Ack first 5 bytes and drop them.
         let dropped = stream.send.ack_and_drop(0, 5);
         assert_eq!(dropped, 5);
-        assert_eq!(stream.send.len(), 5);
+        assert_eq!(stream.send.buffered_bytes(), 5);
 
         // Try to retransmit all 10 bytes - should return 5 since first 5 are
         // acked.
         let retransmitted = stream.send.retransmit(0, 10);
         assert_eq!(retransmitted, 0); // Already marked, so no change
-        assert_eq!(stream.send.len(), 5);
+        assert_eq!(stream.send.buffered_bytes(), 5);
     }
 
     #[test]
@@ -2331,23 +2334,23 @@ mod tests {
 
         // Write some data.
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
-        assert_eq!(stream.send.len(), 5);
+        assert_eq!(stream.send.buffered_bytes(), 5);
 
         // Emit it.
         let mut buf = [0; 10];
         let (written, _) = stream.send.emit(&mut buf).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
 
         // Mark for retransmission.
         let retransmitted = stream.send.retransmit(0, 5);
         assert_eq!(retransmitted, 5);
-        assert_eq!(stream.send.len(), 5);
+        assert_eq!(stream.send.buffered_bytes(), 5);
 
         // Ack and drop - should decrement len and return dropped amount.
         let dropped = stream.send.ack_and_drop(0, 5);
         assert_eq!(dropped, 5);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
     }
 
     #[test]
@@ -2357,27 +2360,27 @@ mod tests {
         // Write and emit two chunks.
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
-        assert_eq!(stream.send.len(), 10);
+        assert_eq!(stream.send.buffered_bytes(), 10);
 
         let mut buf = [0; 10];
         let (written, _) = stream.send.emit(&mut buf).unwrap();
         assert_eq!(written, 10);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
 
         // Mark both chunks for retransmission.
         let retransmitted = stream.send.retransmit(0, 10);
         assert_eq!(retransmitted, 10);
-        assert_eq!(stream.send.len(), 10);
+        assert_eq!(stream.send.buffered_bytes(), 10);
 
         // Ack and drop only first chunk.
         let dropped = stream.send.ack_and_drop(0, 5);
         assert_eq!(dropped, 5);
-        assert_eq!(stream.send.len(), 5);
+        assert_eq!(stream.send.buffered_bytes(), 5);
 
         // Ack and drop second chunk.
         let dropped = stream.send.ack_and_drop(5, 5);
         assert_eq!(dropped, 5);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
     }
 
     #[test]
@@ -2394,7 +2397,7 @@ mod tests {
         // Nothing should be dropped since there's no buffered data.
         let dropped = stream.send.ack_and_drop(0, 5);
         assert_eq!(dropped, 0);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
     }
 
     #[test]
@@ -2422,7 +2425,7 @@ mod tests {
 
         let stream_id = 0u64;
 
-        // Write data: both stream.send.len() and tx_buffered increase.
+        // Write data: both stream.send.buffered_bytes() and tx_buffered increase.
         {
             let stream = streams
                 .get_or_create(
@@ -2436,11 +2439,11 @@ mod tests {
             assert_eq!(stream.send.write(b"hello", false), Ok(5));
         }
         streams.add_tx_buffered(5);
-        assert_eq!(streams.get(stream_id).unwrap().send.len(), 5);
+        assert_eq!(streams.get(stream_id).unwrap().send.buffered_bytes(), 5);
         assert_eq!(streams.tx_buffered(), 5);
         assert!(streams.tx_buffered_is_consistent());
 
-        // Emit data: both stream.send.len() and tx_buffered decrease.
+        // Emit data: both stream.send.buffered_bytes() and tx_buffered decrease.
         let mut buf = [0; 10];
         let written = {
             let stream = streams.get_mut(stream_id).unwrap();
@@ -2449,31 +2452,31 @@ mod tests {
         };
         assert_eq!(written, 5);
         streams.sub_tx_buffered(5);
-        assert_eq!(streams.get(stream_id).unwrap().send.len(), 0);
+        assert_eq!(streams.get(stream_id).unwrap().send.buffered_bytes(), 0);
         assert_eq!(streams.tx_buffered(), 0);
         assert!(streams.tx_buffered_is_consistent());
 
-        // Retransmit: both stream.send.len() and tx_buffered increase by actual
-        // amount retransmitted.
+        // Retransmit: both stream.send.buffered_bytes() and tx_buffered increase
+        // by actual amount retransmitted.
         let retransmitted = {
             let stream = streams.get_mut(stream_id).unwrap();
             stream.send.retransmit(0, 5)
         };
         assert_eq!(retransmitted, 5);
         streams.add_tx_buffered(retransmitted);
-        assert_eq!(streams.get(stream_id).unwrap().send.len(), 5);
+        assert_eq!(streams.get(stream_id).unwrap().send.buffered_bytes(), 5);
         assert_eq!(streams.tx_buffered(), 5);
         assert!(streams.tx_buffered_is_consistent());
 
-        // Ack and drop: both stream.send.len() and tx_buffered decrease by
-        // actual amount dropped.
+        // Ack and drop: both stream.send.buffered_bytes() and tx_buffered
+        // decrease by actual amount dropped.
         let dropped = {
             let stream = streams.get_mut(stream_id).unwrap();
             stream.send.ack_and_drop(0, 5)
         };
         assert_eq!(dropped, 5);
         streams.sub_tx_buffered(dropped);
-        assert_eq!(streams.get(stream_id).unwrap().send.len(), 0);
+        assert_eq!(streams.get(stream_id).unwrap().send.buffered_bytes(), 0);
         assert_eq!(streams.tx_buffered(), 0);
         assert!(streams.tx_buffered_is_consistent());
     }
@@ -2483,27 +2486,27 @@ mod tests {
         let mut stream = <Stream>::new(0, 15, 15, true, 0, 15);
 
         // Initially empty.
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
 
         // After write.
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
-        assert_eq!(stream.send.len(), 5);
+        assert_eq!(stream.send.buffered_bytes(), 5);
 
         // After emit.
         let mut buf = [0; 10];
         let (written, _) = stream.send.emit(&mut buf).unwrap();
         assert_eq!(written, 5);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
 
         // After retransmit.
         let retransmitted = stream.send.retransmit(0, 5);
         assert_eq!(retransmitted, 5);
-        assert_eq!(stream.send.len(), 5);
+        assert_eq!(stream.send.buffered_bytes(), 5);
 
         // After ack_and_drop.
         let dropped = stream.send.ack_and_drop(0, 5);
         assert_eq!(dropped, 5);
-        assert_eq!(stream.send.len(), 0);
+        assert_eq!(stream.send.buffered_bytes(), 0);
     }
 }
 
