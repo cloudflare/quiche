@@ -1154,7 +1154,10 @@ pub extern "C" fn quiche_conn_source_ids(
 pub extern "C" fn quiche_connection_id_iter_next(
     iter: &mut ConnectionIdIter, out: &mut *const u8, out_len: &mut size_t,
 ) -> bool {
-    if let Some(conn_id) = iter.next() {
+    // Don't use `Iterator::next()` here: it returns a clone that is dropped
+    // before this function returns, leaving `out` dangling.
+    if let Some(conn_id) = iter.cids.get(iter.index) {
+        iter.index += 1;
         let id = conn_id.as_ref();
         *out = id.as_ptr();
         *out_len = id.len();
