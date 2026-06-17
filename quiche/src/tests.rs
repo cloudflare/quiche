@@ -6488,12 +6488,12 @@ fn client_rst_stream_while_bytes_in_flight(
         _ => 24000,
     };
 
-    assert_eq!(pipe.server.tx_buffered, 0);
+    assert_eq!(pipe.server.streams.tx_buffered(), 0);
     assert_eq!(
         pipe.server.stream_send(8, &send_buf, false),
         Ok(expected_cwnd)
     );
-    assert_eq!(pipe.server.tx_buffered, expected_cwnd);
+    assert_eq!(pipe.server.streams.tx_buffered(), expected_cwnd);
     assert_eq!(
         pipe.server
             .paths
@@ -6504,7 +6504,6 @@ fn client_rst_stream_while_bytes_in_flight(
         expected_cwnd
     );
     assert_eq!(pipe.advance(), Ok(()));
-    assert_eq!(pipe.server.tx_buffered_state, TxBufferTrackingState::Ok);
 }
 
 #[rstest]
@@ -6577,7 +6576,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         _ => 8400,
     };
 
-    assert_eq!(pipe.server.tx_buffered, 0);
+    assert_eq!(pipe.server.streams.tx_buffered(), 0);
 
     let send_result = pipe.server.stream_send(8, &send_buf, false).unwrap();
     if cc_algorithm_name != "cubic" {
@@ -6587,7 +6586,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         // lost packet.  The exact send size varies.
         assert!((15000..17000).contains(&send_result));
     }
-    assert_eq!(pipe.server.tx_buffered, send_result);
+    assert_eq!(pipe.server.streams.tx_buffered(), send_result);
     assert_eq!(
         pipe.server
             .paths
@@ -6598,7 +6597,6 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         expected_cwnd
     );
     assert_eq!(pipe.advance(), Ok(()));
-    assert_eq!(pipe.server.tx_buffered_state, TxBufferTrackingState::Ok);
 }
 
 #[rstest]
@@ -7827,6 +7825,78 @@ fn early_retransmit(
         })
     );
     assert_eq!(pipe.client.stats().retrans, 1);
+}
+
+#[rstest]
+/// Tests that sub_tx_buffered() is called when data marked for retransmission
+/// is acknowledged before being fully re-emitted.
+///
+/// Send 11KB, trigger PTO timeout, call send() which marks data for retransmit
+/// but can't emit it all due to cwnd limits. Then deliver the original packets
+/// and process ACKs. The ack_and_drop() for data still in the retransmit buffer
+/// must call sub_tx_buffered() to maintain correct accounting.
+fn retransmit_data_acked_before_fully_retransmitted(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(100000);
+    config.set_initial_max_stream_data_bidi_remote(100000);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Establish stream.
+    assert_eq!(pipe.client.stream_send(0, b"init", false), Ok(4));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Send 11KB.
+    let data_size = 11000;
+    let large_data = vec![0xAB; data_size];
+    assert_eq!(
+        pipe.client.stream_send(0, &large_data, false),
+        Ok(data_size)
+    );
+
+    // Emit but don't deliver (simulating loss).
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(pipe.client.streams.tx_buffered(), 0);
+
+    // Trigger PTO timeout.
+    let timer = pipe.client.timeout().unwrap();
+    std::thread::sleep(timer + Duration::from_millis(1));
+    pipe.client.on_timeout();
+
+    // Send PTO probe. retransmit() adds data to tx_buffered, but PTO cwnd
+    // limits prevent emitting all of it.
+    pipe.client.send(&mut buf).unwrap();
+
+    assert!(
+        pipe.client.streams.tx_buffered() > 0,
+        "Expected data in tx_buffered after retransmit"
+    );
+
+    // Deliver original packets (delayed arrival).
+    let server_path = &pipe.server.paths.get_active().unwrap();
+    let server_info = RecvInfo {
+        to: server_path.local_addr(),
+        from: server_path.peer_addr(),
+    };
+    for (pkt, _) in &flight {
+        let mut pkt_mut = pkt.clone();
+        pipe.server.recv(&mut pkt_mut, server_info).unwrap();
+    }
+
+    // Process ACKs. ack_and_drop() returns non-zero for data in retransmit
+    // buffer and sub_tx_buffered() must be called.
+    pipe.advance().ok();
+
+    assert_eq!(
+        pipe.client.streams.tx_buffered(),
+        0,
+        "tx_buffered should be 0 after ACK"
+    );
 }
 
 #[rstest]
