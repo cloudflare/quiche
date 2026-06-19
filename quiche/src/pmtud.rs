@@ -21,6 +21,9 @@
 /// https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
 pub(crate) const MAX_PROBES_DEFAULT: u8 = 3;
 
+/// Number of non-probe packets between PMTUD probes.
+pub(crate) const PKTS_BETWEEN_PROBES: usize = 0;
+
 /// Min Packetization Layer Path MTU (PLPMTU).
 /// https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
 /// For QUIC, this is 1200 bytes per https://datatracker.ietf.org/doc/html/rfc9000#section-14.1
@@ -54,13 +57,23 @@ pub struct Pmtud {
     /// The maximum number of failed probe attempts before treating a size as
     /// failed.
     max_probes: u8,
+
+    /// Non-probe packets sent since the last PMTUD probe.
+    /// `None` means no probe has been sent yet. First probe is allowed immediately.
+    pkts_since_last_probe: Option<usize>,
+
+    /// Minimum non-probe packets required between PMTUD probes.
+    pkts_between_probes: usize,
 }
 
 impl Pmtud {
     /// Creates new PMTUD instance.
     ///
     /// If `max_probes` is 0, uses the default value of [`MAX_PROBES_DEFAULT`].
-    pub fn new(maximum_supported_mtu: usize, max_probes: u8) -> Self {
+    pub fn new(
+        maximum_supported_mtu: usize, max_probes: u8,
+        pkts_between_probes: usize,
+    ) -> Self {
         let max_probes = if max_probes == 0 {
             warn!(
                 "max_probes is 0, using default value {}",
@@ -75,6 +88,7 @@ impl Pmtud {
             maximum_supported_mtu,
             probe_size: maximum_supported_mtu,
             max_probes,
+            pkts_between_probes,
             ..Default::default()
         }
     }
@@ -82,11 +96,20 @@ impl Pmtud {
     /// Indicates whether probing should continue on the connection.
     ///
     /// Checks there are no probes in flight, that a PMTU has not been
-    /// found, and that the minimum supported MTU has not been reached.
+    /// found, that the minimum supported MTU has not been reached, and that
+    /// enough non-probe packets have been sent since the last probe.
     pub fn should_probe(&self) -> bool {
         !self.in_flight &&
             self.pmtu.is_none() &&
-            self.smallest_failed_probe_size != Some(MIN_PLPMTU)
+            self.smallest_failed_probe_size != Some(MIN_PLPMTU) &&
+            self.pkts_since_last_probe
+                .is_none_or(|n| n >= self.pkts_between_probes)
+    }
+
+    /// Records that a non-probe packet was sent.
+    pub fn on_non_probe_sent(&mut self) {
+        self.pkts_since_last_probe =
+            self.pkts_since_last_probe.map(|n| n.saturating_add(1));
     }
 
     /// Sets the PMTUD probe size.
@@ -163,6 +186,9 @@ impl Pmtud {
     /// Sets whether a probe is currently in flight for this connection.
     pub fn set_in_flight(&mut self, in_flight: bool) {
         self.in_flight = in_flight;
+        if in_flight {
+            self.pkts_since_last_probe = Some(0);
+        }
     }
 
     /// Records a successful probe and returns the largest successful probe size
@@ -222,6 +248,7 @@ impl Pmtud {
         self.largest_successful_probe_size = None;
         self.pmtu = None;
         self.probe_failure_count = 0;
+        self.pkts_since_last_probe = None;
     }
 
     // Checks that a probe of PMTU size can be ack'd by enabling
@@ -233,6 +260,7 @@ impl Pmtud {
             self.pmtu = None;
             self.probe_failure_count = 0;
             self.largest_successful_probe_size = None;
+            self.pkts_since_last_probe = None;
         }
     }
 
@@ -263,7 +291,7 @@ mod tests {
 
     #[test]
     fn pmtud_initial_state() {
-        let pmtud = Pmtud::new(1350, 1);
+        let pmtud = Pmtud::new(1350, 1, PKTS_BETWEEN_PROBES);
         assert_eq!(pmtud.get_current_mtu(), 1200);
         assert_eq!(pmtud.get_probe_size(), 1350);
         assert!(pmtud.should_probe());
@@ -271,20 +299,108 @@ mod tests {
 
     #[test]
     fn pmtud_max_probes_zero_uses_default() {
-        let pmtud = Pmtud::new(1500, 0);
+        let pmtud = Pmtud::new(1500, 0, PKTS_BETWEEN_PROBES);
         assert_eq!(pmtud.max_probes, MAX_PROBES_DEFAULT);
     }
 
     #[test]
     fn pmtud_max_probes_set_to_provided_value() {
-        let pmtud = Pmtud::new(1500, 5);
+        let pmtud = Pmtud::new(1500, 5, PKTS_BETWEEN_PROBES);
         assert_eq!(pmtud.max_probes, 5);
         assert_ne!(pmtud.max_probes, MAX_PROBES_DEFAULT);
     }
 
     #[test]
+    fn pmtud_first_probe_allowed_without_non_probe_packets() {
+        let mut pmtud = Pmtud::new(1500, 1, 4);
+
+        assert_eq!(pmtud.pkts_since_last_probe, None);
+        assert!(pmtud.should_probe());
+
+        // Non-probe packets sent before the first PMTUD probe do not start
+        // the spacing counter.
+        for _ in 0..4 {
+            pmtud.on_non_probe_sent();
+        }
+
+        assert_eq!(pmtud.pkts_since_last_probe, None);
+        assert!(pmtud.should_probe());
+    }
+
+    #[test]
+    fn pmtud_blocks_next_probe_until_enough_non_probe_packets() {
+        const PKTS_BETWEEN_PROBES: usize = 4;
+
+        let mut pmtud = Pmtud::new(1500, 1, PKTS_BETWEEN_PROBES);
+
+        assert!(pmtud.should_probe());
+
+        pmtud.set_in_flight(true);
+        assert_eq!(pmtud.pkts_since_last_probe, Some(0));
+        assert!(!pmtud.should_probe());
+
+        pmtud.failed_probe(1500);
+
+        assert!(!pmtud.in_flight);
+        assert_eq!(pmtud.pkts_since_last_probe, Some(0));
+        assert!(!pmtud.should_probe());
+
+        for i in 0..PKTS_BETWEEN_PROBES {
+            assert_eq!(pmtud.pkts_since_last_probe, Some(i));
+            assert!(!pmtud.should_probe());
+
+            pmtud.on_non_probe_sent();
+        }
+
+        assert_eq!(
+            pmtud.pkts_since_last_probe,
+            Some(PKTS_BETWEEN_PROBES)
+        );
+        assert!(pmtud.should_probe());
+    }
+
+    #[test]
+    fn pmtud_probe_spacing_resets_when_probe_is_sent() {
+        const PKTS_BETWEEN_PROBES: usize = 4;
+
+        let mut pmtud = Pmtud::new(1500, 1, PKTS_BETWEEN_PROBES);
+
+        pmtud.set_in_flight(true);
+        pmtud.failed_probe(1500);
+
+        for _ in 0..PKTS_BETWEEN_PROBES {
+            pmtud.on_non_probe_sent();
+        }
+
+        assert!(pmtud.should_probe());
+
+        pmtud.set_in_flight(true);
+
+        assert_eq!(pmtud.pkts_since_last_probe, Some(0));
+        assert!(!pmtud.should_probe());
+    }
+
+    #[test]
+    fn pmtud_revalidation_probe_bypasses_spacing() {
+        const PKTS_BETWEEN_PROBES: usize = 4;
+
+        let mut pmtud = Pmtud::new(1500, 1, PKTS_BETWEEN_PROBES);
+
+        pmtud.set_in_flight(true);
+        pmtud.successful_probe(1500);
+
+        assert_eq!(pmtud.get_pmtu(), Some(1500));
+
+        pmtud.revalidate_pmtu();
+
+        assert_eq!(pmtud.get_pmtu(), None);
+        assert_eq!(pmtud.pkts_since_last_probe, None);
+        assert!(pmtud.should_probe());
+    }
+
+    #[test]
     fn pmtud_binary_search_algorithm() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, PKTS_BETWEEN_PROBES);
 
         // Set initial probe size to 1500
         assert_eq!(pmtud.get_probe_size(), 1500);
@@ -330,7 +446,7 @@ mod tests {
 
     #[test]
     fn pmtud_successful_probe() {
-        let mut pmtud = Pmtud::new(1400, 1);
+        let mut pmtud = Pmtud::new(1400, 1, PKTS_BETWEEN_PROBES);
 
         // Simulate successful probe
         pmtud.successful_probe(1400);
@@ -345,7 +461,7 @@ mod tests {
     /// to verify the PMTU discovery process.
     #[test]
     fn test_pmtud_reset() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, PKTS_BETWEEN_PROBES);
         pmtud.successful_probe(1350);
         assert_eq!(pmtud.pmtu, Some(1350));
         assert!(!pmtud.should_probe());
@@ -360,7 +476,7 @@ mod tests {
     /// Test case for receiving a probe outside the defined supported MTU range.
     #[test]
     fn test_pmtud_errant_probe() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, PKTS_BETWEEN_PROBES);
         pmtud.successful_probe(1500);
         // Even though we've received a probe larger than supported
         // maximum MTU, the PMTU should still respect the configured maximum
@@ -383,7 +499,7 @@ mod tests {
     /// when the PMTU is equal to the minimum supported MTU.
     #[test]
     fn test_pmtu_equal_to_min_supported_mtu() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, PKTS_BETWEEN_PROBES);
         pmtud_test_runner(&mut pmtud, 1200);
     }
 
@@ -393,7 +509,7 @@ mod tests {
     /// when the PMTU is greater than the minimum supported MTU.
     #[test]
     fn test_pmtu_greater_than_min_supported_mtu() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, PKTS_BETWEEN_PROBES);
         pmtud_test_runner(&mut pmtud, 1500);
     }
 
@@ -403,7 +519,7 @@ mod tests {
     /// the case when the PMTU is less than the minimum supported MTU.
     #[test]
     fn test_pmtu_less_than_min_supported_mtu() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, PKTS_BETWEEN_PROBES);
         pmtud_test_runner(&mut pmtud, 1100);
     }
 
@@ -414,7 +530,7 @@ mod tests {
     /// validation probe.
     #[test]
     fn test_pmtu_revalidation() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, PKTS_BETWEEN_PROBES);
         pmtud.set_probe_size(1350);
         pmtud.successful_probe(1350);
 
@@ -428,7 +544,7 @@ mod tests {
 
     #[test]
     fn pmtud_revalidation_tolerates_random_packet_loss() {
-        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT);
+        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT, PKTS_BETWEEN_PROBES);
 
         pmtud.successful_probe(1500);
         assert_eq!(pmtud.get_pmtu(), Some(1500));
@@ -453,7 +569,7 @@ mod tests {
     /// PMTUD should binary search down, not restart.
     #[test]
     fn pmtud_revalidation_failure_binary_searches_not_restarts() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, PKTS_BETWEEN_PROBES);
 
         pmtud.successful_probe(1500);
         assert_eq!(pmtud.get_pmtu(), Some(1500));
@@ -472,7 +588,7 @@ mod tests {
 
     #[test]
     fn pmtud_tolerates_initial_packet_loss() {
-        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT);
+        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT, PKTS_BETWEEN_PROBES);
 
         pmtud.failed_probe(1500);
         assert_eq!(pmtud.probe_failure_count, 1);
@@ -489,7 +605,7 @@ mod tests {
 
     #[test]
     fn pmtud_confirms_failure_after_max_probes() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, PKTS_BETWEEN_PROBES);
 
         pmtud.failed_probe(1500);
 
@@ -501,7 +617,7 @@ mod tests {
 
     #[test]
     fn pmtud_binary_search_no_slowdown() {
-        let mut pmtud = Pmtud::new(1500, 2);
+        let mut pmtud = Pmtud::new(1500, 2, PKTS_BETWEEN_PROBES);
 
         fail_probe_max_times(&mut pmtud, 1500);
         assert!(pmtud.pmtu.is_none());
@@ -528,7 +644,7 @@ mod tests {
     /// 3. Algorithm converges to the correct MTU of 1337
     #[test]
     fn pmtud_convergence_with_intermittent_loss() {
-        let mut pmtud = Pmtud::new(1500, 3);
+        let mut pmtud = Pmtud::new(1500, 3, PKTS_BETWEEN_PROBES);
         let target_mtu = 1337;
 
         while pmtud.get_pmtu().is_none() {
@@ -560,7 +676,7 @@ mod tests {
 
     #[test]
     fn pmtud_failure_at_min_plpmtu() {
-        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT);
+        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT, PKTS_BETWEEN_PROBES);
 
         pmtud.failed_probe(100);
         pmtud.failed_probe(100);
@@ -571,7 +687,7 @@ mod tests {
 
     #[test]
     fn pmtud_in_flight_cleared_on_all_outcomes() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, PKTS_BETWEEN_PROBES);
 
         pmtud.set_in_flight(true);
         assert!(pmtud.in_flight);
@@ -587,7 +703,7 @@ mod tests {
 
     #[test]
     fn pmtud_update_probe_size_initial_state() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, PKTS_BETWEEN_PROBES);
 
         // Manually set probe_size to something else to verify update_probe_size
         // resets it
