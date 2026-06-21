@@ -19,6 +19,7 @@ use crate::recovery::QlogMetrics;
 
 use crate::frame;
 
+use super::Acked;
 use crate::recovery::bytes_in_flight::BytesInFlight;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::rtt::RttStats;
@@ -44,7 +45,6 @@ use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 
 use super::bbr2::BBRv2;
 use super::pacer::Pacer;
-use super::Acked;
 use super::Lost;
 
 // Congestion Control
@@ -498,7 +498,8 @@ pub struct GRecovery {
     /// [`Self::detect_and_remove_lost_packets`] to avoid allocations
     lost_reuse: Vec<Lost>,
 
-    pacer: Pacer,
+    pub pacer: Pacer,
+    last_ack_time: Option<Instant>,
 }
 
 impl GRecovery {
@@ -519,6 +520,7 @@ impl GRecovery {
                 MAX_WINDOW_PACKETS,
                 recovery_config.max_send_udp_payload_size,
                 recovery_config.initial_rtt,
+                recovery_config.enable_bbr_fix,
                 recovery_config.custom_bbr_params.as_ref(),
             ),
             _ => return None,
@@ -563,6 +565,8 @@ impl GRecovery {
 
             newly_acked: Vec::new(),
             lost_reuse: Vec::new(),
+
+            last_ack_time: None,
         })
     }
 
@@ -857,6 +861,9 @@ impl RecoveryOps for GRecovery {
         // Check if largest packet is newly acked.
         let update_rtt = largest_newly_acked.pkt_num == largest_acked_pkt_num &&
             has_ack_eliciting;
+
+        self.last_ack_time = Some(now);
+
         if update_rtt {
             let latest_rtt = now - largest_newly_acked.time_sent;
             self.rtt_stats.update_rtt(
@@ -880,6 +887,7 @@ impl RecoveryOps for GRecovery {
             self.epochs[epoch].least_unacked(),
             &self.rtt_stats,
             &mut self.recovery_stats,
+            self.last_ack_time,
         );
 
         self.pto_count = 0;
@@ -919,6 +927,7 @@ impl RecoveryOps for GRecovery {
                 self.epochs[epoch].least_unacked(),
                 &self.rtt_stats,
                 &mut self.recovery_stats,
+                self.last_ack_time,
             );
 
             self.lost_count += lost_packets;

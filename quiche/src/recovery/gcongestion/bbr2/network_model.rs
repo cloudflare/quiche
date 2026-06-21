@@ -191,6 +191,8 @@ pub(super) struct BBRv2NetworkModel {
     latest_send_rate: Option<Bandwidth>,
     /// The most recent ack rate from the BandwidthSampler.
     latest_ack_rate: Option<Bandwidth>,
+
+    enable_bbr_fix:bool,
 }
 
 impl BBRv2NetworkModel {
@@ -238,6 +240,7 @@ impl BBRv2NetworkModel {
 
             latest_send_rate: None,
             latest_ack_rate: None,
+            enable_bbr_fix:params.enable_bbr_fix
         }
     }
 
@@ -249,6 +252,10 @@ impl BBRv2NetworkModel {
     #[cfg(feature = "qlog")]
     pub(super) fn ack_rate(&self) -> Option<Bandwidth> {
         self.latest_ack_rate
+    }
+
+    pub(super) fn enable_bbr_fix(&self)->bool{
+        self.enable_bbr_fix
     }
 
     pub(super) fn max_ack_height(&self) -> usize {
