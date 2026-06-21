@@ -187,15 +187,16 @@ impl BoundedNonEmptyConnectionIdVecDeque {
     ///
     /// [`OutOfIdentifiers`]: enum.Error.html#OutOfIdentifiers
     fn remove(&mut self, seq: u64) -> Result<Option<ConnectionIdEntry>> {
+        let index = match self.inner.iter().position(|e| e.seq == seq) {
+            Some(i) => i,
+            None => return Ok(None),
+        };
+
         if self.inner.len() <= 1 {
             return Err(Error::OutOfIdentifiers);
         }
 
-        Ok(self
-            .inner
-            .iter()
-            .position(|e| e.seq == seq)
-            .and_then(|index| self.inner.remove(index)))
+        Ok(self.inner.remove(index))
     }
 }
 
