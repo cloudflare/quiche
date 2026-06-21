@@ -55,6 +55,31 @@ impl std::error::Error for BufferTooShortError {
     }
 }
 
+/// A byte sink for encoders in this crate.
+///
+/// This lets callers use octets encoders with output targets other than a
+/// single contiguous [`OctetsMut`] buffer.
+pub trait OctetsWriter {
+    /// The error returned by the output sink.
+    type Error;
+
+    /// Writes `v` to the output sink.
+    fn put_bytes(&mut self, v: &[u8]) -> std::result::Result<(), Self::Error>;
+
+    /// Writes `v` to the output sink after HPACK Huffman-encoding it.
+    ///
+    /// The Huffman code implemented is the one defined for HPACK (RFC7541).
+    #[cfg(feature = "huffman_hpack")]
+    fn put_huffman_encoded<const LOWER_CASE: bool>(
+        &mut self, v: &[u8],
+    ) -> std::result::Result<(), Self::Error>
+    where
+        Self: Sized,
+    {
+        huffman_encode_with::<LOWER_CASE, _, _>(v, |chunk| self.put_bytes(chunk))
+    }
+}
+
 /// Helper macro that asserts at compile time. It requires that
 /// `cond` is a const expression.
 macro_rules! static_assert {
@@ -649,59 +674,7 @@ impl<'a> OctetsMut<'a> {
     pub fn put_huffman_encoded<const LOWER_CASE: bool>(
         &mut self, v: &[u8],
     ) -> Result<()> {
-        use self::huffman_table::ENCODE_TABLE;
-
-        let mut bits: u64 = 0;
-        let mut pending = 0;
-
-        for &b in v {
-            let b = if LOWER_CASE {
-                b.to_ascii_lowercase()
-            } else {
-                b
-            };
-            let (nbits, code) = ENCODE_TABLE[b as usize];
-
-            pending += nbits;
-
-            if pending < 64 {
-                // Have room for the new token
-                bits |= code << (64 - pending);
-                continue;
-            }
-
-            pending -= 64;
-            // Take only the bits that fit
-            bits |= code >> pending;
-            self.put_u64(bits)?;
-
-            bits = if pending == 0 {
-                0
-            } else {
-                code << (64 - pending)
-            };
-        }
-
-        if pending == 0 {
-            return Ok(());
-        }
-
-        bits |= u64::MAX >> pending;
-        // TODO: replace with `next_multiple_of(8)` when stable
-        pending = (pending + 7) & !7; // Round up to a byte
-        bits >>= 64 - pending;
-
-        if pending >= 32 {
-            pending -= 32;
-            self.put_u32((bits >> pending) as u32)?;
-        }
-
-        while pending > 0 {
-            pending -= 8;
-            self.put_u8((bits >> pending) as u8)?;
-        }
-
-        Ok(())
+        <Self as OctetsWriter>::put_huffman_encoded::<LOWER_CASE>(self, v)
     }
 
     /// Rewinds the buffer offset by `len` elements.
@@ -805,6 +778,14 @@ impl AsMut<[u8]> for OctetsMut<'_> {
     }
 }
 
+impl OctetsWriter for OctetsMut<'_> {
+    type Error = BufferTooShortError;
+
+    fn put_bytes(&mut self, v: &[u8]) -> Result<()> {
+        OctetsMut::put_bytes(self, v)
+    }
+}
+
 /// Returns how many bytes it would take to encode `v` as a variable-length
 /// integer.
 pub const fn varint_len(v: u64) -> usize {
@@ -865,6 +846,68 @@ pub fn huffman_encoding_len<const LOWER_CASE: bool>(src: &[u8]) -> Result<usize>
     Ok(len)
 }
 
+#[cfg(feature = "huffman_hpack")]
+fn huffman_encode_with<const LOWER_CASE: bool, F, E>(
+    src: &[u8], mut write: F,
+) -> std::result::Result<(), E>
+where
+    F: FnMut(&[u8]) -> std::result::Result<(), E>,
+{
+    use self::huffman_table::ENCODE_TABLE;
+
+    let mut bits: u64 = 0;
+    let mut pending = 0;
+
+    for &b in src {
+        let b = if LOWER_CASE {
+            b.to_ascii_lowercase()
+        } else {
+            b
+        };
+        let (nbits, code) = ENCODE_TABLE[b as usize];
+
+        pending += nbits;
+
+        if pending < 64 {
+            // Have room for the new token.
+            bits |= code << (64 - pending);
+            continue;
+        }
+
+        pending -= 64;
+        // Take only the bits that fit.
+        bits |= code >> pending;
+        write(&bits.to_be_bytes())?;
+
+        bits = if pending == 0 {
+            0
+        } else {
+            code << (64 - pending)
+        };
+    }
+
+    if pending == 0 {
+        return Ok(());
+    }
+
+    bits |= u64::MAX >> pending;
+    // TODO: replace with `next_multiple_of(8)` when stable.
+    pending = (pending + 7) & !7; // Round up to a byte.
+    bits >>= 64 - pending;
+
+    if pending >= 32 {
+        pending -= 32;
+        write(&((bits >> pending) as u32).to_be_bytes())?;
+    }
+
+    while pending > 0 {
+        pending -= 8;
+        write(&[(bits >> pending) as u8])?;
+    }
+
+    Ok(())
+}
+
 /// The functions in this mod test the compile time assertions in the
 /// `put_u` and `peek_u` macros. If you compile this crate with
 /// `--cfg test_invalid_len_compilation_fail`, e.g., by using
@@ -881,683 +924,6 @@ pub mod fails_to_compile {
         b: &'a mut OctetsMut, v: u8,
     ) -> Result<&'a mut [u8]> {
         put_u!(b, u8, v, 2)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn get_u() {
-        let d = [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-        ];
-
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.cap(), 18);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.get_u8().unwrap(), 1);
-        assert_eq!(b.cap(), 17);
-        assert_eq!(b.off(), 1);
-
-        assert_eq!(b.get_u16().unwrap(), 0x203);
-        assert_eq!(b.cap(), 15);
-        assert_eq!(b.off(), 3);
-
-        assert_eq!(b.get_u24().unwrap(), 0x40506);
-        assert_eq!(b.cap(), 12);
-        assert_eq!(b.off(), 6);
-
-        assert_eq!(b.get_u32().unwrap(), 0x0708090a);
-        assert_eq!(b.cap(), 8);
-        assert_eq!(b.off(), 10);
-
-        assert_eq!(b.get_u64().unwrap(), 0x0b0c0d0e0f101112);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 18);
-
-        assert!(b.get_u8().is_err());
-        assert!(b.get_u16().is_err());
-        assert!(b.get_u24().is_err());
-        assert!(b.get_u32().is_err());
-        assert!(b.get_u64().is_err());
-    }
-
-    #[test]
-    fn get_u_mut() {
-        let mut d = [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-        ];
-
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.cap(), 18);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.get_u8().unwrap(), 1);
-        assert_eq!(b.cap(), 17);
-        assert_eq!(b.off(), 1);
-
-        assert_eq!(b.get_u16().unwrap(), 0x203);
-        assert_eq!(b.cap(), 15);
-        assert_eq!(b.off(), 3);
-
-        assert_eq!(b.get_u24().unwrap(), 0x40506);
-        assert_eq!(b.cap(), 12);
-        assert_eq!(b.off(), 6);
-
-        assert_eq!(b.get_u32().unwrap(), 0x0708090a);
-        assert_eq!(b.cap(), 8);
-        assert_eq!(b.off(), 10);
-
-        assert_eq!(b.get_u64().unwrap(), 0x0b0c0d0e0f101112);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 18);
-
-        assert!(b.get_u8().is_err());
-        assert!(b.get_u16().is_err());
-        assert!(b.get_u24().is_err());
-        assert!(b.get_u32().is_err());
-        assert!(b.get_u64().is_err());
-    }
-
-    #[test]
-    fn peek_u() {
-        let d = [1, 2];
-
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.peek_u8().unwrap(), 1);
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.peek_u8().unwrap(), 1);
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 0);
-
-        b.get_u16().unwrap();
-
-        assert!(b.peek_u8().is_err());
-    }
-
-    #[test]
-    fn peek_u_mut() {
-        let mut d = [1, 2];
-
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.peek_u8().unwrap(), 1);
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.peek_u8().unwrap(), 1);
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 0);
-
-        b.get_u16().unwrap();
-
-        assert!(b.peek_u8().is_err());
-    }
-
-    #[test]
-    fn get_bytes() {
-        let d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.get_bytes(5).unwrap().as_ref(), [1, 2, 3, 4, 5]);
-        assert_eq!(b.cap(), 5);
-        assert_eq!(b.off(), 5);
-
-        assert_eq!(b.get_bytes(3).unwrap().as_ref(), [6, 7, 8]);
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 8);
-
-        assert!(b.get_bytes(3).is_err());
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 8);
-
-        assert_eq!(b.get_bytes(2).unwrap().as_ref(), [9, 10]);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 10);
-
-        assert!(b.get_bytes(2).is_err());
-    }
-
-    #[test]
-    fn get_bytes_mut() {
-        let mut d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.get_bytes(5).unwrap().as_ref(), [1, 2, 3, 4, 5]);
-        assert_eq!(b.cap(), 5);
-        assert_eq!(b.off(), 5);
-
-        assert_eq!(b.get_bytes(3).unwrap().as_ref(), [6, 7, 8]);
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 8);
-
-        assert!(b.get_bytes(3).is_err());
-        assert_eq!(b.cap(), 2);
-        assert_eq!(b.off(), 8);
-
-        assert_eq!(b.get_bytes(2).unwrap().as_ref(), [9, 10]);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 10);
-
-        assert!(b.get_bytes(2).is_err());
-    }
-
-    #[test]
-    fn peek_bytes() {
-        let d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.peek_bytes(5).unwrap().as_ref(), [1, 2, 3, 4, 5]);
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.peek_bytes(5).unwrap().as_ref(), [1, 2, 3, 4, 5]);
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 0);
-
-        b.get_bytes(5).unwrap();
-    }
-
-    #[test]
-    fn peek_bytes_mut() {
-        let mut d = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.peek_bytes(5).unwrap().as_ref(), [1, 2, 3, 4, 5]);
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 0);
-
-        assert_eq!(b.peek_bytes(5).unwrap().as_ref(), [1, 2, 3, 4, 5]);
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 0);
-
-        b.get_bytes(5).unwrap();
-    }
-
-    #[test]
-    fn get_varint() {
-        let d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.get_varint().unwrap(), 151288809941952652);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 8);
-
-        let d = [0x9d, 0x7f, 0x3e, 0x7d];
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.get_varint().unwrap(), 494878333);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 4);
-
-        let d = [0x7b, 0xbd];
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.get_varint().unwrap(), 15293);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 2);
-
-        let d = [0x40, 0x25];
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.get_varint().unwrap(), 37);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 2);
-
-        let d = [0x25];
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.get_varint().unwrap(), 37);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 1);
-    }
-
-    #[test]
-    fn get_varint_mut() {
-        let mut d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.get_varint().unwrap(), 151288809941952652);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 8);
-
-        let mut d = [0x9d, 0x7f, 0x3e, 0x7d];
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.get_varint().unwrap(), 494878333);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 4);
-
-        let mut d = [0x7b, 0xbd];
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.get_varint().unwrap(), 15293);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 2);
-
-        let mut d = [0x40, 0x25];
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.get_varint().unwrap(), 37);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 2);
-
-        let mut d = [0x25];
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.get_varint().unwrap(), 37);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 1);
-    }
-
-    #[cfg(feature = "huffman_hpack")]
-    #[test]
-    fn invalid_huffman() {
-        // Extra non-zero padding byte at the end.
-        let mut b = Octets::with_slice(
-            b"\x00\x85\xf2\xb2\x4a\x84\xff\x84\x49\x50\x9f\xff",
-        );
-        assert!(b.get_huffman_decoded().is_err());
-
-        // Zero padded.
-        let mut b =
-            Octets::with_slice(b"\x00\x85\xf2\xb2\x4a\x84\xff\x83\x49\x50\x90");
-        assert!(b.get_huffman_decoded().is_err());
-
-        // Non-final EOS symbol.
-        let mut b = Octets::with_slice(
-            b"\x00\x85\xf2\xb2\x4a\x84\xff\x87\x49\x51\xff\xff\xff\xfa\x7f",
-        );
-        assert!(b.get_huffman_decoded().is_err());
-    }
-
-    #[test]
-    fn put_varint() {
-        let mut d = [0; 8];
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert!(b.put_varint(151288809941952652).is_ok());
-            assert_eq!(b.cap(), 0);
-            assert_eq!(b.off(), 8);
-        }
-        let exp = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
-        assert_eq!(&d, &exp);
-
-        let mut d = [0; 4];
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert!(b.put_varint(494878333).is_ok());
-            assert_eq!(b.cap(), 0);
-            assert_eq!(b.off(), 4);
-        }
-        let exp = [0x9d, 0x7f, 0x3e, 0x7d];
-        assert_eq!(&d, &exp);
-
-        let mut d = [0; 2];
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert!(b.put_varint(15293).is_ok());
-            assert_eq!(b.cap(), 0);
-            assert_eq!(b.off(), 2);
-        }
-        let exp = [0x7b, 0xbd];
-        assert_eq!(&d, &exp);
-
-        let mut d = [0; 1];
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert!(b.put_varint(37).is_ok());
-            assert_eq!(b.cap(), 0);
-            assert_eq!(b.off(), 1);
-        }
-        let exp = [0x25];
-        assert_eq!(&d, &exp);
-
-        let mut d = [0; 3];
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert!(b.put_varint(151288809941952652).is_err());
-            assert_eq!(b.cap(), 3);
-            assert_eq!(b.off(), 0);
-        }
-        let exp = [0; 3];
-        assert_eq!(&d, &exp);
-    }
-
-    #[test]
-    #[should_panic]
-    fn varint_too_large() {
-        let mut d = [0; 3];
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert!(b.put_varint(u64::MAX).is_err());
-    }
-
-    #[test]
-    fn put_u() {
-        let mut d = [0; 18];
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert_eq!(b.cap(), 18);
-            assert_eq!(b.off(), 0);
-
-            assert!(b.put_u8(1).is_ok());
-            assert_eq!(b.cap(), 17);
-            assert_eq!(b.off(), 1);
-
-            assert!(b.put_u16(0x203).is_ok());
-            assert_eq!(b.cap(), 15);
-            assert_eq!(b.off(), 3);
-
-            assert!(b.put_u24(0x40506).is_ok());
-            assert_eq!(b.cap(), 12);
-            assert_eq!(b.off(), 6);
-
-            assert!(b.put_u32(0x0708090a).is_ok());
-            assert_eq!(b.cap(), 8);
-            assert_eq!(b.off(), 10);
-
-            assert!(b.put_u64(0x0b0c0d0e0f101112).is_ok());
-            assert_eq!(b.cap(), 0);
-            assert_eq!(b.off(), 18);
-
-            assert!(b.put_u8(1).is_err());
-        }
-
-        let exp = [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-        ];
-        assert_eq!(&d, &exp);
-    }
-
-    #[test]
-    fn put_bytes() {
-        let mut d = [0; 5];
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert_eq!(b.cap(), 5);
-            assert_eq!(b.off(), 0);
-
-            let p = [0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
-            assert!(b.put_bytes(&p).is_ok());
-            assert_eq!(b.cap(), 0);
-            assert_eq!(b.off(), 5);
-
-            assert!(b.put_u8(1).is_err());
-        }
-
-        let exp = [0xa, 0xb, 0xc, 0xd, 0xe];
-        assert_eq!(&d, &exp);
-    }
-
-    #[test]
-    fn rewind() {
-        let d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
-        let mut b = Octets::with_slice(&d);
-        assert_eq!(b.get_varint().unwrap(), 151288809941952652);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 8);
-
-        assert_eq!(b.rewind(4), Ok(()));
-        assert_eq!(b.cap(), 4);
-        assert_eq!(b.off(), 4);
-
-        assert_eq!(b.get_u8().unwrap(), 0xff);
-        assert_eq!(b.cap(), 3);
-        assert_eq!(b.off(), 5);
-
-        assert!(b.rewind(6).is_err());
-
-        assert_eq!(b.rewind(5), Ok(()));
-        assert_eq!(b.cap(), 8);
-        assert_eq!(b.off(), 0);
-
-        assert!(b.rewind(1).is_err());
-    }
-
-    #[test]
-    fn rewind_mut() {
-        let mut d = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.get_varint().unwrap(), 151288809941952652);
-        assert_eq!(b.cap(), 0);
-        assert_eq!(b.off(), 8);
-
-        assert_eq!(b.rewind(4), Ok(()));
-        assert_eq!(b.cap(), 4);
-        assert_eq!(b.off(), 4);
-
-        assert_eq!(b.get_u8().unwrap(), 0xff);
-        assert_eq!(b.cap(), 3);
-        assert_eq!(b.off(), 5);
-
-        assert!(b.rewind(6).is_err());
-
-        assert_eq!(b.rewind(5), Ok(()));
-        assert_eq!(b.cap(), 8);
-        assert_eq!(b.off(), 0);
-
-        assert!(b.rewind(1).is_err());
-    }
-
-    #[test]
-    fn split() {
-        let mut d = b"helloworld".to_vec();
-
-        let mut b = OctetsMut::with_slice(&mut d);
-        assert_eq!(b.cap(), 10);
-        assert_eq!(b.off(), 0);
-        assert_eq!(b.as_ref(), b"helloworld");
-
-        assert!(b.get_bytes(5).is_ok());
-        assert_eq!(b.cap(), 5);
-        assert_eq!(b.off(), 5);
-        assert_eq!(b.as_ref(), b"world");
-
-        let off = b.off();
-
-        let (first, last) = b.split_at(off).unwrap();
-        assert_eq!(first.cap(), 5);
-        assert_eq!(first.off(), 0);
-        assert_eq!(first.as_ref(), b"hello");
-
-        assert_eq!(last.cap(), 5);
-        assert_eq!(last.off(), 0);
-        assert_eq!(last.as_ref(), b"world");
-    }
-
-    #[test]
-    fn split_at() {
-        let mut d = b"helloworld".to_vec();
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            let (first, second) = b.split_at(5).unwrap();
-
-            let mut exp1 = b"hello".to_vec();
-            assert_eq!(first.as_ref(), &mut exp1[..]);
-
-            let mut exp2 = b"world".to_vec();
-            assert_eq!(second.as_ref(), &mut exp2[..]);
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            let (first, second) = b.split_at(10).unwrap();
-
-            let mut exp1 = b"helloworld".to_vec();
-            assert_eq!(first.as_ref(), &mut exp1[..]);
-
-            let mut exp2 = b"".to_vec();
-            assert_eq!(second.as_ref(), &mut exp2[..]);
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            let (first, second) = b.split_at(9).unwrap();
-
-            let mut exp1 = b"helloworl".to_vec();
-            assert_eq!(first.as_ref(), &mut exp1[..]);
-
-            let mut exp2 = b"d".to_vec();
-            assert_eq!(second.as_ref(), &mut exp2[..]);
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert!(b.split_at(11).is_err());
-        }
-    }
-
-    #[test]
-    fn slice() {
-        let d = b"helloworld".to_vec();
-
-        {
-            let b = Octets::with_slice(&d);
-            let exp = b"hello".to_vec();
-            assert_eq!(b.slice(5), Ok(&exp[..]));
-        }
-
-        {
-            let b = Octets::with_slice(&d);
-            let exp = b"".to_vec();
-            assert_eq!(b.slice(0), Ok(&exp[..]));
-        }
-
-        {
-            let mut b = Octets::with_slice(&d);
-            b.get_bytes(5).unwrap();
-
-            let exp = b"world".to_vec();
-            assert_eq!(b.slice(5), Ok(&exp[..]));
-        }
-
-        {
-            let b = Octets::with_slice(&d);
-            assert!(b.slice(11).is_err());
-        }
-    }
-
-    #[test]
-    fn slice_mut() {
-        let mut d = b"helloworld".to_vec();
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            let mut exp = b"hello".to_vec();
-            assert_eq!(b.slice(5), Ok(&mut exp[..]));
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            let mut exp = b"".to_vec();
-            assert_eq!(b.slice(0), Ok(&mut exp[..]));
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            b.get_bytes(5).unwrap();
-
-            let mut exp = b"world".to_vec();
-            assert_eq!(b.slice(5), Ok(&mut exp[..]));
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert!(b.slice(11).is_err());
-        }
-    }
-
-    #[test]
-    fn slice_last() {
-        let d = b"helloworld".to_vec();
-
-        {
-            let b = Octets::with_slice(&d);
-            let exp = b"orld".to_vec();
-            assert_eq!(b.slice_last(4), Ok(&exp[..]));
-        }
-
-        {
-            let mut b = Octets::with_slice(&d);
-            b.get_bytes(5).unwrap();
-            let exp = b"orld".to_vec();
-            assert_eq!(b.slice_last(4), Ok(&exp[..]));
-        }
-
-        {
-            let b = Octets::with_slice(&d);
-            let exp = b"d".to_vec();
-            assert_eq!(b.slice_last(1), Ok(&exp[..]));
-        }
-
-        {
-            let b = Octets::with_slice(&d);
-            let exp = b"".to_vec();
-            assert_eq!(b.slice_last(0), Ok(&exp[..]));
-        }
-
-        {
-            let b = Octets::with_slice(&d);
-            let exp = b"helloworld".to_vec();
-            assert_eq!(b.slice_last(10), Ok(&exp[..]));
-        }
-
-        {
-            let b = Octets::with_slice(&d);
-            assert!(b.slice_last(11).is_err());
-        }
-    }
-
-    #[test]
-    fn slice_last_mut() {
-        let mut d = b"helloworld".to_vec();
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            let mut exp = b"orld".to_vec();
-            assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            b.get_bytes(5).unwrap();
-            let mut exp = b"orld".to_vec();
-            assert_eq!(b.slice_last(4), Ok(&mut exp[..]));
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            let mut exp = b"d".to_vec();
-            assert_eq!(b.slice_last(1), Ok(&mut exp[..]));
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            let mut exp = b"".to_vec();
-            assert_eq!(b.slice_last(0), Ok(&mut exp[..]));
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            let mut exp = b"helloworld".to_vec();
-            assert_eq!(b.slice_last(10), Ok(&mut exp[..]));
-        }
-
-        {
-            let mut b = OctetsMut::with_slice(&mut d);
-            assert!(b.slice_last(11).is_err());
-        }
     }
 }
 
