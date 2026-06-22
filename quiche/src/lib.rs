@@ -481,9 +481,6 @@ const MAX_UNDECRYPTABLE_PACKETS: usize = 10;
 
 const RESERVED_VERSION_MASK: u32 = 0xfafafafa;
 
-// The default size of the receiver connection flow control window.
-const DEFAULT_CONNECTION_WINDOW: u64 = 48 * 1024;
-
 // The maximum size of the receiver connection flow control window.
 const MAX_CONNECTION_WINDOW: u64 = 24 * 1024 * 1024;
 
@@ -608,10 +605,6 @@ pub struct Config {
     track_unknown_transport_params: Option<usize>,
 
     initial_rtt: Duration,
-
-    /// When true, uses the initial max data (for connection
-    /// and stream) as the initial flow control window.
-    use_initial_max_data_as_flow_control_win: bool,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -690,8 +683,6 @@ impl Config {
 
             track_unknown_transport_params: None,
             initial_rtt: DEFAULT_INITIAL_RTT,
-
-            use_initial_max_data_as_flow_control_win: false,
         })
     }
 
@@ -1261,16 +1252,10 @@ impl Config {
     /// Sets whether the initial max data value should be used as the initial
     /// flow control window.
     ///
-    /// If set to true, the initial flow control window for streams and the
-    /// connection itself will be set to the initial max data value for streams
-    /// and the connection respectively. If false, the window is set to the
-    /// minimum of initial max data and `DEFAULT_STREAM_WINDOW` or
-    /// `DEFAULT_CONNECTION_WINDOW`
-    ///
-    /// The default is false.
-    pub fn set_use_initial_max_data_as_flow_control_win(&mut self, v: bool) {
-        self.use_initial_max_data_as_flow_control_win = v;
-    }
+    /// This is now always enabled and this method is a no-op. It will be
+    /// removed in a future release.
+    #[deprecated(note = "This is now always enabled. This method is a no-op.")]
+    pub fn set_use_initial_max_data_as_flow_control_win(&mut self, _v: bool) {}
 }
 
 /// Tracks the health of the tx_buffered value.
@@ -2058,12 +2043,7 @@ impl<F: BufFactory> Connection<F> {
             reset_token,
         );
 
-        let initial_flow_control_window =
-            if config.use_initial_max_data_as_flow_control_win {
-                max_rx_data
-            } else {
-                cmp::min(max_rx_data / 2 * 3, DEFAULT_CONNECTION_WINDOW)
-            };
+        let initial_flow_control_window = max_rx_data;
         let mut conn = Connection {
             version: config.version,
 
@@ -2235,10 +2215,6 @@ impl<F: BufFactory> Connection<F> {
 
             max_amplification_factor: config.max_amplification_factor,
         };
-        conn.streams.set_use_initial_max_data_as_flow_control_win(
-            config.use_initial_max_data_as_flow_control_win,
-        );
-
         if let Some(retry_cids) = retry_cids {
             conn.local_transport_params
                 .original_destination_connection_id =
@@ -2788,19 +2764,14 @@ impl<F: BufFactory> Connection<F> {
     /// Sets the `use_initial_max_data_as_flow_control_win` flag during SSL
     /// handshake.
     ///
-    /// This function can only be called inside one of BoringSSL's handshake
-    /// callbacks, before any packet has been sent. Calling this function any
-    /// other time will have no effect.
-    ///
-    /// See [`Connection::enable_use_initial_max_data_as_flow_control_win()`].
+    /// This is now always enabled and this method is a no-op. It will be
+    /// removed in a future release.
     #[cfg(feature = "boringssl-boring-crate")]
     #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    #[deprecated(note = "This is now always enabled. This method is a no-op.")]
     pub fn set_use_initial_max_data_as_flow_control_win_in_handshake(
-        ssl: &mut boring::ssl::SslRef,
+        _ssl: &mut boring::ssl::SslRef,
     ) -> Result<()> {
-        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
-
-        ex_data.use_initial_max_data_as_flow_control_win = true;
         Ok(())
     }
 
@@ -8034,8 +8005,6 @@ impl<F: BufFactory> Connection<F> {
             pmtud: None,
 
             is_server: self.is_server,
-
-            use_initial_max_data_as_flow_control_win: false,
         };
 
         if self.handshake_completed {
@@ -8085,10 +8054,6 @@ impl<F: BufFactory> Connection<F> {
                         self.local_transport_params =
                             ex_data.local_transport_params;
                     }
-                }
-
-                if ex_data.use_initial_max_data_as_flow_control_win {
-                    self.enable_use_initial_max_data_as_flow_control_win();
                 }
 
                 // Try to parse transport parameters as soon as the first flight
@@ -8156,19 +8121,6 @@ impl<F: BufFactory> Connection<F> {
         }
 
         Ok(())
-    }
-
-    /// Use the value of the intial max_data / initial stream max_data setting
-    /// as the initial flow control window for the connection and streams.
-    /// The connection-level flow control window will only be changed if it
-    /// hasn't been auto tuned yet. For streams: only newly created streams
-    /// receive the new setting.
-    fn enable_use_initial_max_data_as_flow_control_win(&mut self) {
-        self.flow_control.set_window_if_not_tuned_yet(
-            self.local_transport_params.initial_max_data,
-        );
-        self.streams
-            .set_use_initial_max_data_as_flow_control_win(true);
     }
 
     /// Selects the packet type for the next outgoing packet.

@@ -1557,18 +1557,11 @@ fn flow_control_limit_dup(
 fn flow_control_update(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
-    #[values(true, false)] use_initial_max_data_as_flow_control_win: bool,
 ) {
     let mut buf = [0; 65535];
 
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
-    if use_initial_max_data_as_flow_control_win {
-        pipe.client
-            .enable_use_initial_max_data_as_flow_control_win();
-        pipe.server
-            .enable_use_initial_max_data_as_flow_control_win();
-    }
 
     // Make sure the pipe is configured as we expect
     assert_eq!(pipe.server.max_rx_data(), 30);
@@ -1616,13 +1609,9 @@ fn flow_control_update(
             max: 30
         })
     );
-    if use_initial_max_data_as_flow_control_win {
-        // Initial max_data/window was 30, we consumed/read 16 bytes, which is
-        // more than 1/2 the window ==> new max data is 30 + 16
-        assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 46 }));
-    } else {
-        assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 61 }));
-    }
+    // Initial max_data/window was 30, we consumed/read 16 bytes, which is
+    // more than 1/2 the window ==> new max data is 30 + 16
+    assert_eq!(iter.next(), Some(&frame::Frame::MaxData { max: 46 }));
 }
 
 #[rstest]
@@ -3888,10 +3877,6 @@ fn stream_shutdown_read_after_fin(
 
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
-    pipe.server
-        .enable_use_initial_max_data_as_flow_control_win();
-    pipe.client
-        .enable_use_initial_max_data_as_flow_control_win();
 
     // Client sends some data and a FIN.
     assert_eq!(pipe.client.stream_send(4, b"hello, world123", true), Ok(15));
@@ -3968,10 +3953,6 @@ fn stream_shutdown_read_update_max_data(
     config.verify_peer(false);
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
-    pipe.server
-        .enable_use_initial_max_data_as_flow_control_win();
-    pipe.client
-        .enable_use_initial_max_data_as_flow_control_win();
     assert_eq!(pipe.handshake(), Ok(()));
 
     assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
@@ -4060,7 +4041,6 @@ fn stream_shutdown_read_update_max_data(
 fn stream_shutdown_write_update_max_data(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
-    #[values(true, false)] use_initial_max_data_as_flow_control_win: bool,
 ) {
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
@@ -4081,12 +4061,6 @@ fn stream_shutdown_write_update_max_data(
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
-    if use_initial_max_data_as_flow_control_win {
-        pipe.server
-            .enable_use_initial_max_data_as_flow_control_win();
-        pipe.server
-            .enable_use_initial_max_data_as_flow_control_win();
-    }
 
     assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
     assert_eq!(pipe.advance(), Ok(()));
@@ -4118,16 +4092,9 @@ fn stream_shutdown_write_update_max_data(
     assert_eq!(pipe.server.rx_data, 30);
     assert_eq!(pipe.server.flow_control.consumed(), 30);
     assert_eq!(pipe.client.tx_data, 30);
-    // new max_tx_data is window + consumed
-    if use_initial_max_data_as_flow_control_win {
-        // initial window == initial_max_data == 30; consumed == 30
-        // ==> new max_tx_data is 60
-        assert_eq!(pipe.client.max_tx_data, 60);
-    } else {
-        // initial window == initial_max_data*1.5 == 45; consumed == 30
-        // ==> new max_tx_data is 75
-        assert_eq!(pipe.client.max_tx_data, 75);
-    }
+    // initial window == initial_max_data == 30; consumed == 30
+    // ==> new max_tx_data is 60
+    assert_eq!(pipe.client.max_tx_data, 60);
 
     // client can send again on a different stream
     assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
@@ -9538,8 +9505,10 @@ fn max_streams_threshold_after_handshake_callback_update(
     );
 }
 
+/// Tests that the initial flow control window equals initial_max_data
+/// for both connection and stream level.
 #[test]
-fn enable_use_initial_max_data_as_flow_control_win() {
+fn initial_max_data_is_flow_control_win() {
     let mut config = test_utils::Pipe::default_config("cubic").unwrap();
     config
         .set_application_protos(&[b"proto1", b"proto2"])
@@ -9551,148 +9520,25 @@ fn enable_use_initial_max_data_as_flow_control_win() {
     config.verify_peer(false);
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
-    pipe.server
-        .enable_use_initial_max_data_as_flow_control_win();
 
-    // We overrode the server's window and set it to initial_max_data
+    // Both sides use initial_max_data as their connection flow control
+    // window.
     assert_eq!(pipe.server.flow_control.window(), 1_000_000);
-    // the clients window is set to DEFAULT_CONNECTION_WINDOW
-    assert_eq!(pipe.client.flow_control.window(), DEFAULT_CONNECTION_WINDOW);
+    assert_eq!(pipe.client.flow_control.window(), 1_000_000);
 
     // Create a new stream
     pipe.client.stream_send(0, &[1, 2, 3], false).unwrap();
     assert_eq!(pipe.advance(), Ok(()));
+
+    // Stream flow control windows equal initial_max_stream_data.
     assert_eq!(
         pipe.client
             .get_or_create_stream(0, true)
-            .unwrap()
-            .recv
-            .flow_control_for_tests()
-            .window(),
-        stream::DEFAULT_STREAM_WINDOW
-    );
-    assert_eq!(
-        pipe.server
-            .get_or_create_stream(0, false)
             .unwrap()
             .recv
             .flow_control_for_tests()
             .window(),
         500_000
-    );
-}
-
-#[test]
-fn enable_use_initial_max_data_as_flow_control_win_in_config() {
-    let mut client_config = test_utils::Pipe::default_config("cubic").unwrap();
-    let mut server_config = test_utils::Pipe::default_config("cubic").unwrap();
-    for config in [&mut client_config, &mut server_config] {
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(1_000_000);
-        config.set_initial_max_stream_data_bidi_remote(500_000);
-        config.set_initial_max_stream_data_bidi_local(500_000);
-        config.set_initial_max_streams_bidi(10);
-        config.verify_peer(false);
-    }
-    server_config.set_use_initial_max_data_as_flow_control_win(true);
-    let mut pipe = test_utils::Pipe::with_client_and_server_config(
-        &mut client_config,
-        &mut server_config,
-    )
-    .unwrap();
-    assert_eq!(pipe.handshake(), Ok(()));
-    pipe.server
-        .enable_use_initial_max_data_as_flow_control_win();
-
-    // We overrode the window and set it to initial_max_data
-    assert_eq!(pipe.server.flow_control.window(), 1_000_000);
-    // the clients window is set to DEFAULT_CONNECTION_WINDOW
-    assert_eq!(pipe.client.flow_control.window(), DEFAULT_CONNECTION_WINDOW);
-
-    // Create a new stream
-    pipe.client.stream_send(0, &[1, 2, 3], false).unwrap();
-    assert_eq!(pipe.advance(), Ok(()));
-    assert_eq!(
-        pipe.client
-            .get_or_create_stream(0, true)
-            .unwrap()
-            .recv
-            .flow_control_for_tests()
-            .window(),
-        stream::DEFAULT_STREAM_WINDOW
-    );
-    assert_eq!(
-        pipe.server
-            .get_or_create_stream(0, false)
-            .unwrap()
-            .recv
-            .flow_control_for_tests()
-            .window(),
-        500_000
-    );
-}
-
-/// Tests that `set_use_initial_max_data_as_flow_control_win_in_handshake()`
-/// correctly updates flow control windows.
-#[cfg(feature = "boringssl-boring-crate")]
-#[test]
-fn set_use_initial_max_data_as_flow_control_win_in_handshake() {
-    // Setup server with handshake callback
-    let mut server_tls_ctx_builder = test_utils::Pipe::default_tls_ctx_builder();
-    server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
-        // Change initial_max_streams_bidi from 4 to 100 during handshake
-        <Connection>::set_use_initial_max_data_as_flow_control_win_in_handshake(
-            hello.ssl_mut(),
-        )
-        .unwrap();
-
-        Ok(())
-    });
-
-    let mut server_config = Config::with_boring_ssl_ctx_builder(
-        PROTOCOL_VERSION,
-        server_tls_ctx_builder,
-    )
-    .unwrap();
-
-    let mut client_config = test_utils::Pipe::default_config("cubic").unwrap();
-
-    for config in [&mut client_config, &mut server_config] {
-        config
-            .set_application_protos(&[b"proto1", b"proto2"])
-            .unwrap();
-        config.set_initial_max_data(1_000_000);
-        config.set_initial_max_stream_data_bidi_remote(500_000);
-        config.set_initial_max_stream_data_bidi_local(500_000);
-        config.set_initial_max_streams_bidi(10);
-        config.verify_peer(false);
-    }
-
-    let mut pipe = test_utils::Pipe::with_client_and_server_config(
-        &mut client_config,
-        &mut server_config,
-    )
-    .unwrap();
-
-    assert_eq!(pipe.handshake(), Ok(()));
-    // We overrode the server's window and set it to initial_max_data
-    assert_eq!(pipe.server.flow_control.window(), 1_000_000);
-    // the clients window is set to DEFAULT_CONNECTION_WINDOW
-    assert_eq!(pipe.client.flow_control.window(), DEFAULT_CONNECTION_WINDOW);
-
-    // Create a new stream
-    pipe.client.stream_send(0, &[1, 2, 3], false).unwrap();
-    assert_eq!(pipe.advance(), Ok(()));
-    assert_eq!(
-        pipe.client
-            .get_or_create_stream(0, true)
-            .unwrap()
-            .recv
-            .flow_control_for_tests()
-            .window(),
-        stream::DEFAULT_STREAM_WINDOW
     );
     assert_eq!(
         pipe.server

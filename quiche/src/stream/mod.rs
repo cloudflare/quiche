@@ -46,9 +46,6 @@ use crate::Result;
 
 const DEFAULT_URGENCY: u8 = 127;
 
-/// The default size of the receiver stream flow control window.
-pub(crate) const DEFAULT_STREAM_WINDOW: u64 = 32 * 1024;
-
 /// The maximum size of the receiver stream flow control window.
 pub const MAX_STREAM_WINDOW: u64 = 16 * 1024 * 1024;
 
@@ -199,10 +196,6 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     /// The maximum size of a stream window.
     max_stream_window: u64,
 
-    /// When `true`, the initial flow control window will be set to the
-    /// `max_rx_data`, if false, it will be set to `DEFAULT_STREAM_WINDOW`
-    use_initial_max_data_as_flow_control_win: bool,
-
     /// Total number of bytes in send buffers across all streams.
     tx_buffered: usize,
 }
@@ -344,12 +337,7 @@ impl<F: BufFactory> StreamMap<F> {
                     },
                 };
 
-                let initial_window =
-                    if self.use_initial_max_data_as_flow_control_win {
-                        max_rx_data
-                    } else {
-                        cmp::min(max_rx_data, DEFAULT_STREAM_WINDOW)
-                    };
+                let initial_window = max_rx_data;
                 let s = Stream::new(
                     id,
                     max_rx_data,
@@ -785,14 +773,6 @@ impl<F: BufFactory> StreamMap<F> {
             );
         }
     }
-
-    /// When `true`, the initial flow control window will be set to the
-    /// `max_rx_data`, if false, it will be set to `DEFAULT_STREAM_WINDOW`
-    pub(crate) fn set_use_initial_max_data_as_flow_control_win(
-        &mut self, v: bool,
-    ) {
-        self.use_initial_max_data_as_flow_control_win = v;
-    }
 }
 
 /// A QUIC stream.
@@ -1044,6 +1024,9 @@ mod tests {
     use crate::range_buf::RangeBuf;
 
     use super::*;
+
+    /// The default size of the receiver stream flow control window.
+    const DEFAULT_STREAM_WINDOW: u64 = 32 * 1024;
 
     #[test]
     fn recv_flow_control() {
