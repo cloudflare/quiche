@@ -372,11 +372,11 @@ pub extern "C" fn quiche_config_set_enable_cubic_idle_restart_fix(
     config.set_enable_cubic_idle_restart_fix(v);
 }
 
+/// Deprecated: this is now always enabled and this function is a no-op.
 #[no_mangle]
 pub extern "C" fn quiche_config_set_use_initial_max_data_as_flow_control_win(
-    config: &mut Config, v: bool,
+    _config: &mut Config, _v: bool,
 ) {
-    config.set_use_initial_max_data_as_flow_control_win(v);
 }
 
 #[no_mangle]

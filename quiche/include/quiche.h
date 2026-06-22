@@ -253,8 +253,7 @@ void quiche_config_enable_pacing(quiche_config *config, bool v);
 void quiche_config_set_enable_cubic_idle_restart_fix(quiche_config *config,
                                                      bool v);
 
-// Configures whether to use the initial max data value as the initial flow
-// control window for streams and the connection (disabled by default).
+// Deprecated: this is now always enabled and this function is a no-op.
 void quiche_config_set_use_initial_max_data_as_flow_control_win(
     quiche_config *config, bool v);
 
