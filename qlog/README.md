@@ -11,6 +11,8 @@ The crate uses Serde for conversion between Rust and JSON.
 https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-quic-events.html
 [HTTP/3 and QPACK event definitions]:
 https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-h3-events.html
+[Careful Resume]:
+https://datatracker.ietf.org/doc/html/draft-ietf-tsvwg-careful-resume-qlog
 
 Overview
 --------
