@@ -10259,7 +10259,7 @@ fn connection_id_retire_exotic_sequence(
             seq_num: 8,
             retire_prior_to: 1,
             conn_id: vec![0],
-            reset_token: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4],
+            reset_token: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
         },
         frame::Frame::NewConnectionId {
             seq_num: 48,
