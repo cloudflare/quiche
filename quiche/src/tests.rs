@@ -5464,6 +5464,183 @@ fn stream_zero_length_non_fin(
     assert!(r.next().is_none());
 }
 
+/// Helper for parameterizing tests over different QUIC stream ID varint
+/// sizes.  Each variant yields a client-initiated bidirectional stream ID
+/// whose varint encoding is 1, 2, or 4 bytes respectively.
+#[derive(Clone, Copy, Debug)]
+enum StreamIdSize {
+    /// stream_id 0: 1-byte varint.
+    OneByteVarint,
+    /// stream_id 64: 2-byte varint.
+    TwoByteVarint,
+    /// stream_id 16384: 4-byte varint.
+    FourByteVarint,
+}
+
+impl StreamIdSize {
+    fn stream_id(self) -> u64 {
+        match self {
+            StreamIdSize::OneByteVarint => 0,
+            StreamIdSize::TwoByteVarint => 64,
+            StreamIdSize::FourByteVarint => 16384,
+        }
+    }
+}
+
+#[rstest]
+/// Tests STREAM frame emission with tight packet buffers.
+///
+/// Two scenarios are covered via the `empty_fin` parameter:
+///
+/// - `false`: the stream has pending data but no FIN.  We assert that no
+///   zero-length non-FIN STREAM frame is ever emitted, and that the stream
+///   remains flushable when the buffer is too small even for the header. The
+///   first buffer size that fits the header should produce a STREAM frame with
+///   exactly 1 byte of payload.
+///
+/// - `true`: the stream has only an empty FIN (no data at all).  We assert that
+///   a zero-length STREAM frame *with* FIN is eventually emitted, and that the
+///   stream remains flushable until that moment.
+///
+/// The test is parameterized over stream IDs with 1-, 2-, and 4-byte
+/// varint encodings to exercise different STREAM frame header sizes.
+///
+/// We sweep buffer sizes from 35 to 50.  A Short packet header for a
+/// 16-byte DCID is approximately 35 bytes
+///   (1 flags + 16 dcid + 2 pkt_num + 16 AEAD tag).
+fn stream_frame_tight_buffer(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(
+        StreamIdSize::OneByteVarint,
+        StreamIdSize::TwoByteVarint,
+        StreamIdSize::FourByteVarint
+    )]
+    stream_id_size: StreamIdSize,
+    #[values(false, true)] empty_fin: bool,
+) {
+    // We need to set initial_max_streams high enough to "fit" the stream_id.
+    // Since the two low-bits of the id encode the type, we can use
+    // `(id >> 2) + 1`.
+    let stream_id = stream_id_size.stream_id();
+    let max_streams_bidi = (stream_id >> 2) + 1;
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_initial_max_streams_bidi(max_streams_bidi);
+    // Just use some large flow control values so they don't get in the way of
+    // the test.
+    config.set_initial_max_data(10_000);
+    config.set_initial_max_stream_data_bidi_local(10_000);
+    config.set_initial_max_stream_data_bidi_remote(10_000);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    // Drain any additional ACKs.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    if empty_fin {
+        // Write only an empty FIN — no data payload at all.
+        assert_eq!(pipe.client.stream_send(stream_id, b"", true), Ok(0));
+    } else {
+        assert_eq!(pipe.client.stream_send(stream_id, b"data", false), Ok(4));
+    }
+    assert!(pipe.client.streams.has_flushable());
+
+    let active_pid = pipe
+        .client
+        .paths
+        .get_active_path_id()
+        .expect("no active path");
+
+    for buf_sz in 35..=50_usize {
+        let mut small_buf = vec![0u8; buf_sz];
+        let result = pipe.client.send_single(
+            &mut small_buf,
+            active_pid,
+            false,
+            Instant::now(),
+        );
+
+        match result {
+            Err(Error::Done) => {
+                // Header didn't fit: stream must remain flushable.
+                assert!(
+                    pipe.client.streams.has_flushable(),
+                    "stream removed from flushable at buf_sz={buf_sz}"
+                );
+            },
+
+            Ok((_, len)) => {
+                // A packet was emitted.  Decrypt and inspect its frames.
+                let frames = test_utils::decode_pkt(
+                    &mut pipe.server,
+                    &mut small_buf[..len],
+                )
+                .unwrap();
+
+                let stream_frames: Vec<_> = frames
+                    .iter()
+                    .filter(|f| matches!(f, frame::Frame::Stream { .. }))
+                    .collect();
+
+                if stream_frames.is_empty() {
+                    // Some other frame; this shouldn't really happen, since
+                    // we don't expect any frames. The Pipe::handshake() call
+                    // above should have drained all such frames.
+                    panic!(
+                        "unexpected non-STREAM frames at buf_sz={buf_sz}: \
+                        {frames:?}"
+                    );
+                }
+
+                assert_eq!(
+                    stream_frames.len(),
+                    1,
+                    "expected exactly one STREAM frame at buf_sz={buf_sz}"
+                );
+
+                match &stream_frames[0] {
+                    frame::Frame::Stream { data, .. } => {
+                        if empty_fin {
+                            // The empty-FIN frame must have zero payload and
+                            // the FIN bit set.
+                            assert_eq!(
+                                data.len(),
+                                0,
+                                "empty-FIN STREAM frame had non-zero payload \
+                                at buf_sz={buf_sz}"
+                            );
+                            assert!(
+                                data.fin(),
+                                "empty-FIN STREAM frame missing FIN bit \
+                                at buf_sz={buf_sz}"
+                            );
+                        } else {
+                            // Non-FIN frame: must carry at least 1 byte and
+                            // must NOT have the FIN bit set.
+                            assert_eq!(
+                                data.len(),
+                                1,
+                                "STREAM frame payload at buf_sz={buf_sz}"
+                            );
+                            assert!(
+                                !data.fin(),
+                                "non-FIN STREAM frame had FIN bit \
+                                at buf_sz={buf_sz}"
+                            );
+                        }
+                    },
+                    _ => unreachable!(),
+                }
+
+                return;
+            },
+
+            Err(e) => panic!("unexpected error at buf_sz={buf_sz}: {e:?}"),
+        }
+    }
+
+    panic!("no buffer size in the range we swept produced a packet with a STREAM frame");
+}
+
 #[rstest]
 /// Tests that completed streams are garbage collected.
 fn collect_streams(
