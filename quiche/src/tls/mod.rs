@@ -707,8 +707,8 @@ pub struct ExData<'a> {
 
     pub tx_cap_factor: f64,
 
-    /// PMTUD configuration: (enable, max_probes)
-    pub pmtud: Option<(bool, u8)>,
+    /// PMTUD configuration: (enable, max_probes, pkts_between_probes)
+    pub pmtud: Option<(bool, u8, usize)>,
 
     pub is_server: bool,
 }

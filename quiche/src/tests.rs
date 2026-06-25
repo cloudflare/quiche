@@ -12080,7 +12080,7 @@ fn enable_pmtud_mid_handshake(
         .set_private_key_file("examples/cert.key", boring::ssl::SslFiletype::PEM)
         .unwrap();
     server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
-        <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), true, 1)
+        <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), true, 1, 0)
             .unwrap();
 
         Ok(())
@@ -12169,7 +12169,7 @@ fn disable_pmtud_mid_handshake(
         .set_private_key_file("examples/cert.key", boring::ssl::SslFiletype::PEM)
         .unwrap();
     server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
-        <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), false, 0)
+        <Connection>::set_discover_pmtu_in_handshake(hello.ssl_mut(), false, 0, 0)
             .unwrap();
 
         Ok(())
