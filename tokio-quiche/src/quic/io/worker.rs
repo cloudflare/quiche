@@ -225,6 +225,16 @@ where
         loop {
             let now = Instant::now();
 
+            if let Some(deadline) = current_deadline {
+                if deadline <= now {
+                    qconn.on_timeout();
+
+                    self.write_state.next_release_time = None;
+                    current_deadline = None;
+                    sleep.as_mut().reset((now + DEFAULT_SLEEP).into());
+                }
+            }
+
             self.write_state.has_pending_data = true;
 
             while self.write_state.has_pending_data {
@@ -313,19 +323,8 @@ where
 
             select! {
                 biased;
-                () = &mut sleep => {
-                    // It's very important that we keep the timeout arm at the top of this loop so
-                    // that we poll it every time we need to. Since this is a biased `select!`, if
-                    // we put this behind another arm, we could theoretically starve the sleep arm
-                    // and hang connections.
-                    //
-                    // See https://docs.rs/tokio/latest/tokio/macro.select.html#fairness for more
-                    qconn.on_timeout();
-
-                    self.write_state.next_release_time = None;
-                    current_deadline = None;
-                    sleep.as_mut().reset((now + DEFAULT_SLEEP).into());
-                }
+                // The sleep branch will be handled by the current_deadline and on_timeout check on the next iteration of the loop.
+                () = &mut sleep => (),
                 Some(pkt) = incoming_recv.recv() => ctx.in_pkt = Some(pkt),
                 directive = self.wait_for_data_or_handshake(qconn, application) => {
                     match directive? {
