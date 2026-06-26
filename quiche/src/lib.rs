@@ -1371,6 +1371,9 @@ where
     /// Total number of received packets.
     recv_count: usize,
 
+    /// Whether at least one packet from the peer was authenticated.
+    received_authenticated_packet: bool,
+
     /// Total number of sent packets.
     sent_count: usize,
 
@@ -2088,6 +2091,7 @@ impl<F: BufFactory> Connection<F> {
             application_protos: config.application_protos.clone(),
 
             recv_count: 0,
+            received_authenticated_packet: false,
             sent_count: 0,
             lost_count: 0,
             spurious_lost_count: 0,
@@ -3324,6 +3328,8 @@ impl<F: BufFactory> Connection<F> {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
             return Err(Error::Done);
         }
+
+        self.received_authenticated_packet = true;
 
         // Packets with no frames are invalid.
         if payload.cap() == 0 {
@@ -7550,8 +7556,8 @@ impl<F: BufFactory> Connection<F> {
             });
         }
 
-        // When no packet was successfully processed close connection immediately.
-        if self.recv_count == 0 {
+        // When no peer packet was authenticated, close connection immediately.
+        if self.recv_count == 0 && !self.received_authenticated_packet {
             self.mark_closed();
         }
 
@@ -8141,6 +8147,15 @@ impl<F: BufFactory> Connection<F> {
 
             if !self.handshake_confirmed {
                 match epoch {
+                    // When a first-flight error happens after packet
+                    // authentication, prefer an Initial close that the peer
+                    // can decrypt.
+                    packet::Epoch::Application
+                        if self.recv_count == 0 &&
+                            self.received_authenticated_packet &&
+                            self.crypto_ctx[packet::Epoch::Initial].has_keys() =>
+                        return Ok(Type::Initial),
+
                     // Downgrade the epoch to Handshake as the handshake is not
                     // completed yet.
                     packet::Epoch::Application => return Ok(Type::Handshake),

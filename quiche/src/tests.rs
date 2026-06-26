@@ -385,6 +385,37 @@ fn missing_initial_source_connection_id(
         pipe.server_recv(&mut buf[..len]),
         Err(Error::InvalidTransportParam)
     );
+
+    assert_eq!(
+        pipe.server.local_error(),
+        Some(&ConnectionError {
+            is_app: false,
+            error_code: WireErrorCode::TransportParameterError as u64,
+            reason: vec![],
+        })
+    );
+
+    assert!(!pipe.server.is_closed());
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+
+    let hdr = Header::from_slice(&mut buf[..len], pipe.client.source_id().len())
+        .unwrap();
+    assert_eq!(hdr.ty, Type::Initial);
+
+    assert_eq!(
+        pipe.client_recv(&mut buf[..len]),
+        Ok(len),
+    );
+
+    assert_eq!(
+        pipe.client.peer_error(),
+        Some(&ConnectionError {
+            is_app: false,
+            error_code: WireErrorCode::TransportParameterError as u64,
+            reason: vec![],
+        })
+    );
 }
 
 #[rstest]
