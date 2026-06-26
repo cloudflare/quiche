@@ -28,7 +28,6 @@
 //! A single image file containing various renderings of stream and H3 DATA
 
 use log::warn;
-use plotters::prelude::*;
 
 use crate::datastore::VantagePoint;
 use crate::plots::colors::*;
