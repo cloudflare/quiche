@@ -704,7 +704,9 @@ where
     async fn wait_for_data_or_handshake<A: ApplicationOverQuic>(
         &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
     ) -> QuicResult<WaitForDataOrHandshakeDirective> {
-        if quic_application.should_act() {
+        let connection_ready = qconn.is_established() || qconn.is_in_early_data();
+
+        if connection_ready && quic_application.should_act() {
             // Poll the application to make progress.
             //
             // Once the connection has been established (i.e. the handshake is
