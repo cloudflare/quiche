@@ -3462,6 +3462,38 @@ fn stop_sending_fin(
 }
 
 #[rstest]
+/// Tests that stream_send() on a collected stream returns InvalidStreamState
+/// rather than Done (issue #1695).
+fn stream_send_after_stop_sending_and_fin(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Server opens a bidi stream and sends data with fin.
+    assert_eq!(pipe.server.stream_send(5, b"hello", true), Ok(5));
+
+    // Server also sends STOP_SENDING, indicating it will not read from the
+    // client on this stream.
+    assert_eq!(pipe.server.stream_shutdown(5, Shutdown::Read, 42), Ok(()));
+
+    // Exchange all packets: client receives the STOP_SENDING and STREAM(fin).
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Client reads the data. The stream is now complete on both sides (recv
+    // finished, send stopped), so quiche collects it.
+    let mut buf = [0; 64];
+    assert_eq!(pipe.client.stream_recv(5, &mut buf), Ok((5, true)));
+
+    // The stream has been collected. stream_send() must return
+    // InvalidStreamState, not Done.
+    assert_eq!(
+        pipe.client.stream_send(5, b"world", false),
+        Err(Error::InvalidStreamState(5)),
+    );
+}
+
+#[rstest]
 /// Tests that resetting a stream restores flow control for unsent data.
 fn stop_sending_unsent_tx_cap(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -5508,7 +5540,10 @@ fn collect_streams(
     assert!(pipe.client.stream_finished(0));
     assert!(pipe.server.stream_finished(0));
 
-    assert_eq!(pipe.client.stream_send(0, b"", true), Err(Error::Done));
+    assert_eq!(
+        pipe.client.stream_send(0, b"", true),
+        Err(Error::InvalidStreamState(0))
+    );
 
     let frames = [frame::Frame::Stream {
         stream_id: 0,
@@ -11728,7 +11763,10 @@ fn stop_sending_stream_send_after_reset_stream_ack(
 
     // If we called send before the client ACK of reset stream, it would
     // have failed with StreamStopped.
-    assert_eq!(pipe.server.stream_send(0, b"world", true), Err(Error::Done),);
+    assert_eq!(
+        pipe.server.stream_send(0, b"world", true),
+        Err(Error::InvalidStreamState(0)),
+    );
 
     // Stream 0 is still not writable.
     let mut w = pipe.server.writable();
