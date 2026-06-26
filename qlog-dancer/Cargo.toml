@@ -21,7 +21,7 @@ js-sys = "0.3"
 log = { workspace = true }
 netlog = { workspace = true }
 plotters = "0.3.4"
-qlog = { workspace = true }
+qlog = { workspace = true, features = ["gzip", "zstd"] }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
