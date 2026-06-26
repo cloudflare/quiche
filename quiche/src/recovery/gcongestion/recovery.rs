@@ -615,7 +615,7 @@ impl GRecovery {
         &self, handshake_status: HandshakeStatus, now: Instant,
     ) -> (Option<Instant>, packet::Epoch) {
         let mut duration =
-            self.pto() * 2_u32.pow(self.pto_count.min(MAX_PTO_EXPONENT));
+            self.pto() * (1_u32 << self.pto_count.min(MAX_PTO_EXPONENT));
 
         // Arm PTO from now when there are no inflight packets.
         if self.bytes_in_flight.is_zero() {
@@ -645,7 +645,7 @@ impl GRecovery {
 
                 // Include max_ack_delay and backoff for Application Data.
                 duration += self.rtt_stats.max_ack_delay *
-                    2_u32.pow(self.pto_count.min(MAX_PTO_EXPONENT));
+                    (1_u32 << self.pto_count.min(MAX_PTO_EXPONENT));
             }
 
             let new_time = self.epochs[e]
