@@ -124,13 +124,6 @@ impl FlowControl {
         self.window = std::cmp::min(window, self.max_window);
     }
 
-    /// If the current window has not yet been updated by `autotune_window`
-    pub fn set_window_if_not_tuned_yet(&mut self, window: u64) {
-        if self.last_update.is_none() {
-            self.set_window(window);
-        }
-    }
-
     /// Make sure the lower bound of the window is same to
     /// the current window.
     pub fn ensure_window_lower_bound(&mut self, min_window: u64) {

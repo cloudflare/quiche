@@ -29,7 +29,6 @@ use plotters::coord::types::RangedCoordf32;
 use plotters::coord::types::RangedCoordf64;
 
 use plotters::coord::Shift;
-use plotters::prelude::*;
 
 use crate::plots::colors::*;
 use crate::plots::*;
