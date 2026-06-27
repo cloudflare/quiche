@@ -102,6 +102,7 @@ struct RecoveryEpoch {
 }
 
 struct AckedDetectionResult {
+    acked_packets: usize,
     acked_bytes: usize,
     spurious_losses: usize,
     spurious_pkt_thresh: Option<u64>,
@@ -125,6 +126,7 @@ impl RecoveryEpoch {
     ) -> Result<AckedDetectionResult> {
         newly_acked.clear();
 
+        let mut acked_packets = 0;
         let mut acked_bytes = 0;
         let mut spurious_losses = 0;
         let mut spurious_pkt_thresh = None;
@@ -182,6 +184,8 @@ impl RecoveryEpoch {
                         has_in_flight_spurious_loss = true;
                     }
                 } else {
+                    acked_packets += 1;
+
                     if unacked.in_flight {
                         self.in_flight_count -= 1;
                         acked_bytes += unacked.size;
@@ -213,6 +217,7 @@ impl RecoveryEpoch {
         self.drain_acked_and_lost_packets(now - rtt_stats.rtt());
 
         Ok(AckedDetectionResult {
+            acked_packets,
             acked_bytes,
             spurious_losses,
             spurious_pkt_thresh,
@@ -677,6 +682,7 @@ impl RecoveryOps for LegacyRecovery {
         trace_id: &str,
     ) -> Result<OnAckReceivedOutcome> {
         let AckedDetectionResult {
+            acked_packets,
             acked_bytes,
             spurious_losses,
             spurious_pkt_thresh,
@@ -754,6 +760,7 @@ impl RecoveryOps for LegacyRecovery {
         Ok(OnAckReceivedOutcome {
             lost_packets,
             lost_bytes,
+            acked_packets,
             acked_bytes,
             spurious_losses,
         })

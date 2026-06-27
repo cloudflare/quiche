@@ -541,8 +541,14 @@ fn main() {
         continue_write = false;
         for client in clients.values_mut() {
             // Reduce max_send_burst by 25% if loss is increasing more than 0.1%.
-            let loss_rate =
-                client.conn.stats().lost as f64 / client.conn.stats().sent as f64;
+            let stats = client.conn.stats();
+            let finished = stats.acked.saturating_add(stats.lost);
+            let loss_rate = if finished == 0 {
+                0.0
+            } else {
+                stats.lost as f64 / finished as f64
+            };
+
             if loss_rate > client.loss_rate + 0.001 {
                 client.max_send_burst = client.max_send_burst / 4 * 3;
                 // Minimum bound of 10xMSS.

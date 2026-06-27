@@ -119,6 +119,7 @@ struct RecoveryEpoch {
 }
 
 struct AckedDetectionResult {
+    acked_packets: usize,
     acked_bytes: usize,
     spurious_losses: usize,
     spurious_pkt_thresh: Option<u64>,
@@ -178,6 +179,7 @@ impl RecoveryEpoch {
     ) -> Result<AckedDetectionResult> {
         newly_acked.clear();
 
+        let mut acked_packets = 0;
         let mut acked_bytes = 0;
         let mut spurious_losses = 0;
         let mut spurious_pkt_thresh = None;
@@ -227,6 +229,8 @@ impl RecoveryEpoch {
                             ack_eliciting,
                             ..
                         } => {
+                            acked_packets += 1;
+
                             if in_flight {
                                 self.pkts_in_flight -= 1;
                                 acked_bytes += sent_bytes;
@@ -260,6 +264,7 @@ impl RecoveryEpoch {
         self.drain_acked_and_lost_packets();
 
         Ok(AckedDetectionResult {
+            acked_packets,
             acked_bytes,
             spurious_losses,
             spurious_pkt_thresh,
@@ -818,6 +823,7 @@ impl RecoveryOps for GRecovery {
         let prior_in_flight = self.bytes_in_flight.get();
 
         let AckedDetectionResult {
+            acked_packets,
             acked_bytes,
             spurious_losses,
             spurious_pkt_thresh,
@@ -836,6 +842,7 @@ impl RecoveryOps for GRecovery {
 
         if self.newly_acked.is_empty() {
             return Ok(OnAckReceivedOutcome {
+                acked_packets,
                 acked_bytes,
                 spurious_losses,
                 ..Default::default()
@@ -892,6 +899,7 @@ impl RecoveryOps for GRecovery {
         Ok(OnAckReceivedOutcome {
             lost_packets,
             lost_bytes,
+            acked_packets,
             acked_bytes,
             spurious_losses,
         })
