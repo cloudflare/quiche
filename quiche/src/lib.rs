@@ -1906,8 +1906,8 @@ macro_rules! qlog_with_type {
     ($ty:expr, $qlog:expr, $qlog_streamer_ref:ident, $body:block) => {{
         #[cfg(feature = "qlog")]
         {
-            if EventImportance::from($ty).is_contained_in(&$qlog.level) {
-                if let Some($qlog_streamer_ref) = &mut $qlog.streamer {
+            if let Some($qlog_streamer_ref) = &mut $qlog.streamer {
+                if $qlog_streamer_ref.should_log($ty) {
                     $body
                 }
             }
@@ -2291,13 +2291,21 @@ impl<F: BufFactory> Connection<F> {
     /// This needs to be called as soon as the connection is created, to avoid
     /// missing some early logs.
     ///
+    /// **Deprecated:** prefer [`Connection::set_qlog_sink`], which accepts a
+    /// [`qlog::QlogSink`] for more flexibility. This function is now a thin
+    /// wrapper that constructs a [`qlog::QlogWriterSink`] from `writer` and
+    /// forwards to [`Connection::set_qlog_sink`].
+    ///
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
+    /// [`Connection::set_qlog_sink`]: Self::set_qlog_sink
     #[cfg(feature = "qlog")]
     #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+    #[deprecated(note = "use Connection::set_qlog_sink")]
     pub fn set_qlog(
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String,
     ) {
+        #[allow(deprecated)]
         self.set_qlog_with_level(writer, title, description, QlogLevel::Base)
     }
 
@@ -2309,12 +2317,57 @@ impl<F: BufFactory> Connection<F> {
     /// This needs to be called as soon as the connection is created, to avoid
     /// missing some early logs.
     ///
+    /// **Deprecated:** prefer [`Connection::set_qlog_sink_with_level`], which
+    /// accepts a [`qlog::QlogSink`] for more flexibility. This function is now
+    /// a thin wrapper that constructs a [`qlog::QlogWriterSink`] from `writer`
+    /// and forwards to [`Connection::set_qlog_sink_with_level`].
+    ///
     /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
+    /// [`Connection::set_qlog_sink_with_level`]: Self::set_qlog_sink_with_level
     #[cfg(feature = "qlog")]
     #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+    #[deprecated(note = "use Connection::set_qlog_sink_with_level")]
     pub fn set_qlog_with_level(
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String, qlog_level: QlogLevel,
+    ) {
+        self.set_qlog_sink_with_level(
+            Box::new(QlogWriterSink::new(writer)),
+            title,
+            description,
+            qlog_level,
+        )
+    }
+
+    /// Sets qlog output to the designated [`QlogSink`].
+    ///
+    /// Only events included in `QlogLevel::Base` are written.
+    ///
+    /// This needs to be called as soon as the connection is created, to avoid
+    /// missing some early logs.
+    ///
+    /// [`QlogSink`]: qlog::QlogSink
+    #[cfg(feature = "qlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+    pub fn set_qlog_sink(
+        &mut self, sink: Box<dyn QlogSink>, title: String, description: String,
+    ) {
+        self.set_qlog_sink_with_level(sink, title, description, QlogLevel::Base)
+    }
+
+    /// Sets qlog output to the designated [`QlogSink`].
+    ///
+    /// Only qlog events included in the specified `QlogLevel` are written.
+    ///
+    /// This needs to be called as soon as the connection is created, to avoid
+    /// missing some early logs.
+    ///
+    /// [`QlogSink`]: qlog::QlogSink
+    #[cfg(feature = "qlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+    pub fn set_qlog_sink_with_level(
+        &mut self, sink: Box<dyn QlogSink>, title: String, description: String,
+        qlog_level: QlogLevel,
     ) {
         use qlog::events::quic::TransportInitiator;
         use qlog::events::HTTP3_URI;
@@ -2358,14 +2411,14 @@ impl<F: BufFactory> Connection<F> {
             vec![QUIC_URI.to_string(), HTTP3_URI.to_string()],
         );
 
-        let mut streamer = qlog::streamer::QlogStreamer::new(
+        let mut streamer = qlog::streamer::QlogStreamer::new_with_sink(
             Some(title),
             Some(description),
             now,
             trace,
             self.qlog.level,
             qlog::streamer::EventTimePrecision::MicroSeconds,
-            writer,
+            sink,
         );
 
         streamer.start_log().ok();
@@ -2385,6 +2438,20 @@ impl<F: BufFactory> Connection<F> {
     #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
     pub fn qlog_streamer(&mut self) -> Option<&mut qlog::streamer::QlogStreamer> {
         self.qlog.streamer.as_mut()
+    }
+
+    /// Removes any qlog streamer previously installed via
+    /// [`set_qlog_sink`], [`set_qlog_sink_with_level`], or the
+    /// deprecated [`set_qlog`] / [`set_qlog_with_level`] entry points.
+    ///
+    /// [`set_qlog`]: Self::set_qlog
+    /// [`set_qlog_with_level`]: Self::set_qlog_with_level
+    /// [`set_qlog_sink`]: Self::set_qlog_sink
+    /// [`set_qlog_sink_with_level`]: Self::set_qlog_sink_with_level
+    #[cfg(feature = "qlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+    pub fn unset_qlog_sink(&mut self) {
+        self.qlog.streamer = None;
     }
 
     /// Configures the given session for resumption.
@@ -3269,7 +3336,12 @@ impl<F: BufFactory> Connection<F> {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames = vec![];
+        let mut qlog_frames = self
+            .qlog
+            .streamer
+            .as_ref()
+            .is_some_and(|q| q.should_log(QLOG_PACKET_RX))
+            .then(Vec::new);
 
         // Check for key update.
         let mut aead_next = None;
@@ -3445,7 +3517,9 @@ impl<F: BufFactory> Connection<F> {
             let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
 
             qlog_with_type!(QLOG_PACKET_RX, self.qlog, _q, {
-                qlog_frames.push(frame.to_qlog());
+                if let Some(qlog_frames) = qlog_frames.as_mut() {
+                    qlog_frames.push(frame.to_qlog());
+                }
             });
 
             if frame.ack_eliciting() {
@@ -3483,7 +3557,7 @@ impl<F: BufFactory> Connection<F> {
             let ev_data = EventData::QuicPacketReceived(
                 qlog::events::quic::PacketReceived {
                     header: qlog_pkt_hdr,
-                    frames: Some(qlog_frames),
+                    frames: Some(qlog_frames.unwrap_or_default()),
                     raw: Some(qlog_raw_info),
                     ..Default::default()
                 },
@@ -4447,15 +4521,20 @@ impl<F: BufFactory> Connection<F> {
         let hdr_ty = hdr.ty;
 
         #[cfg(feature = "qlog")]
-        let qlog_pkt_hdr = self.qlog.streamer.as_ref().map(|_q| {
-            qlog::events::quic::PacketHeader::with_type(
-                hdr.ty.to_qlog(),
-                Some(pn),
-                Some(hdr.version),
-                Some(&hdr.scid),
-                Some(&hdr.dcid),
-            )
-        });
+        let qlog_pkt_hdr = self
+            .qlog
+            .streamer
+            .as_ref()
+            .filter(|q| q.should_log(QLOG_PACKET_TX))
+            .map(|_q| {
+                qlog::events::quic::PacketHeader::with_type(
+                    hdr.ty.to_qlog(),
+                    Some(pn),
+                    Some(hdr.version),
+                    Some(&hdr.scid),
+                    Some(&hdr.dcid),
+                )
+            });
 
         // Calculate the space required for the packet, including the header
         // the payload length, the packet number and the AEAD overhead.
@@ -5379,14 +5458,20 @@ impl<F: BufFactory> Connection<F> {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames: Vec<qlog::events::quic::QuicFrame> =
-            Vec::with_capacity(frames.len());
+        let mut qlog_frames = self
+            .qlog
+            .streamer
+            .as_ref()
+            .is_some_and(|q| q.should_log(QLOG_PACKET_TX))
+            .then(|| Vec::with_capacity(frames.len()));
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
             qlog_with_type!(QLOG_PACKET_TX, self.qlog, _q, {
-                qlog_frames.push(frame.to_qlog());
+                if let Some(qlog_frames) = qlog_frames.as_mut() {
+                    qlog_frames.push(frame.to_qlog());
+                }
             });
         }
 
@@ -5409,7 +5494,7 @@ impl<F: BufFactory> Connection<F> {
                 let ev_data =
                     EventData::QuicPacketSent(qlog::events::quic::PacketSent {
                         header,
-                        frames: Some(qlog_frames),
+                        frames: Some(qlog_frames.unwrap_or_default()),
                         raw: Some(qlog_raw_info),
                         send_at_time: Some(send_at_time),
                         ..Default::default()
@@ -9487,6 +9572,13 @@ pub use crate::error::ConnectionError;
 pub use crate::error::Error;
 pub use crate::error::Result;
 pub use crate::error::WireErrorCode;
+
+#[cfg(feature = "qlog")]
+#[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+pub use qlog::QlogSink;
+#[cfg(feature = "qlog")]
+#[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+pub use qlog::QlogWriterSink;
 
 mod buffers;
 mod cid;

@@ -24,8 +24,28 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::settings::TlsCertificatePaths;
+use std::net::SocketAddr;
+
 use boring::ssl::SslContextBuilder;
+
+use crate::settings::TlsCertificatePaths;
+
+/// Context passed to [`ConnectionHook::create_qlog_sink`] when tokio-quiche
+/// needs an initial qlog sink for a new connection.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct QlogSinkContext<'a> {
+    /// Trace id for this connection. Formatted from the local source
+    /// connection id (`scid`) — i.e. the server's SCID on the server
+    /// path and the client's SCID on the client path.
+    pub id: &'a str,
+    /// True if this connection was accepted as a server.
+    pub is_server: bool,
+    /// Local socket address of the connection.
+    pub local_addr: SocketAddr,
+    /// Peer socket address of the connection.
+    pub peer_addr: SocketAddr,
+}
 
 /// A set of hooks executed at the level of a [quiche::Connection].
 pub trait ConnectionHook {
@@ -41,4 +61,16 @@ pub trait ConnectionHook {
     fn create_custom_ssl_context_builder(
         &self, settings: TlsCertificatePaths<'_>,
     ) -> Option<SslContextBuilder>;
+
+    /// Returns an optional [`qlog::QlogSink`] for a new connection.
+    ///
+    /// Called once per accepted/connected `quiche::Connection`. If `Some` is
+    /// returned, tokio-quiche installs it via
+    /// `quiche::Connection::set_qlog_sink`. If `None` is returned,
+    /// tokio-quiche falls back to the existing `qlog_dir` writer-backed path.
+    fn create_qlog_sink(
+        &self, _ctx: QlogSinkContext<'_>,
+    ) -> Option<Box<dyn qlog::QlogSink>> {
+        None
+    }
 }

@@ -770,8 +770,8 @@ pub extern "C" fn quiche_conn_set_qlog_path(
     let title = unsafe { ffi::CStr::from_ptr(log_title).to_str().unwrap() };
     let description = unsafe { ffi::CStr::from_ptr(log_desc).to_str().unwrap() };
 
-    conn.set_qlog(
-        Box::new(writer),
+    conn.set_qlog_sink(
+        Box::new(qlog::QlogWriterSink::new(writer)),
         title.to_string(),
         format!("{} id={}", description, conn.trace_id),
     );
@@ -791,8 +791,8 @@ pub extern "C" fn quiche_conn_set_qlog_fd(
     let title = unsafe { ffi::CStr::from_ptr(log_title).to_str().unwrap() };
     let description = unsafe { ffi::CStr::from_ptr(log_desc).to_str().unwrap() };
 
-    conn.set_qlog(
-        Box::new(writer),
+    conn.set_qlog_sink(
+        Box::new(qlog::QlogWriterSink::new(writer)),
         title.to_string(),
         format!("{} id={}", description, conn.trace_id),
     );

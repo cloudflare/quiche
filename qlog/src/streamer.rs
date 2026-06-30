@@ -92,7 +92,7 @@ pub enum StreamerState {
 
 pub struct QlogStreamer {
     start_time: std::time::Instant,
-    writer: Box<dyn std::io::Write + Send + Sync>,
+    sink: Box<dyn crate::QlogSink>,
     qlog: QlogSeq,
     state: StreamerState,
     log_level: EventImportance,
@@ -116,6 +116,27 @@ impl QlogStreamer {
         log_level: EventImportance, time_precision: EventTimePrecision,
         writer: Box<dyn std::io::Write + Send + Sync>,
     ) -> Self {
+        Self::new_with_sink(
+            title,
+            description,
+            start_time,
+            trace,
+            log_level,
+            time_precision,
+            Box::new(crate::QlogWriterSink::new(writer)),
+        )
+    }
+
+    /// Creates a [QlogStreamer] object with a custom [QlogSink].
+    ///
+    /// [QlogSink]: crate::QlogSink
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_sink(
+        title: Option<String>, description: Option<String>,
+        start_time: std::time::Instant, trace: TraceSeq,
+        log_level: EventImportance, time_precision: EventTimePrecision,
+        sink: Box<dyn crate::QlogSink>,
+    ) -> Self {
         let qlog = QlogSeq {
             file_schema: QLOGFILESEQ_URI.to_string(),
             serialization_format: "JSON-SEQ".to_string(),
@@ -126,7 +147,7 @@ impl QlogStreamer {
 
         QlogStreamer {
             start_time,
-            writer,
+            sink,
             qlog,
             state: StreamerState::Initial,
             log_level,
@@ -151,10 +172,7 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        self.writer.as_mut().write_all(b"")?;
-        serde_json::to_writer(self.writer.as_mut(), &self.qlog)
-            .map_err(|_| Error::Done)?;
-        self.writer.as_mut().write_all(b"\n")?;
+        self.sink.start_log(&self.qlog)?;
 
         self.state = StreamerState::Ready;
 
@@ -164,6 +182,19 @@ impl QlogStreamer {
     /// Finishes qlog streaming serialization.
     ///
     /// After this is called, no more serialization will occur.
+    ///
+    /// Calling `finish_log` explicitly is optional. [`QlogStreamer`]'s
+    /// [`Drop`] impl also invokes `finish_log` and discards the result,
+    /// so callers that do not need to observe a finalization error can
+    /// simply drop the streamer. Call `finish_log` directly only when
+    /// you want to surface an [`Error`] (for example, if the underlying
+    /// [`QlogSink`] performs I/O during finalization that you want to
+    /// react to).
+    ///
+    /// Returns [`Error::InvalidState`] if the streamer has not yet been
+    /// started or has already been finished.
+    ///
+    /// [`QlogSink`]: crate::QlogSink
     pub fn finish_log(&mut self) -> Result<()> {
         if self.state == StreamerState::Initial ||
             self.state == StreamerState::Finished
@@ -173,14 +204,14 @@ impl QlogStreamer {
 
         self.state = StreamerState::Finished;
 
-        self.writer.as_mut().flush()?;
+        self.sink.finish_log()?;
 
         Ok(())
     }
 
     /// Writes a serializable to a JSON-SEQ record using
     /// [std::time::Instant::now()].
-    pub fn add_event_now<E: Serialize + Eventable>(
+    pub fn add_event_now<E: Into<crate::QlogEvent> + Eventable>(
         &mut self, event: E,
     ) -> Result<()> {
         let now = std::time::Instant::now();
@@ -190,7 +221,7 @@ impl QlogStreamer {
 
     /// Writes a serializable to a pretty-printed JSON-SEQ record using
     /// [std::time::Instant::now()].
-    pub fn add_event_now_pretty<E: Serialize + Eventable>(
+    pub fn add_event_now_pretty<E: Into<crate::QlogEvent> + Eventable>(
         &mut self, event: E,
     ) -> Result<()> {
         let now = std::time::Instant::now();
@@ -200,7 +231,7 @@ impl QlogStreamer {
 
     /// Writes a serializable to a JSON-SEQ record using the provided
     /// [std::time::Instant].
-    pub fn add_event_with_instant<E: Serialize + Eventable>(
+    pub fn add_event_with_instant<E: Into<crate::QlogEvent> + Eventable>(
         &mut self, event: E, now: std::time::Instant,
     ) -> Result<()> {
         self.event_with_instant(event, now, false)
@@ -208,13 +239,15 @@ impl QlogStreamer {
 
     /// Writes a serializable to a pretty-printed JSON-SEQ record using the
     /// provided [std::time::Instant].
-    pub fn add_event_with_instant_pretty<E: Serialize + Eventable>(
+    pub fn add_event_with_instant_pretty<
+        E: Into<crate::QlogEvent> + Eventable,
+    >(
         &mut self, event: E, now: std::time::Instant,
     ) -> Result<()> {
         self.event_with_instant(event, now, true)
     }
 
-    fn event_with_instant<E: Serialize + Eventable>(
+    fn event_with_instant<E: Into<crate::QlogEvent> + Eventable>(
         &mut self, mut event: E, now: std::time::Instant, pretty: bool,
     ) -> Result<()> {
         if self.state != StreamerState::Ready {
@@ -322,6 +355,9 @@ impl QlogStreamer {
         if !EventImportance::from(ty).is_contained_in(&self.log_level) {
             return Err(Error::Done);
         }
+        if !self.sink.should_log(ty) {
+            return Err(Error::Done);
+        }
 
         let event = Event::with_time_ex(
             elapsed_millis(self.start_time, now, &self.time_precision),
@@ -337,7 +373,7 @@ impl QlogStreamer {
     }
 
     /// Writes a JSON-SEQ-serialized [Event] using the provided [Event].
-    pub fn add_event<E: Serialize + Eventable>(
+    pub fn add_event<E: Into<crate::QlogEvent> + Eventable>(
         &mut self, event: E,
     ) -> Result<()> {
         self.write_event(event, false)
@@ -345,14 +381,20 @@ impl QlogStreamer {
 
     /// Writes a pretty-printed JSON-SEQ-serialized [Event] using the provided
     /// [Event].
-    pub fn add_event_pretty<E: Serialize + Eventable>(
+    pub fn add_event_pretty<E: Into<crate::QlogEvent> + Eventable>(
         &mut self, event: E,
     ) -> Result<()> {
         self.write_event(event, true)
     }
 
     /// Writes a JSON-SEQ-serialized [Event] using the provided [Event].
-    fn write_event<E: Serialize + Eventable>(
+    ///
+    /// For native [`crate::events::Event`] payloads, both the
+    /// `EventImportance` filter and [`crate::QlogSink::should_log`] are
+    /// honored. [`crate::events::JsonEvent`] payloads only respect the
+    /// `EventImportance` filter because they do not carry an
+    /// [`EventType`].
+    fn write_event<E: Into<crate::QlogEvent> + Eventable>(
         &mut self, event: E, pretty: bool,
     ) -> Result<()> {
         if self.state != StreamerState::Ready {
@@ -363,27 +405,41 @@ impl QlogStreamer {
             return Err(Error::Done);
         }
 
-        self.writer.as_mut().write_all(b"")?;
-        if pretty {
-            serde_json::to_writer_pretty(self.writer.as_mut(), &event)
-                .map_err(|_| Error::Done)?;
-        } else {
-            serde_json::to_writer(self.writer.as_mut(), &event)
-                .map_err(|_| Error::Done)?;
+        match event.into() {
+            crate::QlogEvent::Event(event) => {
+                let ty = EventType::from(&event.data);
+                if !self.sink.should_log(ty) {
+                    return Err(Error::Done);
+                }
+                if pretty {
+                    self.sink.add_event_pretty(event)?;
+                } else {
+                    self.sink.add_event(event)?;
+                }
+            },
+
+            crate::QlogEvent::JsonEvent(event) if pretty =>
+                self.sink.add_json_event_pretty(event)?,
+            crate::QlogEvent::JsonEvent(event) =>
+                self.sink.add_json_event(event)?,
         }
-        self.writer.as_mut().write_all(b"\n")?;
 
         Ok(())
     }
 
-    /// Returns the writer.
-    #[allow(clippy::borrowed_box)]
-    pub fn writer(&self) -> &Box<dyn std::io::Write + Send + Sync> {
-        &self.writer
+    /// Returns a reference to the underlying [`QlogSink`].
+    pub fn sink(&self) -> &dyn crate::QlogSink {
+        self.sink.as_ref()
     }
 
     pub fn start_time(&self) -> std::time::Instant {
         self.start_time
+    }
+
+    /// Returns whether an event type should be logged.
+    pub fn should_log(&self, event_type: EventType) -> bool {
+        EventImportance::from(event_type).is_contained_in(&self.log_level) &&
+            self.sink.should_log(event_type)
     }
 }
 
@@ -407,9 +463,7 @@ mod tests {
 
     #[test]
     fn serialization_states() {
-        let v: Vec<u8> = Vec::new();
-        let buff = std::io::Cursor::new(v);
-        let writer = Box::new(buff);
+        let writer = crate::testing::SharedWriter::new();
 
         let trace = make_trace_seq();
         let pkt_hdr = make_pkt_hdr(quic::PacketType::Handshake);
@@ -487,7 +541,7 @@ mod tests {
             trace,
             EventImportance::Base,
             EventTimePrecision::NanoSeconds,
-            writer,
+            Box::new(writer.clone()),
         );
 
         // Before the log is started all other operations should fail.
@@ -511,10 +565,6 @@ mod tests {
 
         assert!(matches!(s.finish_log(), Ok(())));
 
-        let r = s.writer();
-        #[allow(clippy::borrowed_box)]
-        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
-
         let log_string = r#"{"file_schema":"urn:ietf:params:qlog:file:sequential","serialization_format":"JSON-SEQ","title":"title","description":"description","trace":{"title":"Quiche qlog trace","description":"Quiche qlog trace description","vantage_point":{"type":"server"},"event_schemas":[]}}
 {"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"fin":true,"raw":{"payload_length":400}}]}}
 {"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"fin":true,"raw":{"payload_length":100}}]}}
@@ -522,9 +572,7 @@ mod tests {
 {"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"stateless_reset_token":"reset_token","raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":0,"offset":0,"fin":true,"raw":{"payload_length":100}}]}}
 "#;
 
-        let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
-
-        pretty_assertions::assert_eq!(log_string, written_string);
+        pretty_assertions::assert_eq!(log_string, writer.as_string());
     }
 
     #[test]
@@ -537,9 +585,7 @@ mod tests {
             data,
         };
 
-        let v: Vec<u8> = Vec::new();
-        let buff = std::io::Cursor::new(v);
-        let writer = Box::new(buff);
+        let writer = crate::testing::SharedWriter::new();
 
         let trace = make_trace_seq();
 
@@ -550,31 +596,23 @@ mod tests {
             trace,
             EventImportance::Base,
             EventTimePrecision::NanoSeconds,
-            writer,
+            Box::new(writer.clone()),
         );
 
         assert!(matches!(s.start_log(), Ok(())));
         assert!(matches!(s.add_event(ev), Ok(())));
         assert!(matches!(s.finish_log(), Ok(())));
 
-        let r = s.writer();
-        #[allow(clippy::borrowed_box)]
-        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
-
         let log_string = r#"{"file_schema":"urn:ietf:params:qlog:file:sequential","serialization_format":"JSON-SEQ","title":"title","description":"description","trace":{"title":"Quiche qlog trace","description":"Quiche qlog trace description","vantage_point":{"type":"server"},"event_schemas":[]}}
 {"time":0.0,"name":"jsonevent:sample","data":{"foo":"Bar","hello":123}}
 "#;
 
-        let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
-
-        pretty_assertions::assert_eq!(log_string, written_string);
+        pretty_assertions::assert_eq!(log_string, writer.as_string());
     }
 
     #[test]
     fn stream_data_ex() {
-        let v: Vec<u8> = Vec::new();
-        let buff = std::io::Cursor::new(v);
-        let writer = Box::new(buff);
+        let writer = crate::testing::SharedWriter::new();
 
         let trace = make_trace_seq();
         let pkt_hdr = make_pkt_hdr(quic::PacketType::Handshake);
@@ -636,7 +674,7 @@ mod tests {
             trace,
             EventImportance::Base,
             EventTimePrecision::NanoSeconds,
-            writer,
+            Box::new(writer.clone()),
         );
 
         assert!(matches!(s.start_log(), Ok(())));
@@ -644,18 +682,153 @@ mod tests {
         assert!(matches!(s.add_event(ev2), Ok(())));
         assert!(matches!(s.finish_log(), Ok(())));
 
-        let r = s.writer();
-        #[allow(clippy::borrowed_box)]
-        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
-
         let log_string = r#"{"file_schema":"urn:ietf:params:qlog:file:sequential","serialization_format":"JSON-SEQ","title":"title","description":"description","trace":{"title":"Quiche qlog trace","description":"Quiche qlog trace description","vantage_point":{"type":"server"},"event_schemas":[]}}
 {"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":40,"offset":40,"fin":true,"raw":{"payload_length":400}}]},"first":{"foo":"Bar","hello":123},"second":{"baz":[1,2,3,4]}}
 {"time":0.0,"name":"quic:packet_sent","data":{"header":{"packet_type":"handshake","packet_number":0,"version":"1","scil":8,"dcil":8,"scid":"7e37e4dcc6682da8","dcid":"36ce104eee50101c"},"raw":{"length":1251,"payload_length":1224},"frames":[{"frame_type":"stream","stream_id":1,"offset":0,"fin":true,"raw":{"payload_length":100}}]}}
 "#;
 
-        let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
+        pretty_assertions::assert_eq!(log_string, writer.as_string());
+    }
 
-        pretty_assertions::assert_eq!(log_string, written_string);
+    struct FilteringSink;
+
+    impl crate::QlogSink for FilteringSink {
+        fn start_log(&mut self, _qlog: &QlogSeq) -> Result<()> {
+            Ok(())
+        }
+
+        fn add_event(&mut self, _event: Event) -> Result<()> {
+            Ok(())
+        }
+
+        fn add_json_event(&mut self, _event: events::JsonEvent) -> Result<()> {
+            Ok(())
+        }
+
+        fn finish_log(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn should_log(&self, event_type: EventType) -> bool {
+            event_type !=
+                EventType::QuicEventType(quic::QuicEventType::PacketSent)
+        }
+    }
+
+    #[test]
+    fn streamer_should_log_combines_importance_and_sink_filter() {
+        let streamer = streamer::QlogStreamer::new_with_sink(
+            Some("title".to_string()),
+            Some("description".to_string()),
+            std::time::Instant::now(),
+            make_trace_seq(),
+            EventImportance::Base,
+            EventTimePrecision::NanoSeconds,
+            Box::new(FilteringSink),
+        );
+
+        assert!(!streamer.should_log(EventType::QuicEventType(
+            quic::QuicEventType::PacketSent,
+        )));
+        assert!(streamer.should_log(EventType::QuicEventType(
+            quic::QuicEventType::ConnectionClosed,
+        )));
+        assert!(!streamer.should_log(EventType::QuicEventType(
+            quic::QuicEventType::ServerListening,
+        )));
+    }
+
+    /// Sink that rejects [`PacketSent`] events and counts every event
+    /// actually delivered to its `add_event` method. Used to prove
+    /// that [`QlogStreamer`]'s public event-writing methods honor
+    /// [`QlogSink::should_log`].
+    struct CountingFilterSink {
+        delivered: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl crate::QlogSink for CountingFilterSink {
+        fn start_log(&mut self, _qlog: &QlogSeq) -> Result<()> {
+            Ok(())
+        }
+
+        fn add_event(&mut self, _event: Event) -> Result<()> {
+            self.delivered
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn add_json_event(&mut self, _event: events::JsonEvent) -> Result<()> {
+            Ok(())
+        }
+
+        fn finish_log(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn should_log(&self, event_type: EventType) -> bool {
+            event_type !=
+                EventType::QuicEventType(quic::QuicEventType::PacketSent)
+        }
+    }
+
+    #[test]
+    fn add_event_paths_honor_sink_should_log() {
+        let delivered =
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let sink = CountingFilterSink {
+            delivered: delivered.clone(),
+        };
+
+        let mut s = streamer::QlogStreamer::new_with_sink(
+            Some("title".to_string()),
+            Some("description".to_string()),
+            std::time::Instant::now(),
+            make_trace_seq(),
+            EventImportance::Base,
+            EventTimePrecision::NanoSeconds,
+            Box::new(sink),
+        );
+        s.start_log().unwrap();
+
+        let pkt_hdr = make_pkt_hdr(quic::PacketType::Handshake);
+
+        // Rejected: PacketSent event delivered via add_event_data_now.
+        let rejected = EventData::QuicPacketSent(quic::PacketSent {
+            header: pkt_hdr.clone(),
+            ..Default::default()
+        });
+        let res = s.add_event_data_now(rejected);
+        assert!(matches!(res, Err(Error::Done)));
+
+        // Rejected: PacketSent event delivered via add_event.
+        let rejected_event = Event::with_time(
+            0.0,
+            EventData::QuicPacketSent(quic::PacketSent {
+                header: pkt_hdr.clone(),
+                ..Default::default()
+            }),
+        );
+        let res = s.add_event(rejected_event);
+        assert!(matches!(res, Err(Error::Done)));
+
+        // Accepted: ConnectionClosed event delivered via add_event_data_now.
+        let accepted = EventData::QuicConnectionClosed(quic::ConnectionClosed {
+            initiator: None,
+            connection_error: None,
+            application_error: None,
+            error_code: None,
+            internal_code: None,
+            reason: None,
+            trigger: None,
+        });
+        let res = s.add_event_data_now(accepted);
+        assert!(matches!(res, Ok(())));
+
+        assert_eq!(
+            delivered.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "only ConnectionClosed should have reached the sink"
+        );
     }
 
     #[test]
