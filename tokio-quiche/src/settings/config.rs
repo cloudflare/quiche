@@ -177,6 +177,9 @@ fn make_quiche_config(
     );
     config.discover_pmtu(quic_settings.discover_path_mtu);
     config.set_pmtud_max_probes(quic_settings.pmtud_max_probes);
+    config.set_pmtud_raise_timer(
+        quic_settings.pmtud_raise_timer.unwrap_or_default(),
+    );
     config.enable_hystart(quic_settings.enable_hystart);
 
     config.enable_pacing(quic_settings.enable_pacing);
