@@ -350,9 +350,11 @@ pub struct H3Driver<H: DriverHooks> {
     dgram_recv: OutboundFrameStream,
     /// Keeps the datagram channel open such that datagram flows can be created.
     dgram_send: OutboundFrameSender,
-    /// A buffer to receive H3 body data from quiche. We initialize a large
-    /// buffer and then `split()` off filled parts until we need to reallocate.
-    body_recv_buf: bytes::buf::Limit<BytesMut>,
+    /// A buffer to receive H3 body data from quiche. Lazily allocated on the
+    /// first body read and released once no streams remain, so idle
+    /// connections hold no receive buffer. We `split()` off filled parts until
+    /// we need to reallocate.
+    body_recv_buf: Option<bytes::buf::Limit<BytesMut>>,
 
     /// The buffer used to interact with the underlying IoWorker.
     io_worker_buf: Vec<u8>,
@@ -393,8 +395,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 dgram_recv,
                 dgram_send: PollSender::new(dgram_send),
                 max_stream_seen: 0,
-                body_recv_buf: BytesMut::with_capacity(BufFactory::MAX_BUF_SIZE)
-                    .limit(BufFactory::MAX_BUF_SIZE),
+                body_recv_buf: None,
                 io_worker_buf: vec![0u8; BufFactory::MAX_BUF_SIZE],
 
                 waiting_streams: FuturesUnordered::new(),
@@ -521,17 +522,23 @@ impl<H: DriverHooks> H3Driver<H> {
                 };
             }
 
-            // NOTE: `self.body_recv_buf` is `Limit<BytesMut>` so
+            // Lazily allocate the receive buffer on first use; idle
+            // connections never receive body bytes and never allocate it.
+            let body_recv_buf = self.body_recv_buf.get_or_insert_with(|| {
+                BytesMut::with_capacity(BufFactory::MAX_BUF_SIZE)
+                    .limit(BufFactory::MAX_BUF_SIZE)
+            });
+            // NOTE: `body_recv_buf` is `Limit<BytesMut>` so
             // `has_remaining_mut()` will indicate if the buffer
             // has space available until the *limit* is
             //  reached. (A plain `BytesMut` can reallocate and would always
             // return true)
-            if !self.body_recv_buf.has_remaining_mut() {
-                self.body_recv_buf =
+            if !body_recv_buf.has_remaining_mut() {
+                *body_recv_buf =
                     BytesMut::with_capacity(BufFactory::MAX_BUF_SIZE)
-                        .limit(BufFactory::MAX_BUF_SIZE)
-            };
-            match conn.recv_body_buf(qconn, stream_id, &mut self.body_recv_buf) {
+                        .limit(BufFactory::MAX_BUF_SIZE);
+            }
+            match conn.recv_body_buf(qconn, stream_id, &mut *body_recv_buf) {
                 Ok(n) => {
                     ctx.audit_stats.add_downstream_bytes_recvd(n as u64);
                     let event = H3Event::BodyBytesReceived {
@@ -541,12 +548,12 @@ impl<H: DriverHooks> H3Driver<H> {
                     };
                     let _ = self.h3_event_sender.send(event.into());
                     // Take the filled part, leave the remaining capacity
-                    let filled_body = self.body_recv_buf.get_mut().split();
+                    let filled_body = body_recv_buf.get_mut().split();
                     // Sanity check: the remaining spare capacity should equal
                     // the limit.
                     debug_assert_eq!(
-                        self.body_recv_buf.get_mut().spare_capacity_mut().len(),
-                        self.body_recv_buf.remaining_mut()
+                        body_recv_buf.get_mut().spare_capacity_mut().len(),
+                        body_recv_buf.remaining_mut()
                     );
                     permit.send(InboundFrame::Body(filled_body, false));
                 },
@@ -1003,15 +1010,23 @@ impl<H: DriverHooks> H3Driver<H> {
         Ok(())
     }
 
-    /// Closes the connection with `NoError` if the H3 event receiver
-    /// has been dropped and there are no active streams or flows.
-    fn close_if_idle(&self, qconn: &mut QuicheConnection) {
-        if self.h3_event_receiver_dropped &&
-            self.stream_map.is_empty() &&
-            self.flow_map.is_empty()
-        {
-            let _ =
-                qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
+    /// Handles connection cleanup once no streams or flows remain.
+    ///
+    /// Releases the body receive buffer (it is reallocated lazily on the next
+    /// body read; body bytes only flow on active streams, so an empty stream
+    /// map means it is unused) and closes the connection with `NoError` if the
+    /// H3 event receiver has been dropped.
+    fn close_if_idle(&mut self, qconn: &mut QuicheConnection) {
+        if self.stream_map.is_empty() && self.flow_map.is_empty() {
+            self.body_recv_buf = None;
+
+            if self.h3_event_receiver_dropped {
+                let _ = qconn.close(
+                    true,
+                    quiche::h3::WireErrorCode::NoError as u64,
+                    &[],
+                );
+            }
         }
     }
 

@@ -243,6 +243,153 @@ mod client_side_driver {
         assert_eq!(helper.driver.stream_map.len(), 0);
     }
 
+    /// An idle connection (and a request/response that exchanges only
+    /// headers) must never allocate the body receive buffer.
+    #[test]
+    fn client_body_recv_buf_not_allocated_when_idle() {
+        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Idle: never received body bytes, so the buffer is not allocated.
+        assert!(helper.driver.body_recv_buf.is_none());
+
+        // Client sends a headers-only request (fin, no request body).
+        let stream_id = helper
+            .driver_send_request(make_request_headers("GET"), true)
+            .unwrap();
+
+        // Server reads the request and sends a headers-only response: `fin =
+        // true` finishes the stream on its headers, so no body follows.
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_server_poll().unwrap(),
+            (0, h3::Event::Headers { .. })
+        );
+        helper.peer_server_send_response(0, true).unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client receives the response headers; `read_fin` confirms the
+        // response carried no body.
+        let resp = assert_matches!(
+            helper.driver_recv_core_event().unwrap(),
+            H3Event::IncomingHeaders(headers) => { headers }
+        );
+        assert_eq!(resp.stream_id, stream_id);
+        assert!(resp.read_fin);
+
+        // Only headers were exchanged, so the body receive buffer is still
+        // not allocated.
+        assert!(helper.driver.body_recv_buf.is_none());
+    }
+
+    /// The body receive buffer is lazily allocated on the first body read
+    /// and released once the last stream is cleaned up.
+    #[test]
+    fn client_body_recv_buf_allocated_on_body_and_released_on_close() {
+        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .driver_send_request(make_request_headers("GET"), true)
+            .unwrap();
+
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_server_poll().unwrap(),
+            (0, h3::Event::Headers { .. })
+        );
+        helper.peer_server_send_response(0, false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let resp = assert_matches!(
+            helper.driver_recv_core_event().unwrap(),
+            H3Event::IncomingHeaders(headers) => { headers }
+        );
+        assert_eq!(resp.stream_id, stream_id);
+        let mut from_server = resp.recv;
+
+        // No body yet: the buffer is still unallocated.
+        assert!(helper.driver.body_recv_buf.is_none());
+
+        // Server sends a body chunk (not fin).
+        helper.peer_server_send_body(0, &[7; 10], false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![7; 10]);
+
+        // The first body read lazily allocated the buffer.
+        assert!(helper.driver.body_recv_buf.is_some());
+
+        // Server finishes the stream.
+        helper.peer_server_send_body(0, &[8; 10], true).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let (body, fin, _) = helper.driver_try_recv_body(&mut from_server);
+        assert_eq!(body, vec![8; 10]);
+        assert!(fin);
+
+        // Stream cleaned up on both-directions-close, buffer released.
+        assert_eq!(helper.driver.stream_map.len(), 0);
+        assert!(helper.driver.body_recv_buf.is_none());
+    }
+
+    /// A body larger than the receive buffer exercises the reallocation
+    /// branch; the buffer stays allocated across reallocations and is
+    /// released once the stream closes.
+    #[test]
+    fn client_body_recv_buf_reallocates_and_releases() {
+        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .driver_send_request(make_request_headers("GET"), true)
+            .unwrap();
+
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_server_poll().unwrap(),
+            (0, h3::Event::Headers { .. })
+        );
+        helper.peer_server_send_response(0, false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let resp = assert_matches!(
+            helper.driver_recv_core_event().unwrap(),
+            H3Event::IncomingHeaders(headers) => { headers }
+        );
+        assert_eq!(resp.stream_id, stream_id);
+        let mut from_server = resp.recv;
+
+        // Force a small receive buffer so the body exhausts it and the
+        // reallocation branch (`*body_recv_buf = ...`) runs.
+        helper.driver_set_body_buf_size(20);
+
+        // Send 40 bytes across the 20-byte buffer, exhausting it repeatedly.
+        helper.peer_server_send_body(0, &[1; 10], false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![1; 10]);
+        helper.peer_server_send_body(0, &[2; 10], false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![2; 10]);
+        helper.peer_server_send_body(0, &[3; 10], false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![3; 10]);
+        // Buffer remains allocated across reallocation.
+        assert!(helper.driver.body_recv_buf.is_some());
+
+        // Final chunk with fin.
+        helper.peer_server_send_body(0, &[4; 10], true).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let (body, fin, _) = helper.driver_try_recv_body(&mut from_server);
+        assert_eq!(body, vec![4; 10]);
+        assert!(fin);
+
+        // Stream cleaned up, buffer released.
+        assert_eq!(helper.driver.stream_map.len(), 0);
+        assert!(helper.driver.body_recv_buf.is_none());
+    }
+
     /// Test that dropping the OutboundFrame channel causes the driver to
     /// send a RESET_STREAM frame to the peer.
     #[test]
@@ -657,6 +804,65 @@ mod client_side_driver {
 mod server_side_driver {
 
     use super::*;
+
+    /// Server-side equivalent of
+    /// [`client_side_driver::client_body_recv_buf_not_allocated_when_idle`]:
+    /// `body_recv_buf` is `H3Driver` state shared by both `ClientHooks` and
+    /// `ServerHooks`, so a headers-only request/response must not allocate it
+    /// on the server either.
+    #[test]
+    fn server_body_recv_buf_not_allocated_when_idle() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Idle: never received body bytes, so the buffer is not allocated.
+        assert!(helper.driver.body_recv_buf.is_none());
+
+        // Client sends a headers-only request (fin, no request body).
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), true)
+            .unwrap();
+
+        // Server reads the request; `read_fin` confirms it finished on its
+        // headers and carries no body.
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { incoming_headers, .. } => { incoming_headers }
+        );
+        assert_eq!(req.stream_id, stream_id);
+        assert!(req.read_fin);
+
+        // The server read only headers (no body), so the buffer stays
+        // unallocated.
+        assert!(helper.driver.body_recv_buf.is_none());
+
+        // Server replies with a headers-only response: response headers
+        // followed by an empty body with fin to complete the exchange. The
+        // per-stream channel holds a single frame in debug builds
+        // (`STREAM_CAPACITY`), so drain the headers before sending the fin.
+        let to_client = req.send.get_ref().unwrap().clone();
+        to_client
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+        to_client
+            .try_send(OutboundFrame::Body(Default::default(), true))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client receives the headers-only response.
+        assert_matches!(
+            helper.peer_client_poll(),
+            Ok((0, h3::Event::Headers { .. }))
+        );
+
+        // Still only headers were exchanged and the stream is closed, so the
+        // body receive buffer was never allocated.
+        assert!(helper.driver.body_recv_buf.is_none());
+        assert_eq!(helper.driver.stream_map.len(), 0);
+    }
 
     #[test]
     fn client_fin_before_server_body() {
