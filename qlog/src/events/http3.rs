@@ -307,7 +307,6 @@ pub struct FrameParsed {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct DatagramCreated {
     pub quarter_stream_id: u64,
-    pub datagram: Option<Vec<String>>,
     pub raw: Option<RawInfo>,
 }
 
@@ -315,7 +314,6 @@ pub struct DatagramCreated {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct DatagramParsed {
     pub quarter_stream_id: u64,
-    pub datagram: Option<Vec<String>>,
     pub raw: Option<RawInfo>,
 }
 
