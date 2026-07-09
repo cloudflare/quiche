@@ -98,6 +98,7 @@ pub enum Http3FrameTypeName {
     Goaway,
     MaxPushId,
     DuplicatePush,
+    Origin,
     Reserved,
     Unknown,
 }
@@ -153,6 +154,10 @@ pub enum Http3Frame {
         raw: Option<RawInfo>,
     },
 
+    Origin {
+        origin_entries: Vec<Http3OriginEntry>,
+    },
+
     Reserved {
         frame_type_bytes: u64,
         raw: Option<RawInfo>,
@@ -162,6 +167,13 @@ pub enum Http3Frame {
         frame_type_bytes: u64,
         raw: Option<RawInfo>,
     },
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct Http3OriginEntry {
+    pub origin_len: u16,
+    pub ascii_origin: Option<String>,
 }
 
 impl Default for Http3Frame {
