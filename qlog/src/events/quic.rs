@@ -462,8 +462,10 @@ pub enum PacketDroppedTrigger {
     Rejected,
     Unsupported,
     Invalid,
+    Duplicate,
     ConnectionUnknown,
     DecryptionFailure,
+    KeyUnavailable,
     General,
 }
 
