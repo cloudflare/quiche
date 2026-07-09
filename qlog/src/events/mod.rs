@@ -26,6 +26,7 @@
 
 use crate::Bytes;
 use crate::Token;
+use http::*;
 use http3::*;
 use quic::*;
 
@@ -47,6 +48,8 @@ pub enum EventType {
     QuicEventType(QuicEventType),
 
     Http3EventType(Http3EventType),
+
+    HttpEventType(HttpEventType),
 
     LogLevelEventType(LogLevelEventType),
 
@@ -299,6 +302,11 @@ impl From<EventType> for EventImportance {
             EventType::Http3EventType(Http3EventType::PushResolved) =>
                 EventImportance::Extra,
 
+            EventType::HttpEventType(HttpEventType::CapsuleCreated) =>
+                EventImportance::Core,
+            EventType::HttpEventType(HttpEventType::CapsuleParsed) =>
+                EventImportance::Core,
+
             _ => unimplemented!(),
         }
     }
@@ -417,6 +425,11 @@ impl From<&EventData> for EventType {
                 EventType::Http3EventType(Http3EventType::DatagramParsed),
             EventData::Http3PushResolved { .. } =>
                 EventType::Http3EventType(Http3EventType::PushResolved),
+
+            EventData::HttpCapsuleCreated { .. } =>
+                EventType::HttpEventType(HttpEventType::CapsuleCreated),
+            EventData::HttpCapsuleParsed { .. } =>
+                EventType::HttpEventType(HttpEventType::CapsuleParsed),
 
             EventData::LogLevelError { .. } =>
                 EventType::LogLevelEventType(LogLevelEventType::Error),
@@ -603,6 +616,13 @@ pub enum EventData {
     #[serde(rename = "http3:push_resolved")]
     Http3PushResolved(http3::PushResolved),
 
+    // HTTP
+    #[serde(rename = "http:capsule_created")]
+    HttpCapsuleCreated(http::CapsuleCreated),
+
+    #[serde(rename = "http:capsule_parsed")]
+    HttpCapsuleParsed(http::CapsuleParsed),
+
     // LogLevel
     #[serde(rename = "loglevel:error")]
     LogLevelError {
@@ -719,5 +739,6 @@ pub struct TupleEndpointInfo {
     pub connection_ids: Option<Vec<Bytes>>,
 }
 
+pub mod http;
 pub mod http3;
 pub mod quic;
