@@ -404,7 +404,7 @@ pub struct ConnectionClosed {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ConnectionIdUpdated {
-    pub owner: Option<TransportInitiator>,
+    pub initiator: TransportInitiator,
 
     pub old: Option<Bytes>,
     pub new: Option<Bytes>,
