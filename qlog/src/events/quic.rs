@@ -452,7 +452,7 @@ pub enum PacketSentTrigger {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum PacketReceivedTrigger {
-    KeysUnavailable,
+    KeysAvailable,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
