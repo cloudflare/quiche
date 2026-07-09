@@ -37,10 +37,11 @@ use std::collections::BTreeMap;
 
 pub type ExData = BTreeMap<String, serde_json::Value>;
 
-pub const LOGLEVEL_URI: &str = "urn:ietf:params:qlog:events:loglevel-13";
+pub const LOGLEVEL_URI: &str = "urn:ietf:params:qlog:events:loglevel-14";
 
-pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic-12";
-pub const HTTP3_URI: &str = "urn:ietf:params:qlog:events:http3-12";
+pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic-13";
+pub const HTTP3_URI: &str = "urn:ietf:params:qlog:events:http3-13";
+pub const HTTP_URI: &str = "urn:ietf:params:qlog:events:http-13";
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(untagged)]
