@@ -359,13 +359,13 @@ pub enum ConnectionState {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionClosedTrigger {
-    Clean,
-    HandshakeTimeout,
     IdleTimeout,
-    Error,
-    StatelessReset,
-    VersionMismatch,
     Application,
+    Error,
+    VersionMismatch,
+    StatelessReset,
+    Aborted,
+    Unspecified,
 }
 
 #[serde_with::skip_serializing_none]
