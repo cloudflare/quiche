@@ -699,12 +699,14 @@ pub enum ApplicationError {
     Unknown,
 }
 
-// TODO
+/// A TLS alert-derived QUIC CRYPTO_ERROR code.
+///
+/// Per draft-ietf-quic-qlog-quic-events-13, this is serialized as a string
+/// of the form `crypto_error_0x1XX` where `XX` are the lowercase hexadecimal
+/// digits of the TLS alert.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum CryptoError {
-    Prefix,
-}
+#[serde(transparent)]
+pub struct CryptoError(pub String);
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
