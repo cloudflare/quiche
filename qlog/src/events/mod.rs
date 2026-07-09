@@ -83,9 +83,13 @@ pub struct Event {
     #[serde(flatten)]
     pub ex_data: Box<ExData>,
 
+    pub tuple: Option<Box<String>>,
+
     pub group_id: Option<Box<String>>,
 
     pub time_format: Option<TimeFormat>,
+
+    pub system_info: Option<SystemInformation>,
 
     #[serde(skip)]
     ty: EventType,
@@ -104,8 +108,10 @@ impl Event {
             time,
             data,
             ex_data: Box::new(ex_data),
+            tuple: Default::default(),
             group_id: Default::default(),
             time_format: Default::default(),
+            system_info: Default::default(),
             ty,
         }
     }
@@ -127,9 +133,19 @@ impl PartialEq for Event {
         self.time == other.time &&
             self.data == other.data &&
             self.ex_data == other.ex_data &&
+            self.tuple == other.tuple &&
             self.group_id == other.group_id &&
-            self.time_format == other.time_format
+            self.time_format == other.time_format &&
+            self.system_info == other.system_info
     }
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct SystemInformation {
+    pub processor_id: Option<u32>,
+    pub process_id: Option<u32>,
+    pub thread_id: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
