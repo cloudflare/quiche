@@ -2343,7 +2343,9 @@ impl<F: BufFactory> Connection<F> {
         let now = Instant::now();
         let now_wall_clock = std::time::SystemTime::now();
         let common_fields = CommonFields {
-            reference_time: ReferenceTime::new_monotonic(Some(now_wall_clock)),
+            reference_time: Some(ReferenceTime::new_monotonic(Some(
+                now_wall_clock,
+            ))),
             ..Default::default()
         };
         let trace = qlog::TraceSeq::new(

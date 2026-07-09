@@ -618,9 +618,8 @@ impl ReferenceTime {
 pub struct CommonFields {
     pub tuple: Option<String>,
     pub group_id: Option<String>,
-    pub protocol_types: Option<Vec<String>>,
 
-    pub reference_time: ReferenceTime,
+    pub reference_time: Option<ReferenceTime>,
     pub time_format: Option<TimeFormat>,
 }
 
