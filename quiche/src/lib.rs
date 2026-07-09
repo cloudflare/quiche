@@ -9191,7 +9191,7 @@ impl<F: BufFactory> Connection<F> {
                     error_code: None,
                     internal_code: None,
                     reason: Some("Failed to establish connection".to_string()),
-                    trigger: Some(qlog::events::quic::ConnectionClosedTrigger::HandshakeTimeout)
+                    trigger: Some(qlog::events::quic::ConnectionClosedTrigger::IdleTimeout)
                 },
 
                 (true, true, _, _) => qlog::events::quic::ConnectionClosed {
@@ -9209,7 +9209,7 @@ impl<F: BufFactory> Connection<F> {
                         (None, Some(qlog::events::ApplicationError::Unknown), None)
                     } else {
                         let trigger = if peer_error.error_code == WireErrorCode::NoError as u64 {
-                            Some(qlog::events::quic::ConnectionClosedTrigger::Clean)
+                            None
                         } else {
                             Some(qlog::events::quic::ConnectionClosedTrigger::Error)
                         };
@@ -9234,7 +9234,7 @@ impl<F: BufFactory> Connection<F> {
                         (None, Some(qlog::events::ApplicationError::Unknown), None)
                     } else {
                         let trigger = if local_error.error_code == WireErrorCode::NoError as u64 {
-                            Some(qlog::events::quic::ConnectionClosedTrigger::Clean)
+                            None
                         } else {
                             Some(qlog::events::quic::ConnectionClosedTrigger::Error)
                         };
