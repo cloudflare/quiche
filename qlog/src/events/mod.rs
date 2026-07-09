@@ -241,6 +241,10 @@ impl From<EventType> for EventImportance {
                 EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::StreamStateUpdated) =>
                 EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::FramesCreated) =>
+                EventImportance::Extra,
+            EventType::QuicEventType(QuicEventType::FramesParsed) =>
+                EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::FramesProcessed) =>
                 EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::StreamDataMoved) =>
@@ -352,6 +356,10 @@ impl From<&EventData> for EventType {
                 EventType::QuicEventType(QuicEventType::UdpDatagramDropped),
             EventData::QuicStreamStateUpdated { .. } =>
                 EventType::QuicEventType(QuicEventType::StreamStateUpdated),
+            EventData::QuicFramesCreated { .. } =>
+                EventType::QuicEventType(QuicEventType::FramesCreated),
+            EventData::QuicFramesParsed { .. } =>
+                EventType::QuicEventType(QuicEventType::FramesParsed),
             EventData::QuicFramesProcessed { .. } =>
                 EventType::QuicEventType(QuicEventType::FramesProcessed),
             EventData::QuicStreamDataMoved { .. } =>
@@ -513,6 +521,12 @@ pub enum EventData {
     #[serde(rename = "quic:stream_state_updated")]
     QuicStreamStateUpdated(quic::StreamStateUpdated),
 
+    #[serde(rename = "quic:frames_created")]
+    QuicFramesCreated(quic::FramesCreated),
+
+    #[serde(rename = "quic:frames_parsed")]
+    QuicFramesParsed(quic::FramesParsed),
+
     #[serde(rename = "quic:frames_processed")]
     QuicFramesProcessed(quic::FramesProcessed),
 
@@ -628,6 +642,8 @@ impl EventData {
                 pkt.frames.as_ref().map(|f| f.len()),
 
             EventData::QuicMarkedForRetransmit(ev) => Some(ev.frames.len()),
+            EventData::QuicFramesCreated(ev) => Some(ev.frames.len()),
+            EventData::QuicFramesParsed(ev) => Some(ev.frames.len()),
             EventData::QuicFramesProcessed(ev) => Some(ev.frames.len()),
 
             _ => None,
