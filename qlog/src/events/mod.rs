@@ -603,22 +603,13 @@ pub enum EventData {
     },
 
     #[serde(rename = "loglevel:info")]
-    LogLevelInfo {
-        code: Option<u64>,
-        message: Option<String>,
-    },
+    LogLevelInfo { message: String },
 
     #[serde(rename = "loglevel:debug")]
-    LogLevelDebug {
-        code: Option<u64>,
-        message: Option<String>,
-    },
+    LogLevelDebug { message: String },
 
     #[serde(rename = "loglevel:verbose")]
-    LogLevelVerbose {
-        code: Option<u64>,
-        message: Option<String>,
-    },
+    LogLevelVerbose { message: String },
 }
 
 impl EventData {
