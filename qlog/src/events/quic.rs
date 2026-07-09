@@ -313,6 +313,8 @@ pub enum QuicEventType {
     UdpDatagramsReceived,
     UdpDatagramDropped,
     StreamStateUpdated,
+    FramesCreated,
+    FramesParsed,
     FramesProcessed,
     StreamDataMoved,
     DatagramDataMoved,
@@ -865,10 +867,26 @@ pub struct StreamStateUpdated {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+pub struct FramesCreated {
+    pub frames: Vec<QuicFrame>,
+
+    pub packet_numbers: Option<Vec<u64>>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+pub struct FramesParsed {
+    pub frames: Vec<QuicFrame>,
+
+    pub packet_numbers: Option<Vec<u64>>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct FramesProcessed {
     pub frames: Vec<QuicFrame>,
 
-    pub packet_numbers: Option<u64>,
+    pub packet_numbers: Option<Vec<u64>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
