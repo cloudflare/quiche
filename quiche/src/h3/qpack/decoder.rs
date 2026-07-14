@@ -368,7 +368,7 @@ mod tests {
 
         assert_eq!(
             dec.decode(&encoded, u64::MAX),
-            Err(super::super::Error::InvalidHeaderValue),
+            Err(Error::InvalidHeaderValue),
         );
     }
 
@@ -396,7 +396,7 @@ mod tests {
         // value is 5 bytes → rejected.
         assert_eq!(
             Decoder::new().decode(&encoded, 46),
-            Err(super::super::Error::HeaderListTooLarge),
+            Err(Error::HeaderListTooLarge),
         );
     }
 
@@ -430,7 +430,7 @@ mod tests {
         // rejected at name check.
         assert_eq!(
             Decoder::new().decode(&encoded, 41),
-            Err(super::super::Error::HeaderListTooLarge),
+            Err(Error::HeaderListTooLarge),
         );
     }
 
@@ -451,14 +451,14 @@ mod tests {
         let value = b"aaaaaaaaaaaaaaaa"; // 16 bytes; Huffman compresses to 10
 
         // -- Encode as LiteralWithNameRef --
-        let headers_nameref = vec![crate::h3::Header::new(b":authority", value)];
+        let headers_nameref = vec![Header::new(b":authority", value)];
         let mut buf = [0u8; 64];
         let mut enc = qpack::Encoder::new();
         let nameref_len = enc.encode(&headers_nameref, &mut buf).unwrap();
         let encoded_nameref = buf[..nameref_len].to_vec();
 
         // -- Encode as Literal (name not in static table) --
-        let headers_literal = vec![crate::h3::Header::new(b"x-custom99", value)];
+        let headers_literal = vec![Header::new(b"x-custom99", value)];
         let mut buf = [0u8; 64];
         let mut enc = qpack::Encoder::new();
         let literal_len = enc.encode(&headers_literal, &mut buf).unwrap();
@@ -485,11 +485,11 @@ mod tests {
         //   3. Huffman decode produces 16 bytes > 15 → rejected
         assert_eq!(
             Decoder::new().decode(&encoded_nameref, 57),
-            Err(super::super::Error::HeaderListTooLarge),
+            Err(Error::HeaderListTooLarge),
         );
         assert_eq!(
             Decoder::new().decode(&encoded_literal, 57),
-            Err(super::super::Error::HeaderListTooLarge),
+            Err(Error::HeaderListTooLarge),
         );
     }
 }
