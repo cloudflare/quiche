@@ -1129,6 +1129,9 @@ void quiche_h3_config_set_qpack_blocked_streams(quiche_h3_config *config, uint64
 // Sets the `SETTINGS_ENABLE_CONNECT_PROTOCOL` setting.
 void quiche_h3_config_enable_extended_connect(quiche_h3_config *config, bool enabled);
 
+// Sets the maximum size for the payload of PRIORITY_UPDATE frames.
+void quiche_h3_config_set_max_priority_update_size(quiche_h3_config *config, uint64_t v);
+
 // Frees the HTTP/3 config object.
 void quiche_h3_config_free(quiche_h3_config *config);
 

@@ -166,7 +166,7 @@ where
         &mut self, headers: IncomingH3Headers,
         _priority: Option<RawPriorityValue>,
     ) {
-        log::info!("received headers: {:?}", &headers);
+        log::info!("received headers: {:?}", headers);
 
         let IncomingH3Headers {
             headers: list,

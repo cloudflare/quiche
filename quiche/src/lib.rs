@@ -9010,32 +9010,17 @@ impl<F: BufFactory> Connection<F> {
             in_scid_pid = None;
         }
 
-        if let Some(in_scid_pid) = in_scid_pid {
-            // This CID has been used by another path. If we have the
-            // room to do so, create a new `Path` structure holding this
-            // new 4-tuple. Otherwise, drop the packet.
-            let old_path = self.paths.get_mut(in_scid_pid)?;
-            let old_local_addr = old_path.local_addr();
-            let old_peer_addr = old_path.peer_addr();
+        // Capture old path info before insert_path() so we can emit the
+        // ReusedSourceConnectionId event after successful insertion. This
+        // ensures the event count is bounded by path Slab capacity.
+        let reused_cid_info = match in_scid_pid {
+            Some(pid) => {
+                let old_path = self.paths.get(pid)?;
+                Some((pid, old_path.local_addr(), old_path.peer_addr()))
+            },
 
-            trace!(
-                "{} reused CID seq {} of ({},{}) (path {}) on ({},{})",
-                self.trace_id,
-                in_scid_seq,
-                old_local_addr,
-                old_peer_addr,
-                in_scid_pid,
-                info.to,
-                info.from
-            );
-
-            // Notify the application.
-            self.paths.notify_event(PathEvent::ReusedSourceConnectionId(
-                in_scid_seq,
-                (old_local_addr, old_peer_addr),
-                (info.to, info.from),
-            ));
-        }
+            None => None,
+        };
 
         // This is a new path using an unassigned CID; create it!
         let mut path = path::Path::new(
@@ -9055,9 +9040,33 @@ impl<F: BufFactory> Connection<F> {
 
         let pid = self.paths.insert_path(path, self.is_server)?;
 
-        // Do not record path reuse.
-        if in_scid_pid.is_none() {
-            ids.link_scid_to_path_id(in_scid_seq, pid)?;
+        // Notify the application of CID reuse only after the path was
+        // successfully admitted. This bounds event queue growth by path Slab
+        // capacity, preventing an attacker from growing the queue unboundedly
+        // by rotating source ports.
+        match reused_cid_info {
+            Some((old_pid, old_local_addr, old_peer_addr)) => {
+                trace!(
+                    "{} reused CID seq {} of ({},{}) (path {}) on ({},{})",
+                    self.trace_id,
+                    in_scid_seq,
+                    old_local_addr,
+                    old_peer_addr,
+                    old_pid,
+                    info.to,
+                    info.from
+                );
+
+                self.paths.notify_event(PathEvent::ReusedSourceConnectionId(
+                    in_scid_seq,
+                    (old_local_addr, old_peer_addr),
+                    (info.to, info.from),
+                ));
+            },
+
+            None => {
+                ids.link_scid_to_path_id(in_scid_seq, pid)?;
+            },
         }
 
         Ok(pid)

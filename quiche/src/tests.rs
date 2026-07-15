@@ -10732,17 +10732,12 @@ fn path_probing_dos(
     flight
         .iter_mut()
         .for_each(|(_, si)| si.from = client_addr_3);
+    // Both existing paths are in use (have DCIDs), so make_room_for_new_path()
+    // cannot evict any and returns Error::Done. Because ReusedSourceConnectionId
+    // is only emitted after successful path insertion, no event is queued.
     test_utils::process_flight(&mut pipe.server, flight)
         .expect("failed to process");
     assert_eq!(pipe.server.paths.len(), 2);
-    assert_eq!(
-        pipe.server.path_event_next(),
-        Some(PathEvent::ReusedSourceConnectionId(
-            1,
-            (server_addr, client_addr_2),
-            (server_addr, client_addr_3)
-        ))
-    );
     assert_eq!(pipe.server.path_event_next(), None);
 }
 
@@ -11386,6 +11381,12 @@ fn resilience_against_migration_attack(
         pipe.server.stream_send(1, &buf[send1_bytes..], true),
         Ok(24000 - send1_bytes)
     );
+    // PathEvent::New is emitted during insert_path(), then
+    // ReusedSourceConnectionId is emitted after successful insertion.
+    assert_eq!(
+        pipe.server.path_event_next(),
+        Some(PathEvent::New(server_addr, spoofed_client_addr))
+    );
     assert_eq!(
         pipe.server.path_event_next(),
         Some(PathEvent::ReusedSourceConnectionId(
@@ -11393,10 +11394,6 @@ fn resilience_against_migration_attack(
             (server_addr, client_addr),
             (server_addr, spoofed_client_addr)
         ))
-    );
-    assert_eq!(
-        pipe.server.path_event_next(),
-        Some(PathEvent::New(server_addr, spoofed_client_addr))
     );
 
     assert_eq!(
@@ -11459,6 +11456,70 @@ fn resilience_against_migration_attack(
     let (rcv_data_2, fin) = pipe.client.stream_recv(1, &mut recv_buf).unwrap();
     assert!(fin);
     assert_eq!(rcv_data_1 + rcv_data_2, DATA_BYTES);
+}
+
+#[rstest]
+fn path_event_queue_bounded_on_port_rotation(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let server_addr = test_utils::Pipe::server_addr();
+    let mut buf = [0u8; 1500];
+
+    // Emulate an attack that sends N valid 1-RTT PING packets, each from a
+    // fresh source port, all targeting the same server SCID.
+    const N: u16 = 5000;
+    for port in 0..N {
+        let written = test_utils::encode_pkt(
+            &mut pipe.client,
+            Type::Short,
+            &[frame::Frame::Ping { mtu_probe: None }],
+            &mut buf,
+        )
+        .unwrap();
+
+        let info = RecvInfo {
+            to: server_addr,
+            from: format!("127.0.0.1:{}", 20000 + port).parse().unwrap(),
+        };
+
+        // Ignore errors - Error::Done is expected once path Slab is full.
+        let _ = pipe.server.recv(&mut buf[..written], info);
+    }
+
+    // Path count is bounded by active_connection_id_limit (default 2).
+    assert!(
+        pipe.server.paths.len() <= 2,
+        "path count should be bounded by active_connection_id_limit: got {}",
+        pipe.server.paths.len()
+    );
+
+    // Events are only emitted after successful path insertion, so the event
+    // count is bounded by path Slab capacity (max_concurrent_paths), not by
+    // attacker packet count. With default active_connection_id_limit=2, we
+    // can have at most 2 paths, so at most a few events (New, Closed for
+    // eviction, ReusedSourceConnectionId) - far fewer than N=5000.
+    let mut event_count = 0usize;
+    while pipe.server.path_event_next().is_some() {
+        event_count += 1;
+    }
+
+    // The key security property: events are bounded, not O(N).
+    // With 2 path slots, we expect roughly:
+    // - Path 0: original (no event, client-side)
+    // - Each new path triggers: possibly Closed (eviction) + New +
+    //   ReusedSourceConnectionId
+    // But only ~2 paths can exist at once, and unused paths get evicted.
+    // The exact count depends on timing, but must be << N.
+    assert!(
+        event_count < 100,
+        "event queue should be bounded by path capacity, not packet count: \
+         got {} events for {} packets",
+        event_count,
+        N
+    );
 }
 
 #[rstest]

@@ -363,11 +363,11 @@ extern "C" {
 
     fn AES_ecb_encrypt(
         inp: *const u8, out: *mut u8, key: *const AES_KEY, enc: c_int,
-    ) -> c_void;
+    );
 
     // ChaCha20
     fn CRYPTO_chacha_20(
         out: *mut u8, inp: *const u8, in_len: usize, key: *const u8,
         nonce: *const u8, counter: u32,
-    ) -> c_void;
+    );
 }
