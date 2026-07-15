@@ -253,8 +253,7 @@ void quiche_config_enable_pacing(quiche_config *config, bool v);
 void quiche_config_set_enable_cubic_idle_restart_fix(quiche_config *config,
                                                      bool v);
 
-// Configures whether to use the initial max data value as the initial flow
-// control window for streams and the connection (disabled by default).
+// Deprecated: this is now always enabled and this function is a no-op.
 void quiche_config_set_use_initial_max_data_as_flow_control_win(
     quiche_config *config, bool v);
 
@@ -842,8 +841,10 @@ ssize_t quiche_conn_send_ack_eliciting_on_path(quiche_conn *conn,
                            const struct sockaddr *local, socklen_t local_len,
                            const struct sockaddr *peer, socklen_t peer_len);
 
-// Returns true if there are retired source connection ids and fill the parameters
-bool quiche_conn_retired_scid_next(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
+// Drains and collects all currently retired source connection IDs into an
+// iterator. The caller must use quiche_connection_id_iter_next() to iterate and
+// quiche_connection_id_iter_free() to free the iterator.
+quiche_connection_id_iter *quiche_conn_retired_scid_iter(quiche_conn *conn);
 
 // Returns the number of source Connection IDs that are retired.
 size_t quiche_conn_retired_scids(const quiche_conn *conn);
@@ -1124,6 +1125,9 @@ void quiche_h3_config_set_qpack_blocked_streams(quiche_h3_config *config, uint64
 
 // Sets the `SETTINGS_ENABLE_CONNECT_PROTOCOL` setting.
 void quiche_h3_config_enable_extended_connect(quiche_h3_config *config, bool enabled);
+
+// Sets the maximum size for the payload of PRIORITY_UPDATE frames.
+void quiche_h3_config_set_max_priority_update_size(quiche_h3_config *config, uint64_t v);
 
 // Frees the HTTP/3 config object.
 void quiche_h3_config_free(quiche_h3_config *config);

@@ -27,8 +27,6 @@
 //! Pending charts
 //! A single image file containing a view of pending vs. in-flight requests
 
-use plotters::prelude::*;
-
 use crate::datastore::{
     self,
 };

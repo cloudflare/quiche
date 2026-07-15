@@ -47,7 +47,7 @@ pub const SETTINGS_H3_DATAGRAM_00: u64 = 0x276;
 pub const SETTINGS_H3_DATAGRAM: u64 = 0x33;
 
 // Permit between 16 maximally-encoded and 128 minimally-encoded SETTINGS.
-const MAX_SETTINGS_PAYLOAD_SIZE: usize = 256;
+pub(crate) const MAX_SETTINGS_PAYLOAD_SIZE: usize = 256;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Frame {

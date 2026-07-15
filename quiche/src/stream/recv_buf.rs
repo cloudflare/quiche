@@ -428,7 +428,9 @@ impl RecvBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream::DEFAULT_STREAM_WINDOW;
+
+    /// The default size of the receiver stream flow control window.
+    const DEFAULT_STREAM_WINDOW: u64 = 32 * 1024;
     use bytes::BufMut as _;
     use rstest::rstest;
 

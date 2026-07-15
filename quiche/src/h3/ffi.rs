@@ -78,6 +78,13 @@ pub extern "C" fn quiche_h3_config_enable_extended_connect(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_h3_config_set_max_priority_update_size(
+    config: &mut h3::Config, v: u64,
+) {
+    config.set_max_priority_update_size(v);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_h3_config_free(config: *mut h3::Config) {
     if !config.is_null() {
         drop(unsafe { Box::from_raw(config) });

@@ -70,6 +70,13 @@ use libc::sockaddr_in6;
 
 type ConnStream<Tx, M> = mpsc::Receiver<io::Result<InitialQuicConnection<Tx, M>>>;
 
+/// How many incoming packets (GRO batches) to process before checking the
+/// `ConnectionMapCommand` queue again. 30 means "check the command queue once
+/// every 30 packets".
+const PACKET_RX_YIELD_AFTER: usize = 30;
+/// `ConnectionMapCommand` processing batch size to amortize receive operations.
+const CONN_MAP_CMD_BATCH_SIZE: usize = 128;
+
 #[cfg(feature = "perf-quic-listener-metrics")]
 mod listener_stage_timer {
     use foundations::telemetry::metrics::TimeHistogram;
@@ -122,7 +129,8 @@ pub enum ConnectionMapCommand {
 
 /// An `InboundPacketRouter` maintains a map of quic connections and routes
 /// [`Incoming`] packets from the [recv half][rh] of a datagram socket to those
-/// connections or some quic initials handler.
+/// connections or some quic initials handler. There is only 1
+/// `InboundPacketRouter` per socket.
 ///
 /// [rh]: datagram_socket::DatagramSocketRecv
 ///
@@ -149,6 +157,10 @@ where
     shutdown_rx: mpsc::Receiver<()>,
     conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>,
     conn_map_cmd_rx: mpsc::UnboundedReceiver<ConnectionMapCommand>,
+    /// Reusable buffer to receive a batch of `ConnectionMapCommand`s in
+    /// `poll_conn_map_commands`. Always fully drained after use, so its length
+    /// should be 0 outside of `poll_conn_map_commands`.
+    conn_map_cmd_buf: Vec<ConnectionMapCommand>,
     accept_sink: mpsc::Sender<io::Result<InitialQuicConnection<Tx, M>>>,
     metrics: M,
     #[cfg(target_os = "linux")]
@@ -193,6 +205,7 @@ where
                 shutdown_rx,
                 conn_map_cmd_tx,
                 conn_map_cmd_rx,
+                conn_map_cmd_buf: Vec::with_capacity(4),
                 accept_sink,
                 #[cfg(target_os = "linux")]
                 udp_drop_count: 0,
@@ -626,16 +639,94 @@ where
         }
     }
 
-    fn handle_conn_map_commands(&mut self) {
-        while let Ok(req) = self.conn_map_cmd_rx.try_recv() {
-            match req {
-                ConnectionMapCommand::MapCid {
-                    existing_cid,
-                    new_cid,
-                } => self.conns.map_cid(&existing_cid, &new_cid),
-                ConnectionMapCommand::UnmapCid(cid) => self.conns.unmap_cid(&cid),
+    fn poll_process_packet(&mut self, cx: &mut Context) -> Poll<()> {
+        let pkt_data = match ready!(self.poll_recv_and_rx_time(cx)) {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("Incoming packet router encountered recvmsg error"; "error" => e);
+                return Poll::Ready(());
+            },
+        };
+
+        let PollRecvData {
+            buf,
+            src_addr: peer_addr,
+            dst_addr_override,
+            rx_time,
+            gro,
+            #[cfg(target_os = "linux")]
+            so_mark_data,
+        } = pkt_data;
+
+        let send_from = if let Some(dst_addr) = dst_addr_override {
+            log::trace!("overriding local address"; "actual_local" => dst_addr, "configured_local" => self.local_addr);
+            dst_addr
+        } else {
+            self.local_addr
+        };
+
+        let res = self.on_incoming(Incoming {
+            peer_addr,
+            local_addr: send_from,
+            buf,
+            rx_time,
+            gro,
+            #[cfg(target_os = "linux")]
+            so_mark_data,
+        });
+
+        // Only error handling below - if `on_incoming` was successful,
+        // we return here
+        let Err(e) = res else {
+            return Poll::Ready(());
+        };
+
+        let err_type = initial_packet_error_type(&e);
+        self.metrics
+            .rejected_initial_packet_count(err_type.clone())
+            .inc();
+
+        if self.config.enable_expensive_packet_count_metrics {
+            if let Some(peer_ip) =
+                quic_expensive_metrics_ip_reduce(peer_addr.ip())
+            {
+                self.metrics
+                    .expensive_rejected_initial_packet_count(
+                        err_type.clone(),
+                        peer_ip,
+                    )
+                    .inc();
             }
         }
+
+        if matches!(err_type, labels::QuicInvalidInitialPacketError::Unexpected) {
+            // don't block packet routing on errors
+            let _ = self.accept_sink.try_send(Err(e));
+        }
+
+        Poll::Ready(())
+    }
+
+    fn poll_conn_map_commands(&mut self, cx: &mut Context) -> Poll<()> {
+        let cmd_rx = &mut self.conn_map_cmd_rx;
+        let buf = &mut self.conn_map_cmd_buf;
+        debug_assert!(buf.is_empty());
+
+        while ready!(cmd_rx.poll_recv_many(cx, buf, CONN_MAP_CMD_BATCH_SIZE)) > 0
+        {
+            for cmd in buf.drain(..) {
+                match cmd {
+                    ConnectionMapCommand::MapCid {
+                        existing_cid,
+                        new_cid,
+                    } => self.conns.map_cid(&existing_cid, &new_cid),
+                    ConnectionMapCommand::UnmapCid(cid) =>
+                        self.conns.unmap_cid(&cid),
+                }
+            }
+        }
+
+        Poll::Ready(())
     }
 }
 
@@ -693,94 +784,39 @@ where
     type Output = io::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        let server_addr = self.local_addr;
-
         loop {
+            // First, check whether the app stopped accepting connections.
+            if self.shutdown_tx.is_some() && self.accept_sink.is_closed() {
+                self.shutdown_tx = None;
+            }
+
+            // Second, check if all connections have shut down and we can exit.
+            if self.shutdown_tx.is_none() &&
+                self.shutdown_rx.poll_recv(cx).is_ready()
+            {
+                return Poll::Ready(Ok(()));
+            }
+
+            // Third, run the generic `InitialPacketHandler` update.
             if let Err(error) = self.incoming_packet_handler.update(cx) {
-                // This is so rare that it's easier to spawn a separate task
+                // An error here is so rare that it's easier to spawn a separate
+                // task
                 let sender = self.accept_sink.clone();
                 spawn_with_killswitch(async move {
                     let _ = sender.send(Err(error)).await;
                 });
             }
 
-            match self.poll_recv_and_rx_time(cx) {
-                Poll::Ready(Ok(PollRecvData {
-                    buf,
-                    src_addr: peer_addr,
-                    dst_addr_override,
-                    rx_time,
-                    gro,
-                    #[cfg(target_os = "linux")]
-                    so_mark_data,
-                })) => {
-                    let send_from = if let Some(dst_addr) = dst_addr_override {
-                        log::trace!("overriding local address"; "actual_local" => dst_addr, "configured_local" => server_addr);
-                        dst_addr
-                    } else {
-                        server_addr
-                    };
+            // Fourth, update ConnectionMap before receiving packets. This ensures
+            // our SCID destinations are up-to-date (as of this moment).
+            // If this returns pending, we have processed all available commands
+            // and are registered for a wakeup on the next command.
+            let _ = self.poll_conn_map_commands(cx);
 
-                    let res = self.on_incoming(Incoming {
-                        peer_addr,
-                        local_addr: send_from,
-                        buf,
-                        rx_time,
-                        gro,
-                        #[cfg(target_os = "linux")]
-                        so_mark_data,
-                    });
-
-                    if let Err(e) = res {
-                        let err_type = initial_packet_error_type(&e);
-                        self.metrics
-                            .rejected_initial_packet_count(err_type.clone())
-                            .inc();
-
-                        if self.config.enable_expensive_packet_count_metrics {
-                            if let Some(peer_ip) =
-                                quic_expensive_metrics_ip_reduce(peer_addr.ip())
-                            {
-                                self.metrics
-                                    .expensive_rejected_initial_packet_count(
-                                        err_type.clone(),
-                                        peer_ip,
-                                    )
-                                    .inc();
-                            }
-                        }
-
-                        if matches!(
-                            err_type,
-                            labels::QuicInvalidInitialPacketError::Unexpected
-                        ) {
-                            // don't block packet routing on errors
-                            let _ = self.accept_sink.try_send(Err(e));
-                        }
-                    }
-                },
-
-                Poll::Ready(Err(e)) => {
-                    log::error!("Incoming packet router encountered recvmsg error"; "error" => e);
-                    continue;
-                },
-
-                Poll::Pending => {
-                    // Check whether any connections are still active
-                    if self.shutdown_tx.is_some() && self.accept_sink.is_closed()
-                    {
-                        self.shutdown_tx = None;
-                    }
-
-                    if self.shutdown_rx.poll_recv(cx).is_ready() {
-                        return Poll::Ready(Ok(()));
-                    }
-
-                    // Process any incoming connection map signals and handle them
-                    self.handle_conn_map_commands();
-
-                    return Poll::Pending;
-                },
+            // Finally, process up to `PACKET_RX_YIELD_AFTER` packet (batches) at
+            // once. If no more packets are available, we wait to be woken again.
+            for _ in 0..PACKET_RX_YIELD_AFTER {
+                ready!(self.poll_process_packet(cx));
             }
         }
     }
@@ -851,11 +887,14 @@ mod tests {
     use crate::settings::QuicSettings;
     use crate::settings::TlsCertificatePaths;
     use crate::socket::SocketCapabilities;
+    use crate::ConnectionIdGenerator as _;
     use crate::ConnectionParams;
     use crate::ServerH3Driver;
 
     use datagram_socket::MAX_DATAGRAM_SIZE;
+    use futures::FutureExt as _;
     use h3i::actions::h3::Action;
+    use std::net::Ipv4Addr;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::net::UdpSocket;
@@ -967,5 +1006,107 @@ mod tests {
         // NOTE: this is a smoke test - in case of issues `notified()` future will
         // never resolve hanging the test.
         drop_check.closed().await;
+    }
+
+    struct NoopDatagramSender;
+    impl DatagramSocketSend for NoopDatagramSender {
+        fn poll_send(
+            &self, _cx: &mut Context, buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_send_to(
+            &self, _cx: &mut Context, buf: &[u8], _addr: SocketAddr,
+        ) -> Poll<io::Result<usize>> {
+            Poll::Ready(Ok(buf.len()))
+        }
+    }
+
+    struct AlwaysReadyReceiver;
+    impl DatagramSocketRecv for AlwaysReadyReceiver {
+        fn poll_recv(
+            &mut self, _cx: &mut Context, buf: &mut tokio::io::ReadBuf,
+        ) -> Poll<io::Result<()>> {
+            // Short header packet:
+            // 1 byte descriptor + 20 byte DCID + 1 byte packet number + payload
+            const DUMMY_QUIC_PACKET: &[u8] =
+                b"\x40THIS_20_BYTE_CONN_ID\x06payload_payload_payload";
+            buf.put_slice(DUMMY_QUIC_PACKET);
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    struct NoopInitialHandler;
+    impl InitialPacketHandler for NoopInitialHandler {
+        fn handle_initials(
+            &mut self, _incoming: Incoming, _hdr: Header<'static>,
+            _quiche_config: &mut quiche::Config,
+        ) -> io::Result<Option<NewConnection>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn test_poll_packet_always_ready() {
+        let tls_cert_settings = TlsCertificatePaths {
+            cert: TEST_CERT_FILE,
+            private_key: TEST_KEY_FILE,
+            kind: crate::settings::CertificateKind::X509,
+        };
+        let params = ConnectionParams::new_server(
+            QuicSettings::default(),
+            tls_cert_settings,
+            Hooks::default(),
+        );
+
+        let config = Config::new(&params, SocketCapabilities::default()).unwrap();
+        let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0);
+
+        let (mut ipr, accept_stream) = InboundPacketRouter::new(
+            config,
+            Arc::new(NoopDatagramSender),
+            AlwaysReadyReceiver,
+            local_addr,
+            NoopInitialHandler,
+            DefaultMetrics,
+        );
+        let conn_map_cmd_tx = ipr.conn_map_cmd_tx.clone();
+
+        // Keep polling the IPR in a busy loop until it resolves
+        let (ipr_notifier, ipr_done) = std::sync::mpsc::sync_channel::<()>(0);
+        let ipr = std::thread::spawn(move || {
+            let mut cx = Context::from_waker(std::task::Waker::noop());
+            while ipr.poll_unpin(&mut cx).is_pending() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            drop(ipr_notifier);
+            ipr
+        });
+
+        // Fill the `conn_map_cmd` channel with some messages to process
+        for _ in 0..20 {
+            let random_cid = SimpleConnectionIdGenerator.new_connection_id();
+            conn_map_cmd_tx
+                .send(ConnectionMapCommand::UnmapCid(random_cid))
+                .unwrap();
+        }
+        // Give the IPR some time to process the ConnectionMapCommands
+        std::thread::sleep(Duration::from_secs(1));
+
+        // Shut the IPR down by dropping the accept_stream receiver. We wait for
+        // up to 10 seconds for IPR::poll to resolve. If it doesn't, it's not
+        // checking the shutdown condition regularly.
+        drop(accept_stream);
+        let ipr_done_res = ipr_done.recv_timeout(Duration::from_secs(10));
+        assert_eq!(
+            ipr_done_res,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+        );
+
+        // Check that the ConnectionMapCommands we added above were actually
+        // processed
+        let ipr = ipr.join().unwrap();
+        assert!(ipr.conn_map_cmd_rx.is_empty());
     }
 }

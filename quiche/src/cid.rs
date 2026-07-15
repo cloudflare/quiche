@@ -197,6 +197,25 @@ impl BoundedNonEmptyConnectionIdVecDeque {
             .position(|e| e.seq == seq)
             .and_then(|index| self.inner.remove(index)))
     }
+
+    /// Removes all elements in the collection with sequence numbers less than
+    /// `retire_prior_to`. The inspect closure is run on each element before it
+    /// is removed.
+    ///
+    /// The deque is in arrival order (not necessarily sorted by seq), so we
+    /// have to check each entry.
+    fn retire_prior_to<F>(&mut self, retire_prior_to: u64, mut inspect: F)
+    where
+        F: FnMut(&mut ConnectionIdEntry),
+    {
+        self.inner.retain_mut(|e| {
+            if e.seq < retire_prior_to {
+                inspect(e);
+                return false;
+            }
+            true
+        });
+    }
 }
 
 #[derive(Default)]
@@ -503,23 +522,18 @@ impl ConnectionIdentifiers {
 
             // To avoid exceeding the capacity of the inner `VecDeque`, we first
             // remove the elements and then insert the new one.
-            let index = self
-                .dcids
-                .inner
-                .partition_point(|e| e.seq < retire_prior_to);
-
-            for e in self.dcids.inner.drain(..index) {
+            self.dcids.retire_prior_to(retire_prior_to, |e| {
                 if let Some(pid) = e.path_id {
                     retired_path_ids.push((e.seq, pid));
                 }
 
                 if let Err(e) = retired.insert(e.seq) {
-                    // Delay propagating the error as we need to try to insert
-                    // the new DCID first.
-                    retired_dcid_queue_err = Some(e);
-                    break;
+                    // Keep the first error we encounter and report it _after_
+                    // inserting the new DCID. We still have to process the
+                    // remaining retired DCIDs.
+                    retired_dcid_queue_err.get_or_insert(e);
                 }
-            }
+            });
 
             self.largest_peer_retire_prior_to = retire_prior_to;
         }
@@ -988,15 +1002,18 @@ mod tests {
         assert!(ids.new_dcid(dcid, 4, rt, 3, &mut retired_path_ids).is_ok());
         assert_eq!(ids.dcids.len(), 2);
 
-        // Insert DCID #1 (e.g due to packet reordering).
+        // Insert DCID #1 (e.g due to packet reordering). It should be discarded
+        // due to `largest_peer_retire_prior_to`.
         let (dcid, rt) = create_cid_and_reset_token(16);
         assert!(ids.new_dcid(dcid, 1, rt, 0, &mut retired_path_ids).is_ok());
         assert_eq!(ids.dcids.len(), 2);
+        assert!(ids.get_dcid(1).is_err());
 
         // Try inserting DCID #1 again (e.g. due to retransmission).
         let (dcid, rt) = create_cid_and_reset_token(16);
         assert!(ids.new_dcid(dcid, 1, rt, 0, &mut retired_path_ids).is_ok());
         assert_eq!(ids.dcids.len(), 2);
+        assert!(ids.get_dcid(1).is_err());
     }
 
     #[test]
@@ -1033,12 +1050,57 @@ mod tests {
 
         // Retire prior to DCID that was just retired.
         //
-        // This is largely to test that the `partition_point()` call above
-        // returns a meaningful value even if the actual sequence that is
-        // searched isn't present in the list.
+        // This is largely to test that `retire_prior_to()` works correctly even
+        // if the actual sequence that is searched isn't present in the list.
         let (dcid, rt) = create_cid_and_reset_token(16);
         assert!(ids.new_dcid(dcid, 5, rt, 3, &mut retired_path_ids).is_ok());
         assert_eq!(ids.dcids.len(), 2);
+
+        // Retire all current DCIDs while adding a new one
+        let (dcid, rt) = create_cid_and_reset_token(16);
+        assert!(ids.new_dcid(dcid, 6, rt, 6, &mut retired_path_ids).is_ok());
+        assert_eq!(ids.dcids.len(), 1);
+    }
+
+    #[test]
+    fn new_dcid_partial_retire_out_of_order() {
+        let (scid, _) = create_cid_and_reset_token(16);
+        let (dcid, _) = create_cid_and_reset_token(16);
+
+        let mut retired_path_ids = SmallVec::new();
+
+        let mut ids = ConnectionIdentifiers::new(5, &scid, 0, None);
+        ids.set_initial_dcid(dcid, None, Some(0));
+
+        assert_eq!(ids.available_dcids(), 0);
+        assert_eq!(ids.dcids.len(), 1);
+
+        // Insert 5 DCIDs where some are out of order
+        let seq_nums = [5, 3, 2, 19, 8];
+        for &seq in &seq_nums {
+            let (dcid, rt) = create_cid_and_reset_token(16);
+            assert!(ids
+                .new_dcid(dcid, seq, rt, 1, &mut retired_path_ids)
+                .is_ok());
+        }
+        assert_eq!(ids.dcids.len(), 5);
+
+        // Trigger a retire of sequence numbers 2 and 3, inserting #20
+        let (dcid, rt) = create_cid_and_reset_token(16);
+        assert!(ids.new_dcid(dcid, 20, rt, 4, &mut retired_path_ids).is_ok());
+        assert_eq!(ids.dcids.len(), 4);
+        assert!(ids.get_dcid(20).is_ok());
+
+        for &seq in &seq_nums {
+            let dcid = ids.get_dcid(seq);
+            assert_eq!(dcid.is_ok(), seq >= 4);
+        }
+
+        // Check that the DCID deque maintains insertion order
+        let seq_iter = ids.dcids.inner.iter().map(|e| e.seq);
+        for (seq, expected) in seq_iter.zip([5, 19, 8, 20]) {
+            assert_eq!(seq, expected);
+        }
     }
 
     #[test]
