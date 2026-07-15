@@ -35,6 +35,9 @@ zero-copy = ["gcongestion"]
 # length on the client DCID field. Enabling this feature can be dangerous if these
 # requirements are not satisfied.
 custom-client-dcid = ["quiche/custom-client-dcid"]
+# Allow client connections to provide custom SCID when initiailizzing a
+# connection.
+custom-client-scid = []
 
 # Deprecated: use `--cfg capture_keylogs` instead.
 capture_keylogs = []

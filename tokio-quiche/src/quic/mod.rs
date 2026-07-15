@@ -185,7 +185,7 @@ where
     App: ApplicationOverQuic,
 {
     let mut client_config = Config::new(params, socket.capabilities)?;
-    let scid = SimpleConnectionIdGenerator.new_connection_id();
+    let scid = params.scid.clone().unwrap_or_else(|| SimpleConnectionIdGenerator.new_connection_id());
 
     #[cfg(feature = "custom-client-dcid")]
     let mut quiche_conn = if let Some(dcid) = &params.dcid {

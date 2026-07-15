@@ -55,6 +55,11 @@ pub struct ConnectionParams<'a> {
     pub hooks: Hooks,
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
+    /// Custom source connection ID to use for client connections.
+    ///
+    /// Has no effect on server-side [`ConnectionParams`].
+    #[cfg(feature = "custom-client-scid")]
+    pub scid: Option<quiche::ConnectionId<'static>>,
     /// Custom destination connection ID to use for client connections.
     ///
     /// Be aware that [RFC 9000] places requirements for unpredictability and
@@ -76,6 +81,9 @@ impl core::fmt::Debug for ConnectionParams<'_> {
             .field("tls_cert", &self.tls_cert)
             .field("hooks", &self.hooks);
 
+        #[cfg(feature = "custom-client-scid")]
+        s.field("scid", &self.scid);
+
         #[cfg(feature = "custom-client-dcid")]
         s.field("dcid", &self.dcid);
 
@@ -95,6 +103,8 @@ impl<'a> ConnectionParams<'a> {
             tls_cert: Some(tls_cert),
             hooks,
             session: None,
+            #[cfg(feature = "custom-client-scid")]
+            scid: None,
             #[cfg(feature = "custom-client-dcid")]
             dcid: None,
         }
@@ -112,6 +122,8 @@ impl<'a> ConnectionParams<'a> {
             tls_cert,
             hooks,
             session: None,
+            #[cfg(feature = "custom-client-scid")]
+            scid: None,
             #[cfg(feature = "custom-client-dcid")]
             dcid: None,
         }
