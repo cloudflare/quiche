@@ -27,6 +27,7 @@
 use std::ffi;
 use std::mem::ManuallyDrop;
 use std::ptr;
+use std::ptr::NonNull;
 use std::slice;
 
 use std::io::Write;
@@ -128,14 +129,15 @@ pub static QUICHE_EX_DATA_INDEX: LazyLock<c_int> = LazyLock::new(|| unsafe {
     SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
 });
 
-pub struct Context(*mut SSL_CTX);
+pub struct Context(NonNull<SSL_CTX>);
 
 impl Context {
     // Note: some vendor-specific methods are implemented in the boringssl
     // submodule.
     pub fn new() -> Result<Context> {
         unsafe {
-            let ctx_raw = SSL_CTX_new(TLS_method());
+            let ctx_raw =
+                NonNull::new(SSL_CTX_new(TLS_method())).ok_or(Error::TlsFail)?;
 
             let mut ctx = Context(ctx_raw);
 
@@ -150,18 +152,23 @@ impl Context {
     #[cfg(feature = "boringssl-boring-crate")]
     pub fn from_boring(
         ssl_ctx_builder: boring::ssl::SslContextBuilder,
-    ) -> Context {
+    ) -> Result<Context> {
         use foreign_types_shared::ForeignType;
 
-        let mut ctx = Context(ssl_ctx_builder.build().into_ptr() as _);
+        let ctx_raw = NonNull::new(ssl_ctx_builder.build().into_ptr() as _)
+            .ok_or(Error::TlsFail)?;
+
+        let mut ctx = Context(ctx_raw);
         ctx.set_session_callback();
 
-        ctx
+        Ok(ctx)
     }
 
     pub fn new_handshake(&mut self) -> Result<Handshake> {
         unsafe {
-            let ssl = SSL_new(self.as_mut_ptr());
+            let ssl =
+                NonNull::new(SSL_new(self.as_mut_ptr())).ok_or(Error::TlsFail)?;
+
             Ok(Handshake::new(ssl))
         }
     }
@@ -330,15 +337,13 @@ impl Context {
     }
 
     fn as_mut_ptr(&mut self) -> *mut SSL_CTX {
-        self.0
+        self.0.as_ptr()
     }
 }
 
-// NOTE: These traits are not automatically implemented for Context due to the
-// raw pointer it wraps. However, the underlying data is not aliased (as Context
-// should be its only owner), and there is no interior mutability, as the
-// pointer is not accessed directly outside of this module, and the Context
-// object API should preserve Rust's borrowing guarantees.
+// These traits are not automatically implemented because NonNull does not
+// convey ownership. Context uniquely owns the underlying data, and its API
+// preserves Rust's borrowing guarantees.
 unsafe impl Send for Context {}
 unsafe impl Sync for Context {}
 
@@ -349,8 +354,7 @@ impl Drop for Context {
 }
 
 pub struct Handshake {
-    /// Raw pointer
-    ptr: *mut SSL,
+    ptr: NonNull<SSL>,
     /// SSL_process_quic_post_handshake should be called when whenever
     /// SSL_provide_quic_data is called to process the provided data.
     provided_data_outstanding: bool,
@@ -360,11 +364,13 @@ impl Handshake {
     // Note: some vendor-specific methods are implemented in the boringssl
     // submodule.
     #[cfg(any(feature = "ffi", feature = "boringssl-boring-crate"))]
-    pub unsafe fn from_ptr(ssl: *mut c_void) -> Handshake {
-        Handshake::new(ssl as *mut SSL)
+    pub unsafe fn from_ptr(ssl: *mut c_void) -> Result<Handshake> {
+        let ptr = NonNull::new(ssl.cast()).ok_or(Error::TlsFail)?;
+
+        Ok(Handshake::new(ptr))
     }
 
-    fn new(ptr: *mut SSL) -> Handshake {
+    fn new(ptr: NonNull<SSL>) -> Handshake {
         Handshake {
             ptr,
             provided_data_outstanding: false,
@@ -590,11 +596,11 @@ impl Handshake {
     }
 
     fn as_ptr(&self) -> *const SSL {
-        self.ptr
+        self.ptr.as_ptr()
     }
 
     fn as_mut_ptr(&mut self) -> *mut SSL {
-        self.ptr
+        self.ptr.as_ptr()
     }
 
     fn map_result_ssl(&mut self, bssl_result: c_int) -> Result<()> {
@@ -674,11 +680,9 @@ impl Handshake {
     }
 }
 
-// NOTE: These traits are not automatically implemented for Handshake due to the
-// raw pointer it wraps. However, the underlying data is not aliased (as
-// Handshake should be its only owner), and there is no interior mutability, as
-// the pointer is not accessed directly outside of this module, and the
-// Handshake object API should preserve Rust's borrowing guarantees.
+// These traits are not automatically implemented because NonNull does not
+// convey ownership. Handshake uniquely owns the underlying data, and its API
+// preserves Rust's borrowing guarantees.
 unsafe impl Send for Handshake {}
 unsafe impl Sync for Handshake {}
 
@@ -987,7 +991,13 @@ extern "C" fn select_alpn(
 }
 
 extern "C" fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
-    let ex_data = match ExData::from_ssl_ptr(ssl) {
+    let ssl = match NonNull::new(ssl) {
+        Some(v) => v,
+
+        None => return 0,
+    };
+
+    let ex_data = match ExData::from_ssl_ptr(ssl.as_ptr()) {
         Some(v) => v,
 
         None => return 0,
