@@ -445,7 +445,7 @@ where
             match handshake_fut.await {
                 Ok(running) => Self::resume(running),
                 Err(e) => {
-                    log::error!("QUIC handshake failed in IQC::start"; "error" => e)
+                    log::error!("QUIC handshake failed in IQC::start"; "error" => e);
                 },
             }
         };

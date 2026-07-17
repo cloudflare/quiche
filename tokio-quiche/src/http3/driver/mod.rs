@@ -259,7 +259,8 @@ pub enum H3Event {
     /// [`H3Event::ResetStream`] variant.
     StreamClosed { stream_id: u64 },
     /// A GOAWAY frame was received from the peer containing `id`,
-    /// as described in https://datatracker.ietf.org/doc/html/rfc9114#section-5.2.
+    /// as described in
+    /// <https://datatracker.ietf.org/doc/html/rfc9114#section-5.2.>
     GoAway { id: u64 },
 }
 
