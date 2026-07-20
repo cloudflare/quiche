@@ -11797,6 +11797,74 @@ fn stop_sending_stream_send_after_reset_stream_ack(
     assert!(!w.any(|s| s == 0));
 }
 
+/// Verify that a stream stopped by the peer still surfaces `StreamStopped`
+/// to the application when it was unlinked from the writable queue before
+/// the RESET_STREAM ack arrived.
+///
+/// Poll `stream_writable_next()` to unlink the stopped stream, then deliver
+/// the RESET_STREAM ack. The stream stays uncollected and the next
+/// `stream_send()` returns `StreamStopped`.
+#[test]
+fn stop_sending_signal_survives_writable_unlink_before_ack() {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(999999999);
+    config.set_initial_max_stream_data_bidi_local(30);
+    config.set_initial_max_stream_data_bidi_remote(30);
+    config.set_initial_max_streams_bidi(10);
+    config.set_initial_max_streams_uni(0);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens a bidi stream with fin; the server reads the whole
+    // request so the stream's receive side is complete.
+    assert_eq!(pipe.client.stream_send(0, b"req", true), Ok(3));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((3, true)));
+
+    // Client no longer wants the response and sends STOP_SENDING. Deliver
+    // only that packet to the server, without letting the server's
+    // RESET_STREAM reply or its ack go anywhere yet.
+    assert_eq!(pipe.client.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // The application polls the stream as writable, which unlinks it from
+    // the writable queue, before sending anything on it. This mirrors an
+    // async driver's write loop running before the RESET_STREAM ack.
+    assert_eq!(pipe.server.stream_writable_next(), Some(0));
+
+    // Let the RESET_STREAM reach the client and its ack come back to the
+    // server, which processes the ack with the stream already unlinked.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // The stream must not have been collected yet: the application has not
+    // observed the STOP_SENDING.
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // The application finally writes its response and must see
+    // StreamStopped, not Done.
+    assert_eq!(
+        pipe.server.stream_send(0, b"resp", true),
+        Err(Error::StreamStopped(42))
+    );
+}
+
 #[rstest]
 fn challenge_no_cids(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,

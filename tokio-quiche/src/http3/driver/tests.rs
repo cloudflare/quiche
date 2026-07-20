@@ -656,6 +656,8 @@ mod client_side_driver {
 /// the client side.
 mod server_side_driver {
 
+    use crate::ApplicationOverQuic as _;
+
     use super::*;
 
     #[test]
@@ -842,6 +844,131 @@ mod server_side_driver {
         assert_eq!(audit_stats.sent_stream_fin(), StreamClosureKind::None);
         assert_eq!(audit_stats.downstream_bytes_recvd(), 3);
         assert_eq!(audit_stats.downstream_bytes_sent(), 0);
+    }
+
+    /// Test the case where the server's outbound channel closes and
+    /// `audit_stats` records the STOP_SENDING error code from the client
+    /// sent before the server has written any response to a `fin=true` request
+    #[test]
+    fn client_sends_stop_sending_before_first_write() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // client sends a request
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), true)
+            .unwrap();
+
+        // server reads the request and creates the StreamCtx
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        assert_eq!(req.stream_id, stream_id);
+        let to_client = req.send.get_ref().unwrap().clone();
+        let audit_stats = req.h3_audit_stats;
+
+        // client sends a STOP_SENDING before the server has written any
+        // response bytes
+        assert_eq!(
+            helper.pipe.client.stream_shutdown(
+                stream_id,
+                quiche::Shutdown::Read,
+                4242
+            ),
+            Ok(())
+        );
+        helper.advance_and_run_loop().unwrap();
+
+        // the app produces a response, unaware the peer already gave up
+        to_client
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+
+        assert!(to_client.is_closed());
+        assert_eq!(audit_stats.recvd_stop_sending_error_code(), 4242);
+    }
+
+    /// A client sends a headers-only request with fin, then STOP_SENDING,
+    /// before the server writes any response. The server's process_writes()
+    /// pops the stream via stream_writable_next() with nothing queued,
+    /// unlinking it, before the RESET_STREAM ack arrives. Verifies the app
+    /// still observes StreamStopped: recv_single()'s ack arms must gate
+    /// stream collection on send.is_stopped(), not on writable-queue linkage.
+    #[test]
+    fn client_sends_stop_sending_before_first_writable_poll() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // client sends a request
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), true)
+            .unwrap();
+
+        // server reads the request and creates the StreamCtx
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        assert_eq!(req.stream_id, stream_id);
+        let to_client = req.send.get_ref().unwrap().clone();
+        let audit_stats = req.h3_audit_stats;
+
+        // Client sends STOP_SENDING before the server has written any
+        // response bytes. Deliver only this packet to the server --
+        // unlike advance_and_run_loop(), this does not let the server's
+        // RESET_STREAM reply or its ack go anywhere yet.
+        assert_eq!(
+            helper.pipe.client.stream_shutdown(
+                stream_id,
+                quiche::Shutdown::Read,
+                4242
+            ),
+            Ok(())
+        );
+        let flight =
+            quiche::test_utils::emit_flight(&mut helper.pipe.client).unwrap();
+        quiche::test_utils::process_flight(&mut helper.pipe.server, flight)
+            .unwrap();
+
+        // Run process_reads() and process_writes() back to back, exactly
+        // as RunningApplication::on_read() does. process_writes() calls
+        // stream_writable_next(), which pops the stream with nothing
+        // queued to write, before the RESET_STREAM we just queued has
+        // even reached the client.
+        helper
+            .driver
+            .process_reads(&mut helper.pipe.server)
+            .unwrap();
+        helper
+            .driver
+            .process_writes(&mut helper.pipe.server)
+            .unwrap();
+
+        // Only now let the RESET_STREAM reach the client, and the
+        // client's ack come back to the server.
+        let flight =
+            quiche::test_utils::emit_flight(&mut helper.pipe.server).unwrap();
+        quiche::test_utils::process_flight(&mut helper.pipe.client, flight)
+            .unwrap();
+        let flight =
+            quiche::test_utils::emit_flight(&mut helper.pipe.client).unwrap();
+        quiche::test_utils::process_flight(&mut helper.pipe.server, flight)
+            .unwrap();
+
+        // the app produces a response, unaware the peer already gave up
+        to_client
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+
+        assert!(to_client.is_closed());
+        assert_eq!(audit_stats.recvd_stop_sending_error_code(), 4242);
     }
 
     /// Test the case where the client sends a RESET_STREAM quiche frame.
