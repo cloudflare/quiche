@@ -190,6 +190,8 @@ where
     #[cfg(not(feature = "custom-client-scid"))]
     let scid = SimpleConnectionIdGenerator.new_connection_id();
 
+    client_config.scid_len = scid.len();
+
     #[cfg(feature = "custom-client-dcid")]
     let mut quiche_conn = if let Some(dcid) = &params.dcid {
         quiche::connect_with_dcid_and_buffer_factory(
@@ -298,7 +300,8 @@ where
         "O_NONBLOCK should be set for the listening socket"
     );
 
-    let config = Config::new(params, socket.capabilities).into_io()?;
+    let mut config = Config::new(params, socket.capabilities).into_io()?;
+    config.scid_len = socket.cid_generator.cid_len();
 
     let local_addr = socket.socket.local_addr()?;
     let socket_tx = Arc::new(socket.socket);

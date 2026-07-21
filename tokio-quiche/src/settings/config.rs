@@ -30,7 +30,7 @@ use std::fs::File;
 use std::time::Duration;
 
 use qlog::writer::QlogCompression;
-
+use quiche::MAX_CONN_ID_LEN;
 use crate::result::QuicResult;
 use crate::settings::CertificateKind;
 use crate::settings::ConnectionParams;
@@ -109,7 +109,7 @@ impl Config {
             handshake_timeout: quic_settings.handshake_timeout,
             has_ippktinfo,
             has_ipv6pktinfo,
-            scid_len: params.scid_len,
+            scid_len: MAX_CONN_ID_LEN,
         })
     }
 }
