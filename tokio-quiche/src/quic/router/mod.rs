@@ -251,12 +251,13 @@ where
             }
         }
 
-        let hdr = Header::from_slice(&mut incoming.buf, self.scid_len)
-            .map_err(|e| match e {
+        let hdr = Header::from_slice(&mut incoming.buf, self.scid_len).map_err(
+            |e| match e {
                 quiche::Error::BufferTooShort | quiche::Error::InvalidPacket =>
                     labels::QuicInvalidInitialPacketError::FailedToParse.into(),
                 e => io::Error::other(e),
-            })?;
+            },
+        )?;
 
         if let Some(ev_sender) = self.conns.get(&hdr.dcid) {
             let _ = ev_sender.try_send(incoming);

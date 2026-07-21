@@ -29,13 +29,13 @@ use std::borrow::Cow;
 use std::fs::File;
 use std::time::Duration;
 
-use qlog::writer::QlogCompression;
-use quiche::MAX_CONN_ID_LEN;
 use crate::result::QuicResult;
 use crate::settings::CertificateKind;
 use crate::settings::ConnectionParams;
 use crate::settings::TlsCertificatePaths;
 use crate::socket::SocketCapabilities;
+use qlog::writer::QlogCompression;
+use quiche::MAX_CONN_ID_LEN;
 
 /// Whether `--cfg capture_keylogs` was set at build time. We keep supporting
 /// the `capture_keylogs` feature for backward compatibility.

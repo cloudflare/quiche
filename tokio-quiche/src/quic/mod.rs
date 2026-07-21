@@ -186,7 +186,10 @@ where
 {
     let mut client_config = Config::new(params, socket.capabilities)?;
     #[cfg(feature = "custom-client-scid")]
-    let scid = params.scid.clone().unwrap_or_else(|| SimpleConnectionIdGenerator.new_connection_id());
+    let scid = params
+        .scid
+        .clone()
+        .unwrap_or_else(|| SimpleConnectionIdGenerator.new_connection_id());
     #[cfg(not(feature = "custom-client-scid"))]
     let scid = SimpleConnectionIdGenerator.new_connection_id();
 

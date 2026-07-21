@@ -24,7 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use quiche::{ConnectionId, MAX_CONN_ID_LEN};
+use quiche::ConnectionId;
+use quiche::MAX_CONN_ID_LEN;
 use std::sync::Arc;
 
 use crate::QuicResult;
