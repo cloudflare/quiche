@@ -37,6 +37,7 @@ use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::gcongestion::Lost;
 
+use super::rtt_jump_detector::RttJumpDetector;
 use super::Acked;
 use super::BBRv2CongestionEvent;
 use super::BwLoMode;
@@ -191,6 +192,8 @@ pub(super) struct BBRv2NetworkModel {
     latest_send_rate: Option<Bandwidth>,
     /// The most recent ack rate from the BandwidthSampler.
     latest_ack_rate: Option<Bandwidth>,
+
+    rtt_jump_detector: RttJumpDetector,
 }
 
 impl BBRv2NetworkModel {
@@ -238,6 +241,8 @@ impl BBRv2NetworkModel {
 
             latest_send_rate: None,
             latest_ack_rate: None,
+
+            rtt_jump_detector: RttJumpDetector::new(),
         }
     }
 
@@ -363,6 +368,14 @@ impl BBRv2NetworkModel {
 
         if let Some(rtt_sample) = sample.sample_rtt {
             congestion_event.sample_min_rtt = Some(rtt_sample);
+
+            self.rtt_jump_detector.on_rtt_sample_with_mode(
+                params.rtt_jump_detector,
+                rtt_sample,
+                event_time,
+                self.full_bandwidth_reached,
+            );
+
             self.min_rtt_filter.update(rtt_sample, event_time);
         }
 
@@ -697,6 +710,33 @@ impl BBRv2NetworkModel {
         self.bandwidth_sampler.total_bytes_lost()
     }
 
+    /// Total number of confirmed persistent RTT jump episodes over the
+    /// lifetime of the connection.
+    pub(super) fn rtt_persistent_jump_count(&self) -> u64 {
+        self.rtt_jump_detector.rtt_persistent_jump_count()
+    }
+
+    /// The start time of the most recently confirmed persistent RTT jump
+    /// episode, if any.
+    #[cfg(test)]
+    pub(super) fn last_persistent_jump_time(&self) -> Option<Instant> {
+        self.rtt_jump_detector.last_persistent_jump_time()
+    }
+
+    /// Whether an RTT jump episode is currently active (elevated but not yet
+    /// resolved), regardless of whether it has been confirmed persistent.
+    #[cfg(test)]
+    pub(super) fn is_rtt_jump_active(&self) -> bool {
+        self.rtt_jump_detector.is_rtt_jump_active()
+    }
+
+    /// Whether the current RTT jump episode has been confirmed as a persistent
+    /// network condition.
+    #[cfg(test)]
+    pub(super) fn is_rtt_jump_persistent(&self) -> bool {
+        self.rtt_jump_detector.is_rtt_jump_persistent()
+    }
+
     fn round_trip_count(&self) -> usize {
         self.round_trip_counter.round_trip_count
     }
@@ -780,5 +820,196 @@ impl BBRv2NetworkModel {
 
     pub(super) fn rounds_with_queueing(&self) -> usize {
         self.rounds_with_queueing
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
+    use crate::recovery::gcongestion::BbrRttJumpDetector;
+
+    fn ms(millis: u64) -> Duration {
+        Duration::from_millis(millis)
+    }
+
+    const RTT: Duration = Duration::from_millis(50);
+    const RTT_3X: Duration = Duration::from_millis(150);
+    const RTT_JUMP: Duration = Duration::from_millis(151);
+
+    /// Ack a packet with the given RTT through the real congestion-event path.
+    fn ack_with_rtt(
+        model: &mut BBRv2NetworkModel, params: &Params, pkt_num: u64,
+        base: Instant, sent_offset: Duration, rtt: Duration,
+    ) -> BBRv2CongestionEvent {
+        ack_with_rtt_util(
+            model,
+            params,
+            pkt_num,
+            base,
+            sent_offset,
+            rtt,
+            100_000,
+            1200,
+        )
+    }
+
+    /// As `ack_with_rtt`, but with explicit cwnd and inflight inputs.
+    // Test harness: the extra cwnd/inflight knobs push this one over the
+    // argument-count lint, which is not worth a builder struct in tests.
+    #[allow(clippy::too_many_arguments)]
+    fn ack_with_rtt_util(
+        model: &mut BBRv2NetworkModel, params: &Params, pkt_num: u64,
+        base: Instant, sent_offset: Duration, rtt: Duration, prior_cwnd: usize,
+        prior_in_flight: usize,
+    ) -> BBRv2CongestionEvent {
+        let bytes = 1200;
+        let sent_time = base + sent_offset;
+        model.on_packet_sent(sent_time, 0, pkt_num, bytes, true);
+
+        let ack_time = sent_time + rtt;
+        let acked = [Acked {
+            pkt_num,
+            time_sent: sent_time,
+        }];
+        let mut event = BBRv2CongestionEvent::new(
+            ack_time,
+            prior_cwnd,
+            prior_in_flight,
+            false,
+        );
+        model.on_congestion_event_start(&acked, &[], &mut event, params);
+        event
+    }
+
+    fn rtt_jump_params(detector: BbrRttJumpDetector) -> Params {
+        Params {
+            rtt_jump_detector: detector,
+            ..DEFAULT_PARAMS
+        }
+    }
+
+    #[test]
+    fn rtt_jump_detector_is_disabled_by_default() {
+        let params = &DEFAULT_PARAMS;
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..5 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+
+        let mut offset = 100;
+        for pkt in 5..20 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(offset), RTT_3X);
+            offset += 100;
+        }
+
+        assert_eq!(model.rtt_persistent_jump_count(), 0);
+        assert!(!model.is_rtt_jump_active());
+        assert_eq!(model.last_persistent_jump_time(), None);
+    }
+
+    #[test]
+    fn global_min_detector_can_be_enabled() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..5 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+        model.set_full_bandwidth_reached();
+
+        ack_with_rtt(&mut model, params, 5, base, ms(100), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 6, base, ms(110), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 7, base, ms(300), RTT_JUMP);
+
+        assert_eq!(model.rtt_persistent_jump_count(), 1);
+        assert!(model.is_rtt_jump_persistent());
+        assert!(model.last_persistent_jump_time().is_some());
+    }
+
+    #[test]
+    fn global_min_detector_sustained_step_becomes_persistent() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..5 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+        model.set_full_bandwidth_reached();
+
+        ack_with_rtt(&mut model, params, 5, base, ms(100), RTT_JUMP);
+        assert!(model.is_rtt_jump_active());
+        assert!(!model.is_rtt_jump_persistent());
+
+        ack_with_rtt(&mut model, params, 6, base, ms(110), RTT_JUMP);
+        assert!(!model.is_rtt_jump_persistent());
+
+        ack_with_rtt(&mut model, params, 7, base, ms(300), RTT_JUMP);
+        assert!(model.is_rtt_jump_persistent());
+        assert_eq!(model.rtt_persistent_jump_count(), 1);
+        assert!(model.last_persistent_jump_time().is_some());
+    }
+
+    #[test]
+    fn global_min_detector_uses_strict_3x_threshold() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let base = Instant::now();
+
+        let mut at_edge = BBRv2NetworkModel::new(params, RTT);
+        ack_with_rtt(&mut at_edge, params, 1, base, ms(10), RTT);
+        at_edge.set_full_bandwidth_reached();
+        ack_with_rtt(&mut at_edge, params, 2, base, ms(20), RTT_3X);
+        assert!(!at_edge.is_rtt_jump_active());
+
+        let mut just_above = BBRv2NetworkModel::new(params, RTT);
+        ack_with_rtt(&mut just_above, params, 1, base, ms(10), RTT);
+        just_above.set_full_bandwidth_reached();
+        ack_with_rtt(&mut just_above, params, 2, base, ms(20), RTT_JUMP);
+        assert!(just_above.is_rtt_jump_active());
+    }
+
+    #[test]
+    fn global_min_detector_tracks_downward_baseline() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        ack_with_rtt(&mut model, params, 1, base, ms(100), ms(100));
+        ack_with_rtt(&mut model, params, 2, base, ms(200), ms(299));
+        assert!(!model.is_rtt_jump_active());
+
+        ack_with_rtt(&mut model, params, 3, base, ms(300), RTT);
+        assert!(!model.is_rtt_jump_active());
+
+        model.set_full_bandwidth_reached();
+        ack_with_rtt(&mut model, params, 4, base, ms(400), RTT_JUMP);
+        assert!(model.is_rtt_jump_active());
+    }
+
+    #[test]
+    fn global_min_detector_ignores_startup_rtt_jump_until_full_bandwidth() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        ack_with_rtt(&mut model, params, 1, base, ms(10), RTT);
+        ack_with_rtt(&mut model, params, 2, base, ms(20), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 3, base, ms(30), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 4, base, ms(200), RTT_JUMP);
+
+        assert_eq!(model.rtt_persistent_jump_count(), 0);
+        assert!(!model.is_rtt_jump_active());
+
+        model.set_full_bandwidth_reached();
+        ack_with_rtt(&mut model, params, 5, base, ms(210), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 6, base, ms(220), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 7, base, ms(360), RTT_JUMP);
+
+        assert_eq!(model.rtt_persistent_jump_count(), 1);
+        assert!(model.is_rtt_jump_persistent());
     }
 }

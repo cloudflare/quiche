@@ -46,6 +46,8 @@ use self::congestion::recovery::LegacyRecovery;
 use self::gcongestion::GRecovery;
 pub use gcongestion::BbrBwLoReductionStrategy;
 pub use gcongestion::BbrParams;
+#[cfg(feature = "internal")]
+pub use gcongestion::BbrRttJumpDetector;
 
 // Loss Recovery
 const INITIAL_PACKET_THRESHOLD: u64 = 3;
@@ -248,6 +250,9 @@ pub trait RecoveryOps {
 
     /// Maximum bandwidth estimate, if one is available.
     fn max_bandwidth(&self) -> Option<Bandwidth>;
+
+    /// Total number of confirmed persistent RTT jump episodes.
+    fn rtt_persistent_jump_count(&self) -> u64;
 
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit>;

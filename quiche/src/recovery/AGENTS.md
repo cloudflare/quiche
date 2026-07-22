@@ -39,6 +39,7 @@ gcongestion/        Next-gen CC (BBR2)
     probe_bw.rs     ProbeBW mode (bandwidth probing cycles)
     probe_rtt.rs    ProbeRTT mode (min RTT measurement)
     network_model.rs  Bandwidth/RTT model, BbrParams application
+    rtt_jump_detector.rs  Global-min RTT jump detection
   bbr.rs            BBR (v1, not actively used)
 ```
 

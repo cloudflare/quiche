@@ -923,6 +923,16 @@ impl RecoveryOps for LegacyRecovery {
         None
     }
 
+    fn rtt_persistent_jump_count(&self) -> u64 {
+        // Persistent RTT jump counts are produced by the BBR2 global-min RTT
+        // jump detector. Legacy Reno/CUBIC recovery does not own a BBR2
+        // network model or run that detector, but it still implements
+        // RecoveryOps so PathStats can be populated through one shared
+        // interface. Report zero to indicate that no detector is active on
+        // this path.
+        0
+    }
+
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit> {
         self.congestion.ssthresh.startup_exit()

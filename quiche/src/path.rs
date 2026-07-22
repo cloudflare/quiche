@@ -579,6 +579,7 @@ impl Path {
                 .recovery
                 .max_bandwidth()
                 .map(Bandwidth::to_bytes_per_second),
+            rtt_persistent_jump_count: self.recovery.rtt_persistent_jump_count(),
             startup_exit: self.recovery.startup_exit(),
         }
     }
@@ -1020,6 +1021,9 @@ pub struct PathStats {
     /// it is currently only implemented for bbr2_gcongestion.
     pub max_bandwidth: Option<u64>,
 
+    /// The total number of confirmed persistent RTT jump episodes.
+    pub rtt_persistent_jump_count: u64,
+
     /// Statistics from when a CCA first exited the startup phase.
     pub startup_exit: Option<StartupExit>,
 }
@@ -1051,8 +1055,11 @@ impl std::fmt::Debug for PathStats {
 
         write!(
             f,
-            " stream_retrans_bytes={} pmtu={} delivery_rate={}",
-            self.stream_retrans_bytes, self.pmtu, self.delivery_rate,
+            " stream_retrans_bytes={} pmtu={} delivery_rate={} rtt_persistent_jump_count={}",
+            self.stream_retrans_bytes,
+            self.pmtu,
+            self.delivery_rate,
+            self.rtt_persistent_jump_count,
         )
     }
 }
