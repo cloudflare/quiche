@@ -74,7 +74,6 @@ use self::streams::StreamReady;
 use self::streams::WaitForDownstreamData;
 use self::streams::WaitForStream;
 use self::streams::WaitForUpstreamCapacity;
-use crate::buf_factory::BufFactory;
 use crate::http3::settings::Http3Settings;
 use crate::http3::H3AuditStats;
 use crate::metrics::Metrics;
@@ -125,17 +124,36 @@ const FLOW_CAPACITY: usize = 2048;
 //   reallocate the buffer on every read. Allocating at least this many bytes
 //   lets a single allocation absorb many small reads (each `split()` off)
 //   before it is exhausted and reallocated.
+//
+// The floor is a soft hint, not a hard minimum: it never overrides the
+// configured cap, so a cap smaller than the floor still bounds the allocation
+// (see [`body_recv_buf_size`]).
 const MIN_BODY_RECV_BUF_SIZE: usize = 1024;
 
+// Default cap for the body receive buffer when
+// [`Http3Settings::max_recv_body_buf_size`] is unset or zero. Chosen well below
+// `BufFactory::MAX_BUF_SIZE` (64 KiB) so a request that carries a body doesn't
+// pin a large allocation for the life of the stream; a larger streamed body
+// simply reallocates once per driver read-cycle.
+const DEFAULT_MAX_BODY_RECV_BUF_SIZE: usize = 16 * 1024;
+
 /// Computes the capacity to use for the body receive buffer given the number of
-/// bytes currently readable on the stream.
+/// bytes currently readable on the stream and the configured maximum.
 ///
-/// The result is clamped to `[MIN_BODY_RECV_BUF_SIZE, MAX_BUF_SIZE]`: reads
-/// below the floor still allocate the floor (so a trickle of tiny reads reuses
-/// one allocation instead of reallocating each time), while a single
-/// (potentially adversarial) read never allocates more than `MAX_BUF_SIZE`.
-fn body_recv_buf_size(readable: usize) -> usize {
-    readable.clamp(MIN_BODY_RECV_BUF_SIZE, BufFactory::MAX_BUF_SIZE)
+/// The result is clamped to `[floor, max]`, where `floor` is
+/// [`MIN_BODY_RECV_BUF_SIZE`] capped by `max`. Reads below the floor still
+/// allocate the floor (so a trickle of tiny reads reuses one allocation instead
+/// of reallocating each time), while a single (potentially adversarial) read
+/// never allocates more than `max`. `max` is derived from
+/// [`Http3Settings::max_recv_body_buf_size`], defaulting to
+/// [`DEFAULT_MAX_BODY_RECV_BUF_SIZE`] when the setting is unset or zero.
+///
+/// `max` is the hard upper bound: when it is smaller than the floor it wins, so
+/// the range passed to `clamp` is always valid (`floor <= max`). The
+/// constructor guarantees `max >= 1`, so the result is never zero.
+fn body_recv_buf_size(readable: usize, max: usize) -> usize {
+    let floor = MIN_BODY_RECV_BUF_SIZE.min(max);
+    readable.clamp(floor, max)
 }
 
 /// Used by a local task to send [`OutboundFrame`]s to a peer on the
@@ -379,6 +397,10 @@ pub struct H3Driver<H: DriverHooks> {
     /// connections hold no receive buffer. We `split()` off filled parts until
     /// we need to reallocate.
     body_recv_buf: Option<bytes::buf::Limit<BytesMut>>,
+    /// Upper bound on the capacity of `body_recv_buf`, from
+    /// [`Http3Settings::max_recv_body_buf_size`]. Unset or `0` defaults to
+    /// [`DEFAULT_MAX_BODY_RECV_BUF_SIZE`], so this is always non-zero.
+    max_recv_body_buf_size: usize,
 
     /// The maximum HTTP/3 stream ID seen on this connection.
     max_stream_seen: u64,
@@ -418,6 +440,12 @@ impl<H: DriverHooks> H3Driver<H> {
                 dgram_send: PollSender::new(dgram_send),
                 max_stream_seen: 0,
                 body_recv_buf: None,
+                // `Some(0)` would make `recv_body_buf` a no-op, so treat it as
+                // unset.
+                max_recv_body_buf_size: http3_settings
+                    .max_recv_body_buf_size
+                    .filter(|&size| size > 0)
+                    .unwrap_or(DEFAULT_MAX_BODY_RECV_BUF_SIZE),
 
                 waiting_streams: FuturesUnordered::new(),
 
@@ -543,16 +571,18 @@ impl<H: DriverHooks> H3Driver<H> {
                 };
             }
 
-            // Size the receive buffer to the amount of data currently readable
-            // on the stream, capped at `MAX_BUF_SIZE`, so small or idle bodies
-            // don't pay for a full 64 KiB allocation. `stream_readable_len`
-            // returns the contiguous, in-order bytes available to read now (it
-            // includes H3 framing overhead but never counts data behind a gap),
-            // so the buffer is sized to what a single drain can actually read.
-            // The floor (`MIN_BODY_RECV_BUF_SIZE`) keeps the allocation non-zero
-            // and large enough that a trickle of tiny reads reuses a single
-            // allocation instead of reallocating each time.
-            let want = body_recv_buf_size(qconn.stream_readable_len(stream_id));
+            // Size the receive buffer to the contiguous, in-order data currently
+            // readable on the stream, capped at the configured maximum, so small
+            // or idle bodies don't pay for a full allocation.
+            // The readable length includes H3 framing, so it is enough to drain
+            // all currently readable body bytes. The floor
+            // (`MIN_BODY_RECV_BUF_SIZE`) keeps the allocation non-zero and large
+            // enough that a trickle of tiny reads reuses a single allocation
+            // instead of reallocating each time.
+            let want = body_recv_buf_size(
+                qconn.stream_readable_len(stream_id, self.max_recv_body_buf_size),
+                self.max_recv_body_buf_size,
+            );
             // Lazily allocate the receive buffer on first use; idle
             // connections never receive body bytes and never allocate it.
             let body_recv_buf = self

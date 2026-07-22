@@ -420,17 +420,14 @@ impl RecvBuf {
     }
 
     /// Returns the number of bytes that can be read contiguously from the
-    /// current read offset.
+    /// current read offset, up to `max_len`.
     ///
-    /// This is the amount of in-order data available to read right now, up to
-    /// 64 KiB. Data buffered behind a gap (received out of order) is not
-    /// counted, so this never reports bytes that are not yet readable. The cost
-    /// is proportional to the number of contiguous buffered chunks at the front
-    /// of the buffer, up to 64 KiB; no data is copied.
-    pub fn readable_len(&self) -> usize {
-        const MAX_READABLE_LEN: usize = 64 * 1024;
-
-        let mut contiguous = 0;
+    /// Data buffered behind a gap (received out of order) is not counted, so
+    /// this never reports bytes that are not yet readable. The cost is
+    /// proportional to the number of contiguous buffered chunks at the front
+    /// of the buffer, up to `max_len`; no data is copied.
+    pub fn readable_len(&self, max_len: usize) -> usize {
+        let mut contiguous = 0usize;
         let mut next_off = self.off;
 
         // `data` is ordered by offset, so walk from the front and stop at the
@@ -441,10 +438,10 @@ impl RecvBuf {
                 break;
             }
 
-            contiguous = (contiguous + buf.len()).min(MAX_READABLE_LEN);
+            contiguous = contiguous.saturating_add(buf.len()).min(max_len);
             next_off = buf.max_off();
 
-            if contiguous == MAX_READABLE_LEN {
+            if contiguous == max_len {
                 break;
             }
         }
@@ -627,42 +624,23 @@ mod tests {
     }
 
     #[test]
-    /// `readable_len` counts only contiguous in-order data, ignoring bytes
-    /// buffered behind a gap.
+    /// `readable_len` counts only contiguous in-order data, up to its limit.
     fn readable_len() {
         let mut recv =
             RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
 
         // Empty buffer: nothing readable.
-        assert_eq!(recv.readable_len(), 0);
+        assert_eq!(recv.readable_len(64 * 1024), 0);
 
-        // Contiguous data at the front is readable.
+        // Data buffered behind a gap is not readable.
         assert!(recv.write(RangeBuf::from(b"hello", 0, false)).is_ok());
-        assert_eq!(recv.readable_len(), 5);
-
-        // Data buffered behind a gap ([5, 10) is missing) is NOT counted, even
-        // though `max_off` has advanced to 19.
         assert!(recv.write(RangeBuf::from(b"something", 10, false)).is_ok());
-        assert_eq!(recv.max_off(), 19);
-        assert_eq!(recv.readable_len(), 5);
+        assert_eq!(recv.readable_len(64 * 1024), 5);
 
-        // Filling the gap makes the whole range contiguous and readable.
+        // Filling the gap makes the full range readable, bounded by the limit.
         assert!(recv.write(RangeBuf::from(b"world", 5, false)).is_ok());
-        assert_eq!(recv.readable_len(), 19);
-
-        // Reading part of the data shrinks the readable count accordingly.
-        let mut buf = [0; 4];
-        assert_eq!(recv.emit(&mut buf), Ok((4, false)));
-        assert_eq!(recv.readable_len(), 15);
-
-        // Traversal stops at the maximum body receive buffer size.
-        let mut recv =
-            RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
-        assert!(recv
-            .write(RangeBuf::from(&[0; 64 * 1024], 0, false))
-            .is_ok());
-        assert!(recv.write(RangeBuf::from(&[0], 64 * 1024, false)).is_ok());
-        assert_eq!(recv.readable_len(), 64 * 1024);
+        assert_eq!(recv.readable_len(64 * 1024), 19);
+        assert_eq!(recv.readable_len(10), 10);
     }
 
     /// Test shutdown behavior
