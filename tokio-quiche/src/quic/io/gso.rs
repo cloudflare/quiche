@@ -138,8 +138,17 @@ pub async fn send_to(
 
         let mut cmsgs: SmallVec<[ControlMessage; 3]> = SmallVec::new();
 
-        // Create cmsg for UDP_SEGMENT.
-        cmsgs.push(ControlMessage::UdpGsoSegments(&segment_size_u16));
+        // Only attach the UDP_SEGMENT cmsg when the buffer actually spans more
+        // than one segment. A single-segment send needs no segmentation, and
+        // attaching the cmsg anyway makes sendmsg() return EIO on NICs that
+        // accept the UDP_SEGMENT sockopt but cannot segment (e.g. virtio-net
+        // with scatter-gather off). Since GSO is initialized with a u16::MAX
+        // segment size, omitting the cmsg here cannot cause a truncating
+        // fallback to a smaller socket-level segment size.
+        if send_buf.len() > segment_size {
+            // Create cmsg for UDP_SEGMENT.
+            cmsgs.push(ControlMessage::UdpGsoSegments(&segment_size_u16));
+        }
 
         if tx_time.is_some() {
             // Create cmsg for TXTIME.
