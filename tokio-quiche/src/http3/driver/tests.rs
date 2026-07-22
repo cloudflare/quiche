@@ -1,3 +1,4 @@
+use crate::buf_factory::BufFactory;
 use crate::http3::driver::client::ClientHooks;
 use crate::http3::driver::server::ServerHooks;
 use assert_matches::assert_matches;
@@ -9,19 +10,21 @@ use super::*;
 mod body_recv_buf_size {
     use super::*;
 
+    const MAX: usize = BufFactory::MAX_BUF_SIZE;
+
     #[test]
     fn zero_readable_uses_floor() {
         // Never build a zero-capacity buffer.
-        assert_eq!(body_recv_buf_size(0), MIN_BODY_RECV_BUF_SIZE);
+        assert_eq!(body_recv_buf_size(0, MAX), MIN_BODY_RECV_BUF_SIZE);
     }
 
     #[test]
     fn small_readable_uses_floor() {
         // A read below the floor is raised to the floor so a trickle of tiny
         // reads reuses one allocation instead of reallocating each time.
-        assert_eq!(body_recv_buf_size(10), MIN_BODY_RECV_BUF_SIZE);
+        assert_eq!(body_recv_buf_size(10, MAX), MIN_BODY_RECV_BUF_SIZE);
         assert_eq!(
-            body_recv_buf_size(MIN_BODY_RECV_BUF_SIZE),
+            body_recv_buf_size(MIN_BODY_RECV_BUF_SIZE, MAX),
             MIN_BODY_RECV_BUF_SIZE
         );
     }
@@ -30,25 +33,74 @@ mod body_recv_buf_size {
     fn readable_above_floor_tracks_size() {
         // Between the floor and the cap the buffer tracks the readable length.
         let readable = MIN_BODY_RECV_BUF_SIZE + 500;
-        assert_eq!(body_recv_buf_size(readable), readable);
+        assert_eq!(body_recv_buf_size(readable, MAX), readable);
     }
 
     #[test]
     fn large_readable_caps_at_max() {
+        assert_eq!(body_recv_buf_size(MAX, MAX), MAX);
+        // Readable beyond the configured max is capped.
+        assert_eq!(body_recv_buf_size(MAX + 1, MAX), MAX);
+        assert_eq!(body_recv_buf_size(10 * MAX, MAX), MAX);
+    }
+
+    #[test]
+    fn respects_configured_max() {
+        // A configured cap above the floor bounds the buffer below
+        // MAX_BUF_SIZE.
+        let cap = MIN_BODY_RECV_BUF_SIZE * 4;
+        assert_eq!(body_recv_buf_size(MAX, cap), cap);
+        assert_eq!(body_recv_buf_size(cap / 2, cap), cap / 2);
+        // A larger configured cap allows the buffer to grow past
+        // MAX_BUF_SIZE.
+        assert_eq!(body_recv_buf_size(2 * MAX, 4 * MAX), 2 * MAX);
+    }
+
+    #[test]
+    fn cap_below_floor_wins() {
+        // The cap is the hard upper bound: when it is smaller than the floor,
+        // the floor yields to it and `clamp` never sees an inverted range.
+        let cap = MIN_BODY_RECV_BUF_SIZE / 2;
+        assert_eq!(body_recv_buf_size(0, cap), cap);
+        assert_eq!(body_recv_buf_size(10, cap), cap);
+        assert_eq!(body_recv_buf_size(MAX, cap), cap);
+    }
+
+    #[test]
+    fn default_cap_is_16kib() {
+        assert_eq!(DEFAULT_MAX_BODY_RECV_BUF_SIZE, 16 * 1024);
+        // A body larger than the default is capped at 16 KiB.
         assert_eq!(
-            body_recv_buf_size(BufFactory::MAX_BUF_SIZE),
-            BufFactory::MAX_BUF_SIZE
-        );
-        // Readable beyond MAX_BUF_SIZE is capped.
-        assert_eq!(
-            body_recv_buf_size(BufFactory::MAX_BUF_SIZE + 1),
-            BufFactory::MAX_BUF_SIZE
-        );
-        assert_eq!(
-            body_recv_buf_size(10 * BufFactory::MAX_BUF_SIZE),
-            BufFactory::MAX_BUF_SIZE
+            body_recv_buf_size(MAX, DEFAULT_MAX_BODY_RECV_BUF_SIZE),
+            DEFAULT_MAX_BODY_RECV_BUF_SIZE
         );
     }
+}
+
+/// `Some(0)` is normalized to the default (it would make `recv_body_buf` a
+/// no-op); non-zero overrides are kept as-is.
+#[test]
+fn zero_configured_max_recv_body_buf_size_falls_back_to_default() {
+    let settings_max = |max: Option<usize>| {
+        let (driver, _controller) = H3Driver::<ClientHooks>::new(Http3Settings {
+            max_recv_body_buf_size: max,
+            ..Default::default()
+        });
+        driver.max_recv_body_buf_size
+    };
+
+    // `Some(0)` and unset both fall back to the default.
+    assert_eq!(settings_max(Some(0)), DEFAULT_MAX_BODY_RECV_BUF_SIZE);
+    assert_eq!(settings_max(None), DEFAULT_MAX_BODY_RECV_BUF_SIZE);
+    // A non-zero override is kept as-is, even below the sizing floor.
+    assert_eq!(
+        settings_max(Some(MIN_BODY_RECV_BUF_SIZE / 2)),
+        MIN_BODY_RECV_BUF_SIZE / 2
+    );
+    assert_eq!(
+        settings_max(Some(BufFactory::MAX_BUF_SIZE)),
+        BufFactory::MAX_BUF_SIZE
+    );
 }
 
 /// Tests for connection close error metrics recorded by
