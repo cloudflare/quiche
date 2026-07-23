@@ -84,17 +84,6 @@ pub struct ConnectionStageContext<A> {
     pub stats: QuicConnectionStatsShared,
 }
 
-impl<A> ConnectionStageContext<A>
-where
-    A: ApplicationOverQuic,
-{
-    // TODO: remove when AOQ::buffer() situation is sorted - that method shouldn't
-    // exist
-    pub fn buffer(&mut self) -> &mut [u8] {
-        self.application.buffer()
-    }
-}
-
 #[derive(Debug)]
 pub struct Handshake {
     pub handshake_info: HandshakeInfo,

@@ -56,6 +56,7 @@ pub(crate) struct Config {
     pub handshake_timeout: Option<Duration>,
     pub has_ippktinfo: bool,
     pub has_ipv6pktinfo: bool,
+    pub pool_send_buffer: bool,
 }
 
 impl AsMut<quiche::Config> for Config {
@@ -110,6 +111,7 @@ impl Config {
             handshake_timeout: quic_settings.handshake_timeout,
             has_ippktinfo,
             has_ipv6pktinfo,
+            pool_send_buffer: quic_settings.pool_send_buffer,
         })
     }
 }

@@ -41,7 +41,6 @@ use tokio::sync::oneshot;
 use tokio::time::sleep;
 use tokio::time::sleep_until;
 use tokio::time::Instant;
-use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::metrics::Metrics;
 use tokio_quiche::quic::HandshakeInfo;
 use tokio_quiche::quic::QuicheConnection;
@@ -222,7 +221,6 @@ impl Future for BuildingConnectionSummary {
 }
 
 pub struct H3iDriver {
-    buffer: Vec<u8>,
     actions: Vec<Action>,
     actions_executed: usize,
     next_fire_time: Instant,
@@ -246,7 +244,6 @@ impl H3iDriver {
 
         (
             Self {
-                buffer: vec![0u8; BufFactory::MAX_BUF_SIZE],
                 actions,
                 actions_executed: 0,
                 next_fire_time: Instant::now(),
@@ -425,10 +422,6 @@ impl ApplicationOverQuic for H3iDriver {
         }
 
         Ok(())
-    }
-
-    fn buffer(&mut self) -> &mut [u8] {
-        &mut self.buffer
     }
 
     fn on_conn_close<M: Metrics>(

@@ -680,19 +680,8 @@ pub trait ApplicationOverQuic: Send + 'static {
     /// worker.
     ///
     /// The function is checked in each iteration of the worker loop. Only
-    /// `on_conn_established()` and `buffer()` bypass this check.
+    /// `on_conn_established()` bypasses this check.
     fn should_act(&self) -> bool;
-
-    /// A borrowed buffer for the worker to write outbound packets into.
-    ///
-    /// This method allows sharing a buffer between the worker and the
-    /// application, efficiently using the allocated memory while the
-    /// application is inactive. It can also be used to artificially
-    /// restrict the size of outbound network packets.
-    ///
-    /// Any data in the buffer may be overwritten by the worker. If necessary,
-    /// the application should save the contents when this method is called.
-    fn buffer(&mut self) -> &mut [u8];
 
     /// Waits for an event to trigger the next iteration of the worker loop.
     ///

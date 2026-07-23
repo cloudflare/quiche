@@ -121,6 +121,37 @@ async fn e2e_client_ip_validation_disabled() {
     assert!(hook.was_called());
 }
 
+// Exercise the persistent per-connection egress buffer path, i.e. the IO
+// worker with `QuicSettings::pool_send_buffer` disabled. The default (pooling
+// enabled) path is covered by every other end-to-end test.
+#[tokio::test]
+async fn e2e_pooled_send_buffer_disabled() {
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.max_recv_udp_payload_size = 1400;
+    quic_settings.max_send_udp_payload_size = 1400;
+    quic_settings.pool_send_buffer = false;
+
+    let hook = TestConnectionHook::new();
+
+    let (url, _) = start_server_with_settings(
+        quic_settings,
+        Http3Settings::default(),
+        hook.clone(),
+        handle_connection,
+    );
+    let url = format!("{url}/1");
+    let reqs = vec![request(url, 1)];
+
+    let res = try_join_all(reqs).await.unwrap();
+    let res_map = map_responses(res);
+
+    assert_eq!(res_map.len(), 1);
+
+    let resps = res_map.get(&1).unwrap();
+    assert_eq!(resps.len(), 1);
+    assert!(hook.was_called());
+}
+
 #[with_test_telemetry(tokio::test)]
 async fn quiche_logs_forwarded_server_side(cx: TestTelemetryContext) {
     let mut quic_settings = QuicSettings::default();
