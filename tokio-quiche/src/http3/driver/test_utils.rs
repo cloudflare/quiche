@@ -277,7 +277,8 @@ impl<H: DriverHooks + GetConnectionForHook> DriverTestHelper<H> {
     }
 
     pub fn driver_set_body_buf_size(&mut self, limit: usize) {
-        self.driver.body_recv_buf = BytesMut::with_capacity(limit).limit(limit);
+        self.driver.body_recv_buf =
+            Some(BytesMut::with_capacity(limit).limit(limit));
     }
 }
 

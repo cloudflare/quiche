@@ -637,7 +637,7 @@ impl Config {
     pub fn with_boring_ssl_ctx_builder(
         version: u32, tls_ctx_builder: boring::ssl::SslContextBuilder,
     ) -> Result<Config> {
-        Self::with_tls_ctx(version, tls::Context::from_boring(tls_ctx_builder))
+        Self::with_tls_ctx(version, tls::Context::from_boring(tls_ctx_builder)?)
     }
 
     fn with_tls_ctx(version: u32, tls_ctx: tls::Context) -> Result<Config> {
@@ -2755,7 +2755,7 @@ impl<F: BufFactory> Connection<F> {
         // a borrowed view of `ssl`. The caller retains ownership of the
         // underlying BoringSSL object.
         let mut handshake = ManuallyDrop::new(unsafe {
-            tls::Handshake::from_ptr(ssl.as_ptr() as _)
+            tls::Handshake::from_ptr(ssl.as_ptr() as _)?
         });
 
         handshake.set_quic_transport_params(&params, is_server)

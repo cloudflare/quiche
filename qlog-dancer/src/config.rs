@@ -364,12 +364,7 @@ impl AppConfig {
 
         let ignore_acks = false;
 
-        let qlog_ext = std::path::Path::new(&file)
-            .extension()
-            .unwrap()
-            .to_str()
-            .unwrap();
-        let log_format = SerializationFormat::from_file_extension(qlog_ext);
+        let log_format = SerializationFormat::from_filename(&file);
 
         let config = Self {
             file: file.to_string(),

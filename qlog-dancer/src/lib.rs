@@ -121,10 +121,28 @@ impl SerializationFormat {
     pub fn from_file_extension(extension: &str) -> Self {
         match extension {
             "qlog" => SerializationFormat::QlogJson,
-            "sqlog" => SerializationFormat::QlogJsonSeq,
+            "sqlog" | "gz" | "zst" => SerializationFormat::QlogJsonSeq,
             "json" => Self::NetlogJson,
             _ => SerializationFormat::Unknown,
         }
+    }
+
+    pub fn from_filename(filename: &str) -> Self {
+        // Check for compound extensions first (order matters!)
+        if filename.ends_with(".sqlog.gz") || filename.ends_with(".sqlog.zst") {
+            return SerializationFormat::QlogJsonSeq;
+        }
+        if filename.ends_with(".sqlog") {
+            return SerializationFormat::QlogJsonSeq;
+        }
+        if filename.ends_with(".qlog") {
+            return SerializationFormat::QlogJson;
+        }
+        // Fall back to extension-based detection
+        if let Some(ext) = filename.rsplit('.').next() {
+            return Self::from_file_extension(ext);
+        }
+        SerializationFormat::Unknown
     }
 }
 
@@ -295,13 +313,11 @@ pub fn read_qlog_from_file<P: AsRef<Path>>(
 
 pub fn qlog_seq_reader(
     config: &AppConfig,
-) -> Result<(QlogSeqReader<'_>, LogFileDetails), Box<dyn Error>> {
-    let file = std::fs::File::open(config.file.clone())?;
-    let reader = BufReader::new(file);
-
-    let qlog_reader = QlogSeqReader::new(Box::new(reader)).map_err(|e| {
-        std::io::Error::other(format!("problem reading file! {}", e))
-    })?;
+) -> Result<(QlogSeqReader<'static>, LogFileDetails), Box<dyn Error>> {
+    let qlog_reader =
+        QlogSeqReader::with_file(config.file.clone()).map_err(|e| {
+            std::io::Error::other(format!("problem reading file! {}", e))
+        })?;
 
     let vp = qlog_reader
         .qlog

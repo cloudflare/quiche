@@ -649,7 +649,11 @@ pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
         let local = std_addr_from_c(local, local_len);
         let peer = std_addr_from_c(peer, peer_len);
 
-        let tls = unsafe { tls::Handshake::from_ptr(ssl) };
+        let tls = match unsafe { tls::Handshake::from_ptr(ssl) } {
+            Ok(v) => v,
+
+            Err(_) => return ptr::null_mut(),
+        };
 
         match Connection::with_tls(
             &scid,
@@ -706,7 +710,11 @@ pub extern "C" fn quiche_conn_new_with_tls(
     let local = std_addr_from_c(local, local_len);
     let peer = std_addr_from_c(peer, peer_len);
 
-    let tls = unsafe { tls::Handshake::from_ptr(ssl) };
+    let tls = match unsafe { tls::Handshake::from_ptr(ssl) } {
+        Ok(v) => v,
+
+        Err(_) => return ptr::null_mut(),
+    };
 
     match Connection::with_tls(
         &scid, retry_cids, None, local, peer, config, tls, is_server,
