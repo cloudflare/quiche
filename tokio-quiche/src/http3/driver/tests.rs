@@ -5,6 +5,52 @@ use assert_matches::assert_matches;
 use super::test_utils::*;
 use super::*;
 
+/// Tests for the body receive buffer sizing helper.
+mod body_recv_buf_size {
+    use super::*;
+
+    #[test]
+    fn zero_readable_uses_floor() {
+        // Never build a zero-capacity buffer.
+        assert_eq!(body_recv_buf_size(0), MIN_BODY_RECV_BUF_SIZE);
+    }
+
+    #[test]
+    fn small_readable_uses_floor() {
+        // A read below the floor is raised to the floor so a trickle of tiny
+        // reads reuses one allocation instead of reallocating each time.
+        assert_eq!(body_recv_buf_size(10), MIN_BODY_RECV_BUF_SIZE);
+        assert_eq!(
+            body_recv_buf_size(MIN_BODY_RECV_BUF_SIZE),
+            MIN_BODY_RECV_BUF_SIZE
+        );
+    }
+
+    #[test]
+    fn readable_above_floor_tracks_size() {
+        // Between the floor and the cap the buffer tracks the readable length.
+        let readable = MIN_BODY_RECV_BUF_SIZE + 500;
+        assert_eq!(body_recv_buf_size(readable), readable);
+    }
+
+    #[test]
+    fn large_readable_caps_at_max() {
+        assert_eq!(
+            body_recv_buf_size(BufFactory::MAX_BUF_SIZE),
+            BufFactory::MAX_BUF_SIZE
+        );
+        // Readable beyond MAX_BUF_SIZE is capped.
+        assert_eq!(
+            body_recv_buf_size(BufFactory::MAX_BUF_SIZE + 1),
+            BufFactory::MAX_BUF_SIZE
+        );
+        assert_eq!(
+            body_recv_buf_size(10 * BufFactory::MAX_BUF_SIZE),
+            BufFactory::MAX_BUF_SIZE
+        );
+    }
+}
+
 /// Tests for connection close error metrics recorded by
 /// [`H3Driver::on_conn_close`].
 mod conn_close_metrics {
@@ -318,8 +364,22 @@ mod client_side_driver {
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![7; 10]);
 
-        // The first body read lazily allocated the buffer.
+        // The body read lazily allocated the buffer at the floor
+        // (`MIN_BODY_RECV_BUF_SIZE`) rather than a fixed 64 KiB, because the
+        // readable length was below the floor. The buffer therefore tracks the
+        // floor -- far below the 64 KiB a fixed allocation would use.
         assert!(helper.driver.body_recv_buf.is_some());
+        let cap = helper
+            .driver
+            .body_recv_buf
+            .as_ref()
+            .unwrap()
+            .get_ref()
+            .capacity();
+        assert!(
+            cap <= MIN_BODY_RECV_BUF_SIZE,
+            "body buffer should track the floor, not a fixed 64 KiB; cap = {cap}"
+        );
 
         // Server finishes the stream.
         helper.peer_server_send_body(0, &[8; 10], true).unwrap();
@@ -361,11 +421,12 @@ mod client_side_driver {
         assert_eq!(resp.stream_id, stream_id);
         let mut from_server = resp.recv;
 
-        // Force a small receive buffer so the body exhausts it and the
-        // reallocation branch (`*body_recv_buf = ...`) runs.
+        // Force a small receive buffer so it is smaller than the size we want
+        // for each read, exercising the reallocation branch
+        // (`*body_recv_buf = ...`).
         helper.driver_set_body_buf_size(20);
 
-        // Send 40 bytes across the 20-byte buffer, exhausting it repeatedly.
+        // Send 40 bytes across four chunks, reallocating on the way.
         helper.peer_server_send_body(0, &[1; 10], false).unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![1; 10]);
@@ -1255,14 +1316,24 @@ mod server_side_driver {
         );
         assert_matches!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
         assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
-        assert_eq!(helper.peer_client_send_body(0, &[1; 10], false), Ok(10));
+        // The client sends the first half of the body.
+        assert_eq!(helper.peer_client_send_body(0, &[1; 5], false), Ok(5));
 
-        // Advance the pipe and let the driver read a part of the body and
-        // put it into the `from_client` channel
+        // Advance the pipe and let the driver read the buffered body into the
+        // `from_client` channel, filling it (`STREAM_CAPACITY` is 1 in tests).
         helper.pipe.advance().unwrap();
-        // Limit the amount of data we read from the stream.
-        helper.driver_set_body_buf_size(5);
         helper.work_loop_iter().unwrap();
+
+        // The client sends the second half. With the downstream channel full
+        // and the stream readable again, the driver blocks the stream waiting
+        // for capacity (registering it in `waiting_streams`) without reading
+        // further.
+        assert_eq!(helper.peer_client_send_body(0, &[1; 5], false), Ok(5));
+        helper.pipe.advance().unwrap();
+        helper.work_loop_iter().unwrap();
+
+        // Drain the first body frame; this frees downstream capacity so the
+        // blocked stream can make progress on the next `wait_for_data`.
         assert_matches!(from_client.try_recv(), Ok(InboundFrame::Body(buf, fin)) => {
             assert_eq!(buf.to_vec(), &[1; 5]);
             assert!(!fin);
@@ -1280,11 +1351,12 @@ mod server_side_driver {
             Err(TryRecvError::Empty)
         );
 
-        // client sends a reset.
-        // TODO: This is a bit finnicky to test properly. We don't want to
-        // run a full `work_loop_iter()` because that would call `process_reads()`
-        // first.
-        helper.pipe.advance().unwrap();
+        // The client resets the stream; the buffered-but-unread second half is
+        // dropped when the reset is processed.
+        // TODO: This is a bit finnicky to test properly. We don't want to run a
+        // full `work_loop_iter()` because that would call `process_reads()`
+        // first; we exercise the path where `wait_for_data` / `upstream_ready`
+        // observes the reset while reading.
         assert_eq!(
             helper
                 .pipe
@@ -1370,13 +1442,12 @@ mod server_side_driver {
             Ok((0, h3::Event::Headers { .. }))
         );
         assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
-        assert_eq!(helper.peer_client_send_body(0, &[1; 10], false), Ok(10));
+        // The client sends the first half of the body.
+        assert_eq!(helper.peer_client_send_body(0, &[1; 5], false), Ok(5));
 
-        // Advance the pipe and let the driver read a part of the body and
-        // put it into the `from_client` channel
+        // Advance the pipe and let the driver read the buffered body and put
+        // it into the `from_client` channel.
         helper.pipe.advance().unwrap();
-        // Limit the amount of data we read from the stream.
-        helper.driver_set_body_buf_size(5);
         helper.work_loop_iter().unwrap();
         assert_matches!(from_client.try_recv(), Ok(InboundFrame::Body(buf, fin)) => {
             assert_eq!(buf.to_vec(), &[1; 5]);
@@ -1391,7 +1462,12 @@ mod server_side_driver {
             })
         );
 
-        // client sends a reset.
+        // The client sends the second half of the body (delivered to the
+        // server but not yet read by the driver), then resets the stream. The
+        // buffered-but-unread bytes are dropped when the reset is processed, so
+        // they are never counted.
+        assert_eq!(helper.peer_client_send_body(0, &[1; 5], false), Ok(5));
+        helper.pipe.advance().unwrap();
         assert_eq!(
             helper
                 .pipe
