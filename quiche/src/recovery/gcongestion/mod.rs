@@ -253,6 +253,9 @@ pub enum BbrRttJumpDetector {
     /// Connection-lifetime minimum baseline with a strict multiplicative jump
     /// test and a sample/duration confirmation gate.
     GlobalMin = 1,
+
+    /// 3-state Hidden Markov Model (HMM) decoded with a scaled forward filter.
+    Hmm       = 2,
 }
 
 #[doc(hidden)]
@@ -266,6 +269,7 @@ impl FromStr for BbrRttJumpDetector {
         match name {
             "none" => Ok(BbrRttJumpDetector::Disabled),
             "global_min" => Ok(BbrRttJumpDetector::GlobalMin),
+            "hmm" => Ok(BbrRttJumpDetector::Hmm),
 
             _ => Err(crate::Error::CongestionControl),
         }
