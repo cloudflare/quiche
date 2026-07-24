@@ -193,6 +193,7 @@ pub(super) struct BBRv2NetworkModel {
     /// The most recent ack rate from the BandwidthSampler.
     latest_ack_rate: Option<Bandwidth>,
 
+    /// Detector for persistent RTT jump episodes.
     rtt_jump_detector: RttJumpDetector,
 }
 
@@ -242,7 +243,7 @@ impl BBRv2NetworkModel {
             latest_send_rate: None,
             latest_ack_rate: None,
 
-            rtt_jump_detector: RttJumpDetector::new(),
+            rtt_jump_detector: RttJumpDetector::new(params.rtt_jump_detector),
         }
     }
 
@@ -369,8 +370,7 @@ impl BBRv2NetworkModel {
         if let Some(rtt_sample) = sample.sample_rtt {
             congestion_event.sample_min_rtt = Some(rtt_sample);
 
-            self.rtt_jump_detector.on_rtt_sample_with_mode(
-                params.rtt_jump_detector,
+            self.rtt_jump_detector.on_rtt_sample(
                 rtt_sample,
                 event_time,
                 self.full_bandwidth_reached,
@@ -931,6 +931,28 @@ mod tests {
     }
 
     #[test]
+    fn hmm_detector_can_be_enabled() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::Hmm);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..9u64 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+        model.set_full_bandwidth_reached();
+
+        let mut offset = 200u64;
+        for pkt in 9u64..40 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(offset), RTT_3X);
+            offset += 100;
+        }
+
+        assert_eq!(model.rtt_persistent_jump_count(), 1);
+        assert!(model.is_rtt_jump_persistent());
+        assert!(model.last_persistent_jump_time().is_some());
+    }
+
+    #[test]
     fn global_min_detector_sustained_step_becomes_persistent() {
         let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
         let mut model = BBRv2NetworkModel::new(params, RTT);
@@ -1011,5 +1033,29 @@ mod tests {
 
         assert_eq!(model.rtt_persistent_jump_count(), 1);
         assert!(model.is_rtt_jump_persistent());
+    }
+
+    #[test]
+    fn hmm_detector_ignores_startup_rtt_jump_until_full_bandwidth() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::Hmm);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..9u64 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+
+        for pkt in 9u64..20 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 100), RTT_3X);
+        }
+
+        assert_eq!(model.rtt_persistent_jump_count(), 0);
+        assert!(!model.is_rtt_jump_active());
+
+        model.set_full_bandwidth_reached();
+        ack_with_rtt(&mut model, params, 20, base, ms(2100), RTT_3X);
+
+        assert_eq!(model.rtt_persistent_jump_count(), 0);
+        assert!(!model.is_rtt_jump_persistent());
     }
 }
