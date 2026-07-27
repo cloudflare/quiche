@@ -455,7 +455,17 @@ mod client_side_driver {
     /// active, then allocated again for subsequent body data.
     #[test]
     fn client_body_recv_buf_releases_when_exhausted() {
-        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        // Permit one full floor-sized body in a single H3 DATA frame.
+        let mut config = default_quiche_config();
+        let max_data = 2 * MIN_BODY_RECV_BUF_SIZE as u64;
+        config.set_initial_max_data(max_data);
+        config.set_initial_max_stream_data_bidi_local(max_data);
+        config.set_initial_max_stream_data_bidi_remote(max_data);
+        config.set_initial_max_stream_data_uni(max_data);
+        let mut helper = DriverTestHelper::<ClientHooks>::with_pipe(
+            quiche::test_utils::Pipe::with_config_and_buf(&mut config).unwrap(),
+        )
+        .unwrap();
         helper.complete_handshake().unwrap();
         helper.advance_and_run_loop().unwrap();
 
