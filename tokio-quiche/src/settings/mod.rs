@@ -44,7 +44,6 @@ pub use self::tls::*;
 /// To construct them, either `ConnectionParams::new_server` or
 /// `ConnectionParams::new_client` must be used. The parameters can be modified
 /// freely after construction.
-#[derive(Default)]
 #[non_exhaustive] // force use of constructor functions
 pub struct ConnectionParams<'a> {
     /// QUIC connection settings.
@@ -55,6 +54,11 @@ pub struct ConnectionParams<'a> {
     pub hooks: Hooks,
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
+    /// Custom source connection ID to use for client connections.
+    ///
+    /// Has no effect on server-side [`ConnectionParams`].
+    #[cfg(feature = "custom-client-scid")]
+    pub scid: Option<quiche::ConnectionId<'static>>,
     /// Custom destination connection ID to use for client connections.
     ///
     /// Be aware that [RFC 9000] places requirements for unpredictability and
@@ -68,6 +72,21 @@ pub struct ConnectionParams<'a> {
     pub dcid: Option<quiche::ConnectionId<'static>>,
 }
 
+impl core::default::Default for ConnectionParams<'_> {
+    fn default() -> Self {
+        Self {
+            settings: Default::default(),
+            tls_cert: Default::default(),
+            hooks: Default::default(),
+            session: Default::default(),
+            #[cfg(feature = "custom-client-scid")]
+            scid: Default::default(),
+            #[cfg(feature = "custom-client-dcid")]
+            dcid: Default::default(),
+        }
+    }
+}
+
 impl core::fmt::Debug for ConnectionParams<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Avoid printing 'session' since it contains connection secrets.
@@ -75,6 +94,9 @@ impl core::fmt::Debug for ConnectionParams<'_> {
         s.field("settings", &self.settings)
             .field("tls_cert", &self.tls_cert)
             .field("hooks", &self.hooks);
+
+        #[cfg(feature = "custom-client-scid")]
+        s.field("scid", &self.scid);
 
         #[cfg(feature = "custom-client-dcid")]
         s.field("dcid", &self.dcid);
@@ -95,6 +117,8 @@ impl<'a> ConnectionParams<'a> {
             tls_cert: Some(tls_cert),
             hooks,
             session: None,
+            #[cfg(feature = "custom-client-scid")]
+            scid: None,
             #[cfg(feature = "custom-client-dcid")]
             dcid: None,
         }
@@ -112,6 +136,8 @@ impl<'a> ConnectionParams<'a> {
             tls_cert,
             hooks,
             session: None,
+            #[cfg(feature = "custom-client-scid")]
+            scid: None,
             #[cfg(feature = "custom-client-dcid")]
             dcid: None,
         }

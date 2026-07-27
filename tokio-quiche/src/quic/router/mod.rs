@@ -44,7 +44,6 @@ use datagram_socket::DatagramSocketSend;
 use foundations::telemetry::log;
 use quiche::ConnectionId;
 use quiche::Header;
-use quiche::MAX_CONN_ID_LEN;
 use std::default::Default;
 use std::future::Future;
 use std::io;
@@ -152,6 +151,7 @@ where
     local_addr: SocketAddr,
     config: Config,
     conns: ConnectionMap,
+    scid_len: usize,
     incoming_packet_handler: I,
     shutdown_tx: Option<mpsc::Sender<()>>,
     shutdown_rx: mpsc::Receiver<()>,
@@ -200,6 +200,7 @@ where
                 socket_tx,
                 socket_rx,
                 conns: ConnectionMap::default(),
+                scid_len: config.scid_len,
                 incoming_packet_handler,
                 shutdown_tx: Some(shutdown_tx),
                 shutdown_rx,
@@ -243,19 +244,20 @@ where
         #[cfg(feature = "perf-quic-listener-metrics")]
         let start = std::time::Instant::now();
 
-        if let Some(dcid) = short_dcid(&incoming.buf) {
+        if let Some(dcid) = short_dcid(&incoming.buf, self.scid_len) {
             if let Some(ev_sender) = self.conns.get(&dcid) {
                 let _ = ev_sender.try_send(incoming);
                 return Ok(());
             }
         }
 
-        let hdr = Header::from_slice(&mut incoming.buf, MAX_CONN_ID_LEN)
-            .map_err(|e| match e {
+        let hdr = Header::from_slice(&mut incoming.buf, self.scid_len).map_err(
+            |e| match e {
                 quiche::Error::BufferTooShort | quiche::Error::InvalidPacket =>
                     labels::QuicInvalidInitialPacketError::FailedToParse.into(),
                 e => io::Error::other(e),
-            })?;
+            },
+        )?;
 
         if let Some(ev_sender) = self.conns.get(&hdr.dcid) {
             let _ = ev_sender.try_send(incoming);
@@ -731,11 +733,11 @@ where
 }
 
 // Quickly extract the connection id of a short quic packet without allocating
-fn short_dcid(buf: &[u8]) -> Option<ConnectionId<'_>> {
+fn short_dcid(buf: &[u8], cid_len: usize) -> Option<ConnectionId<'_>> {
     let is_short_dcid = buf.first()? >> 7 == 0;
 
     if is_short_dcid {
-        buf.get(1..1 + MAX_CONN_ID_LEN).map(ConnectionId::from_ref)
+        buf.get(1..1 + cid_len).map(ConnectionId::from_ref)
     } else {
         None
     }
