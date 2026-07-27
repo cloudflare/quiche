@@ -380,8 +380,6 @@ pub struct H3Driver<H: DriverHooks> {
     /// we need to reallocate.
     body_recv_buf: Option<bytes::buf::Limit<BytesMut>>,
 
-    /// The buffer used to interact with the underlying IoWorker.
-    io_worker_buf: Vec<u8>,
     /// The maximum HTTP/3 stream ID seen on this connection.
     max_stream_seen: u64,
 
@@ -420,7 +418,6 @@ impl<H: DriverHooks> H3Driver<H> {
                 dgram_send: PollSender::new(dgram_send),
                 max_stream_seen: 0,
                 body_recv_buf: None,
-                io_worker_buf: vec![0u8; BufFactory::MAX_BUF_SIZE],
 
                 waiting_streams: FuturesUnordered::new(),
 
@@ -1302,11 +1299,6 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
     #[inline]
     fn should_act(&self) -> bool {
         self.conn.is_some()
-    }
-
-    #[inline]
-    fn buffer(&mut self) -> &mut [u8] {
-        &mut self.io_worker_buf
     }
 
     /// Poll the underlying [`quiche::h3::Connection`] for

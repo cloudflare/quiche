@@ -289,6 +289,17 @@ pub(crate) mod quic {
     /// cancellation.
     pub fn skipped_mid_handshake_flush_count() -> Counter;
 
+    /// Number of egress scratch buffers allocated because the per-worker send
+    /// buffer pool was empty on acquire (a pool miss). This is a cold path;
+    /// re-using a pooled buffer does not touch this counter.
+    pub fn send_buffer_pool_allocated() -> Counter;
+
+    /// Number of egress scratch buffers discarded because the per-worker send
+    /// buffer pool was already at capacity when a buffer was returned. This is
+    /// a cold path; returning a buffer to a non-full pool does not touch this
+    /// counter.
+    pub fn send_buffer_pool_discarded() -> Counter;
+
     /// Number of QUIC packets received where the CID could not be verified.
     pub fn invalid_cid_packet_count(reason: String) -> Counter;
 
