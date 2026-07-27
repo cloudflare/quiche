@@ -114,6 +114,30 @@ const STREAM_CAPACITY: usize = 1; // Set to 1 to stress write_pending under test
 // to 3MB of max buffered data at 1500 bytes per datagram.
 const FLOW_CAPACITY: usize = 2048;
 
+// Floor for the lazily-allocated body receive buffer. The buffer is sized to
+// the amount currently readable on the stream (see [`process_h3_data`]), but we
+// never allocate below this floor, for two reasons:
+//
+// - A `Limit<BytesMut>` with a zero limit reports no remaining capacity and
+//   would make `recv_body_buf` a no-op.
+// - Sizing strictly to the readable length defeats allocation amortization: a
+//   body that trickles in a few bytes at a time (e.g. one byte per read) would
+//   reallocate the buffer on every read. Allocating at least this many bytes
+//   lets a single allocation absorb many small reads (each `split()` off)
+//   before it is exhausted and reallocated.
+const MIN_BODY_RECV_BUF_SIZE: usize = 1024;
+
+/// Computes the capacity to use for the body receive buffer given the number of
+/// bytes currently readable on the stream.
+///
+/// The result is clamped to `[MIN_BODY_RECV_BUF_SIZE, MAX_BUF_SIZE]`: reads
+/// below the floor still allocate the floor (so a trickle of tiny reads reuses
+/// one allocation instead of reallocating each time), while a single
+/// (potentially adversarial) read never allocates more than `MAX_BUF_SIZE`.
+fn body_recv_buf_size(readable: usize) -> usize {
+    readable.clamp(MIN_BODY_RECV_BUF_SIZE, BufFactory::MAX_BUF_SIZE)
+}
+
 /// Used by a local task to send [`OutboundFrame`]s to a peer on the
 /// stream or flow associated with this channel.
 pub type OutboundFrameSender = PollSender<OutboundFrame>;
@@ -522,21 +546,33 @@ impl<H: DriverHooks> H3Driver<H> {
                 };
             }
 
+            // Size the receive buffer to the amount of data currently readable
+            // on the stream, capped at `MAX_BUF_SIZE`, so small or idle bodies
+            // don't pay for a full 64 KiB allocation. `stream_readable_len`
+            // returns the contiguous, in-order bytes available to read now (it
+            // includes H3 framing overhead but never counts data behind a gap),
+            // so the buffer is sized to what a single drain can actually read.
+            // The floor (`MIN_BODY_RECV_BUF_SIZE`) keeps the allocation non-zero
+            // and large enough that a trickle of tiny reads reuses a single
+            // allocation instead of reallocating each time.
+            let want = body_recv_buf_size(qconn.stream_readable_len(stream_id));
             // Lazily allocate the receive buffer on first use; idle
             // connections never receive body bytes and never allocate it.
-            let body_recv_buf = self.body_recv_buf.get_or_insert_with(|| {
-                BytesMut::with_capacity(BufFactory::MAX_BUF_SIZE)
-                    .limit(BufFactory::MAX_BUF_SIZE)
-            });
-            // NOTE: `body_recv_buf` is `Limit<BytesMut>` so
-            // `has_remaining_mut()` will indicate if the buffer
-            // has space available until the *limit* is
-            //  reached. (A plain `BytesMut` can reallocate and would always
-            // return true)
-            if !body_recv_buf.has_remaining_mut() {
-                *body_recv_buf =
-                    BytesMut::with_capacity(BufFactory::MAX_BUF_SIZE)
-                        .limit(BufFactory::MAX_BUF_SIZE);
+            let body_recv_buf = self
+                .body_recv_buf
+                .get_or_insert_with(|| BytesMut::with_capacity(want).limit(want));
+            // NOTE: `body_recv_buf` is `Limit<BytesMut>` so `remaining_mut()`
+            // reports the space left until the *limit* is reached. (A plain
+            // `BytesMut` can reallocate and would always report space available.)
+            //
+            // Reallocate whenever the room left is smaller than what we want for
+            // this read. This covers an exhausted buffer, but also grows a
+            // buffer that was previously sized to a smaller readable length so a
+            // later, larger read is not throttled by leftover capacity. Capacity
+            // is kept equal to the limit so the `split()` invariant asserted
+            // below (spare capacity == remaining_mut) continues to hold.
+            if body_recv_buf.remaining_mut() < want {
+                *body_recv_buf = BytesMut::with_capacity(want).limit(want);
             }
             match conn.recv_body_buf(qconn, stream_id, &mut *body_recv_buf) {
                 Ok(n) => {

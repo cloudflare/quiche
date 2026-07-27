@@ -4430,6 +4430,39 @@ fn stream_readable(
 }
 
 #[rstest]
+/// Tests `stream_readable_len`.
+fn stream_readable_len(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Unknown stream has no readable data.
+    assert_eq!(pipe.server.stream_readable_len(0), 0);
+
+    assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server has 5 buffered bytes to read.
+    assert_eq!(pipe.server.stream_readable_len(0), 5);
+
+    // Sending more data grows the readable count.
+    assert_eq!(pipe.client.stream_send(0, b"bbbbb", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_readable_len(0), 10);
+
+    // Reading some data shrinks the readable count.
+    let mut b = [0; 4];
+    assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((4, false)));
+    assert_eq!(pipe.server.stream_readable_len(0), 6);
+
+    // Draining the rest brings it back to 0.
+    let mut b = [0; 6];
+    assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((6, false)));
+    assert_eq!(pipe.server.stream_readable_len(0), 0);
+}
+
+#[rstest]
 /// Tests the writable iterator.
 fn stream_writable(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
