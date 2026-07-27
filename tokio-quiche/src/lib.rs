@@ -110,6 +110,19 @@
 //!
 //! - `--cfg capture_keylogs`: Optional `SSLKEYLOGFILE` capturing for QUIC
 //!   connections.
+//!
+//! # Custom qlog sinks
+//!
+//! In addition to the writer-backed [`QuicSettings::qlog_dir`] path, apps
+//! can install a custom [`qlog::QlogSink`] per connection by implementing
+//! [`ConnectionHook::create_qlog_sink`](crate::quic::ConnectionHook::create_qlog_sink).
+//! The hook takes precedence over `qlog_dir`. Apps can also switch
+//! the active sink on a live connection by sending a
+//! [`QuicCommand::Custom`](crate::quic::QuicCommand::Custom) closure that
+//! calls `quiche::Connection::set_qlog_sink_with_level` on the live
+//! [`QuicheConnection`](crate::quic::QuicheConnection).
+//!
+//! [`QuicSettings::qlog_dir`]: crate::settings::QuicSettings::qlog_dir
 
 pub extern crate quiche;
 

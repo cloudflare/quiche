@@ -671,7 +671,11 @@ impl std::fmt::Display for HexSlice<'_> {
 
 pub mod events;
 pub mod reader;
+pub mod sink;
 pub mod streamer;
+pub use sink::QlogEvent;
+pub use sink::QlogSink;
+pub use sink::QlogWriterSink;
 #[doc(hidden)]
 pub mod testing;
 pub mod writer;
