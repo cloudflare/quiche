@@ -110,8 +110,8 @@ pub(super) trait CongestionControl: Debug {
 
     fn is_in_recovery(&self) -> bool;
 
-    #[allow(dead_code)]
-    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool;
+    #[cfg(test)]
+    fn is_app_limited(&self) -> bool;
 
     fn pacing_rate(
         &self, bytes_in_flight: usize, rtt_stats: &RttStats,
