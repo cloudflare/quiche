@@ -1,0 +1,39 @@
+quiche/src/recovery/mod.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 155-157,166-168
+quiche/src/recovery/congestion/recovery.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 1308,1313,1315,1317
+tokio-quiche/src/settings/config.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 221-227
+tokio-quiche/tests/integration_tests/app_limited.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 46-47,53-62,66,86-97,99,163-164,188-191
+quiche/src/recovery/gcongestion/mod.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 142-147,283-288,293-294,298,302,306
+tokio-quiche/src/settings/mod.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 58-60,101-102,120-121
+quiche/src/recovery/gcongestion/recovery.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 1615,1620,1622,1624
+quiche/Cargo.toml
+  s_0273feb767df01::t_7d187dd1eb3c71 53,74
+tokio-quiche/src/settings/quic.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 176-184,508-529
+quiche/src/lib.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 417-418,579,611-640,692,1123-1132,1199-1200,1202,2643
+tokio-quiche/tests/fixtures/mod.rs
+  s_0273feb767df01::t_7d187dd1eb3c71 44-45,236-254,274-281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9899ebc35c4b5b2f72a42984af0a80fec55fca32",
+  "prompts": {},
+  "sessions": {
+    "s_0273feb767df01": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0570241fdffeocWRcMWfKzudNG",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    }
+  }
+}
