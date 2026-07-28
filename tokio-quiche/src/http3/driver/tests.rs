@@ -451,6 +451,68 @@ mod client_side_driver {
         assert!(helper.driver.body_recv_buf.is_none());
     }
 
+    /// An exhausted receive buffer is released while its stream remains
+    /// active, then allocated again for subsequent body data.
+    #[test]
+    fn client_body_recv_buf_releases_when_exhausted() {
+        // Permit one full floor-sized body in a single H3 DATA frame.
+        let mut config = default_quiche_config();
+        let max_data = 2 * MIN_BODY_RECV_BUF_SIZE as u64;
+        config.set_initial_max_data(max_data);
+        config.set_initial_max_stream_data_bidi_local(max_data);
+        config.set_initial_max_stream_data_bidi_remote(max_data);
+        config.set_initial_max_stream_data_uni(max_data);
+        let mut helper = DriverTestHelper::<ClientHooks>::with_pipe(
+            quiche::test_utils::Pipe::with_config_and_buf(&mut config).unwrap(),
+        )
+        .unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .driver_send_request(make_request_headers("GET"), true)
+            .unwrap();
+
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_server_poll().unwrap(),
+            (0, h3::Event::Headers { .. })
+        );
+        helper.peer_server_send_response(0, false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let resp = assert_matches!(
+            helper.driver_recv_core_event().unwrap(),
+            H3Event::IncomingHeaders(headers) => { headers }
+        );
+        assert_eq!(resp.stream_id, stream_id);
+        let mut from_server = resp.recv;
+
+        let full_body = vec![1; MIN_BODY_RECV_BUF_SIZE];
+        assert_eq!(
+            helper.peer_server_send_body(0, &full_body, false),
+            Ok(full_body.len())
+        );
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, full_body);
+        assert_eq!(helper.driver.stream_map.len(), 1);
+        assert!(helper.driver.body_recv_buf.is_none());
+
+        // The next body chunk allocates a fresh buffer.
+        helper.peer_server_send_body(0, &[2; 10], false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![2; 10]);
+        assert!(helper.driver.body_recv_buf.is_some());
+
+        helper.peer_server_send_body(0, &[3; 10], true).unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let (body, fin, _) = helper.driver_try_recv_body(&mut from_server);
+        assert_eq!(body, vec![3; 10]);
+        assert!(fin);
+        assert_eq!(helper.driver.stream_map.len(), 0);
+        assert!(helper.driver.body_recv_buf.is_none());
+    }
+
     /// Test that dropping the OutboundFrame channel causes the driver to
     /// send a RESET_STREAM frame to the peer.
     #[test]

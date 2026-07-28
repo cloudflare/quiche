@@ -588,6 +588,11 @@ impl<H: DriverHooks> H3Driver<H> {
                         body_recv_buf.get_mut().spare_capacity_mut().len(),
                         body_recv_buf.remaining_mut()
                     );
+                    // A full split leaves only an empty shared handle, so let
+                    // the forwarded frame own the allocation.
+                    if !body_recv_buf.has_remaining_mut() {
+                        self.body_recv_buf = None;
+                    }
                     permit.send(InboundFrame::Body(filled_body, false));
                 },
                 Err(h3::Error::Done) =>
