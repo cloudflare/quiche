@@ -20,7 +20,7 @@ workspace = true
 async = ["dep:tokio", "dep:tokio-quiche"]
 
 [dependencies]
-clap = "3"
+clap = "4"
 env_logger = { workspace = true }
 inquire = "0.9.1"
 log = { workspace = true, features = ["std"] }
