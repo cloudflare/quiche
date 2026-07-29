@@ -107,15 +107,15 @@ const HMM_MIN_DWELL: Duration = Duration::from_millis(80);
 
 /// RTTs the raw HMM argmax must continuously hold `Transient` before a
 /// transient episode is committed.
-const HMM_TRANSIENT_DWELL_RTTS: f32 = 1.0;
+const HMM_TRANSIENT_DWELL_RTTS: u32 = 1;
 
 /// RTTs the raw HMM argmax must continuously hold `Persistent` before a
 /// persistent jump is committed.
-const HMM_PERSIST_DWELL_RTTS: f32 = 5.0;
+const HMM_PERSIST_DWELL_RTTS: u32 = 5;
 
 /// RTTs the raw HMM argmax must continuously hold a calmer state before a
 /// committed episode exits.
-const HMM_CLEAR_DWELL_RTTS: f32 = 1.0;
+const HMM_CLEAR_DWELL_RTTS: u32 = 1;
 
 /// HMM persistent-state samples required before committing a persistent jump.
 const HMM_PERSIST_CONFIRM_SAMPLES: u32 = 3;
@@ -227,7 +227,7 @@ fn dwell_for_transition(
         HMM_CLEAR_DWELL_RTTS
     };
 
-    HMM_MIN_DWELL.max(rtt_sample.mul_f32(rtts))
+    HMM_MIN_DWELL.max(rtt_sample * rtts)
 }
 
 #[derive(Debug)]
