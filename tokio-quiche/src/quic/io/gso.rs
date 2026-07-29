@@ -123,7 +123,7 @@ pub async fn send_to(
 ) -> io::Result<usize> {
     // An instant with the value of zero, since [`Instant`] is backed by a version
     // of timespec this allows to extract raw values from an [`Instant`]
-    const INSTANT_ZERO: Instant = unsafe { std::mem::transmute(0u128) };
+    let instant_zero: Instant = unsafe { std::mem::zeroed() };
 
     let mut sendmsg_retry_timer = None;
     loop {
@@ -131,7 +131,7 @@ pub async fn send_to(
         let segment_size_u16 = segment_size as u16;
 
         let raw_time = tx_time
-            .map(|t| t.duration_since(INSTANT_ZERO).as_nanos() as u64)
+            .map(|t| t.duration_since(instant_zero).as_nanos() as u64)
             .unwrap_or(0);
 
         let pkt_info = from.map(PktInfo::from_socket_addr);
@@ -193,7 +193,7 @@ mod test {
     fn instant_zero() {
         use std::time::Instant;
 
-        const INSTANT_ZERO: Instant = unsafe { std::mem::transmute(0u128) };
+        let instant_zero: Instant = unsafe { std::mem::zeroed() };
         const NANOS_PER_SEC: u128 = 1_000_000_000;
 
         // Define a [`Timespec`] similar to the one backing [`Instant`]
@@ -206,7 +206,7 @@ mod test {
         let now = Instant::now();
         let now_timespec: Timespec = unsafe { std::mem::transmute(now) };
 
-        let ref_elapsed = now.duration_since(INSTANT_ZERO).as_nanos();
+        let ref_elapsed = now.duration_since(instant_zero).as_nanos();
         let raw_elapsed = now_timespec.tv_sec as u128 * NANOS_PER_SEC +
             now_timespec.tv_nsec as u128;
 
