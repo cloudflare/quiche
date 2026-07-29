@@ -539,6 +539,7 @@ pub enum QuicFrame {
         raw: Option<Box<RawInfo>>,
     },
 
+    /// See https://datatracker.ietf.org/doc/html/draft-ietf-quic-reliable-stream-reset/#section-4
     ResetStreamAt {
         stream_id: u64,
         error: ApplicationError,
