@@ -245,6 +245,11 @@ pub trait RecoveryOps {
 
     fn pto(&self) -> Duration;
 
+    /// Returns the PTO backoff duration (PTO * 3).
+    fn pto_backoff(&self) -> Duration {
+        self.pto() * 3
+    }
+
     /// The most recent data delivery rate estimate.
     fn delivery_rate(&self) -> Bandwidth;
 
