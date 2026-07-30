@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ConnectionRecord"],"fn":["connect"],"struct":["BuildingConnectionSummary","H3iDriver"]};
