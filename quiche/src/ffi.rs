@@ -223,6 +223,13 @@ pub extern "C" fn quiche_config_set_pmtud_max_probes(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_pmtud_raise_timer(
+    config: &mut Config, millis: u64,
+) {
+    config.set_pmtud_raise_timer(Duration::from_millis(millis));
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_log_keys(config: &mut Config) {
     config.log_keys();
 }

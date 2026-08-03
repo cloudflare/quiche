@@ -579,6 +579,7 @@ pub struct Config {
 
     pmtud: bool,
     pmtud_max_probes: u8,
+    pmtud_raise_timer: Option<Duration>,
 
     hystart: bool,
 
@@ -660,6 +661,7 @@ impl Config {
             enable_send_streams_blocked: false,
             pmtud: false,
             pmtud_max_probes: pmtud::MAX_PROBES_DEFAULT,
+            pmtud_raise_timer: None,
             hystart: true,
             pacing: true,
             max_pacing_rate: None,
@@ -784,6 +786,14 @@ impl Config {
     /// If 0 is passed, the default value is used.
     pub fn set_pmtud_max_probes(&mut self, max_probes: u8) {
         self.pmtud_max_probes = max_probes;
+    }
+
+    /// Configures how long PMTUD stays on a discovered PMTU before re-entering
+    /// the Search Phase to probe for a larger path MTU.
+    ///
+    /// Defaults to disabled. A duration of zero disables periodic re-probing.
+    pub fn set_pmtud_raise_timer(&mut self, raise_timer: Duration) {
+        self.pmtud_raise_timer = (!raise_timer.is_zero()).then_some(raise_timer);
     }
 
     /// Configures whether to send GREASE values.
@@ -1355,6 +1365,11 @@ where
 
     /// The configuration for recovery.
     recovery_config: recovery::RecoveryConfig,
+
+    /// Period on the discovered PMTU before re-entering the Search Phase,
+    /// applied to paths that enable PMTUD during the handshake. [`None`]
+    /// disables periodic re-probing.
+    pmtud_raise_timer: Option<Duration>,
 
     /// The path manager.
     paths: path::PathMap,
@@ -2080,6 +2095,8 @@ impl<F: BufFactory> Connection<F> {
 
             recovery_config,
 
+            pmtud_raise_timer: config.pmtud_raise_timer,
+
             paths,
             path_challenge_recv_max_queue_len: config
                 .path_challenge_recv_max_queue_len,
@@ -2683,7 +2700,10 @@ impl<F: BufFactory> Connection<F> {
     ) -> Result<()> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
 
-        ex_data.pmtud = Some((discover, max_probes));
+        ex_data.pmtud = Some(pmtud::PmtudParams {
+            enable: discover,
+            max_probes,
+        });
 
         Ok(())
     }
@@ -3538,7 +3558,7 @@ impl<F: BufFactory> Connection<F> {
                             // Ensure the probe is within the supported MTU range
                             // before updating the max datagram size
                             if let Some(current_mtu) =
-                                pmtud.successful_probe(mtu_probe)
+                                pmtud.successful_probe(mtu_probe, now)
                             {
                                 qlog_with_type!(
                                     EventType::QuicEventType(
@@ -4295,7 +4315,7 @@ impl<F: BufFactory> Connection<F> {
                         if let Some(failed_probe) = mtu_probe {
                             if let Some(pmtud) = p.pmtud.as_mut() {
                                 trace!("pmtud probe dropped: {failed_probe}");
-                                pmtud.failed_probe(failed_probe);
+                                pmtud.failed_probe(failed_probe, now);
                             }
                         }
                     },
@@ -7036,12 +7056,23 @@ impl<F: BufFactory> Connection<F> {
                 .filter_map(|(_, p)| p.recovery.loss_detection_timer())
                 .min();
 
+            let pmtud_raise_timer = self
+                .paths
+                .iter()
+                .filter_map(|(_, p)| p.pmtud.as_ref()?.raise_timer())
+                .min();
+
             let key_update_timer = self.crypto_ctx[packet::Epoch::Application]
                 .key_update
                 .as_ref()
                 .map(|key_update| key_update.timer);
 
-            let timers = [self.idle_timer, path_timer, key_update_timer];
+            let timers = [
+                self.idle_timer,
+                path_timer,
+                pmtud_raise_timer,
+                key_update_timer,
+            ];
 
             timers.iter().filter_map(|&x| x).min()
         }
@@ -7069,8 +7100,10 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// If no timeout has occurred it does nothing.
     pub fn on_timeout(&mut self) {
-        let now = Instant::now();
+        self.on_timeout_at(Instant::now());
+    }
 
+    fn on_timeout_at(&mut self, now: Instant) {
         if let Some(draining_timer) = self.draining_timer {
             if draining_timer <= now {
                 trace!("{} draining timeout expired", self.trace_id);
@@ -7131,6 +7164,10 @@ impl<F: BufFactory> Connection<F> {
                         p.recovery.maybe_qlog(q, now);
                     });
                 }
+            }
+
+            if let Some(pmtud) = p.pmtud.as_mut() {
+                pmtud.on_raise_timeout(now);
             }
         }
 
@@ -8061,11 +8098,11 @@ impl<F: BufFactory> Connection<F> {
                         self.tx_cap_factor = ex_data.tx_cap_factor;
                     }
 
-                    if let Some((discover, max_probes)) = ex_data.pmtud {
+                    if let Some(params) = ex_data.pmtud {
                         self.paths.set_discover_pmtu_on_existing_paths(
-                            discover,
+                            params,
+                            self.pmtud_raise_timer,
                             self.recovery_config.max_send_udp_payload_size,
-                            max_probes,
                         );
                     }
 

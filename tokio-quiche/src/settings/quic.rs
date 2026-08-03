@@ -197,6 +197,14 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_pmtud_max_probes")]
     pub pmtud_max_probes: u8,
 
+    /// Configures how long PMTUD stays on a discovered PMTU before re-entering
+    /// the Search Phase to probe for a larger path MTU.
+    ///
+    /// Defaults to disabled. `None` or zero disables periodic re-probing.
+    #[serde(rename = "pmtud_raise_timer_ms")]
+    #[serde_as(as = "Option<DurationMilliSeconds>")]
+    pub pmtud_raise_timer: Option<Duration>,
+
     /// Whether to use HyStart++ (only with `cubic` and `reno` CC).
     ///
     /// Defaults to `true`.
@@ -508,11 +516,20 @@ mod test {
     #[test]
     fn timeouts_parse_as_milliseconds() {
         let quic = serde_json::from_str::<QuicSettings>(
-            r#"{ "handshake_timeout_ms": 5000, "max_idle_timeout_ms": 7000 }"#,
+            r#"{ "handshake_timeout_ms": 5000, "max_idle_timeout_ms": 7000, "pmtud_raise_timer_ms": 300000 }"#,
         )
         .unwrap();
 
         assert_eq!(quic.handshake_timeout.unwrap(), Duration::from_secs(5));
         assert_eq!(quic.max_idle_timeout.unwrap(), Duration::from_secs(7));
+        assert_eq!(quic.pmtud_raise_timer.unwrap(), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn pmtud_raise_timer_is_disabled_when_omitted() {
+        let quic = serde_json::from_str::<QuicSettings>("{}")
+            .expect("default settings deserialize");
+
+        assert_eq!(quic.pmtud_raise_timer, None);
     }
 }
