@@ -4587,8 +4587,8 @@ impl<F: BufFactory> Connection<F> {
             // In addition, the PMTUD probe is only generated when the handshake
             // is confirmed, to avoid interfering with the handshake
             // (e.g. due to the anti-amplification limits).
-            if let Ok(active_path) = self.paths.get_active_mut() {
-                let should_probe_pmtu = active_path.should_send_pmtu_probe(
+            if let Ok(send_path) = self.paths.get_mut(send_pid) {
+                let should_probe_pmtu = send_path.should_send_pmtu_probe(
                     self.handshake_confirmed,
                     self.handshake_completed,
                     out_len,
@@ -4597,7 +4597,7 @@ impl<F: BufFactory> Connection<F> {
                 );
 
                 if should_probe_pmtu {
-                    if let Some(pmtud) = active_path.pmtud.as_mut() {
+                    if let Some(pmtud) = send_path.pmtud.as_mut() {
                         let probe_size = pmtud.get_probe_size();
                         trace!(
                         "{} sending pmtud probe pmtu_probe={} estimated_pmtu={}",
@@ -4620,7 +4620,7 @@ impl<F: BufFactory> Connection<F> {
                                 //
                                 // In such case app_limited is set to false here
                                 // to make cwnd grow when ACK is received.
-                                active_path.recovery.update_app_limited(false);
+                                send_path.recovery.update_app_limited(false);
                                 return Err(Error::Done);
                             },
                         }
