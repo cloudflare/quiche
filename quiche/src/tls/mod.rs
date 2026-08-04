@@ -711,8 +711,8 @@ pub struct ExData<'a> {
 
     pub tx_cap_factor: f64,
 
-    /// PMTUD configuration: (enable, max_probes)
-    pub pmtud: Option<(bool, u8)>,
+    /// PMTUD configuration to apply to the connection's paths.
+    pub pmtud: Option<crate::pmtud::PmtudConfig>,
 
     pub is_server: bool,
 }

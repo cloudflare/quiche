@@ -579,6 +579,7 @@ pub struct Config {
 
     pmtud: bool,
     pmtud_max_probes: u8,
+    pmtud_pkts_between_probes: usize,
 
     hystart: bool,
 
@@ -660,6 +661,7 @@ impl Config {
             enable_send_streams_blocked: false,
             pmtud: false,
             pmtud_max_probes: pmtud::MAX_PROBES_DEFAULT,
+            pmtud_pkts_between_probes: pmtud::PKTS_BETWEEN_PROBES,
             hystart: true,
             pacing: true,
             max_pacing_rate: None,
@@ -784,6 +786,14 @@ impl Config {
     /// If 0 is passed, the default value is used.
     pub fn set_pmtud_max_probes(&mut self, max_probes: u8) {
         self.pmtud_max_probes = max_probes;
+    }
+
+    /// Configures the number of non-probe packets that must be sent between
+    /// PMTUD probes.
+    ///
+    /// The default value is `0`.
+    pub fn set_pmtud_pkts_between_probes(&mut self, pkts: usize) {
+        self.pmtud_pkts_between_probes = pkts;
     }
 
     /// Configures whether to send GREASE values.
@@ -2683,7 +2693,11 @@ impl<F: BufFactory> Connection<F> {
     ) -> Result<()> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
 
-        ex_data.pmtud = Some((discover, max_probes));
+        ex_data.pmtud = Some(pmtud::PmtudConfig {
+            enable: discover,
+            max_probes,
+            pkts_between_probes: pmtud::PKTS_BETWEEN_PROBES,
+        });
 
         Ok(())
     }
@@ -4004,7 +4018,7 @@ impl<F: BufFactory> Connection<F> {
 
         let send_path = self.paths.get_mut(send_pid)?;
 
-        // Update max datagram size to allow path MTU discovery probe to be sent.
+        // Increase output size to allow path MTU discovery probe to be sent.
         if let Some(pmtud) = send_path.pmtud.as_mut() {
             if pmtud.should_probe() {
                 let size = if self.handshake_confirmed || self.handshake_completed
@@ -4014,10 +4028,7 @@ impl<F: BufFactory> Connection<F> {
                     pmtud.get_current_mtu()
                 };
 
-                send_path.recovery.pmtud_update_max_datagram_size(size);
-
-                left =
-                    cmp::min(out.len(), send_path.recovery.max_datagram_size());
+                left = cmp::min(out.len(), size);
             }
         }
 
@@ -4296,6 +4307,9 @@ impl<F: BufFactory> Connection<F> {
                             if let Some(pmtud) = p.pmtud.as_mut() {
                                 trace!("pmtud probe dropped: {failed_probe}");
                                 pmtud.failed_probe(failed_probe);
+                                p.recovery.pmtud_update_max_datagram_size(
+                                    pmtud.get_current_mtu(),
+                                );
                             }
                         }
                     },
@@ -5488,6 +5502,12 @@ impl<F: BufFactory> Connection<F> {
         self.sent_bytes += written as u64;
         path.sent_count += 1;
         path.sent_bytes += written as u64;
+
+        if !is_pmtud_probe {
+            if let Some(pmtud) = path.pmtud.as_mut() {
+                pmtud.on_non_probe_sent();
+            }
+        }
 
         if self.dgram_send_queue.byte_size() > path.recovery.cwnd_available() {
             path.recovery.update_app_limited(false);
@@ -7988,7 +8008,7 @@ impl<F: BufFactory> Connection<F> {
                     .pmtud
                     .as_mut()
                     .expect("PMTUD existence verified above")
-                    .get_probe_size()
+                    .get_current_mtu()
                     .min(peer_params.max_udp_payload_size as usize),
             );
         } else {
@@ -8061,11 +8081,10 @@ impl<F: BufFactory> Connection<F> {
                         self.tx_cap_factor = ex_data.tx_cap_factor;
                     }
 
-                    if let Some((discover, max_probes)) = ex_data.pmtud {
+                    if let Some(params) = ex_data.pmtud {
                         self.paths.set_discover_pmtu_on_existing_paths(
-                            discover,
+                            params,
                             self.recovery_config.max_send_udp_payload_size,
-                            max_probes,
                         );
                     }
 

@@ -177,6 +177,10 @@ void quiche_config_grease(quiche_config *config, bool v);
 // Configures whether to do path MTU discovery.
 void quiche_config_discover_pmtu(quiche_config *config, bool v);
 
+// Configures the number of non-probe packets between PMTUD probes.
+void quiche_config_set_pmtud_pkts_between_probes(quiche_config *config,
+                                                 size_t pkts);
+
 // Enables logging of secrets.
 void quiche_config_log_keys(quiche_config *config);
 
