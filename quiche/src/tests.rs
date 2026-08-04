@@ -11952,7 +11952,19 @@ fn pmtud_probe_success(
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
-    // Send probe and let it be acknowledged
+    // Send the probe, but don't deliver it yet.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .max_datagram_size(),
+        1200,
+    );
+
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
     assert_eq!(pipe.advance(), Ok(()));
 
     // Verify probing is disabled after successful probe
@@ -11969,9 +11981,56 @@ fn pmtud_probe_success(
     // Verify MTU was updated
     let current_mtu = pmtud.get_current_mtu();
     assert_eq!(current_mtu, 1400);
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .max_datagram_size(),
+        current_mtu,
+    );
 
     let path_stats = pipe.client.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, current_mtu);
+}
+
+#[rstest]
+fn pmtud_probe_loss_restores_recovery_mss(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_max_send_udp_payload_size(1400);
+    config.discover_pmtu(true);
+    config.set_pmtud_max_probes(1);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let mut out = [0; 4096];
+    let _ = pipe.client.send(&mut out).unwrap();
+    let (probe_size, _) = pipe.client.send(&mut out).unwrap();
+    assert_eq!(probe_size, 1400);
+
+    let active_path = pipe.client.paths.get_active_mut().unwrap();
+    let current_mtu = active_path.pmtud.as_ref().unwrap().get_current_mtu();
+    active_path
+        .recovery
+        .pmtud_update_max_datagram_size(probe_size);
+
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
+
+    let _ = pipe.client.send(&mut out);
+
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .max_datagram_size(),
+        current_mtu,
+    );
 }
 
 #[rstest]
