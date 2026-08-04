@@ -12003,6 +12003,7 @@ fn pmtud_probe_loss_restores_recovery_mss(
     config.set_max_send_udp_payload_size(1400);
     config.discover_pmtu(true);
     config.set_pmtud_max_probes(1);
+    config.set_pmtud_pkts_between_probes(100);
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
@@ -12022,15 +12023,9 @@ fn pmtud_probe_loss_restores_recovery_mss(
 
     let _ = pipe.client.send(&mut out);
 
-    assert_eq!(
-        pipe.client
-            .paths
-            .get_active()
-            .unwrap()
-            .recovery
-            .max_datagram_size(),
-        current_mtu,
-    );
+    let active_path = pipe.client.paths.get_active().unwrap();
+    assert!(!active_path.pmtud.as_ref().unwrap().should_probe());
+    assert_eq!(active_path.recovery.max_datagram_size(), current_mtu);
 }
 
 #[rstest]
