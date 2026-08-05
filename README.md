@@ -99,7 +99,7 @@ to set these to something else to satisfy their needs using the following:
 - [`set_initial_max_stream_data_uni()`]
 
 [`Config`] also holds TLS configuration. This can be changed by mutators on
-the an existing object, or by constructing a TLS context manually and
+an existing object, or by constructing a TLS context manually and
 creating a configuration using [`with_boring_ssl_ctx_builder()`].
 
 A configuration object can be shared among multiple connections.
