@@ -5477,6 +5477,105 @@ fn stream_zero_length_fin_deferred_collection(
 }
 
 #[rstest]
+/// Tests that stream_send_complete() only reports true once the peer has
+/// acked the fin, and not merely when it has been queued or sent.
+fn stream_send_complete_waits_for_ack(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // The final size is unknown until the fin is sent, so an acked stream
+    // with more data to come is not complete.
+    assert_eq!(pipe.client.stream_send(4, b"hello, ", false), Ok(7));
+    assert!(!pipe.client.stream_send_complete(4));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(!pipe.client.stream_send_complete(4));
+
+    // Queueing the fin is not enough: it hasn't left the connection.
+    assert_eq!(pipe.client.stream_send(4, b"world", true), Ok(5));
+    assert!(!pipe.client.stream_send_complete(4));
+
+    // Deliver the fin to the server, but hold on to its ack. This is the state
+    // that distinguishes this from stream_capacity(): the peer has the data,
+    // but we can't know that yet, and the frames are still eligible for
+    // retransmission.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    assert!(!pipe.client.stream_send_complete(4));
+
+    // Deliver the ack.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    assert!(pipe.client.stream_send_complete(4));
+}
+
+#[rstest]
+/// Tests that stream_send_complete() reports a zero-length fin, which has no
+/// stream data to ack, as complete.
+fn stream_send_complete_zero_length_fin(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"", true), Ok(0));
+    assert!(!pipe.client.stream_send_complete(4));
+
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.client.stream_send_complete(4));
+}
+
+#[rstest]
+/// Tests that stream_send_complete() reports a stream reset by the local
+/// endpoint, or stopped by the peer, as incomplete: neither delivers the fin.
+fn stream_send_complete_reset(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Locally reset before the fin is sent.
+    assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+    assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(!pipe.client.stream_send_complete(4));
+
+    // Stopped by the peer before the fin is sent.
+    assert_eq!(pipe.client.stream_send(8, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_shutdown(8, Shutdown::Read, 42), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(!pipe.client.stream_send_complete(8));
+}
+
+#[rstest]
+/// Tests that stream_send_complete() reports a collected stream as complete.
+/// A local unidirectional stream is dropped as soon as the fin is acked, so
+/// the state it would otherwise read is already gone.
+fn stream_send_complete_collected(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(2, b"hello", true), Ok(5));
+    assert!(!pipe.client.stream_send_complete(2));
+
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // The stream is gone, so stream_capacity() no longer answers for it.
+    assert_eq!(
+        pipe.client.stream_capacity(2),
+        Err(Error::InvalidStreamState(2))
+    );
+    assert!(pipe.client.stream_send_complete(2));
+
+    // A stream that was never opened reads the same way.
+    assert!(pipe.client.stream_send_complete(6));
+}
+
+#[rstest]
 /// Tests that the stream gets created with stream_send() even if there's
 /// no data in the buffer and the fin flag is not set.
 fn stream_zero_length_non_fin(

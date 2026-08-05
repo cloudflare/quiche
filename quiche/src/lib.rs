@@ -6547,6 +6547,50 @@ impl<F: BufFactory> Connection<F> {
         stream.recv.is_fin()
     }
 
+    /// Returns true if the peer has acked all the data sent on the specified
+    /// stream, including the `fin` flag.
+    ///
+    /// This is the send-side counterpart to [`stream_finished()`]. Where
+    /// [`stream_send()`] returning with `fin` set only means the FIN was
+    /// queued, this reports that it actually reached the peer, so an
+    /// application can tell a delivered stream apart from one that is still
+    /// retransmitting. That distinction matters when the stream is about to be
+    /// reset: [`stream_shutdown()`] on a stream with unacked data discards it,
+    /// whereas on a completed stream it cannot lose anything.
+    ///
+    /// Returns false while data or the FIN are still in flight, and while the
+    /// final size is unknown because `fin` hasn't been sent yet. A stream that
+    /// was reset locally, or stopped by the peer, also reads as incomplete:
+    /// neither delivers the FIN.
+    ///
+    /// Note that an unknown stream ID reads as complete, mirroring
+    /// [`stream_finished()`]. quiche drops a stream's state once it can make no
+    /// further progress, so a stream that completed cleanly and one that was
+    /// reset are indistinguishable after collection. An application that resets
+    /// a stream is expected to remember it did.
+    ///
+    /// [`stream_finished()`]: struct.Connection.html#method.stream_finished
+    /// [`stream_send()`]: struct.Connection.html#method.stream_send
+    /// [`stream_shutdown()`]: struct.Connection.html#method.stream_shutdown
+    #[inline]
+    pub fn stream_send_complete(&self, stream_id: u64) -> bool {
+        let stream = match self.streams.get(stream_id) {
+            Some(v) => v,
+
+            None => return true,
+        };
+
+        // `send.is_complete()` is what decides whether the stream can be
+        // collected, so a reset counts as complete there: there is nothing left
+        // to send either way. Here it would be a lie, because the FIN never
+        // reached the peer.
+        if stream.send.is_shutdown() || stream.send.is_stopped() {
+            return false;
+        }
+
+        stream.send.is_complete()
+    }
+
     /// Returns true if the specified stream is closed.
     ///
     /// For bidirectional streams this happens when both the receive and send
