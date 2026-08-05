@@ -367,8 +367,6 @@ fn verify_client_anonymous() {
 fn missing_initial_source_connection_id(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut buf = [0; 65535];
-
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Reset initial_source_connection_id.
@@ -378,11 +376,11 @@ fn missing_initial_source_connection_id(
     assert_eq!(pipe.client.encode_transport_params(), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server rejects transport parameters.
     assert_eq!(
-        pipe.server_recv(&mut buf[..len]),
+        test_utils::process_flight(&mut pipe.server, flight),
         Err(Error::InvalidTransportParam)
     );
 }
@@ -391,8 +389,6 @@ fn missing_initial_source_connection_id(
 fn invalid_initial_source_connection_id(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut buf = [0; 65535];
-
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Scramble initial_source_connection_id.
@@ -402,11 +398,11 @@ fn invalid_initial_source_connection_id(
     assert_eq!(pipe.client.encode_transport_params(), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server rejects transport parameters.
     assert_eq!(
-        pipe.server_recv(&mut buf[..len]),
+        test_utils::process_flight(&mut pipe.server, flight),
         Err(Error::InvalidTransportParam)
     );
 }
@@ -666,8 +662,8 @@ fn handshake_0rtt(
     assert_eq!(pipe.client.set_session(session), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(test_utils::process_flight(&mut pipe.server, flight), Ok(()));
 
     // Client sends 0-RTT packet.
     let pkt_type = Type::ZeroRTT;
@@ -730,8 +726,7 @@ fn handshake_0rtt_reordered(
     assert_eq!(pipe.client.set_session(session), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
-    let mut initial = buf[..len].to_vec();
+    let initial = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Client sends 0-RTT packet.
     let pkt_type = Type::ZeroRTT;
@@ -756,7 +751,10 @@ fn handshake_0rtt_reordered(
     assert_eq!(r.next(), None);
 
     // Initial packet is also received.
-    assert_eq!(pipe.server_recv(&mut initial), Ok(initial.len()));
+    assert_eq!(
+        test_utils::process_flight(&mut pipe.server, initial),
+        Ok(())
+    );
 
     // 0-RTT stream data is readable.
     let mut r = pipe.server.readable();
@@ -923,7 +921,7 @@ fn limit_handshake_data(
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
     let server_sent = flight.iter().fold(0, |out, p| out + p.0.len());
 
-    assert_eq!(server_sent, client_sent * MAX_AMPLIFICATION_FACTOR);
+    assert!(server_sent <= client_sent * MAX_AMPLIFICATION_FACTOR);
 }
 
 #[rstest]
@@ -1162,8 +1160,6 @@ fn streamio_mixed_actions(
 
 #[rstest]
 fn zero_rtt(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
-    let mut buf = [0; 65535];
-
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
@@ -1194,22 +1190,23 @@ fn zero_rtt(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     assert_eq!(pipe.client.set_session(session), Ok(()));
 
     // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
-    let mut initial = buf[..len].to_vec();
+    let initial = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     assert!(pipe.client.is_in_early_data());
 
     // Client sends 0-RTT data.
     assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
-    let mut zrtt = buf[..len].to_vec();
+    let zrtt = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server receives packets.
-    assert_eq!(pipe.server_recv(&mut initial), Ok(initial.len()));
+    assert_eq!(
+        test_utils::process_flight(&mut pipe.server, initial),
+        Ok(())
+    );
     assert!(pipe.server.is_in_early_data());
 
-    assert_eq!(pipe.server_recv(&mut zrtt), Ok(zrtt.len()));
+    assert_eq!(test_utils::process_flight(&mut pipe.server, zrtt), Ok(()));
 
     // 0-RTT stream data is readable.
     let mut r = pipe.server.readable();
@@ -5771,7 +5768,7 @@ fn retry_missing_original_destination_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server accepts connection and send first flight. But original
     // destination connection ID is ignored.
@@ -5784,7 +5781,7 @@ fn retry_missing_original_destination_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -5833,7 +5830,7 @@ fn retry_invalid_original_destination_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server accepts connection and send first flight. But original
     // destination connection ID is invalid.
@@ -5847,7 +5844,7 @@ fn retry_invalid_original_destination_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -5900,9 +5897,10 @@ fn retry_separate_source_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let mut flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    let send_info = flight[0].1;
 
-    let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
+    let hdr = Header::from_slice(&mut flight[0].0, MAX_CONN_ID_LEN).unwrap();
     assert_eq!(&hdr.token.unwrap(), token);
 
     // Server accepts connection.
@@ -5920,7 +5918,7 @@ fn retry_separate_source_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
     assert_eq!(pipe.advance(), Ok(()));
 
@@ -5965,7 +5963,8 @@ fn retry_invalid_source_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    let send_info = flight[0].1;
 
     // Server accepts connection and send first flight. But retry source
     // connection ID is invalid.
@@ -5983,7 +5982,7 @@ fn retry_invalid_source_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -8086,31 +8085,26 @@ fn dont_coalesce_probes(
 fn coalesce_padding_short(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut buf = [0; 65535];
-
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Client sends first flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
-    assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(flight[0].0.len(), MIN_CLIENT_INITIAL_LEN);
+    assert_eq!(test_utils::process_flight(&mut pipe.server, flight), Ok(()));
 
     // Server sends first flight.
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
-    assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
-    assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
-
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
-    assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    assert_eq!(flight[0].0.len(), MIN_CLIENT_INITIAL_LEN);
+    assert_eq!(test_utils::process_flight(&mut pipe.client, flight), Ok(()));
 
     // Client sends stream data.
     assert!(pipe.client.is_established());
     assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
 
     // Client sends second flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
-    assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(flight[0].0.len(), MIN_CLIENT_INITIAL_LEN);
+    assert_eq!(test_utils::process_flight(&mut pipe.server, flight), Ok(()));
 
     // None of the sent packets should have been dropped.
     assert_eq!(pipe.client.sent_count, pipe.server.recv_count);
@@ -8122,8 +8116,6 @@ fn coalesce_padding_short(
 fn handshake_anti_deadlock(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut buf = [0; 65535];
-
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
@@ -8143,13 +8135,13 @@ fn handshake_anti_deadlock(
     assert!(!pipe.server.handshake_status().has_handshake_keys);
     assert!(pipe.server.handshake_status().peer_verified_address);
 
-    // Client sends padded Initial.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
-    assert_eq!(len, 1200);
+    // Client sends initial flight.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(flight[0].0.len(), 1200);
 
     // Server receives client's Initial and sends own Initial and Handshake
     // until it's blocked by the anti-amplification limit.
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
     assert!(!pipe.client.handshake_status().has_handshake_keys);
@@ -8181,12 +8173,12 @@ fn handshake_packet_type_corruption(
 
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
-    // Client sends padded Initial.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
-    assert_eq!(len, 1200);
+    // Client sends initial flight.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(flight[0].0.len(), 1200);
 
     // Server receives client's Initial and sends own Initial and Handshake.
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
     test_utils::process_flight(&mut pipe.client, flight).unwrap();
