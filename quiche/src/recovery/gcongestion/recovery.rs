@@ -33,6 +33,7 @@ use crate::recovery::RecoveryStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::Sent;
 use crate::recovery::StartupExit;
+use crate::recovery::ACK_LOOP_WINDOW;
 use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
@@ -267,14 +268,17 @@ impl RecoveryEpoch {
     }
 
     fn detect_and_remove_lost_packets(
-        &mut self, loss_delay: Duration, pkt_thresh: Option<u64>, now: Instant,
-        newly_lost: &mut Vec<Lost>,
+        &mut self, loss_delay: Duration, pkt_thresh: Option<u64>,
+        pkt_age_gate: Duration, now: Instant, newly_lost: &mut Vec<Lost>,
     ) -> LossDetectionResult {
         newly_lost.clear();
         let mut lost_bytes = 0;
         self.loss_time = None;
 
         let lost_send_time = now.checked_sub(loss_delay).unwrap();
+        // The reordering threshold only convicts a packet old enough
+        // that its acknowledgement had a fair chance to be processed.
+        let pkt_gate_time = now.checked_sub(pkt_age_gate).unwrap();
         let largest_acked = self.largest_acked_packet.unwrap_or(0);
         let mut pmtud_lost_bytes = 0;
         let mut pmtud_lost_packets = SmallVec::new();
@@ -287,7 +291,9 @@ impl RecoveryEpoch {
             if let SentStatus::Sent { time_sent, .. } = status {
                 let loss_by_time = *time_sent <= lost_send_time;
                 let loss_by_pkt = match pkt_thresh {
-                    Some(pkt_thresh) => largest_acked >= *pkt_num + pkt_thresh,
+                    Some(pkt_thresh) =>
+                        largest_acked >= *pkt_num + pkt_thresh &&
+                            *time_sent <= pkt_gate_time,
                     None => false,
                 };
 
@@ -460,6 +466,13 @@ pub struct GRecovery {
 
     loss_timer: LossDetectionTimer,
 
+    // The worst full-loop ack latency (send to processed acknowledgement)
+    // seen in the current window, and when it was recorded. Only used
+    // when `enable_ack_latency_loss_floor` is set.
+    ack_loop_max: Duration,
+    ack_loop_at: Option<Instant>,
+    ack_latency_loss_floor: bool,
+
     pto_count: u32,
 
     rtt_stats: RttStats,
@@ -531,6 +544,9 @@ impl GRecovery {
             ),
             recovery_stats: RecoveryStats::default(),
             loss_timer: Default::default(),
+            ack_loop_max: Duration::ZERO,
+            ack_loop_at: None,
+            ack_latency_loss_floor: recovery_config.enable_ack_latency_loss_floor,
             pto_count: 0,
 
             lost_count: 0,
@@ -568,8 +584,12 @@ impl GRecovery {
     fn detect_and_remove_lost_packets(
         &mut self, epoch: packet::Epoch, now: Instant,
     ) -> (usize, usize) {
-        let loss_delay =
+        let mut loss_delay =
             self.rtt_stats.loss_delay(self.loss_thresh.time_thresh());
+        if self.ack_latency_loss_floor {
+            loss_delay =
+                loss_delay.max(self.ack_loop_max.saturating_add(GRANULARITY));
+        }
         let lost = &mut self.lost_reuse;
 
         let LossDetectionResult {
@@ -580,6 +600,7 @@ impl GRecovery {
         } = self.epochs[epoch].detect_and_remove_lost_packets(
             loss_delay,
             self.loss_thresh.pkt_thresh(),
+            self.ack_loop_max,
             now,
             lost,
         );
@@ -838,6 +859,25 @@ impl RecoveryOps for GRecovery {
                 spurious_losses,
                 ..Default::default()
             });
+        }
+
+        // The slowest acknowledgement in this batch proves how late an
+        // honest ack can currently be. Windowed so a transient stall
+        // stops inflating the loss delay shortly after it passes.
+        if self.ack_latency_loss_floor {
+            let batch_loop = self
+                .newly_acked
+                .iter()
+                .map(|acked| now.saturating_duration_since(acked.time_sent))
+                .max()
+                .unwrap_or(Duration::ZERO);
+            let expired = self.ack_loop_at.is_none_or(|at| {
+                now.saturating_duration_since(at) > ACK_LOOP_WINDOW
+            });
+            if expired || batch_loop >= self.ack_loop_max {
+                self.ack_loop_max = batch_loop;
+                self.ack_loop_at = Some(now);
+            }
         }
 
         self.bytes_in_flight.saturating_subtract(acked_bytes, now);
