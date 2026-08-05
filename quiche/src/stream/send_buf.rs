@@ -122,6 +122,13 @@ where
     /// The final stream offset written to the stream, if any.
     fin_off: Option<u64>,
 
+    /// Whether the peer acked the `fin` itself, rather than just the stream
+    /// data up to the final offset.
+    ///
+    /// Tracked separately because a `fin` carries no bytes of its own, so it
+    /// leaves no trace in `acked`.
+    fin_acked: bool,
+
     /// Whether the stream's send-side has been shut down.
     shutdown: bool,
 
@@ -324,6 +331,14 @@ impl<F: BufFactory> SendBuf<F> {
         self.acked.insert(off..off + len as u64);
     }
 
+    /// Records that the peer acked a frame carrying the `fin`.
+    ///
+    /// Only the `fin` conveys the final size, and it occupies no offset of its
+    /// own, so it has to be tracked apart from the acked ranges.
+    pub fn ack_fin(&mut self) {
+        self.fin_acked = true;
+    }
+
     pub fn ack_and_drop(&mut self, off: u64, len: usize) -> usize {
         self.ack(off, len);
 
@@ -441,6 +456,11 @@ impl<F: BufFactory> SendBuf<F> {
 
         self.fin_off = Some(unsent_off);
 
+        // A RESET_STREAM carries the final size in place of the `fin`, so the
+        // stream can complete without one ever being sent. Without this the
+        // stream would never be collected.
+        self.fin_acked = true;
+
         // Drop all buffered data.
         self.data.clear();
 
@@ -520,9 +540,20 @@ impl<F: BufFactory> SendBuf<F> {
 
     /// Returns true if the send-side of the stream is complete.
     ///
-    /// This happens when the stream's send final size is known, and the peer
-    /// has already acked all stream data up to that point.
+    /// This happens when the stream's send final size is known, the peer has
+    /// acked all stream data up to that point, and it has acked the `fin` that
+    /// carries the final size.
     pub fn is_complete(&self) -> bool {
+        // A `fin` adds no bytes, so acking the data up to the final offset says
+        // nothing about whether the peer learned the final size. A zero-length
+        // `fin` written at an already-acked offset would otherwise report the
+        // stream complete before the frame carrying it has even been built, and
+        // the caller collects the stream on the strength of that, dropping the
+        // `fin` for good.
+        if !self.fin_acked {
+            return false;
+        }
+
         if let Some(fin_off) = self.fin_off {
             if self.acked == (0..fin_off) {
                 return true;
