@@ -6404,28 +6404,28 @@ impl<F: BufFactory> Connection<F> {
         stream.is_readable()
     }
 
-    /// Returns the number of bytes that can currently be read from a stream
-    /// without gaps.
+    /// Returns the number of contiguous bytes buffered for a stream, up to
+    /// `max_len`.
     ///
     /// This is the length of the contiguous, in-order data buffered at the
-    /// stream's current read offset, up to 64 KiB, i.e. the bytes a call to
-    /// [`stream_recv`] would return right now. Data received out of order that
-    /// sits behind a gap is not counted, so this never reports bytes that are
-    /// not yet readable.
+    /// stream's current read offset, i.e. the bytes a call to [`stream_recv`]
+    /// would return right now. Data received out of order that sits behind a
+    /// gap is not counted, so this never reports bytes that are not yet
+    /// readable.
     ///
     /// This is a companion to [`stream_readable`], which only reports *whether*
     /// data is available; this reports *how much*. It is intended for sizing a
     /// receive buffer. The cost is proportional to the number of contiguous
-    /// buffered chunks at the front of the stream, up to 64 KiB, and no data is
-    /// copied.
+    /// buffered chunks at the front of the stream, up to `max_len`, and no data
+    /// is copied.
     ///
-    /// Returns 0 if the stream does not exist or has no data ready to read.
+    /// Returns 0 if the stream does not exist.
     ///
     /// [`stream_recv`]: struct.Connection.html#method.stream_recv
     /// [`stream_readable`]: struct.Connection.html#method.stream_readable
-    pub fn stream_readable_len(&self, stream_id: u64) -> usize {
+    pub fn stream_readable_len(&self, stream_id: u64, max_len: usize) -> usize {
         match self.streams.get(stream_id) {
-            Some(s) => s.recv.readable_len(),
+            Some(s) => s.recv.readable_len(max_len),
 
             None => 0,
         }
