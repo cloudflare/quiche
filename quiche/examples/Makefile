@@ -28,16 +28,16 @@ LIBS = $(LIB_DIR)/libquiche.a -lev -ldl -pthread -lm
 all: client server http3-client http3-server
 
 client: client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
+	$(CXX) $(CFLAGS) $(LDFLAGS) -x c $< -x none -o $@ $(INCS) $(LIBS)
 
 server: server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
+	$(CXX) $(CFLAGS) $(LDFLAGS) -x c $< -x none -o $@ $(INCS) $(LIBS)
 
 http3-client: http3-client.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
+	$(CXX) $(CFLAGS) $(LDFLAGS) -x c $< -x none -o $@ $(INCS) $(LIBS)
 
 http3-server: http3-server.c $(INCLUDE_DIR)/quiche.h $(LIB_DIR)/libquiche.a
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(INCS) $(LIBS)
+	$(CXX) $(CFLAGS) $(LDFLAGS) -x c $< -x none -o $@ $(INCS) $(LIBS)
 
 $(LIB_DIR)/libquiche.a: $(shell find $(SOURCE_DIR) -type f -name '*.rs')
 	cd .. && cargo build --target-dir $(BUILD_DIR) --features ffi
