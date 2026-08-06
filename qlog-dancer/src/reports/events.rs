@@ -177,11 +177,8 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
     let mut s = String::new();
 
     match frame {
-        Http3Frame::Data { raw } =>{
+        Http3Frame::Data { .. } =>{
             s += " DATA";
-            if let Some(r) = raw {
-                printyo!("len", r.length, s);
-            }
         },
         Http3Frame::Headers { headers, .. } => {
             s += " HEADERS {";
@@ -215,9 +212,16 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
         Http3Frame::Reserved { /*length*/ .. } => {
             s += " GREASE {{todo}}";
         },
+        Http3Frame::Origin { .. } => {
+            s += " ORIGIN {{todo}}";
+        },
         Http3Frame::Unknown { frame_type_bytes, .. } => {
             s += &format!(" UNKNOWN {{ty={frame_type_bytes}}}");
         }
+    }
+
+    if let Some(r) = frame.raw() {
+        printyo!("len", r.length, s);
     }
 
     s
@@ -422,12 +426,10 @@ pub fn sqlog_event_list(
                     },
                     EventData::Http3FrameCreated(v) => {
                         printy!("id", v.stream_id, p.details);
-                        printyo!("len", v.length, p.details);
                         p.details += &http_frame_to_string(&v.frame);
                     },
                     EventData::Http3FrameParsed(v) => {
                         printy!("id", v.stream_id, p.details);
-                        printyo!("len", v.length, p.details);
                         p.details += &http_frame_to_string(&v.frame);
                     },
 

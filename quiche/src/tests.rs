@@ -12914,7 +12914,7 @@ fn server_qlog() {
         header.trace.vantage_point.unwrap().ty,
         qlog::VantagePointType::Server
     );
-    let ref_time = header.trace.common_fields.unwrap().reference_time;
+    let ref_time = header.trace.common_fields.unwrap().reference_time.unwrap();
     assert_eq!(ref_time.clock_type, "monotonic");
     assert_eq!(ref_time.epoch, "unknown");
     assert!(ref_time.wall_clock_time.is_some());

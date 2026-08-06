@@ -2343,7 +2343,9 @@ impl<F: BufFactory> Connection<F> {
         let now = Instant::now();
         let now_wall_clock = std::time::SystemTime::now();
         let common_fields = CommonFields {
-            reference_time: ReferenceTime::new_monotonic(Some(now_wall_clock)),
+            reference_time: Some(ReferenceTime::new_monotonic(Some(
+                now_wall_clock,
+            ))),
             ..Default::default()
         };
         let trace = qlog::TraceSeq::new(
@@ -9217,73 +9219,104 @@ impl<F: BufFactory> Connection<F> {
     fn mark_closed(&mut self) {
         #[cfg(feature = "qlog")]
         {
-            let cc = match (self.is_established(), self.timed_out, &self.peer_error, &self.local_error) {
-                (false, _, _, _) => qlog::events::quic::ConnectionClosed {
+            let cc = match (
+                self.is_established(),
+                self.timed_out,
+                &self.peer_error,
+                &self.local_error,
+            ) {
+                (false, ..) => qlog::events::quic::ConnectionClosed {
                     initiator: Some(TransportInitiator::Local),
                     connection_error: None,
                     application_error: None,
                     error_code: None,
                     internal_code: None,
                     reason: Some("Failed to establish connection".to_string()),
-                    trigger: Some(qlog::events::quic::ConnectionClosedTrigger::HandshakeTimeout)
+                    trigger: Some(
+                        qlog::events::quic::ConnectionClosedTrigger::IdleTimeout,
+                    ),
                 },
 
-                (true, true, _, _) => qlog::events::quic::ConnectionClosed {
+                (true, true, ..) => qlog::events::quic::ConnectionClosed {
                     initiator: Some(TransportInitiator::Local),
                     connection_error: None,
                     application_error: None,
                     error_code: None,
                     internal_code: None,
                     reason: Some("Idle timeout".to_string()),
-                    trigger: Some(qlog::events::quic::ConnectionClosedTrigger::IdleTimeout)
+                    trigger: Some(
+                        qlog::events::quic::ConnectionClosedTrigger::IdleTimeout,
+                    ),
                 },
 
                 (true, false, Some(peer_error), None) => {
-                    let (connection_code, application_error, trigger) = if peer_error.is_app {
-                        (None, Some(qlog::events::ApplicationError::Unknown), None)
-                    } else {
-                        let trigger = if peer_error.error_code == WireErrorCode::NoError as u64 {
-                            Some(qlog::events::quic::ConnectionClosedTrigger::Clean)
+                    let (connection_code, application_error, trigger) =
+                        if peer_error.is_app {
+                            (
+                                None,
+                                Some(qlog::events::ApplicationError::Unknown),
+                                None,
+                            )
                         } else {
-                            Some(qlog::events::quic::ConnectionClosedTrigger::Error)
+                            let trigger = if peer_error.error_code ==
+                                WireErrorCode::NoError as u64
+                            {
+                                None
+                            } else {
+                                Some(qlog::events::quic::ConnectionClosedTrigger::Error)
+                            };
+
+                            (Some(qlog::events::ConnectionClosedEventError::TransportError(qlog::events::quic::TransportError::Unknown)), None, trigger)
                         };
 
-                        (Some(qlog::events::ConnectionClosedEventError::TransportError(qlog::events::quic::TransportError::Unknown)), None, trigger)
-                    };
-
-                    // TODO: select more appopriate connection_code and application_error than unknown.
+                    // TODO: select more appopriate connection_code and
+                    // application_error than unknown.
                     qlog::events::quic::ConnectionClosed {
                         initiator: Some(TransportInitiator::Remote),
                         connection_error: connection_code,
                         application_error,
                         error_code: Some(peer_error.error_code),
                         internal_code: None,
-                        reason: Some(String::from_utf8_lossy(&peer_error.reason).to_string()),
+                        reason: Some(
+                            String::from_utf8_lossy(&peer_error.reason)
+                                .to_string(),
+                        ),
                         trigger,
                     }
                 },
 
                 (true, false, None, Some(local_error)) => {
-                    let (connection_code, application_error, trigger) = if local_error.is_app {
-                        (None, Some(qlog::events::ApplicationError::Unknown), None)
-                    } else {
-                        let trigger = if local_error.error_code == WireErrorCode::NoError as u64 {
-                            Some(qlog::events::quic::ConnectionClosedTrigger::Clean)
+                    let (connection_code, application_error, trigger) =
+                        if local_error.is_app {
+                            (
+                                None,
+                                Some(qlog::events::ApplicationError::Unknown),
+                                None,
+                            )
                         } else {
-                            Some(qlog::events::quic::ConnectionClosedTrigger::Error)
+                            let trigger = if local_error.error_code ==
+                                WireErrorCode::NoError as u64
+                            {
+                                None
+                            } else {
+                                Some(qlog::events::quic::ConnectionClosedTrigger::Error)
+                            };
+
+                            (Some(qlog::events::ConnectionClosedEventError::TransportError(qlog::events::quic::TransportError::Unknown)), None, trigger)
                         };
 
-                        (Some(qlog::events::ConnectionClosedEventError::TransportError(qlog::events::quic::TransportError::Unknown)), None, trigger)
-                    };
-
-                    // TODO: select more appopriate connection_code and application_error than unknown.
+                    // TODO: select more appopriate connection_code and
+                    // application_error than unknown.
                     qlog::events::quic::ConnectionClosed {
                         initiator: Some(TransportInitiator::Local),
                         connection_error: connection_code,
                         application_error,
                         error_code: Some(local_error.error_code),
                         internal_code: None,
-                        reason: Some(String::from_utf8_lossy(&local_error.reason).to_string()),
+                        reason: Some(
+                            String::from_utf8_lossy(&local_error.reason)
+                                .to_string(),
+                        ),
                         trigger,
                     }
                 },
