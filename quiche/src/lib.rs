@@ -3624,35 +3624,39 @@ impl<F: BufFactory> Connection<F> {
                         };
 
                         let dropped = stream.send.ack_and_drop(offset, length);
-                        let priority_key = Arc::clone(&stream.priority_key);
 
                         // Only collect the stream if it is complete and not
-                        // readable or writable.
+                        // readable or stopped.
                         //
                         // If it is readable, it will get collected when
                         // stream_recv() is next used.
                         //
-                        // If it is writable, it might mean that the stream
-                        // has been stopped by the peer (i.e. a STOP_SENDING
-                        // frame is received), in which case before collecting
-                        // the stream we will need to propagate the
+                        // If the stream has been stopped by the peer (i.e. a
+                        // STOP_SENDING frame is received), before collecting
+                        // the stream we need to propagate the
                         // `StreamStopped` error to the application. It will
                         // instead get collected when one of stream_capacity(),
                         // stream_writable(), stream_send(), ... is next called.
                         //
                         // Note that we can't use `is_writable()` here because
                         // it returns false if the stream is stopped. Instead,
-                        // since the stream is marked as writable when a
-                        // STOP_SENDING frame is received, we check the writable
-                        // queue directly instead.
-                        let is_writable = priority_key.writable.is_linked() &&
-                            // Ensure that the stream is actually stopped.
-                            stream.send.is_stopped();
-
+                        // we check `stream.send.is_stopped()` directly. We
+                        // can't check the writable queue instead:
+                        // `stream_writable_next()` unlinks the stream from
+                        // the writable queue on its very next poll, which
+                        // happens every `IoWorker` iteration before any
+                        // network round trip completes. By the time an ack
+                        // for a stopped stream arrives, the stream is
+                        // already unlinked from the writable queue
+                        // regardless of whether the app observed it as
+                        // writable.
                         let is_complete = stream.is_complete();
                         let is_readable = stream.is_readable();
 
-                        if is_complete && !is_readable && !is_writable {
+                        if is_complete &&
+                            !is_readable &&
+                            !stream.send.is_stopped()
+                        {
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
                         }
@@ -3681,35 +3685,38 @@ impl<F: BufFactory> Connection<F> {
                             None => continue,
                         };
 
-                        let priority_key = Arc::clone(&stream.priority_key);
-
                         // Only collect the stream if it is complete and not
-                        // readable or writable.
+                        // readable or stopped.
                         //
                         // If it is readable, it will get collected when
                         // stream_recv() is next used.
                         //
-                        // If it is writable, it might mean that the stream
-                        // has been stopped by the peer (i.e. a STOP_SENDING
-                        // frame is received), in which case before collecting
-                        // the stream we will need to propagate the
+                        // If the stream has been stopped by the peer (i.e. a
+                        // STOP_SENDING frame is received), before collecting
+                        // the stream we need to propagate the
                         // `StreamStopped` error to the application. It will
                         // instead get collected when one of stream_capacity(),
                         // stream_writable(), stream_send(), ... is next called.
                         //
                         // Note that we can't use `is_writable()` here because
                         // it returns false if the stream is stopped. Instead,
-                        // since the stream is marked as writable when a
-                        // STOP_SENDING frame is received, we check the writable
-                        // queue directly instead.
-                        let is_writable = priority_key.writable.is_linked() &&
-                            // Ensure that the stream is actually stopped.
-                            stream.send.is_stopped();
-
+                        // we check `stream.send.is_stopped()` directly. We
+                        // can't check the writable queue instead:
+                        // `stream_writable_next()` unlinks the stream from
+                        // the writable queue on its very next poll, which
+                        // happens every `IoWorker` iteration before any
+                        // network round trip completes. By the time an ack
+                        // for a stopped stream arrives, the stream is
+                        // already unlinked from the writable queue
+                        // regardless of whether the app observed it as
+                        // writable.
                         let is_complete = stream.is_complete();
                         let is_readable = stream.is_readable();
 
-                        if is_complete && !is_readable && !is_writable {
+                        if is_complete &&
+                            !is_readable &&
+                            !stream.send.is_stopped()
+                        {
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
                         }
