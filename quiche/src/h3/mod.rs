@@ -3822,11 +3822,14 @@ mod tests {
         ));
 
         // Client sends initial flight.
-        let (len, _) = pipe.client.send(&mut buf).unwrap();
+        let flight = crate::test_utils::emit_flight(&mut pipe.client).unwrap();
 
         // Now an H3 connection can be created.
         assert!(Connection::with_transport(&mut pipe.client, &h3_config).is_ok());
-        assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+        assert_eq!(
+            crate::test_utils::process_flight(&mut pipe.server, flight),
+            Ok(())
+        );
 
         // Client sends 0-RTT packet.
         let pkt_type = crate::packet::Type::ZeroRTT;
