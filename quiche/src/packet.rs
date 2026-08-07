@@ -357,6 +357,13 @@ impl<'a> Header<'a> {
     ) -> Result<Header<'a>> {
         let first = b.get_u8()?;
 
+        // RFC 9000 requires the fixed bit to be set in every QUIC packet.
+        // Header protection does not cover this bit, so it can be validated
+        // before decoding the rest of the header.
+        if first & 0x40 == 0 {
+            return Err(Error::InvalidPacket);
+        }
+
         if !Header::is_long(first) {
             // Decode short header.
             let dcid = b.get_bytes(dcid_len)?;
@@ -1197,6 +1204,18 @@ mod tests {
 
         let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
+    }
+
+    #[test]
+    fn fixed_bit_must_be_set() {
+        let mut invalid = [0x00, 0, 0, 0, 0];
+        assert_eq!(
+            Header::from_slice(&mut invalid, 4),
+            Err(Error::InvalidPacket)
+        );
+
+        let mut valid = [0x40, 0, 0, 0, 0];
+        assert!(Header::from_slice(&mut valid, 4).is_ok());
     }
 
     #[test]
