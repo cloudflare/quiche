@@ -1356,6 +1356,12 @@ where
     /// The configuration for recovery.
     recovery_config: recovery::RecoveryConfig,
 
+    /// Whether newly-created runtime paths inherit PMTU discovery.
+    discover_pmtu: bool,
+
+    /// Maximum probe attempts inherited by newly-created runtime paths.
+    pmtud_max_probes: u8,
+
     /// The path manager.
     paths: path::PathMap,
 
@@ -2079,6 +2085,9 @@ impl<F: BufFactory> Connection<F> {
             session: None,
 
             recovery_config,
+
+            discover_pmtu: config.pmtud,
+            pmtud_max_probes: config.pmtud_max_probes,
 
             paths,
             path_challenge_recv_max_queue_len: config
@@ -4005,19 +4014,23 @@ impl<F: BufFactory> Connection<F> {
         let send_path = self.paths.get_mut(send_pid)?;
 
         // Update max datagram size to allow path MTU discovery probe to be sent.
-        if let Some(pmtud) = send_path.pmtud.as_mut() {
-            if pmtud.should_probe() {
-                let size = if self.handshake_confirmed || self.handshake_completed
-                {
-                    pmtud.get_probe_size()
-                } else {
-                    pmtud.get_current_mtu()
-                };
+        if send_path.validated() {
+            if let Some(pmtud) = send_path.pmtud.as_mut() {
+                if pmtud.should_probe() {
+                    let size =
+                        if self.handshake_confirmed || self.handshake_completed {
+                            pmtud.get_probe_size()
+                        } else {
+                            pmtud.get_current_mtu()
+                        };
 
-                send_path.recovery.pmtud_update_max_datagram_size(size);
+                    send_path.recovery.pmtud_update_max_datagram_size(size);
 
-                left =
-                    cmp::min(out.len(), send_path.recovery.max_datagram_size());
+                    left = cmp::min(
+                        out.len(),
+                        send_path.recovery.max_datagram_size(),
+                    );
+                }
             }
         }
 
@@ -8062,6 +8075,8 @@ impl<F: BufFactory> Connection<F> {
                     }
 
                     if let Some((discover, max_probes)) = ex_data.pmtud {
+                        self.discover_pmtu = discover;
+                        self.pmtud_max_probes = max_probes;
                         self.paths.set_discover_pmtu_on_existing_paths(
                             discover,
                             self.recovery_config.max_send_udp_payload_size,
@@ -9052,6 +9067,13 @@ impl<F: BufFactory> Connection<F> {
             None,
         );
 
+        if self.discover_pmtu {
+            path.pmtud = Some(pmtud::Pmtud::new(
+                self.recovery_config.max_send_udp_payload_size,
+                self.pmtud_max_probes,
+            ));
+        }
+
         path.max_send_bytes = buf_len * self.max_amplification_factor;
         path.active_scid_seq = Some(in_scid_seq);
 
@@ -9202,6 +9224,12 @@ impl<F: BufFactory> Connection<F> {
             false,
             None,
         );
+        if self.discover_pmtu {
+            path.pmtud = Some(pmtud::Pmtud::new(
+                self.recovery_config.max_send_udp_payload_size,
+                self.pmtud_max_probes,
+            ));
+        }
         path.active_dcid_seq = Some(dcid_seq);
 
         let pid = self

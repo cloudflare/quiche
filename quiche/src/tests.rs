@@ -11185,6 +11185,50 @@ fn connection_migration(
     );
 }
 
+#[test]
+fn runtime_paths_inherit_pmtud_configuration() {
+    const PROBE_SIZE: usize = 1350;
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config.set_application_protos(&[b"proto1"]).unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(2);
+    config.set_max_send_udp_payload_size(PROBE_SIZE);
+    config.discover_pmtu(true);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
+    let server_addr = test_utils::Pipe::server_addr();
+    let client_addr = "127.0.0.1:5678".parse().unwrap();
+
+    assert_eq!(pipe.client.probe_path(client_addr, server_addr), Ok(1));
+    let client_path = pipe
+        .client
+        .paths
+        .path_id_from_addrs(&(client_addr, server_addr))
+        .and_then(|id| pipe.client.paths.get(id).ok())
+        .expect("client runtime path");
+    let client_pmtud = client_path.pmtud.as_ref().expect("client PMTUD state");
+    assert_eq!(client_pmtud.get_probe_size(), PROBE_SIZE);
+
+    assert_eq!(pipe.advance(), Ok(()));
+    let server_path = pipe
+        .server
+        .paths
+        .path_id_from_addrs(&(server_addr, client_addr))
+        .and_then(|id| pipe.server.paths.get(id).ok())
+        .expect("server runtime path");
+    assert!(
+        server_path.pmtud.is_some(),
+        "server runtime path must inherit PMTUD state"
+    );
+}
+
 #[rstest]
 fn connection_migration_zero_length_cid(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
