@@ -274,7 +274,13 @@ void quiche_config_set_max_stream_window(quiche_config *config, uint64_t v);
 // Sets the limit of active connection IDs.
 void quiche_config_set_active_connection_id_limit(quiche_config *config, uint64_t v);
 
-// Sets the initial stateless reset token. |v| must contain 16 bytes, otherwise the behaviour is undefined.
+// Sets the static key used to derive stateless reset tokens. |v| must contain
+// 16 bytes, otherwise the behaviour is undefined.
+void quiche_config_set_stateless_reset_key(quiche_config *config, const uint8_t *v);
+
+// Deprecated: use quiche_config_set_stateless_reset_key(). |v| is treated as
+// the static key, not a per-connection token. |v| must contain 16 bytes,
+// otherwise the behaviour is undefined.
 void quiche_config_set_stateless_reset_token(quiche_config *config, const uint8_t *v);
 
 // Sets whether the QUIC connection should avoid reusing DCIDs over different paths.

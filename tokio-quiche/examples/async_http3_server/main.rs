@@ -64,6 +64,10 @@ async fn main() {
     quic_settings.enable_pacing = args.enable_pacing;
     quic_settings.max_pacing_rate =
         (args.max_pacing_rate > 0).then_some(args.max_pacing_rate);
+    quic_settings.stateless_reset_key = args.parsed_stateless_reset_key();
+    if quic_settings.stateless_reset_key.is_some() {
+        log::info!("stateless reset enabled");
+    }
 
     let mut listeners = listen(
         [socket],

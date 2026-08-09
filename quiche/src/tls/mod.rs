@@ -462,7 +462,7 @@ impl Handshake {
     pub fn set_quic_transport_params(
         &mut self, params: &crate::TransportParams, is_server: bool,
     ) -> Result<()> {
-        let mut raw_params = [0; 128];
+        let mut raw_params = [0; 256];
 
         let raw_params =
             crate::TransportParams::encode(params, is_server, &mut raw_params)?;

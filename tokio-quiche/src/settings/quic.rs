@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#![allow(deprecated)]
+
 use foundations::settings::settings;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
@@ -325,12 +327,23 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_max_path_challenge_recv_queue_len")]
     pub max_path_challenge_recv_queue_len: usize,
 
-    /// Sets the initial stateless reset token.
+    /// Sets the static key used to derive stateless reset tokens.
     ///
     /// Note that this applies only to server-side connections - on client-side
     /// connections, this is a no-op.
     ///
     /// Defaults to `None`.
+    pub stateless_reset_key: Option<u128>,
+
+    /// Legacy alias for [`stateless_reset_key`].
+    ///
+    /// Prefer [`stateless_reset_key`]. If both are set,
+    /// [`stateless_reset_key`] is used.
+    ///
+    /// [`stateless_reset_key`]: QuicSettings::stateless_reset_key
+    #[deprecated(
+        note = "use `stateless_reset_key` as this field is treated as the static key"
+    )]
     pub stateless_reset_token: Option<u128>,
 
     /// Sets whether the QUIC connection should avoid reusing DCIDs over
@@ -367,6 +380,18 @@ pub struct QuicSettings {
 }
 
 impl QuicSettings {
+    /// Returns the configured stateless reset key.
+    ///
+    /// Prefers [`stateless_reset_key`] and falls back to the deprecated
+    /// [`stateless_reset_token`] alias.
+    ///
+    /// [`stateless_reset_key`]: QuicSettings::stateless_reset_key
+    /// [`stateless_reset_token`]: QuicSettings::stateless_reset_token
+    #[allow(deprecated)]
+    pub(crate) fn resolved_stateless_reset_key(&self) -> Option<u128> {
+        self.stateless_reset_key.or(self.stateless_reset_token)
+    }
+
     #[inline]
     fn default_alpn() -> Vec<Vec<u8>> {
         quiche::h3::APPLICATION_PROTOCOL
@@ -514,5 +539,38 @@ mod test {
 
         assert_eq!(quic.handshake_timeout.unwrap(), Duration::from_secs(5));
         assert_eq!(quic.max_idle_timeout.unwrap(), Duration::from_secs(7));
+    }
+
+    #[test]
+    fn resolved_stateless_reset_key_prefers_new_field() {
+        let token_only = serde_json::from_str::<QuicSettings>(
+            r#"{ "stateless_reset_token": 1 }"#,
+        )
+        .unwrap();
+        assert_eq!(token_only.resolved_stateless_reset_key(), Some(1));
+
+        let key_only = serde_json::from_str::<QuicSettings>(
+            r#"{ "stateless_reset_key": 2 }"#,
+        )
+        .unwrap();
+        assert_eq!(key_only.resolved_stateless_reset_key(), Some(2));
+
+        let both = serde_json::from_str::<QuicSettings>(
+            r#"{ "stateless_reset_key": 2, "stateless_reset_token": 1 }"#,
+        )
+        .unwrap();
+        assert_eq!(both.resolved_stateless_reset_key(), Some(2));
+    }
+
+    #[test]
+    fn legacy_stateless_reset_token_field_still_resolves() {
+        #[allow(deprecated)]
+        let settings = QuicSettings {
+            stateless_reset_token: Some(0xba),
+            ..Default::default()
+        };
+
+        assert_eq!(settings.resolved_stateless_reset_key(), Some(0xba));
+        assert_eq!(settings.stateless_reset_key, None);
     }
 }

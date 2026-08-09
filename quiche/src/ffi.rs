@@ -420,17 +420,27 @@ pub extern "C" fn quiche_config_set_active_connection_id_limit(
     config.set_active_connection_id_limit(v);
 }
 
+fn set_stateless_reset_key_from_ptr(config: &mut Config, v: *const u8) {
+    let reset_key = unsafe { slice::from_raw_parts(v, 16) };
+    let reset_key = match reset_key.try_into() {
+        Ok(rt) => rt,
+        Err(_) => unreachable!(),
+    };
+    config.set_stateless_reset_key(Some(u128::from_be_bytes(reset_key)));
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_config_set_stateless_reset_key(
+    config: &mut Config, v: *const u8,
+) {
+    set_stateless_reset_key_from_ptr(config, v);
+}
+
 #[no_mangle]
 pub extern "C" fn quiche_config_set_stateless_reset_token(
     config: &mut Config, v: *const u8,
 ) {
-    let reset_token = unsafe { slice::from_raw_parts(v, 16) };
-    let reset_token = match reset_token.try_into() {
-        Ok(rt) => rt,
-        Err(_) => unreachable!(),
-    };
-    let reset_token = u128::from_be_bytes(reset_token);
-    config.set_stateless_reset_token(Some(reset_token));
+    set_stateless_reset_key_from_ptr(config, v);
 }
 
 #[no_mangle]

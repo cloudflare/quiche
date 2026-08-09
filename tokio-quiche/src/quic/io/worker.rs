@@ -236,6 +236,7 @@ impl AsMut<[u8]> for TransientSendBuf {
 
 pub struct WriterConfig {
     pub pending_cid: Option<ConnectionId<'static>>,
+    pub stateless_reset_key: Option<u128>,
     pub peer_addr: SocketAddr,
     pub local_addr: SocketAddr,
     pub with_gso: bool,
@@ -334,9 +335,9 @@ where
 
         let current_cid = qconn.source_id().into_owned();
         for _ in 0..qconn.scids_left() {
-            // We don't emit stateless resets, so any unguessable value is fine
-            let reset_token = random_u128();
             let new_cid = cid_generator.new_connection_id();
+            let reset_token =
+                reset_token_for_cid(self.cfg.stateless_reset_key, &new_cid);
 
             if self
                 .conn_map_cmd_tx
@@ -1312,6 +1313,23 @@ impl<M: Metrics> Drop for TrackMidHandshakeFlush<M> {
     }
 }
 
+fn reset_token_for_cid(static_key: Option<u128>, cid: &ConnectionId) -> u128 {
+    let Some(static_key) = static_key else {
+        return random_u128();
+    };
+
+    match quiche::derive_stateless_reset_wire_token(
+        &static_key.to_be_bytes(),
+        cid.as_ref(),
+    ) {
+        Ok(reset_token) => reset_token,
+        Err(error) => {
+            log::error!("failed to derive stateless reset token, using a random token"; "error" => ?error);
+            random_u128()
+        },
+    }
+}
+
 fn random_u128() -> u128 {
     let mut buf = [0; 16];
     boring::rand::rand_bytes(&mut buf).expect("boring's RAND_bytes never fails");
@@ -1378,5 +1396,21 @@ mod pooled_send_buf_tests {
         })
         .join()
         .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_token_for_cid_is_derived_when_key_is_configured() {
+        let static_key = u128::from_be_bytes([0xba; 16]);
+        let cid = ConnectionId::from_ref(b"cid");
+
+        assert_eq!(
+            reset_token_for_cid(Some(static_key), &cid),
+            0x5c99_a18d_1775_d13b_f681_8a38_0867_604b,
+        );
     }
 }

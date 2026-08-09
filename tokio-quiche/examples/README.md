@@ -45,6 +45,39 @@ The server should print the events something like this:
 
 Logging can be suppressed entirely by omitting the `RUST_LOG` environment variable.
 
+## Stateless reset demo
+
+Pass `--stateless-reset-key` (32 hex digits) and keep the same key across
+restarts. Use `stateless_reset_client` as the peer.
+
+Lost connection state:
+
+```shell
+# terminal 1
+RUST_LOG=info cargo run -p tokio-quiche --example async_http3_server -- \
+  --address 127.0.0.1:5757 \
+  --stateless-reset-key 00000000000000000000000000000001
+
+# terminal 2
+RUST_LOG=info cargo run -p tokio-quiche --example stateless_reset_client -- --hold
+```
+
+Restart the server with the same key. The client PINGs until it sees a
+stateless reset and drains.
+
+In-flight cap (server still running):
+
+```shell
+# one source 2-tuple: at most one in-flight reset
+cargo run -p tokio-quiche --example stateless_reset_client -- --flood 200
+
+# many source ports: replies stop around the 64-slot cap
+cargo run -p tokio-quiche --example stateless_reset_client -- \
+  --flood 200 --unique-ports
+```
+
+The client prints `sent=… recv=…`. `recv` is how many reset datagrams came back.
+
 The server also exposes a `/stream-bytes/<n>` endpoint. When a request is made to said
 endpoint, `n` bytes will come back in the response body:
 

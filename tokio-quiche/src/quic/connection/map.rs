@@ -128,6 +128,19 @@ impl ConnectionMap {
         self.quic_id_map.remove(&cid.into());
     }
 
+    /// This is only used on the client side because client sockets only have
+    /// one connection.
+    pub(crate) fn get_any(&self) -> Option<&mpsc::Sender<Incoming>> {
+        self.quic_id_map.values().next()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_sender(
+        &mut self, cid: &ConnectionId<'_>, sender: mpsc::Sender<Incoming>,
+    ) {
+        self.quic_id_map.insert(cid.into(), sender);
+    }
+
     pub(crate) fn get(
         &self, id: &ConnectionId,
     ) -> Option<&mpsc::Sender<Incoming>> {
@@ -146,6 +159,18 @@ impl ConnectionMap {
 mod tests {
     use super::*;
     use quiche::ConnectionId;
+
+    #[test]
+    fn get_any_returns_a_mapped_connection() {
+        let cid = ConnectionId::from_ref(b"cid");
+        let (sender, _receiver) = mpsc::channel(1);
+        let mut map = ConnectionMap::default();
+        map.insert_sender(&cid, sender.clone());
+
+        assert!(map
+            .get_any()
+            .is_some_and(|mapped| mapped.same_channel(&sender)));
+    }
 
     #[test]
     fn cid_storage() {
