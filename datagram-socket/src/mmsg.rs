@@ -36,6 +36,16 @@ use tokio::io::ReadBuf;
 
 const MAX_MMSG: usize = 16;
 
+// musl's `msghdr` has private padding fields, so it cannot be built with a
+// struct literal. Zeroing covers them and yields the same header on glibc.
+fn single_iov_msghdr(iov: *mut libc::iovec) -> libc::msghdr {
+    // Safety: an all zero `msghdr` is valid; the other fields were zero before.
+    let mut hdr: libc::msghdr = unsafe { std::mem::zeroed() };
+    hdr.msg_iov = iov;
+    hdr.msg_iovlen = 1;
+    hdr
+}
+
 pub fn recvmmsg(fd: BorrowedFd, bufs: &mut [ReadBuf<'_>]) -> io::Result<usize> {
     let mut msgvec: SmallVec<[libc::mmsghdr; MAX_MMSG]> = SmallVec::new();
     let mut slices: SmallVec<[IoSlice; MAX_MMSG]> = SmallVec::new();
@@ -56,15 +66,9 @@ pub fn recvmmsg(fd: BorrowedFd, bufs: &mut [ReadBuf<'_>]) -> io::Result<usize> {
             slices.push(IoSlice::new(b));
 
             msgvec.push(libc::mmsghdr {
-                msg_hdr: libc::msghdr {
-                    msg_name: std::ptr::null_mut(),
-                    msg_namelen: 0,
-                    msg_iov: slices.last_mut().unwrap() as *mut _ as *mut _,
-                    msg_iovlen: 1,
-                    msg_control: std::ptr::null_mut(),
-                    msg_controllen: 0,
-                    msg_flags: 0,
-                },
+                msg_hdr: single_iov_msghdr(
+                    slices.last_mut().unwrap() as *mut _ as *mut _
+                ),
                 msg_len: buf.capacity().try_into().unwrap(),
             });
         }
@@ -116,15 +120,9 @@ pub fn sendmmsg(fd: BorrowedFd, bufs: &[ReadBuf<'_>]) -> io::Result<usize> {
             slices.push(IoSlice::new(buf.filled()));
 
             msgvec.push(libc::mmsghdr {
-                msg_hdr: libc::msghdr {
-                    msg_name: std::ptr::null_mut(),
-                    msg_namelen: 0,
-                    msg_iov: slices.last_mut().unwrap() as *mut _ as *mut _,
-                    msg_iovlen: 1,
-                    msg_control: std::ptr::null_mut(),
-                    msg_controllen: 0,
-                    msg_flags: 0,
-                },
+                msg_hdr: single_iov_msghdr(
+                    slices.last_mut().unwrap() as *mut _ as *mut _
+                ),
                 msg_len: buf.capacity().try_into().unwrap(),
             });
         }
