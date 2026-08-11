@@ -7618,11 +7618,18 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// The exporter is available after the TLS handshake completes. The label
     /// identifies the protocol usage, while the optional context can separate
-    /// exporter instances within that usage.
+    /// exporter instances within that usage. Returns [`InvalidState`] until
+    /// the connection is established.
+    ///
+    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
     #[inline]
     pub fn export_keying_material(
         &self, out: &mut [u8], label: &[u8], context: Option<&[u8]>,
     ) -> Result<()> {
+        if !self.is_established() {
+            return Err(Error::InvalidState);
+        }
+
         self.handshake.export_keying_material(out, label, context)
     }
 
