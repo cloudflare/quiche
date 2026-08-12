@@ -34,7 +34,9 @@ use std::os::fd::BorrowedFd;
 use smallvec::SmallVec;
 use tokio::io::ReadBuf;
 
-const MAX_MMSG: usize = 16;
+/// Maximum number of messages passed to a single `sendmmsg(2)` or
+/// `recvmmsg(2)` call.
+pub const MAX_MMSG: usize = 16;
 
 pub fn recvmmsg(fd: BorrowedFd, bufs: &mut [ReadBuf<'_>]) -> io::Result<usize> {
     let mut msgvec: SmallVec<[libc::mmsghdr; MAX_MMSG]> = SmallVec::new();
@@ -69,6 +71,12 @@ pub fn recvmmsg(fd: BorrowedFd, bufs: &mut [ReadBuf<'_>]) -> io::Result<usize> {
             });
         }
 
+        // SAFETY: `slices` and `msgvec` are `SmallVec`s with inline capacity
+        // `MAX_MMSG`, and each chunk has at most `MAX_MMSG` elements, so the
+        // pushes above cannot trigger a reallocation that would invalidate
+        // the pointers into `slices` taken by `msg_iov` above. Neither
+        // vector is modified before the syscall returns, and `fd` remains
+        // valid for the duration of the call.
         let result = unsafe {
             libc::recvmmsg(
                 fd.as_raw_fd(),
@@ -102,33 +110,70 @@ pub fn recvmmsg(fd: BorrowedFd, bufs: &mut [ReadBuf<'_>]) -> io::Result<usize> {
     Ok(ret)
 }
 
+/// Sends multiple datagrams with a single system call where possible.
+///
+/// The returned value is the number of datagrams sent.
 pub fn sendmmsg(fd: BorrowedFd, bufs: &[ReadBuf<'_>]) -> io::Result<usize> {
+    sendmmsg_impl(fd, bufs, None)
+}
+
+/// Sends multiple datagrams, appending the same suffix to every datagram.
+///
+/// The returned value is the number of datagrams sent. The suffix is framing
+/// supplied on the caller's behalf and does not affect that count.
+pub fn sendmmsg_with_suffix(
+    fd: BorrowedFd, bufs: &[ReadBuf<'_>], suffix: &[u8],
+) -> io::Result<usize> {
+    sendmmsg_impl(fd, bufs, Some(suffix))
+}
+
+fn sendmmsg_impl(
+    fd: BorrowedFd, bufs: &[ReadBuf<'_>], suffix: Option<&[u8]>,
+) -> io::Result<usize> {
+    if bufs.is_empty() {
+        return Ok(0);
+    }
+
     let mut msgvec: SmallVec<[libc::mmsghdr; MAX_MMSG]> = SmallVec::new();
-    let mut slices: SmallVec<[IoSlice; MAX_MMSG]> = SmallVec::new();
+    let mut iovecs: SmallVec<[libc::iovec; 2 * MAX_MMSG]> = SmallVec::new();
 
     let mut ret = 0;
 
     for bufs in bufs.chunks(MAX_MMSG) {
         msgvec.clear();
-        slices.clear();
+        iovecs.clear();
 
-        for buf in bufs.iter() {
-            slices.push(IoSlice::new(buf.filled()));
+        for buf in bufs {
+            iovecs.push(iovec(buf.filled()));
 
+            if let Some(suffix) = suffix {
+                iovecs.push(iovec(suffix));
+            }
+        }
+
+        // Populate all iovecs before taking pointers into the vector. This
+        // ensures none of the pointers can be invalidated by a reallocation.
+        let iovecs_per_message = if suffix.is_some() { 2 } else { 1 };
+        for message_iovecs in iovecs.chunks_exact_mut(iovecs_per_message) {
             msgvec.push(libc::mmsghdr {
                 msg_hdr: libc::msghdr {
                     msg_name: std::ptr::null_mut(),
                     msg_namelen: 0,
-                    msg_iov: slices.last_mut().unwrap() as *mut _ as *mut _,
-                    msg_iovlen: 1,
+                    msg_iov: message_iovecs.as_mut_ptr(),
+                    msg_iovlen: iovecs_per_message,
                     msg_control: std::ptr::null_mut(),
                     msg_controllen: 0,
                     msg_flags: 0,
                 },
-                msg_len: buf.capacity().try_into().unwrap(),
+                // Output field populated by the kernel.
+                msg_len: 0,
             });
         }
 
+        // SAFETY: `iovecs` was fully populated before the pointers in
+        // `msgvec` were created, and neither vector is modified before the
+        // syscall returns. Each header points to one or two live iovecs, and
+        // `fd` remains valid for the duration of the call.
         let result = unsafe {
             libc::sendmmsg(
                 fd.as_raw_fd(),
@@ -139,21 +184,32 @@ pub fn sendmmsg(fd: BorrowedFd, bufs: &[ReadBuf<'_>]) -> io::Result<usize> {
         };
 
         if result == -1 {
+            let err = io::Error::last_os_error();
+
+            if ret == 0 {
+                return Err(err);
+            }
+
             break;
         }
 
         ret += result as usize;
 
-        if (result as usize) < MAX_MMSG {
+        if (result as usize) < bufs.len() {
             break;
         }
     }
 
-    if ret == 0 {
-        return Err(io::Error::last_os_error());
-    }
-
     Ok(ret)
+}
+
+fn iovec(buf: &[u8]) -> libc::iovec {
+    libc::iovec {
+        // `sendmmsg(2)` does not mutate the memory described by an iovec, but
+        // the C API represents the pointer as mutable.
+        iov_base: buf.as_ptr().cast_mut().cast(),
+        iov_len: buf.len(),
+    }
 }
 
 #[macro_export]
@@ -197,10 +253,14 @@ macro_rules! poll_sendmmsg {
 #[cfg(test)]
 mod tests {
     use std::io;
+    use std::os::fd::AsFd;
 
     use tokio::io::ReadBuf;
     use tokio::net::UnixDatagram;
 
+    use super::sendmmsg;
+    use super::sendmmsg_with_suffix;
+    use super::MAX_MMSG;
     use crate::DatagramSocketRecvExt;
     use crate::DatagramSocketSendExt;
 
@@ -237,7 +297,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sendmmsg() -> io::Result<()> {
+    async fn send_many() -> io::Result<()> {
         let (s, r) = UnixDatagram::pair()?;
         let mut bufs: [_; 128] = std::array::from_fn(|i| [i as u8; 128]);
 
@@ -258,6 +318,65 @@ mod tests {
             assert_eq!(r.recv(&mut rbuf).await?, 128);
             assert_eq!(rbuf, [i as u8; 128]);
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sendmmsg_with_suffix_appends_to_every_datagram() -> io::Result<()> {
+        let (s, r) = UnixDatagram::pair()?;
+        let suffix = b"-suffix";
+        let mut payloads: Vec<Vec<u8>> =
+            (0..MAX_MMSG + 4).map(|i| vec![i as u8; i]).collect();
+        let bufs: Vec<_> = payloads
+            .iter_mut()
+            .map(|payload| {
+                let len = payload.len();
+                let mut buf = ReadBuf::new(payload);
+                buf.set_filled(len);
+                buf
+            })
+            .collect();
+
+        assert_eq!(
+            sendmmsg_with_suffix(s.as_fd(), &bufs, suffix)?,
+            payloads.len()
+        );
+
+        let mut received = vec![0; MAX_MMSG + suffix.len() + 4];
+        for expected in &payloads {
+            let received_len = r.recv(&mut received).await?;
+            assert_eq!(
+                &received[..received_len],
+                [expected.as_slice(), suffix].concat()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn empty_send_batches_are_noops() -> io::Result<()> {
+        let (s, _r) = std::os::unix::net::UnixDatagram::pair()?;
+
+        assert_eq!(sendmmsg(s.as_fd(), &[])?, 0);
+        assert_eq!(sendmmsg_with_suffix(s.as_fd(), &[], b"suffix")?, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn sendmmsg_with_suffix_reports_an_error_without_progress() -> io::Result<()>
+    {
+        let (s, r) = std::os::unix::net::UnixDatagram::pair()?;
+        drop(r);
+
+        let mut payload = *b"payload";
+        let payload_len = payload.len();
+        let mut buf = ReadBuf::new(&mut payload);
+        buf.set_filled(payload_len);
+
+        assert!(sendmmsg_with_suffix(s.as_fd(), &[buf], b"suffix").is_err());
 
         Ok(())
     }
