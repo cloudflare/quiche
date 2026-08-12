@@ -33,6 +33,7 @@ mod mode;
 mod network_model;
 mod probe_bw;
 mod probe_rtt;
+mod rtt_jump_detector;
 mod startup;
 
 use std::time::Duration;
@@ -50,6 +51,7 @@ use super::bbr::SendTimeState;
 use super::Acked;
 use super::BbrBwLoReductionStrategy;
 use super::BbrParams;
+use super::BbrRttJumpDetector;
 use super::CongestionControl;
 use super::Lost;
 use super::RttStats;
@@ -207,6 +209,9 @@ struct Params {
     /// 1/8th of an RTT into the future, so the error introduced by
     /// setting `time_sent` to `now` is bounded.
     time_sent_set_to_now: bool,
+
+    /// Selects the RTT jump detector implementation.
+    rtt_jump_detector: BbrRttJumpDetector,
 }
 
 impl Params {
@@ -252,6 +257,13 @@ impl Params {
         apply_override!(disable_probe_down_early_exit);
         apply_override!(time_sent_set_to_now);
         apply_optional_override!(initial_pacing_rate_bytes_per_second);
+
+        #[cfg(feature = "internal")]
+        {
+            if let Some(custom_value) = custom_bbr_settings.rtt_jump_detector {
+                self.rtt_jump_detector = custom_value;
+            }
+        }
 
         if let Some(custom_value) = custom_bbr_settings.bw_lo_reduction_strategy {
             self.bw_lo_mode = custom_value.into();
@@ -347,6 +359,8 @@ const DEFAULT_PARAMS: Params = Params {
     disable_probe_down_early_exit: false,
 
     time_sent_set_to_now: true,
+
+    rtt_jump_detector: BbrRttJumpDetector::Disabled,
 };
 
 #[derive(Debug, PartialEq)]
@@ -638,6 +652,10 @@ impl BBRv2 {
     #[cfg(feature = "qlog")]
     pub(crate) fn ack_rate(&self) -> Option<Bandwidth> {
         self.mode.network_model().ack_rate()
+    }
+
+    pub(crate) fn rtt_persistent_jump_count(&self) -> u64 {
+        self.mode.network_model().rtt_persistent_jump_count()
     }
 }
 

@@ -419,6 +419,36 @@ impl RecvBuf {
         buf.off() == self.off
     }
 
+    /// Returns the number of bytes that can be read contiguously from the
+    /// current read offset, up to `max_len`.
+    ///
+    /// Data buffered behind a gap (received out of order) is not counted, so
+    /// this never reports bytes that are not yet readable. The cost is
+    /// proportional to the number of contiguous buffered chunks at the front
+    /// of the buffer, up to `max_len`; no data is copied.
+    pub fn readable_len(&self, max_len: usize) -> usize {
+        let mut contiguous = 0usize;
+        let mut next_off = self.off;
+
+        // `data` is ordered by offset, so walk from the front and stop at the
+        // first gap (a chunk that does not start where the contiguous run so
+        // far leaves off).
+        for buf in self.data.values() {
+            if buf.off() != next_off {
+                break;
+            }
+
+            contiguous = contiguous.saturating_add(buf.len()).min(max_len);
+            next_off = buf.max_off();
+
+            if contiguous == max_len {
+                break;
+            }
+        }
+
+        contiguous
+    }
+
     #[cfg(test)]
     pub(crate) fn flow_control_for_tests(&self) -> &flowcontrol::FlowControl {
         &self.flow_control
@@ -591,6 +621,26 @@ mod tests {
         assert_eq!(recv.off, 19);
 
         assert_emit_discard_done(&mut recv, emit);
+    }
+
+    #[test]
+    /// `readable_len` counts only contiguous in-order data, up to its limit.
+    fn readable_len() {
+        let mut recv =
+            RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
+
+        // Empty buffer: nothing readable.
+        assert_eq!(recv.readable_len(64 * 1024), 0);
+
+        // Data buffered behind a gap is not readable.
+        assert!(recv.write(RangeBuf::from(b"hello", 0, false)).is_ok());
+        assert!(recv.write(RangeBuf::from(b"something", 10, false)).is_ok());
+        assert_eq!(recv.readable_len(64 * 1024), 5);
+
+        // Filling the gap makes the full range readable, bounded by the limit.
+        assert!(recv.write(RangeBuf::from(b"world", 5, false)).is_ok());
+        assert_eq!(recv.readable_len(64 * 1024), 19);
+        assert_eq!(recv.readable_len(10), 10);
     }
 
     /// Test shutdown behavior

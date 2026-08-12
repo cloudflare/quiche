@@ -637,7 +637,7 @@ impl Config {
     pub fn with_boring_ssl_ctx_builder(
         version: u32, tls_ctx_builder: boring::ssl::SslContextBuilder,
     ) -> Result<Config> {
-        Self::with_tls_ctx(version, tls::Context::from_boring(tls_ctx_builder))
+        Self::with_tls_ctx(version, tls::Context::from_boring(tls_ctx_builder)?)
     }
 
     fn with_tls_ctx(version: u32, tls_ctx: tls::Context) -> Result<Config> {
@@ -2755,7 +2755,7 @@ impl<F: BufFactory> Connection<F> {
         // a borrowed view of `ssl`. The caller retains ownership of the
         // underlying BoringSSL object.
         let mut handshake = ManuallyDrop::new(unsafe {
-            tls::Handshake::from_ptr(ssl.as_ptr() as _)
+            tls::Handshake::from_ptr(ssl.as_ptr() as _)?
         });
 
         handshake.set_quic_transport_params(&params, is_server)
@@ -6385,6 +6385,33 @@ impl<F: BufFactory> Connection<F> {
         stream.is_readable()
     }
 
+    /// Returns the number of contiguous bytes buffered for a stream, up to
+    /// `max_len`.
+    ///
+    /// This is the length of the contiguous, in-order data buffered at the
+    /// stream's current read offset, i.e. the bytes a call to [`stream_recv`]
+    /// would return right now. Data received out of order that sits behind a
+    /// gap is not counted, so this never reports bytes that are not yet
+    /// readable.
+    ///
+    /// This is a companion to [`stream_readable`], which only reports *whether*
+    /// data is available; this reports *how much*. It is intended for sizing a
+    /// receive buffer. The cost is proportional to the number of contiguous
+    /// buffered chunks at the front of the stream, up to `max_len`, and no data
+    /// is copied.
+    ///
+    /// Returns 0 if the stream does not exist.
+    ///
+    /// [`stream_recv`]: struct.Connection.html#method.stream_recv
+    /// [`stream_readable`]: struct.Connection.html#method.stream_readable
+    pub fn stream_readable_len(&self, stream_id: u64, max_len: usize) -> usize {
+        match self.streams.get(stream_id) {
+            Some(s) => s.recv.readable_len(max_len),
+
+            None => 0,
+        }
+    }
+
     /// Returns the next stream that can be written to.
     ///
     /// Note that once returned by this method, a stream ID will not be returned
@@ -9477,6 +9504,8 @@ pub use crate::path::SocketAddrIter;
 
 pub use crate::recovery::BbrBwLoReductionStrategy;
 pub use crate::recovery::BbrParams;
+#[cfg(feature = "internal")]
+pub use crate::recovery::BbrRttJumpDetector;
 pub use crate::recovery::CongestionControlAlgorithm;
 pub use crate::recovery::StartupExit;
 pub use crate::recovery::StartupExitReason;

@@ -1071,6 +1071,10 @@ impl RecoveryOps for GRecovery {
         Some(self.pacer.max_bandwidth())
     }
 
+    fn rtt_persistent_jump_count(&self) -> u64 {
+        self.pacer.rtt_persistent_jump_count()
+    }
+
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit> {
         self.recovery_stats.startup_exit

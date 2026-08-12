@@ -56,6 +56,7 @@ pub(crate) struct Config {
     pub handshake_timeout: Option<Duration>,
     pub has_ippktinfo: bool,
     pub has_ipv6pktinfo: bool,
+    pub pool_send_buffer: bool,
 }
 
 impl AsMut<quiche::Config> for Config {
@@ -75,7 +76,9 @@ impl Config {
         };
         let keylog_file = keylog_path.and_then(|path| if KEYLOGFILE_ENABLED {
                 File::options().create(true).append(true).open(path)
-                    .inspect_err(|e| log::warn!("failed to open SSLKEYLOGFILE"; "error" => e))
+                    .inspect_err(|e| {
+                        log::warn!("failed to open SSLKEYLOGFILE"; "error" => e);
+                    })
                     .ok()
             } else {
                 log::warn!("SSLKEYLOGFILE is set, but `--cfg capture_keylogs` was not enabled. No keys will be logged.");
@@ -108,6 +111,7 @@ impl Config {
             handshake_timeout: quic_settings.handshake_timeout,
             has_ippktinfo,
             has_ipv6pktinfo,
+            pool_send_buffer: quic_settings.pool_send_buffer,
         })
     }
 }

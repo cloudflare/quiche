@@ -2954,8 +2954,14 @@ impl Connection {
 
                 self.finished_streams.push_back(stream_id);
             },
-
-            _ => (),
+            Some(stream::Type::Unknown) | None => {
+                self.streams.remove(&stream_id);
+            },
+            // Closing any of the critical streams leads to connection close,
+            // so there is no need for any cleanup actions here.
+            Some(stream::Type::Control) |
+            Some(stream::Type::QpackEncoder) |
+            Some(stream::Type::QpackDecoder) => (),
         };
     }
 
@@ -7586,6 +7592,104 @@ mod tests {
 
         assert_eq!(s.poll_client(), Err(Error::Done));
         assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    fn unknown_uni_stream_leaks_past_max_streams_uni() {
+        let (mut config, h3_config) = Session::default_configs().unwrap();
+        config.set_initial_max_data(100_000);
+        config.set_initial_max_stream_data_uni(100_000);
+        config.set_initial_max_streams_uni(5);
+        config.grease(false);
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        s.handshake().unwrap();
+
+        let baseline = s.server.streams.len();
+        let mut leaked_streams = Vec::new();
+        let mut id = 14;
+
+        let n = 500;
+        for i in 0..n {
+            s.pipe
+                .client
+                .stream_send(id, &[0x21], true)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "stream credit was not re-issued after {} streams: {:?}",
+                        i, e
+                    )
+                });
+
+            s.pipe.advance().unwrap();
+            assert_eq!(s.poll_server(), Err(Error::Done));
+            assert!(s.pipe.server.streams.is_collected(id));
+            s.pipe.advance().unwrap();
+
+            leaked_streams.push(id);
+            id += 4;
+        }
+
+        for id in leaked_streams {
+            assert!(s.pipe.server.streams.is_collected(id));
+        }
+
+        assert_eq!(
+            s.server.streams.len(),
+            baseline,
+            "expected {} allocated streams in stream map after {} streams with unknown type",
+            baseline,
+            n,
+        );
+    }
+
+    #[test]
+    fn empty_uni_stream_leaks_past_max_streams_uni() {
+        let (mut config, h3_config) = Session::default_configs().unwrap();
+        config.set_initial_max_data(100_000);
+        config.set_initial_max_stream_data_uni(100_000);
+        config.set_initial_max_streams_uni(5);
+        config.grease(false);
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        s.handshake().unwrap();
+
+        let baseline = s.server.streams.len();
+        let mut leaked_streams = Vec::new();
+        let mut id = 14;
+
+        let n = 500;
+        for i in 0..n {
+            s.pipe
+                .client
+                .stream_send(id, &[], true)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "stream credit was not re-issued after {} streams: {:?}",
+                        i, e
+                    )
+                });
+
+            s.pipe.advance().unwrap();
+            assert_eq!(s.poll_server(), Err(Error::Done));
+            assert!(s.pipe.server.streams.is_collected(id));
+            s.pipe.advance().unwrap();
+
+            leaked_streams.push(id);
+            id += 4;
+        }
+
+        for id in leaked_streams {
+            assert!(s.pipe.server.streams.is_collected(id));
+        }
+
+        assert_eq!(
+            s.server.streams.len(),
+            baseline,
+            "expected {} allocated streams in stream map after {} streams without stream type",
+            baseline,
+            n,
+        );
     }
 
     #[test]

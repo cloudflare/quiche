@@ -269,9 +269,11 @@ where
     // drive the packet router:
     tokio::spawn(async move {
         match router.await {
-            Ok(()) => log::debug!("incoming packet router finished"),
+            Ok(()) => {
+                log::debug!("incoming packet router finished");
+            },
             Err(error) => {
-                log::error!("incoming packet router failed"; "error"=>error)
+                log::error!("incoming packet router failed"; "error"=>error);
             },
         }
     });
@@ -334,9 +336,11 @@ where
 
     crate::metrics::tokio_task::spawn("quic_udp_listener", metrics, async move {
         match socket_driver.await {
-            Ok(()) => log::trace!("incoming packet router finished"),
+            Ok(()) => {
+                log::trace!("incoming packet router finished");
+            },
             Err(error) => {
-                log::error!("incoming packet router failed"; "error"=>error)
+                log::error!("incoming packet router failed"; "error"=>error);
             },
         }
     });

@@ -338,6 +338,7 @@ where
             } else {
                 self.config.has_ipv6pktinfo
             },
+            pool_send_buffer: self.config.pool_send_buffer,
         };
 
         let handshake_info = HandshakeInfo::new(

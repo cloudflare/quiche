@@ -74,7 +74,6 @@ use self::streams::StreamReady;
 use self::streams::WaitForDownstreamData;
 use self::streams::WaitForStream;
 use self::streams::WaitForUpstreamCapacity;
-use crate::buf_factory::BufFactory;
 use crate::http3::settings::Http3Settings;
 use crate::http3::H3AuditStats;
 use crate::metrics::Metrics;
@@ -113,6 +112,49 @@ const STREAM_CAPACITY: usize = 1; // Set to 1 to stress write_pending under test
 // For *all* flows use a shared channel with 2048 entries, which works out
 // to 3MB of max buffered data at 1500 bytes per datagram.
 const FLOW_CAPACITY: usize = 2048;
+
+// Floor for the lazily-allocated body receive buffer. The buffer is sized to
+// the amount currently readable on the stream (see [`process_h3_data`]), but we
+// never allocate below this floor, for two reasons:
+//
+// - A `Limit<BytesMut>` with a zero limit reports no remaining capacity and
+//   would make `recv_body_buf` a no-op.
+// - Sizing strictly to the readable length defeats allocation amortization: a
+//   body that trickles in a few bytes at a time (e.g. one byte per read) would
+//   reallocate the buffer on every read. Allocating at least this many bytes
+//   lets a single allocation absorb many small reads (each `split()` off)
+//   before it is exhausted and reallocated.
+//
+// The floor is a soft hint, not a hard minimum: it never overrides the
+// configured cap, so a cap smaller than the floor still bounds the allocation
+// (see [`body_recv_buf_size`]).
+const MIN_BODY_RECV_BUF_SIZE: usize = 1024;
+
+// Default cap for the body receive buffer when
+// [`Http3Settings::max_recv_body_buf_size`] is unset or zero. Chosen well below
+// `BufFactory::MAX_BUF_SIZE` (64 KiB) so a request that carries a body doesn't
+// pin a large allocation for the life of the stream; a larger streamed body
+// simply reallocates once per driver read-cycle.
+const DEFAULT_MAX_BODY_RECV_BUF_SIZE: usize = 16 * 1024;
+
+/// Computes the capacity to use for the body receive buffer given the number of
+/// bytes currently readable on the stream and the configured maximum.
+///
+/// The result is clamped to `[floor, max]`, where `floor` is
+/// [`MIN_BODY_RECV_BUF_SIZE`] capped by `max`. Reads below the floor still
+/// allocate the floor (so a trickle of tiny reads reuses one allocation instead
+/// of reallocating each time), while a single (potentially adversarial) read
+/// never allocates more than `max`. `max` is derived from
+/// [`Http3Settings::max_recv_body_buf_size`], defaulting to
+/// [`DEFAULT_MAX_BODY_RECV_BUF_SIZE`] when the setting is unset or zero.
+///
+/// `max` is the hard upper bound: when it is smaller than the floor it wins, so
+/// the range passed to `clamp` is always valid (`floor <= max`). The
+/// constructor guarantees `max >= 1`, so the result is never zero.
+fn body_recv_buf_size(readable: usize, max: usize) -> usize {
+    let floor = MIN_BODY_RECV_BUF_SIZE.min(max);
+    readable.clamp(floor, max)
+}
 
 /// Used by a local task to send [`OutboundFrame`]s to a peer on the
 /// stream or flow associated with this channel.
@@ -350,12 +392,16 @@ pub struct H3Driver<H: DriverHooks> {
     dgram_recv: OutboundFrameStream,
     /// Keeps the datagram channel open such that datagram flows can be created.
     dgram_send: OutboundFrameSender,
-    /// A buffer to receive H3 body data from quiche. We initialize a large
-    /// buffer and then `split()` off filled parts until we need to reallocate.
-    body_recv_buf: bytes::buf::Limit<BytesMut>,
+    /// A buffer to receive H3 body data from quiche. Lazily allocated on the
+    /// first body read and released once no streams remain, so idle
+    /// connections hold no receive buffer. We `split()` off filled parts until
+    /// we need to reallocate.
+    body_recv_buf: Option<bytes::buf::Limit<BytesMut>>,
+    /// Upper bound on the capacity of `body_recv_buf`, from
+    /// [`Http3Settings::max_recv_body_buf_size`]. Unset or `0` defaults to
+    /// [`DEFAULT_MAX_BODY_RECV_BUF_SIZE`], so this is always non-zero.
+    max_recv_body_buf_size: usize,
 
-    /// The buffer used to interact with the underlying IoWorker.
-    io_worker_buf: Vec<u8>,
     /// The maximum HTTP/3 stream ID seen on this connection.
     max_stream_seen: u64,
 
@@ -393,9 +439,13 @@ impl<H: DriverHooks> H3Driver<H> {
                 dgram_recv,
                 dgram_send: PollSender::new(dgram_send),
                 max_stream_seen: 0,
-                body_recv_buf: BytesMut::with_capacity(BufFactory::MAX_BUF_SIZE)
-                    .limit(BufFactory::MAX_BUF_SIZE),
-                io_worker_buf: vec![0u8; BufFactory::MAX_BUF_SIZE],
+                body_recv_buf: None,
+                // `Some(0)` would make `recv_body_buf` a no-op, so treat it as
+                // unset.
+                max_recv_body_buf_size: http3_settings
+                    .max_recv_body_buf_size
+                    .filter(|&size| size > 0)
+                    .unwrap_or(DEFAULT_MAX_BODY_RECV_BUF_SIZE),
 
                 waiting_streams: FuturesUnordered::new(),
 
@@ -521,17 +571,37 @@ impl<H: DriverHooks> H3Driver<H> {
                 };
             }
 
-            // NOTE: `self.body_recv_buf` is `Limit<BytesMut>` so
-            // `has_remaining_mut()` will indicate if the buffer
-            // has space available until the *limit* is
-            //  reached. (A plain `BytesMut` can reallocate and would always
-            // return true)
-            if !self.body_recv_buf.has_remaining_mut() {
-                self.body_recv_buf =
-                    BytesMut::with_capacity(BufFactory::MAX_BUF_SIZE)
-                        .limit(BufFactory::MAX_BUF_SIZE)
-            };
-            match conn.recv_body_buf(qconn, stream_id, &mut self.body_recv_buf) {
+            // Size the receive buffer to the contiguous, in-order data currently
+            // readable on the stream, capped at the configured maximum, so small
+            // or idle bodies don't pay for a full allocation.
+            // The readable length includes H3 framing, so it is enough to drain
+            // all currently readable body bytes. The floor
+            // (`MIN_BODY_RECV_BUF_SIZE`) keeps the allocation non-zero and large
+            // enough that a trickle of tiny reads reuses a single allocation
+            // instead of reallocating each time.
+            let want = body_recv_buf_size(
+                qconn.stream_readable_len(stream_id, self.max_recv_body_buf_size),
+                self.max_recv_body_buf_size,
+            );
+            // Lazily allocate the receive buffer on first use; idle
+            // connections never receive body bytes and never allocate it.
+            let body_recv_buf = self
+                .body_recv_buf
+                .get_or_insert_with(|| BytesMut::with_capacity(want).limit(want));
+            // NOTE: `body_recv_buf` is `Limit<BytesMut>` so `remaining_mut()`
+            // reports the space left until the *limit* is reached. (A plain
+            // `BytesMut` can reallocate and would always report space available.)
+            //
+            // Reallocate whenever the room left is smaller than what we want for
+            // this read. This covers an exhausted buffer, but also grows a
+            // buffer that was previously sized to a smaller readable length so a
+            // later, larger read is not throttled by leftover capacity. Capacity
+            // is kept equal to the limit so the `split()` invariant asserted
+            // below (spare capacity == remaining_mut) continues to hold.
+            if body_recv_buf.remaining_mut() < want {
+                *body_recv_buf = BytesMut::with_capacity(want).limit(want);
+            }
+            match conn.recv_body_buf(qconn, stream_id, &mut *body_recv_buf) {
                 Ok(n) => {
                     ctx.audit_stats.add_downstream_bytes_recvd(n as u64);
                     let event = H3Event::BodyBytesReceived {
@@ -541,13 +611,18 @@ impl<H: DriverHooks> H3Driver<H> {
                     };
                     let _ = self.h3_event_sender.send(event.into());
                     // Take the filled part, leave the remaining capacity
-                    let filled_body = self.body_recv_buf.get_mut().split();
+                    let filled_body = body_recv_buf.get_mut().split();
                     // Sanity check: the remaining spare capacity should equal
                     // the limit.
                     debug_assert_eq!(
-                        self.body_recv_buf.get_mut().spare_capacity_mut().len(),
-                        self.body_recv_buf.remaining_mut()
+                        body_recv_buf.get_mut().spare_capacity_mut().len(),
+                        body_recv_buf.remaining_mut()
                     );
+                    // A full split leaves only an empty shared handle, so let
+                    // the forwarded frame own the allocation.
+                    if !body_recv_buf.has_remaining_mut() {
+                        self.body_recv_buf = None;
+                    }
                     permit.send(InboundFrame::Body(filled_body, false));
                 },
                 Err(h3::Error::Done) =>
@@ -1003,15 +1078,23 @@ impl<H: DriverHooks> H3Driver<H> {
         Ok(())
     }
 
-    /// Closes the connection with `NoError` if the H3 event receiver
-    /// has been dropped and there are no active streams or flows.
-    fn close_if_idle(&self, qconn: &mut QuicheConnection) {
-        if self.h3_event_receiver_dropped &&
-            self.stream_map.is_empty() &&
-            self.flow_map.is_empty()
-        {
-            let _ =
-                qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[]);
+    /// Handles connection cleanup once no streams or flows remain.
+    ///
+    /// Releases the body receive buffer (it is reallocated lazily on the next
+    /// body read; body bytes only flow on active streams, so an empty stream
+    /// map means it is unused) and closes the connection with `NoError` if the
+    /// H3 event receiver has been dropped.
+    fn close_if_idle(&mut self, qconn: &mut QuicheConnection) {
+        if self.stream_map.is_empty() && self.flow_map.is_empty() {
+            self.body_recv_buf = None;
+
+            if self.h3_event_receiver_dropped {
+                let _ = qconn.close(
+                    true,
+                    quiche::h3::WireErrorCode::NoError as u64,
+                    &[],
+                );
+            }
         }
     }
 
@@ -1251,11 +1334,6 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
     #[inline]
     fn should_act(&self) -> bool {
         self.conn.is_some()
-    }
-
-    #[inline]
-    fn buffer(&mut self) -> &mut [u8] {
-        &mut self.io_worker_buf
     }
 
     /// Poll the underlying [`quiche::h3::Connection`] for

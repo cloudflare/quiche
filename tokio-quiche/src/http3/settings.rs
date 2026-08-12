@@ -61,6 +61,18 @@ pub struct Http3Settings {
     /// Set the `SETTINGS_ENABLE_CONNECT_PROTOCOL` HTTP/3 setting.
     /// See <https://www.rfc-editor.org/rfc/rfc9220#section-3-2>
     pub enable_extended_connect: bool,
+    /// Maximum size, in bytes, of the buffer the driver uses to read HTTP/3
+    /// body data out of quiche before forwarding it upstream.
+    ///
+    /// The buffer is sized dynamically to the amount of data currently
+    /// readable on a stream (which is itself bounded by the QUIC flow-control
+    /// window and the size of the buffered QUIC STREAM frames), but a single
+    /// read will never allocate more than this cap. This bounds the memory a
+    /// single (potentially adversarial) stream can force the driver to
+    /// allocate.
+    ///
+    /// When unset or `Some(0)`, the driver defaults to 16 KiB.
+    pub max_recv_body_buf_size: Option<usize>,
 }
 
 impl From<&Http3Settings> for quiche::h3::Config {
