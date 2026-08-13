@@ -6415,6 +6415,106 @@ fn tx_cap_factor(#[values(true, false)] discard: bool) {
     assert_eq!(r.next(), None);
 }
 
+#[test]
+fn tx_cap_factor_with_full_cwnd() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(100000);
+    config.set_initial_max_stream_data_bidi_remote(100000);
+    config.set_initial_max_streams_bidi(1);
+    config.set_max_recv_udp_payload_size(1200);
+    config.verify_peer(false);
+    config.set_send_capacity_factor(2.0);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let cwin = pipe
+        .server
+        .paths
+        .get_active()
+        .expect("no active")
+        .recovery
+        .cwnd();
+
+    // Fill one congestion window and emit it without delivering the packets,
+    // so no ACK can free congestion window capacity. Some stream data can stay
+    // buffered because packet overhead also consumes congestion window space.
+    let send_buf = vec![0; cwin];
+    assert_eq!(pipe.server.stream_send(0, &send_buf, false), Ok(cwin));
+    assert!(test_utils::emit_flight(&mut pipe.server).is_ok());
+
+    assert_eq!(
+        pipe.server
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .cwnd_available(),
+        0
+    );
+
+    let expected = cwin.saturating_sub(pipe.server.streams.tx_buffered());
+    assert!(expected > 0);
+
+    // Recalculate the cap while cwnd is full. With a factor of 2 there must
+    // still be capacity to pre-buffer up to one additional congestion window.
+    pipe.server.update_tx_cap();
+    assert_eq!(pipe.server.tx_cap, expected);
+
+    let send_buf = vec![0; expected];
+    assert_eq!(pipe.server.stream_send(0, &send_buf, false), Ok(expected));
+
+    // Updating the cap again must not grant the extra buffering allowance a
+    // second time while the congestion window is still full.
+    pipe.server.update_tx_cap();
+    assert_eq!(pipe.server.tx_cap, 0);
+    assert_eq!(pipe.server.stream_send(0, b"a", false), Err(Error::Done));
+}
+
+#[test]
+fn tx_cap_factor_does_not_scale_flow_control() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config.set_initial_max_data(10000);
+    config.set_initial_max_stream_data_bidi_local(50000);
+    config.set_initial_max_stream_data_bidi_remote(50000);
+    config.set_initial_max_streams_bidi(1);
+    config.set_max_recv_udp_payload_size(1200);
+    config.verify_peer(false);
+    config.set_send_capacity_factor(2.0);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let send_buf = [0; 20000];
+    assert_eq!(pipe.server.stream_send(0, &send_buf, false), Ok(10000));
+    assert_eq!(pipe.server.stream_send(0, b"a", false), Err(Error::Done));
+}
+
 #[rstest]
 fn client_rst_stream_while_bytes_in_flight(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
