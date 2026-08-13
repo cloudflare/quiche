@@ -381,6 +381,10 @@ impl Path {
         &mut self, hs_confirmed: bool, hs_done: bool, out_len: usize,
         is_closing: bool, frames_empty: bool,
     ) -> bool {
+        if !self.validated() {
+            return false;
+        }
+
         let Some(pmtud) = self.pmtud.as_mut() else {
             return false;
         };
