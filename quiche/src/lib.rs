@@ -8922,14 +8922,24 @@ impl<F: BufFactory> Connection<F> {
 
     /// Updates send capacity.
     fn update_tx_cap(&mut self) {
-        let cwin_available = match self.paths.get_active() {
-            Ok(p) => p.recovery.cwnd_available() as u64,
-            Err(_) => 0,
+        let (cwin, cwin_available) = match self.paths.get_active() {
+            Ok(p) => (p.recovery.cwnd(), p.recovery.cwnd_available()),
+            Err(_) => (0, 0),
         };
 
-        let cap =
-            cmp::min(cwin_available, self.max_tx_data - self.tx_data) as usize;
-        self.tx_cap = (cap as f64 * self.tx_cap_factor).ceil() as usize;
+        let flow_cap = self.max_tx_data - self.tx_data;
+
+        let base_cap = (cmp::min(cwin_available as u64, flow_cap) as f64 *
+            self.tx_cap_factor.min(1.0))
+        .ceil() as usize;
+
+        let extra_cap = ((cwin as f64 * (self.tx_cap_factor - 1.0).max(0.0))
+            .ceil() as usize)
+            .saturating_sub(self.streams.tx_buffered());
+
+        self.tx_cap =
+            cmp::min(base_cap.saturating_add(extra_cap) as u64, flow_cap)
+                as usize;
     }
 
     fn delivery_rate_check_if_app_limited(&self) -> bool {
