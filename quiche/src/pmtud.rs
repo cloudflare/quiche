@@ -17,9 +17,21 @@
 //!
 //! [RFC 8899]: https://datatracker.ietf.org/doc/html/rfc8899
 
+use std::time::Duration;
+use std::time::Instant;
+
 /// Maximum number of probe attempts before treating a size as failed.
 /// https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
 pub(crate) const MAX_PROBES_DEFAULT: u8 = 3;
+
+/// PMTUD configuration carried across the handshake and applied to paths.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PmtudParams {
+    pub enable: bool,
+
+    /// Consecutive probe failures tolerated before a size is treated as failed.
+    pub max_probes: u8,
+}
 
 /// Min Packetization Layer Path MTU (PLPMTU).
 /// https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
@@ -54,13 +66,26 @@ pub struct Pmtud {
     /// The maximum number of failed probe attempts before treating a size as
     /// failed.
     max_probes: u8,
+
+    /// How long to stay on the discovered PMTU before re-entering the Search
+    /// Phase. [`None`] disables periodic re-probing.
+    raise_interval: Option<Duration>,
+
+    /// When set, the instant at which the Search Phase should be re-entered.
+    /// Armed once a PMTU is found; cleared while searching.
+    raise_deadline: Option<Instant>,
 }
 
 impl Pmtud {
     /// Creates new PMTUD instance.
     ///
     /// If `max_probes` is 0, uses the default value of [`MAX_PROBES_DEFAULT`].
-    pub fn new(maximum_supported_mtu: usize, max_probes: u8) -> Self {
+    /// `raise_interval` of [`None`] disables periodic re-probing once a PMTU is
+    /// found.
+    pub fn new(
+        maximum_supported_mtu: usize, max_probes: u8,
+        raise_interval: Option<Duration>,
+    ) -> Self {
         let max_probes = if max_probes == 0 {
             warn!(
                 "max_probes is 0, using default value {}",
@@ -75,6 +100,7 @@ impl Pmtud {
             maximum_supported_mtu,
             probe_size: maximum_supported_mtu,
             max_probes,
+            raise_interval,
             ..Default::default()
         }
     }
@@ -114,7 +140,7 @@ impl Pmtud {
     ///
     /// Based on the Optimistic Binary algorithm defined in:
     /// Ref: <https://www.hb.fh-muenster.de/opus4/frontdoor/deliver/index/docId/14965/file/dplpmtudQuicPaper.pdf>
-    fn update_probe_size(&mut self) {
+    fn update_probe_size(&mut self, now: Instant) {
         match (
             self.smallest_failed_probe_size,
             self.largest_successful_probe_size,
@@ -136,7 +162,7 @@ impl Pmtud {
                 // Found the PMTU
                 if failed_probe_size - successful_probe_size <= 1 {
                     debug!("Found PMTU: {successful_probe_size}");
-                    self.set_pmtu(successful_probe_size);
+                    self.set_pmtu(successful_probe_size, now);
                 } else {
                     self.probe_size =
                         (successful_probe_size + failed_probe_size) / 2
@@ -152,7 +178,7 @@ impl Pmtud {
             // is the maximum supported MTU, then having only a successful probe
             // means the maximum supported MTU is <= PMTU
             (None, Some(successful_probe_size)) => {
-                self.set_pmtu(successful_probe_size);
+                self.set_pmtu(successful_probe_size, now);
             },
 
             // Use the initial probe size if no record of success/failures
@@ -166,7 +192,9 @@ impl Pmtud {
     }
 
     /// Records a successful probe and returns the largest successful probe size
-    pub fn successful_probe(&mut self, probe_size: usize) -> Option<usize> {
+    pub fn successful_probe(
+        &mut self, probe_size: usize, now: Instant,
+    ) -> Option<usize> {
         self.probe_failure_count = 0;
 
         self.largest_successful_probe_size = std::cmp::max(
@@ -175,14 +203,29 @@ impl Pmtud {
             self.largest_successful_probe_size,
         );
 
-        self.update_probe_size();
+        self.update_probe_size(now);
         self.in_flight = false;
 
         self.largest_successful_probe_size
     }
 
+    /// Returns the instant at which the Search Phase should be re-entered, if a
+    /// raise timer is currently armed.
+    pub fn raise_timer(&self) -> Option<Instant> {
+        self.raise_deadline
+    }
+
+    /// Re-enters the Search Phase if the raise timer has expired.
+    ///
+    /// A no-op if the timer is unarmed or has not yet elapsed.
+    pub fn on_raise_timeout(&mut self, now: Instant) {
+        if self.raise_deadline.is_some_and(|deadline| now >= deadline) {
+            self.enter_search_phase();
+        }
+    }
+
     /// Records a failed probe
-    pub fn failed_probe(&mut self, probe_size: usize) {
+    pub fn failed_probe(&mut self, probe_size: usize, now: Instant) {
         // Treat errant probes as if they failed at the minimum supported MTU
         let probe_size = std::cmp::max(probe_size, MIN_PLPMTU);
         self.probe_failure_count += 1;
@@ -210,18 +253,26 @@ impl Pmtud {
         );
 
         self.probe_failure_count = 0;
-        self.update_probe_size();
+        self.update_probe_size(now);
         self.in_flight = false;
     }
 
     // Resets PMTUD internals such that PMTUD will be recalculated
     // on the next opportunity
     fn restart_pmtud(&mut self) {
+        self.largest_successful_probe_size = None;
+        self.enter_search_phase();
+    }
+
+    // Re-enters the Search Phase, retaining the largest confirmed probe size so
+    // ordinary traffic keeps flowing at the current PLPMTU while a larger size
+    // is probed.
+    fn enter_search_phase(&mut self) {
         self.set_probe_size(self.maximum_supported_mtu);
         self.smallest_failed_probe_size = None;
-        self.largest_successful_probe_size = None;
         self.pmtu = None;
         self.probe_failure_count = 0;
+        self.raise_deadline = None;
     }
 
     // Checks that a probe of PMTU size can be ack'd by enabling
@@ -233,13 +284,21 @@ impl Pmtud {
             self.pmtu = None;
             self.probe_failure_count = 0;
             self.largest_successful_probe_size = None;
+            self.raise_deadline = None;
         }
     }
 
-    fn set_pmtu(&mut self, successful_probe_size: usize) {
+    fn set_pmtu(&mut self, successful_probe_size: usize, now: Instant) {
         self.pmtu = Some(successful_probe_size);
         self.probe_size = successful_probe_size;
         self.probe_failure_count = 0;
+
+        // Entering the Search Complete state arms the raise timer so the path
+        // is periodically re-probed for a larger MTU, regardless of whether a
+        // successful or failed probe completed the search.
+        self.raise_deadline = self
+            .raise_interval
+            .and_then(|interval| now.checked_add(interval));
     }
 }
 
@@ -263,7 +322,7 @@ mod tests {
 
     #[test]
     fn pmtud_initial_state() {
-        let pmtud = Pmtud::new(1350, 1);
+        let pmtud = Pmtud::new(1350, 1, None);
         assert_eq!(pmtud.get_current_mtu(), 1200);
         assert_eq!(pmtud.get_probe_size(), 1350);
         assert!(pmtud.should_probe());
@@ -271,69 +330,69 @@ mod tests {
 
     #[test]
     fn pmtud_max_probes_zero_uses_default() {
-        let pmtud = Pmtud::new(1500, 0);
+        let pmtud = Pmtud::new(1500, 0, None);
         assert_eq!(pmtud.max_probes, MAX_PROBES_DEFAULT);
     }
 
     #[test]
     fn pmtud_max_probes_set_to_provided_value() {
-        let pmtud = Pmtud::new(1500, 5);
+        let pmtud = Pmtud::new(1500, 5, None);
         assert_eq!(pmtud.max_probes, 5);
         assert_ne!(pmtud.max_probes, MAX_PROBES_DEFAULT);
     }
 
     #[test]
     fn pmtud_binary_search_algorithm() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, None);
 
         // Set initial probe size to 1500
         assert_eq!(pmtud.get_probe_size(), 1500);
 
         // Simulate probe loss - should update to midpoint
-        pmtud.failed_probe(1500);
+        pmtud.failed_probe(1500, Instant::now());
         // Expected: 1200 + ((1500 - 1200) / 2) = 1200 + 150 = 1350
         assert_eq!(pmtud.get_probe_size(), 1350);
 
         // Another probe loss
-        pmtud.failed_probe(1350);
+        pmtud.failed_probe(1350, Instant::now());
         // Expected: 1200 + ((1350 - 1200) / 2) = 1200 + 75 = 1275
         assert_eq!(pmtud.get_probe_size(), 1275);
 
-        pmtud.failed_probe(1275);
+        pmtud.failed_probe(1275, Instant::now());
         // Expected: 1200 + ((1275 - 1200) / 2) = 1200 + 37 = 1237
         assert_eq!(pmtud.get_probe_size(), 1237);
 
-        pmtud.failed_probe(1237);
+        pmtud.failed_probe(1237, Instant::now());
         // Expected: 1200 + ((1237 - 1200) / 2) = 1200 + 18 = 1218
         assert_eq!(pmtud.get_probe_size(), 1218);
 
-        pmtud.failed_probe(1218);
+        pmtud.failed_probe(1218, Instant::now());
         // Expected: 1200 + ((1218 - 1200) / 2) = 1200 + 9 = 1209
         assert_eq!(pmtud.get_probe_size(), 1209);
 
-        pmtud.failed_probe(1209);
+        pmtud.failed_probe(1209, Instant::now());
         // Expected: 1200 + ((1209 - 1200) / 2) = 1200 + 4 = 1204
         assert_eq!(pmtud.get_probe_size(), 1204);
 
-        pmtud.failed_probe(1204);
+        pmtud.failed_probe(1204, Instant::now());
         // Expected: 1200 + ((1204 - 1200) / 2) = 1200 + 2 = 1202
         assert_eq!(pmtud.get_probe_size(), 1202);
 
-        pmtud.failed_probe(1202);
+        pmtud.failed_probe(1202, Instant::now());
         // Expected: 1200 + ((1202 - 1200) / 2) = 1200 + 1 = 1201
         assert_eq!(pmtud.get_probe_size(), 1201);
 
-        pmtud.failed_probe(1201);
+        pmtud.failed_probe(1201, Instant::now());
         // Expected: 1200 + ((1201 - 1200) / 2) = 1200 + 0 = 1200
         assert_eq!(pmtud.get_probe_size(), 1200);
     }
 
     #[test]
     fn pmtud_successful_probe() {
-        let mut pmtud = Pmtud::new(1400, 1);
+        let mut pmtud = Pmtud::new(1400, 1, None);
 
         // Simulate successful probe
-        pmtud.successful_probe(1400);
+        pmtud.successful_probe(1400, Instant::now());
 
         assert_eq!(pmtud.get_current_mtu(), 1400);
     }
@@ -345,8 +404,8 @@ mod tests {
     /// to verify the PMTU discovery process.
     #[test]
     fn test_pmtud_reset() {
-        let mut pmtud = Pmtud::new(1350, 1);
-        pmtud.successful_probe(1350);
+        let mut pmtud = Pmtud::new(1350, 1, None);
+        pmtud.successful_probe(1350, Instant::now());
         assert_eq!(pmtud.pmtu, Some(1350));
         assert!(!pmtud.should_probe());
 
@@ -360,8 +419,8 @@ mod tests {
     /// Test case for receiving a probe outside the defined supported MTU range.
     #[test]
     fn test_pmtud_errant_probe() {
-        let mut pmtud = Pmtud::new(1350, 1);
-        pmtud.successful_probe(1500);
+        let mut pmtud = Pmtud::new(1350, 1, None);
+        pmtud.successful_probe(1500, Instant::now());
         // Even though we've received a probe larger than supported
         // maximum MTU, the PMTU should still respect the configured maximum
         assert_eq!(pmtud.pmtu, Some(1350));
@@ -371,7 +430,7 @@ mod tests {
 
         // A failed probe of a value less than the minimum supported MTU
         // should stop probing
-        pmtud.failed_probe(1100);
+        pmtud.failed_probe(1100, Instant::now());
         assert_eq!(pmtud.pmtu, None);
         assert_eq!(pmtud.get_probe_size(), 1200);
         assert!(!pmtud.should_probe());
@@ -383,7 +442,7 @@ mod tests {
     /// when the PMTU is equal to the minimum supported MTU.
     #[test]
     fn test_pmtu_equal_to_min_supported_mtu() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, None);
         pmtud_test_runner(&mut pmtud, 1200);
     }
 
@@ -393,7 +452,7 @@ mod tests {
     /// when the PMTU is greater than the minimum supported MTU.
     #[test]
     fn test_pmtu_greater_than_min_supported_mtu() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, None);
         pmtud_test_runner(&mut pmtud, 1500);
     }
 
@@ -403,7 +462,7 @@ mod tests {
     /// the case when the PMTU is less than the minimum supported MTU.
     #[test]
     fn test_pmtu_less_than_min_supported_mtu() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, None);
         pmtud_test_runner(&mut pmtud, 1100);
     }
 
@@ -414,9 +473,9 @@ mod tests {
     /// validation probe.
     #[test]
     fn test_pmtu_revalidation() {
-        let mut pmtud = Pmtud::new(1350, 1);
+        let mut pmtud = Pmtud::new(1350, 1, None);
         pmtud.set_probe_size(1350);
-        pmtud.successful_probe(1350);
+        pmtud.successful_probe(1350, Instant::now());
 
         // Simulate a case where an established PMTU probe is dropped repeatedly
         pmtud.revalidate_pmtu();
@@ -428,23 +487,23 @@ mod tests {
 
     #[test]
     fn pmtud_revalidation_tolerates_random_packet_loss() {
-        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT);
+        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT, None);
 
-        pmtud.successful_probe(1500);
+        pmtud.successful_probe(1500, Instant::now());
         assert_eq!(pmtud.get_pmtu(), Some(1500));
 
         pmtud.revalidate_pmtu();
         assert_eq!(pmtud.get_pmtu(), None);
         assert!(pmtud.largest_successful_probe_size.is_none());
 
-        pmtud.failed_probe(1500);
+        pmtud.failed_probe(1500, Instant::now());
         assert_eq!(pmtud.probe_failure_count, 1);
         assert!(pmtud.pmtu.is_none());
 
-        pmtud.failed_probe(1500);
+        pmtud.failed_probe(1500, Instant::now());
         assert_eq!(pmtud.probe_failure_count, 2);
 
-        pmtud.successful_probe(1500);
+        pmtud.successful_probe(1500, Instant::now());
         assert_eq!(pmtud.get_pmtu(), Some(1500));
         assert_eq!(pmtud.probe_failure_count, 0);
     }
@@ -453,9 +512,9 @@ mod tests {
     /// PMTUD should binary search down, not restart.
     #[test]
     fn pmtud_revalidation_failure_binary_searches_not_restarts() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, None);
 
-        pmtud.successful_probe(1500);
+        pmtud.successful_probe(1500, Instant::now());
         assert_eq!(pmtud.get_pmtu(), Some(1500));
 
         // Revalidation clears largest_successful_probe_size
@@ -463,7 +522,7 @@ mod tests {
         assert!(pmtud.largest_successful_probe_size.is_none());
 
         // Revalidation probe fails - should binary search down, not restart
-        pmtud.failed_probe(1500);
+        pmtud.failed_probe(1500, Instant::now());
 
         assert_eq!(pmtud.smallest_failed_probe_size, Some(1500));
         assert!(pmtud.largest_successful_probe_size.is_none());
@@ -472,26 +531,26 @@ mod tests {
 
     #[test]
     fn pmtud_tolerates_initial_packet_loss() {
-        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT);
+        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT, None);
 
-        pmtud.failed_probe(1500);
+        pmtud.failed_probe(1500, Instant::now());
         assert_eq!(pmtud.probe_failure_count, 1);
         assert!(pmtud.smallest_failed_probe_size.is_none());
 
-        pmtud.failed_probe(1500);
+        pmtud.failed_probe(1500, Instant::now());
         assert_eq!(pmtud.probe_failure_count, 2);
         assert!(pmtud.smallest_failed_probe_size.is_none());
 
-        pmtud.successful_probe(1500);
+        pmtud.successful_probe(1500, Instant::now());
         assert_eq!(pmtud.get_pmtu(), Some(1500));
         assert_eq!(pmtud.probe_failure_count, 0);
     }
 
     #[test]
     fn pmtud_confirms_failure_after_max_probes() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, None);
 
-        pmtud.failed_probe(1500);
+        pmtud.failed_probe(1500, Instant::now());
 
         assert_eq!(pmtud.smallest_failed_probe_size, Some(1500));
         assert!(pmtud.pmtu.is_none());
@@ -501,7 +560,7 @@ mod tests {
 
     #[test]
     fn pmtud_binary_search_no_slowdown() {
-        let mut pmtud = Pmtud::new(1500, 2);
+        let mut pmtud = Pmtud::new(1500, 2, None);
 
         fail_probe_max_times(&mut pmtud, 1500);
         assert!(pmtud.pmtu.is_none());
@@ -509,11 +568,11 @@ mod tests {
         let search_size_1 = pmtud.get_probe_size();
         assert!(search_size_1 < 1500);
 
-        pmtud.successful_probe(search_size_1);
+        pmtud.successful_probe(search_size_1, Instant::now());
         assert_eq!(pmtud.probe_failure_count, 0);
 
         let search_size_2 = pmtud.get_probe_size();
-        pmtud.failed_probe(search_size_2);
+        pmtud.failed_probe(search_size_2, Instant::now());
 
         assert!(pmtud.pmtu.is_none());
         assert_eq!(pmtud.probe_failure_count, 1);
@@ -528,7 +587,7 @@ mod tests {
     /// 3. Algorithm converges to the correct MTU of 1337
     #[test]
     fn pmtud_convergence_with_intermittent_loss() {
-        let mut pmtud = Pmtud::new(1500, 3);
+        let mut pmtud = Pmtud::new(1500, 3, None);
         let target_mtu = 1337;
 
         while pmtud.get_pmtu().is_none() {
@@ -536,11 +595,11 @@ mod tests {
 
             if probe_size <= target_mtu {
                 // First probe fails (random loss)
-                pmtud.failed_probe(probe_size);
+                pmtud.failed_probe(probe_size, Instant::now());
                 assert_eq!(pmtud.probe_failure_count, 1);
 
                 // Second probe succeeds
-                pmtud.successful_probe(probe_size);
+                pmtud.successful_probe(probe_size, Instant::now());
                 assert_eq!(pmtud.probe_failure_count, 0); // Reset on success
             } else {
                 // Size exceeds MTU - all probes fail
@@ -560,34 +619,34 @@ mod tests {
 
     #[test]
     fn pmtud_failure_at_min_plpmtu() {
-        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT);
+        let mut pmtud = Pmtud::new(1500, MAX_PROBES_DEFAULT, None);
 
-        pmtud.failed_probe(100);
-        pmtud.failed_probe(100);
-        pmtud.failed_probe(100);
+        pmtud.failed_probe(100, Instant::now());
+        pmtud.failed_probe(100, Instant::now());
+        pmtud.failed_probe(100, Instant::now());
 
         assert_eq!(pmtud.smallest_failed_probe_size, Some(MIN_PLPMTU));
     }
 
     #[test]
     fn pmtud_in_flight_cleared_on_all_outcomes() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, None);
 
         pmtud.set_in_flight(true);
         assert!(pmtud.in_flight);
 
-        pmtud.failed_probe(1500);
+        pmtud.failed_probe(1500, Instant::now());
         assert!(!pmtud.in_flight);
 
         pmtud.set_in_flight(true);
 
-        pmtud.successful_probe(1500);
+        pmtud.successful_probe(1500, Instant::now());
         assert!(!pmtud.in_flight);
     }
 
     #[test]
     fn pmtud_update_probe_size_initial_state() {
-        let mut pmtud = Pmtud::new(1500, 1);
+        let mut pmtud = Pmtud::new(1500, 1, None);
 
         // Manually set probe_size to something else to verify update_probe_size
         // resets it
@@ -595,16 +654,105 @@ mod tests {
 
         // With no successful or failed probes, should reset to
         // maximum_supported_mtu
-        pmtud.update_probe_size();
+        pmtud.update_probe_size(Instant::now());
 
         assert_eq!(pmtud.probe_size, 1500);
+    }
+
+    #[test]
+    fn pmtud_arms_raise_timer_when_pmtu_found() {
+        let interval = Duration::from_secs(600);
+        let mut pmtud = Pmtud::new(1400, 1, Some(interval));
+        let now = Instant::now();
+
+        assert_eq!(pmtud.raise_timer(), None);
+
+        pmtud.successful_probe(1400, now);
+
+        assert_eq!(pmtud.get_pmtu(), Some(1400));
+        assert_eq!(pmtud.raise_timer(), Some(now + interval));
+    }
+
+    #[test]
+    fn pmtud_raise_timer_disabled_never_arms() {
+        let mut pmtud = Pmtud::new(1400, 1, None);
+
+        pmtud.successful_probe(1400, Instant::now());
+
+        assert_eq!(pmtud.get_pmtu(), Some(1400));
+        assert_eq!(pmtud.raise_timer(), None);
+    }
+
+    #[test]
+    fn pmtud_on_raise_timeout_before_deadline_is_noop() {
+        let interval = Duration::from_secs(600);
+        let mut pmtud = Pmtud::new(1400, 1, Some(interval));
+        let now = Instant::now();
+
+        pmtud.successful_probe(1400, now);
+        pmtud.on_raise_timeout(now + interval - Duration::from_secs(1));
+
+        assert_eq!(pmtud.get_pmtu(), Some(1400));
+        assert_eq!(pmtud.raise_timer(), Some(now + interval));
+        assert!(!pmtud.should_probe());
+    }
+
+    #[test]
+    fn pmtud_on_raise_timeout_reenters_search() {
+        let interval = Duration::from_secs(600);
+        let mut pmtud = Pmtud::new(1400, 1, Some(interval));
+        let now = Instant::now();
+
+        pmtud.successful_probe(1400, now);
+        pmtud.on_raise_timeout(now + interval);
+
+        assert_eq!(pmtud.get_pmtu(), None);
+        assert_eq!(pmtud.raise_timer(), None);
+        assert_eq!(pmtud.get_probe_size(), 1400);
+        assert!(pmtud.should_probe());
+    }
+
+    #[test]
+    fn pmtud_arms_raise_timer_when_search_completes_on_failure() {
+        let interval = Duration::from_secs(600);
+        let mut pmtud = Pmtud::new(1204, 1, Some(interval));
+        let now = Instant::now();
+
+        // Drive the search so its final, gap-closing probe is a failure: the
+        // PMTU is then established through failed_probe, not successful_probe.
+        pmtud.failed_probe(1204, now);
+        pmtud.successful_probe(1202, now);
+        assert_eq!(pmtud.get_pmtu(), None);
+
+        pmtud.failed_probe(1203, now);
+
+        assert_eq!(pmtud.get_pmtu(), Some(1202));
+        assert_eq!(pmtud.raise_timer(), Some(now + interval));
+    }
+
+    #[test]
+    fn pmtud_raise_search_keeps_serving_confirmed_mtu() {
+        let interval = Duration::from_secs(600);
+        let mut pmtud = Pmtud::new(1500, 1, Some(interval));
+
+        // Confirm a PMTU below the maximum, leaving headroom to probe upward.
+        pmtud_test_runner(&mut pmtud, 1400);
+        assert_eq!(pmtud.get_pmtu(), Some(1400));
+        assert_eq!(pmtud.get_current_mtu(), 1400);
+
+        let deadline = pmtud.raise_timer().expect("raise timer armed");
+        pmtud.on_raise_timeout(deadline);
+
+        assert!(pmtud.should_probe());
+        assert_eq!(pmtud.get_pmtu(), None);
+        assert_eq!(pmtud.get_current_mtu(), 1400);
     }
 
     // Test utilities
 
     fn fail_probe_max_times(pmtud: &mut Pmtud, size: usize) {
         for _ in 0..pmtud.max_probes {
-            pmtud.failed_probe(size);
+            pmtud.failed_probe(size, Instant::now());
         }
     }
 
@@ -620,13 +768,13 @@ mod tests {
             let probe_size = pmtud.get_probe_size();
 
             if probe_size <= test_pmtu {
-                pmtud.successful_probe(probe_size);
+                pmtud.successful_probe(probe_size, Instant::now());
             } else {
                 fail_probe_max_times(pmtud, probe_size);
             }
 
             // Update the probe size based on the result
-            pmtud.update_probe_size();
+            pmtud.update_probe_size(Instant::now());
 
             // If the probe size hasn't changed and is equal to the minimum
             // supported MTU, break the loop

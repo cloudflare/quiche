@@ -11975,6 +11975,73 @@ fn pmtud_probe_success(
     assert_eq!(path_stats.pmtu, current_mtu);
 }
 
+fn active_pmtud(conn: &mut Connection) -> &mut pmtud::Pmtud {
+    conn.paths.get_active_mut().unwrap().pmtud.as_mut().unwrap()
+}
+
+#[test]
+fn pmtud_raise_timer_is_disabled_by_default() {
+    let config = Config::new(PROTOCOL_VERSION).expect("valid config");
+
+    assert_eq!(config.pmtud_raise_timer, None);
+}
+
+#[rstest]
+/// The raise timer re-enters the Search Phase once it expires, and a settled
+/// PMTU is re-discovered.
+fn pmtud_raise_timer_reprobes(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let raise_timer = Duration::from_millis(50);
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config.set_application_protos(&[b"proto1"]).unwrap();
+    config.verify_peer(false);
+    config.set_max_send_udp_payload_size(1400);
+    config.discover_pmtu(true);
+    config.set_pmtud_raise_timer(raise_timer);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Settle the PMTU and confirm the raise timer is armed.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let raise_deadline = {
+        let pmtud = active_pmtud(&mut pipe.client);
+        assert!(!pmtud.should_probe());
+        assert_eq!(pmtud.get_pmtu(), Some(1400));
+        pmtud.raise_timer().expect("raise timer armed")
+    };
+    assert_eq!(pipe.client.timeout_instant(), Some(raise_deadline));
+
+    // Once the raise timer expires, the path re-enters the Search Phase.
+    pipe.client.on_timeout_at(raise_deadline);
+
+    {
+        let pmtud = active_pmtud(&mut pipe.client);
+        assert!(pmtud.should_probe());
+        assert_eq!(pmtud.get_pmtu(), None);
+        assert_eq!(pmtud.get_probe_size(), 1400);
+        assert_eq!(pmtud.raise_timer(), None);
+    }
+
+    // The re-probe succeeds and re-arms the raise timer.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let pmtud = active_pmtud(&mut pipe.client);
+    assert!(!pmtud.should_probe());
+    assert_eq!(pmtud.get_pmtu(), Some(1400));
+    assert!(pmtud.raise_timer().is_some());
+}
+
 #[rstest]
 /// This test verifies that multiple send() calls after handshake completion
 /// only generate one PMTUD probe packet, not multiple identical probes.
@@ -12091,13 +12158,13 @@ fn pmtud_probe_retry_after_loss(
 
     // Simulate probe loss - need 2 failures (configured via set_pmtud_max_probes)
     // before size changes. First failure - should retry at same size
-    pmtud.failed_probe(initial_probe_size);
+    pmtud.failed_probe(initial_probe_size, Instant::now());
     assert_eq!(pmtud.get_current_mtu(), 1200);
     assert!(pmtud.should_probe());
     assert_eq!(pmtud.get_probe_size(), 1400); // Still trying 1400
 
     // Second failure (max_probes reached) - now size should change
-    pmtud.failed_probe(initial_probe_size);
+    pmtud.failed_probe(initial_probe_size, Instant::now());
     assert_eq!(pmtud.get_current_mtu(), 1200);
     assert!(pmtud.should_probe());
     assert_eq!(pmtud.get_probe_size(), 1300);
@@ -12120,8 +12187,8 @@ fn pmtud_probe_retry_after_loss(
     assert!(!pmtud.should_probe());
 
     // Simulate second probe loss (2 failures needed)
-    pmtud.failed_probe(1300);
-    pmtud.failed_probe(1300);
+    pmtud.failed_probe(1300, Instant::now());
+    pmtud.failed_probe(1300, Instant::now());
 
     // Verify MTU is not updated
     assert_eq!(pmtud.get_current_mtu(), 1200);
@@ -12190,6 +12257,7 @@ fn enable_pmtud_mid_handshake(
         server_config.set_cc_algorithm_name(cc_algorithm_name),
         Ok(())
     );
+    server_config.set_pmtud_raise_timer(Duration::from_secs(1200));
 
     let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
     client_config
@@ -12242,6 +12310,18 @@ fn enable_pmtud_mid_handshake(
         .unwrap()
         .get_current_mtu();
     assert_eq!(current_mtu, 1350);
+
+    // PMTUD enabled mid-handshake inherits the raise timer from Config.
+    assert!(pipe
+        .server
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap()
+        .raise_timer()
+        .is_some());
 
     let path_stats = pipe.server.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, current_mtu);

@@ -177,6 +177,14 @@ void quiche_config_grease(quiche_config *config, bool v);
 // Configures whether to do path MTU discovery.
 void quiche_config_discover_pmtu(quiche_config *config, bool v);
 
+// Configures the maximum number of PMTUD probe attempts before treating a size
+// as failed.
+void quiche_config_set_pmtud_max_probes(quiche_config *config, uint8_t max_probes);
+
+// Configures how long PMTUD stays on a discovered PMTU before re-entering the
+// Search Phase, in milliseconds. Zero disables periodic re-probing.
+void quiche_config_set_pmtud_raise_timer(quiche_config *config, uint64_t millis);
+
 // Enables logging of secrets.
 void quiche_config_log_keys(quiche_config *config);
 
