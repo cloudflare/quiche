@@ -352,9 +352,9 @@ impl ConnectionIdentifiers {
     pub(crate) fn set_initial_dcid_reset_token(
         &mut self, reset_token: Option<u128>,
     ) {
-        self.dcids
-            .get_mut(0)
-            .map(|cid| cid.reset_token = reset_token);
+        if let Some(cid) = self.dcids.get_mut(0) {
+            cid.reset_token = reset_token;
+        }
     }
 
     /// Adds a new source identifier, and indicates whether it should be
