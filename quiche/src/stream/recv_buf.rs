@@ -409,6 +409,11 @@ impl RecvBuf {
         self.drain
     }
 
+    /// Returns true if the stream has been reset by the peer.
+    pub fn is_reset(&self) -> bool {
+        self.error.is_some()
+    }
+
     /// Returns true if the stream has data to be read.
     pub fn ready(&self) -> bool {
         let (_, buf) = match self.data.first_key_value() {
