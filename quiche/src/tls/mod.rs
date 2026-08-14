@@ -25,6 +25,8 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::ffi;
+#[cfg(feature = "boringssl-bssl-sys")]
+use std::mem;
 use std::mem::ManuallyDrop;
 use std::ptr;
 use std::ptr::NonNull;
@@ -36,6 +38,8 @@ use std::sync::LazyLock;
 
 use libc::c_char;
 use libc::c_int;
+#[cfg(all(feature = "boringssl-bssl-sys", windows))]
+use libc::c_long;
 use libc::c_uint;
 use libc::c_void;
 
@@ -52,68 +56,91 @@ const TLS1_3_VERSION: u16 = 0x0304;
 const TLS_ALERT_ERROR: u64 = 0x100;
 const INTERNAL_ERROR: u64 = 0x01;
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct SSL_METHOD {
     _unused: c_void,
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct SSL_CTX {
     _unused: c_void,
 }
+#[cfg(feature = "boringssl-bssl-sys")]
+use bssl_sys::SSL_CTX;
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct SSL {
     _unused: c_void,
 }
+#[cfg(feature = "boringssl-bssl-sys")]
+use bssl_sys::SSL;
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct SSL_CIPHER {
     _unused: c_void,
 }
+#[cfg(feature = "boringssl-bssl-sys")]
+use bssl_sys::SSL_CIPHER;
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct SSL_SESSION {
     _unused: c_void,
 }
+#[cfg(feature = "boringssl-bssl-sys")]
+use bssl_sys::SSL_SESSION;
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct X509_VERIFY_PARAM {
     _unused: c_void,
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 #[cfg(windows)]
 struct X509_STORE {
     _unused: c_void,
 }
+#[cfg(all(feature = "boringssl-bssl-sys", windows))]
+use bssl_sys::X509_STORE;
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct X509_STORE_CTX {
     _unused: c_void,
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 #[cfg(windows)]
 struct X509 {
     _unused: c_void,
 }
+#[cfg(all(feature = "boringssl-bssl-sys", windows))]
+use bssl_sys::X509;
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct STACK_OF {
     _unused: c_void,
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[cfg(test)]
 #[repr(C)]
 #[allow(non_camel_case_types)]
@@ -123,10 +150,31 @@ enum ssl_private_key_result_t {
     ssl_private_key_retry,
     ssl_private_key_failure,
 }
+#[cfg(all(feature = "boringssl-bssl-sys", test))]
+use bssl_sys::ssl_private_key_result_t;
 
 /// BoringSSL ex_data index for quiche connections.
 pub static QUICHE_EX_DATA_INDEX: LazyLock<c_int> = LazyLock::new(|| unsafe {
-    SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
+    #[cfg(not(feature = "boringssl-bssl-sys"))]
+    {
+        SSL_get_ex_new_index(
+            0,
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+            ptr::null(),
+        )
+    }
+    #[cfg(feature = "boringssl-bssl-sys")]
+    {
+        bssl_sys::SSL_get_ex_new_index(
+            0,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            None,
+            None,
+        )
+    }
 });
 
 pub struct Context(NonNull<SSL_CTX>);
@@ -136,8 +184,23 @@ impl Context {
     // submodule.
     pub fn new() -> Result<Context> {
         unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
             let ctx_raw =
                 NonNull::new(SSL_CTX_new(TLS_method())).ok_or(Error::TlsFail)?;
+            #[cfg(feature = "boringssl-bssl-sys")]
+            let ctx_raw = NonNull::new(bssl_sys::SSL_CTX_new(
+                bssl_sys::TLS_method(),
+            ) as *mut SSL_CTX)
+            .ok_or(Error::TlsFail)?;
+
+            #[cfg(all(feature = "boringssl-bssl-sys", test))]
+            {
+                let curves = ffi::CString::new("X25519:P-256:P-384").unwrap();
+                bssl_sys::SSL_CTX_set1_curves_list(
+                    ctx_raw.as_ptr() as *mut _,
+                    curves.as_ptr(),
+                );
+            }
 
             let mut ctx = Context(ctx_raw);
 
@@ -166,8 +229,14 @@ impl Context {
 
     pub fn new_handshake(&mut self) -> Result<Handshake> {
         unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
             let ssl =
                 NonNull::new(SSL_new(self.as_mut_ptr())).ok_or(Error::TlsFail)?;
+            #[cfg(feature = "boringssl-bssl-sys")]
+            let ssl = NonNull::new(
+                bssl_sys::SSL_new(self.as_mut_ptr() as *mut _) as *mut SSL,
+            )
+            .ok_or(Error::TlsFail)?;
 
             Ok(Handshake::new(ssl))
         }
@@ -176,11 +245,22 @@ impl Context {
     pub fn load_verify_locations_from_file(&mut self, file: &str) -> Result<()> {
         let file = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
-            SSL_CTX_load_verify_locations(
-                self.as_mut_ptr(),
-                file.as_ptr(),
-                ptr::null(),
-            )
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_CTX_load_verify_locations(
+                    self.as_mut_ptr(),
+                    file.as_ptr(),
+                    ptr::null(),
+                )
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_CTX_load_verify_locations(
+                    self.as_mut_ptr() as *mut _,
+                    file.as_ptr(),
+                    ptr::null(),
+                )
+            }
         })
     }
 
@@ -189,31 +269,83 @@ impl Context {
     ) -> Result<()> {
         let path = ffi::CString::new(path).map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
-            SSL_CTX_load_verify_locations(
-                self.as_mut_ptr(),
-                ptr::null(),
-                path.as_ptr(),
-            )
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_CTX_load_verify_locations(
+                    self.as_mut_ptr(),
+                    ptr::null(),
+                    path.as_ptr(),
+                )
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_CTX_load_verify_locations(
+                    self.as_mut_ptr() as *mut _,
+                    ptr::null(),
+                    path.as_ptr(),
+                )
+            }
         })
     }
 
     pub fn use_certificate_chain_file(&mut self, file: &str) -> Result<()> {
         let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
-        map_result(unsafe {
-            SSL_CTX_use_certificate_chain_file(self.as_mut_ptr(), cstr.as_ptr())
-        })
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            map_result(unsafe {
+                SSL_CTX_use_certificate_chain_file(
+                    self.as_mut_ptr(),
+                    cstr.as_ptr(),
+                )
+            })
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            map_result(unsafe {
+                bssl_sys::SSL_CTX_use_certificate_chain_file(
+                    self.as_mut_ptr() as *mut _,
+                    cstr.as_ptr(),
+                )
+            })
+        }
     }
 
     pub fn use_privkey_file(&mut self, file: &str) -> Result<()> {
         let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
-        map_result(unsafe {
-            SSL_CTX_use_PrivateKey_file(self.as_mut_ptr(), cstr.as_ptr(), 1)
-        })
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            map_result(unsafe {
+                SSL_CTX_use_PrivateKey_file(self.as_mut_ptr(), cstr.as_ptr(), 1)
+            })
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            map_result(unsafe {
+                bssl_sys::SSL_CTX_use_PrivateKey_file(
+                    self.as_mut_ptr() as *mut _,
+                    cstr.as_ptr(),
+                    1,
+                )
+            })
+        }
     }
 
     #[cfg(not(windows))]
     fn load_ca_certs(&mut self) -> Result<()> {
-        unsafe { map_result(SSL_CTX_set_default_verify_paths(self.as_mut_ptr())) }
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            unsafe {
+                map_result(SSL_CTX_set_default_verify_paths(self.as_mut_ptr()))
+            }
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            map_result(unsafe {
+                bssl_sys::SSL_CTX_set_default_verify_paths(
+                    self.as_mut_ptr() as *mut _
+                )
+            })
+        }
     }
 
     #[cfg(windows)]
@@ -229,7 +361,12 @@ impl Context {
                 return Err(Error::TlsFail);
             }
 
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
             let ctx_store = SSL_CTX_get_cert_store(self.as_mut_ptr());
+            #[cfg(feature = "boringssl-bssl-sys")]
+            let ctx_store =
+                bssl_sys::SSL_CTX_get_cert_store(self.as_mut_ptr() as *mut _);
+
             if ctx_store.is_null() {
                 return Err(Error::TlsFail);
             }
@@ -240,22 +377,44 @@ impl Context {
             );
 
             while !ctx_p.is_null() {
-                let in_p = (*ctx_p).pbCertEncoded as *const u8;
+                #[cfg(not(feature = "boringssl-bssl-sys"))]
+                {
+                    let in_p = (*ctx_p).pbCertEncoded as *const u8;
 
-                let cert = d2i_X509(
-                    ptr::null_mut(),
-                    &in_p,
-                    (*ctx_p).cbCertEncoded as i32,
-                );
-                if !cert.is_null() {
-                    X509_STORE_add_cert(ctx_store, cert);
+                    let cert = d2i_X509(
+                        ptr::null_mut(),
+                        &in_p,
+                        (*ctx_p).cbCertEncoded as i32,
+                    );
+                    if !cert.is_null() {
+                        X509_STORE_add_cert(ctx_store, cert);
+                    }
+
+                    X509_free(cert);
+
+                    ctx_p = windows_sys::Win32::Security::Cryptography::CertEnumCertificatesInStore(
+                        sys_store, ctx_p,
+                    );
                 }
+                #[cfg(feature = "boringssl-bssl-sys")]
+                {
+                    let in_p = (*ctx_p).pbCertEncoded as *const u8;
 
-                X509_free(cert);
+                    let cert = bssl_sys::d2i_X509(
+                        ptr::null_mut(),
+                        &in_p,
+                        (*ctx_p).cbCertEncoded as c_long,
+                    );
+                    if !cert.is_null() {
+                        bssl_sys::X509_STORE_add_cert(ctx_store, cert);
+                    }
 
-                ctx_p = windows_sys::Win32::Security::Cryptography::CertEnumCertificatesInStore(
-                    sys_store, ctx_p,
-                );
+                    bssl_sys::X509_free(cert);
+
+                    ctx_p = windows_sys::Win32::Security::Cryptography::CertEnumCertificatesInStore(
+                        sys_store, ctx_p,
+                    );
+                }
             }
 
             // tidy up
@@ -272,12 +431,26 @@ impl Context {
         unsafe {
             // This is needed to enable the session callback on the client. On
             // the server it doesn't do anything.
-            SSL_CTX_set_session_cache_mode(
-                self.as_mut_ptr(),
-                0x0001, // SSL_SESS_CACHE_CLIENT
-            );
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_CTX_set_session_cache_mode(
+                    self.as_mut_ptr(),
+                    0x0001, // SSL_SESS_CACHE_CLIENT
+                );
 
-            SSL_CTX_sess_set_new_cb(self.as_mut_ptr(), Some(new_session));
+                SSL_CTX_sess_set_new_cb(self.as_mut_ptr(), Some(new_session));
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_CTX_set_session_cache_mode(
+                    self.as_mut_ptr() as *mut _,
+                    0x0001, // SSL_SESS_CACHE_CLIENT
+                );
+                bssl_sys::SSL_CTX_sess_set_new_cb(
+                    self.as_mut_ptr() as *mut _,
+                    Some(new_session),
+                );
+            }
         };
     }
 
@@ -289,13 +462,22 @@ impl Context {
         // Note: Base on two used modes(see above), it seems ok for both, bssl and
         // ossl. If mode needs to be ored then it may need to be adjusted.
         unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
             SSL_CTX_set_verify(self.as_mut_ptr(), mode, None);
+            #[cfg(feature = "boringssl-bssl-sys")]
+            bssl_sys::SSL_CTX_set_verify(self.as_mut_ptr() as *mut _, mode, None);
         }
     }
 
     pub fn enable_keylog(&mut self) {
         unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
             SSL_CTX_set_keylog_callback(self.as_mut_ptr(), Some(keylog));
+            #[cfg(feature = "boringssl-bssl-sys")]
+            bssl_sys::SSL_CTX_set_keylog_callback(
+                self.as_mut_ptr() as *mut _,
+                Some(keylog),
+            );
         }
     }
 
@@ -309,30 +491,80 @@ impl Context {
 
         // Configure ALPN for servers.
         unsafe {
-            SSL_CTX_set_alpn_select_cb(
-                self.as_mut_ptr(),
-                Some(select_alpn),
-                ptr::null_mut(),
-            );
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_CTX_set_alpn_select_cb(
+                    self.as_mut_ptr(),
+                    Some(select_alpn),
+                    ptr::null_mut(),
+                );
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_CTX_set_alpn_select_cb(
+                    self.as_mut_ptr() as *mut _,
+                    Some(mem::transmute::<
+                        extern "C" fn(
+                            *mut SSL,
+                            *mut *const u8,
+                            *mut u8,
+                            *mut u8,
+                            c_uint,
+                            *mut c_void,
+                        ) -> c_int,
+                        unsafe extern "C" fn(
+                            *mut SSL,
+                            *mut *const u8,
+                            *mut u8,
+                            *const u8,
+                            c_uint,
+                            *mut c_void,
+                        ) -> c_int,
+                    >(select_alpn)),
+                    ptr::null_mut(),
+                );
+            }
         }
 
         // Configure ALPN for clients.
         map_result_zero_is_success(unsafe {
-            SSL_CTX_set_alpn_protos(
-                self.as_mut_ptr(),
-                protos.as_ptr(),
-                protos.len(),
-            )
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_CTX_set_alpn_protos(
+                    self.as_mut_ptr(),
+                    protos.as_ptr(),
+                    protos.len(),
+                )
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_CTX_set_alpn_protos(
+                    self.as_mut_ptr() as *mut _,
+                    protos.as_ptr(),
+                    protos.len() as _,
+                )
+            }
         })
     }
 
     pub fn set_ticket_key(&mut self, key: &[u8]) -> Result<()> {
         map_result(unsafe {
-            SSL_CTX_set_tlsext_ticket_keys(
-                self.as_mut_ptr(),
-                key.as_ptr(),
-                key.len(),
-            )
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_CTX_set_tlsext_ticket_keys(
+                    self.as_mut_ptr(),
+                    key.as_ptr(),
+                    key.len(),
+                )
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_CTX_set_tlsext_ticket_keys(
+                    self.as_mut_ptr() as *mut _,
+                    key.as_ptr() as *const _,
+                    key.len() as _,
+                )
+            }
         })
     }
 
@@ -349,7 +581,12 @@ unsafe impl Sync for Context {}
 
 impl Drop for Context {
     fn drop(&mut self) {
-        unsafe { SSL_CTX_free(self.as_mut_ptr()) }
+        unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            SSL_CTX_free(self.as_mut_ptr());
+            #[cfg(feature = "boringssl-bssl-sys")]
+            bssl_sys::SSL_CTX_free(self.as_mut_ptr() as *mut _);
+        }
     }
 }
 
@@ -378,7 +615,12 @@ impl Handshake {
     }
 
     pub fn get_error(&self, ret_code: c_int) -> c_int {
-        unsafe { SSL_get_error(self.as_ptr(), ret_code) }
+        unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            return SSL_get_error(self.as_ptr(), ret_code);
+            #[cfg(feature = "boringssl-bssl-sys")]
+            return bssl_sys::SSL_get_error(self.as_ptr() as *const _, ret_code);
+        }
     }
 
     pub fn init(&mut self, is_server: bool) -> Result<()> {
@@ -400,19 +642,40 @@ impl Handshake {
 
     pub fn use_legacy_codepoint(&mut self, use_legacy: bool) {
         unsafe {
-            SSL_set_quic_use_legacy_codepoint(
-                self.as_mut_ptr(),
-                use_legacy as c_int,
-            );
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_set_quic_use_legacy_codepoint(
+                    self.as_mut_ptr(),
+                    use_legacy as c_int,
+                );
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_set_quic_use_legacy_codepoint(
+                    self.as_mut_ptr() as *mut _,
+                    use_legacy as c_int,
+                );
+            }
         }
     }
 
     pub fn set_state(&mut self, is_server: bool) {
         unsafe {
-            if is_server {
-                SSL_set_accept_state(self.as_mut_ptr());
-            } else {
-                SSL_set_connect_state(self.as_mut_ptr());
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                if is_server {
+                    SSL_set_accept_state(self.as_mut_ptr());
+                } else {
+                    SSL_set_connect_state(self.as_mut_ptr());
+                }
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                if is_server {
+                    bssl_sys::SSL_set_accept_state(self.as_mut_ptr() as *mut _);
+                } else {
+                    bssl_sys::SSL_set_connect_state(self.as_mut_ptr() as *mut _);
+                }
             }
         }
     }
@@ -420,43 +683,128 @@ impl Handshake {
     pub fn set_ex_data<T>(&mut self, idx: c_int, data: *const T) -> Result<()> {
         map_result(unsafe {
             let ptr = data as *mut c_void;
-            SSL_set_ex_data(self.as_mut_ptr(), idx, ptr)
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_set_ex_data(self.as_mut_ptr(), idx, ptr)
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_set_ex_data(
+                    self.as_mut_ptr() as *mut _,
+                    idx,
+                    ptr as *mut _,
+                )
+            }
         })
     }
 
     pub fn set_quic_method(&mut self) -> Result<()> {
-        map_result(unsafe {
-            SSL_set_quic_method(self.as_mut_ptr(), &QUICHE_STREAM_METHOD)
-        })
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            map_result(unsafe {
+                SSL_set_quic_method(self.as_mut_ptr(), &QUICHE_STREAM_METHOD)
+            })
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            map_result(unsafe {
+                bssl_sys::SSL_set_quic_method(
+                    self.as_mut_ptr() as *mut _,
+                    &QUICHE_STREAM_METHOD as *const SSL_QUIC_METHOD as *const _,
+                )
+            })
+        }
     }
 
     pub fn set_min_proto_version(&mut self, version: u16) -> Result<()> {
-        map_result(unsafe {
-            SSL_set_min_proto_version(self.as_mut_ptr(), version)
-        })
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            map_result(unsafe {
+                SSL_set_min_proto_version(self.as_mut_ptr(), version)
+            })
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            map_result(unsafe {
+                bssl_sys::SSL_set_min_proto_version(
+                    self.as_mut_ptr() as *mut _,
+                    version,
+                )
+            })
+        }
     }
 
     pub fn set_max_proto_version(&mut self, version: u16) -> Result<()> {
-        map_result(unsafe {
-            SSL_set_max_proto_version(self.as_mut_ptr(), version)
-        })
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            map_result(unsafe {
+                SSL_set_max_proto_version(self.as_mut_ptr(), version)
+            })
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            map_result(unsafe {
+                bssl_sys::SSL_set_max_proto_version(
+                    self.as_mut_ptr() as *mut _,
+                    version,
+                )
+            })
+        }
     }
 
     pub fn set_quiet_shutdown(&mut self, mode: bool) {
-        unsafe { SSL_set_quiet_shutdown(self.as_mut_ptr(), i32::from(mode)) }
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            unsafe { SSL_set_quiet_shutdown(self.as_mut_ptr(), i32::from(mode)) }
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            unsafe {
+                bssl_sys::SSL_set_quiet_shutdown(
+                    self.as_mut_ptr() as *mut _,
+                    i32::from(mode),
+                )
+            }
+        }
     }
 
     pub fn set_host_name(&mut self, name: &str) -> Result<()> {
-        let cstr = ffi::CString::new(name).map_err(|_| Error::TlsFail)?;
-        let rc =
-            unsafe { SSL_set_tlsext_host_name(self.as_mut_ptr(), cstr.as_ptr()) };
-        self.map_result_ssl(rc)?;
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            let cstr = ffi::CString::new(name).map_err(|_| Error::TlsFail)?;
+            let rc = unsafe {
+                SSL_set_tlsext_host_name(self.as_mut_ptr(), cstr.as_ptr())
+            };
+            self.map_result_ssl(rc)?;
 
-        let param = unsafe { SSL_get0_param(self.as_mut_ptr()) };
+            let param = unsafe { SSL_get0_param(self.as_mut_ptr()) };
 
-        map_result(unsafe {
-            X509_VERIFY_PARAM_set1_host(param, cstr.as_ptr(), name.len())
-        })
+            map_result(unsafe {
+                X509_VERIFY_PARAM_set1_host(param, cstr.as_ptr(), name.len())
+            })
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            let cstr = ffi::CString::new(name).map_err(|_| Error::TlsFail)?;
+            let rc = unsafe {
+                bssl_sys::SSL_set_tlsext_host_name(
+                    self.as_mut_ptr() as *mut _,
+                    cstr.as_ptr(),
+                )
+            };
+            self.map_result_ssl(rc)?;
+
+            let param =
+                unsafe { bssl_sys::SSL_get0_param(self.as_mut_ptr() as *mut _) };
+
+            map_result(unsafe {
+                bssl_sys::X509_VERIFY_PARAM_set1_host(
+                    param,
+                    cstr.as_ptr(),
+                    name.len() as _,
+                )
+            })
+        }
     }
 
     pub fn set_quic_transport_params(
@@ -468,11 +816,22 @@ impl Handshake {
             crate::TransportParams::encode(params, is_server, &mut raw_params)?;
 
         let rc = unsafe {
-            SSL_set_quic_transport_params(
-                self.as_mut_ptr(),
-                raw_params.as_ptr(),
-                raw_params.len(),
-            )
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_set_quic_transport_params(
+                    self.as_mut_ptr(),
+                    raw_params.as_ptr(),
+                    raw_params.len(),
+                )
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_set_quic_transport_params(
+                    self.as_mut_ptr() as *mut _,
+                    raw_params.as_ptr(),
+                    raw_params.len() as _,
+                )
+            }
         };
         self.map_result_ssl(rc)
     }
@@ -482,7 +841,22 @@ impl Handshake {
         let mut len: usize = 0;
 
         unsafe {
-            SSL_get_peer_quic_transport_params(self.as_ptr(), &mut ptr, &mut len);
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_get_peer_quic_transport_params(
+                    self.as_ptr(),
+                    &mut ptr,
+                    &mut len,
+                );
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_get_peer_quic_transport_params(
+                    self.as_ptr() as *const _,
+                    &mut ptr,
+                    &mut len,
+                );
+            }
         }
 
         if len == 0 {
@@ -497,7 +871,18 @@ impl Handshake {
         let mut len: u32 = 0;
 
         unsafe {
-            SSL_get0_alpn_selected(self.as_ptr(), &mut ptr, &mut len);
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_get0_alpn_selected(self.as_ptr(), &mut ptr, &mut len);
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_get0_alpn_selected(
+                    self.as_ptr() as *const _,
+                    &mut ptr,
+                    &mut len,
+                );
+            }
         }
 
         if len == 0 {
@@ -509,16 +894,32 @@ impl Handshake {
 
     pub fn server_name(&self) -> Option<&str> {
         let s = unsafe {
-            let ptr = SSL_get_servername(
-                self.as_ptr(),
-                0, // TLSEXT_NAMETYPE_host_name
-            );
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                let ptr = SSL_get_servername(
+                    self.as_ptr(),
+                    0, // TLSEXT_NAMETYPE_host_name
+                );
 
-            if ptr.is_null() {
-                return None;
+                if ptr.is_null() {
+                    return None;
+                }
+
+                ffi::CStr::from_ptr(ptr)
             }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                let ptr = bssl_sys::SSL_get_servername(
+                    self.as_ptr() as *const _,
+                    0, // TLSEXT_NAMETYPE_host_name
+                );
 
-            ffi::CStr::from_ptr(ptr)
+                if ptr.is_null() {
+                    return None;
+                }
+
+                ffi::CStr::from_ptr(ptr)
+            }
         };
 
         s.to_str().ok()
@@ -529,19 +930,34 @@ impl Handshake {
     ) -> Result<()> {
         self.provided_data_outstanding = true;
         let rc = unsafe {
-            SSL_provide_quic_data(
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            let rc = SSL_provide_quic_data(
                 self.as_mut_ptr(),
                 level,
                 buf.as_ptr(),
                 buf.len(),
-            )
+            );
+            #[cfg(feature = "boringssl-bssl-sys")]
+            let rc = bssl_sys::SSL_provide_quic_data(
+                self.as_mut_ptr() as *mut _,
+                level as u32,
+                buf.as_ptr(),
+                buf.len() as _,
+            );
+            rc
         };
         self.map_result_ssl(rc)
     }
 
     pub fn do_handshake(&mut self, ex_data: &mut ExData) -> Result<()> {
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
-        let rc = unsafe { SSL_do_handshake(self.as_mut_ptr()) };
+        let rc = unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            let rc = SSL_do_handshake(self.as_mut_ptr());
+            #[cfg(feature = "boringssl-bssl-sys")]
+            let rc = bssl_sys::SSL_do_handshake(self.as_mut_ptr() as *mut _);
+            rc
+        };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, ptr::null())?;
 
         self.set_transport_error(ex_data, rc);
@@ -557,7 +973,15 @@ impl Handshake {
         self.provided_data_outstanding = false;
 
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
-        let rc = unsafe { SSL_process_quic_post_handshake(self.as_mut_ptr()) };
+        let rc = unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            let rc = SSL_process_quic_post_handshake(self.as_mut_ptr());
+            #[cfg(feature = "boringssl-bssl-sys")]
+            let rc = bssl_sys::SSL_process_quic_post_handshake(
+                self.as_mut_ptr() as *mut _
+            );
+            rc
+        };
         self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, ptr::null())?;
 
         self.set_transport_error(ex_data, rc);
@@ -565,12 +989,29 @@ impl Handshake {
     }
 
     pub fn write_level(&self) -> crypto::Level {
-        unsafe { SSL_quic_write_level(self.as_ptr()) }
+        unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            return SSL_quic_write_level(self.as_ptr());
+            #[cfg(feature = "boringssl-bssl-sys")]
+            return from_bssl_level(bssl_sys::SSL_quic_write_level(
+                self.as_ptr() as *const _,
+            ))
+            .unwrap();
+        }
     }
 
     pub fn cipher(&self) -> Option<crypto::Algorithm> {
-        let cipher =
-            map_result_ptr(unsafe { SSL_get_current_cipher(self.as_ptr()) });
+        let cipher = map_result_ptr(unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            {
+                SSL_get_current_cipher(self.as_ptr())
+            }
+            #[cfg(feature = "boringssl-bssl-sys")]
+            {
+                bssl_sys::SSL_get_current_cipher(self.as_ptr() as *const _)
+                    as *const SSL_CIPHER
+            }
+        });
 
         get_cipher_from_ptr(cipher.ok()?).ok()
     }
@@ -578,20 +1019,39 @@ impl Handshake {
     #[cfg(test)]
     pub fn set_options(&mut self, opts: u32) {
         unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
             SSL_set_options(self.as_mut_ptr(), opts);
+            #[cfg(feature = "boringssl-bssl-sys")]
+            bssl_sys::SSL_set_options(self.as_mut_ptr() as *mut _, opts);
         }
     }
 
     pub fn is_completed(&self) -> bool {
-        unsafe { SSL_in_init(self.as_ptr()) == 0 }
+        unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            return SSL_in_init(self.as_ptr()) == 0;
+            #[cfg(feature = "boringssl-bssl-sys")]
+            return bssl_sys::SSL_in_init(self.as_ptr() as *const _) == 0;
+        }
     }
 
     pub fn is_resumed(&self) -> bool {
-        unsafe { SSL_session_reused(self.as_ptr()) == 1 }
+        unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            return SSL_session_reused(self.as_ptr()) == 1;
+            #[cfg(feature = "boringssl-bssl-sys")]
+            return bssl_sys::SSL_session_reused(self.as_ptr() as *const _) == 1;
+        }
     }
 
     pub fn clear(&mut self) -> Result<()> {
-        let rc = unsafe { SSL_clear(self.as_mut_ptr()) };
+        let rc = unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            let rc = SSL_clear(self.as_mut_ptr());
+            #[cfg(feature = "boringssl-bssl-sys")]
+            let rc = bssl_sys::SSL_clear(self.as_mut_ptr() as *mut _);
+            rc
+        };
         self.map_result_ssl(rc)
     }
 
@@ -688,7 +1148,12 @@ unsafe impl Sync for Handshake {}
 
 impl Drop for Handshake {
     fn drop(&mut self) {
-        unsafe { SSL_free(self.as_mut_ptr()) }
+        unsafe {
+            #[cfg(not(feature = "boringssl-bssl-sys"))]
+            SSL_free(self.as_mut_ptr());
+            #[cfg(feature = "boringssl-bssl-sys")]
+            bssl_sys::SSL_free(self.as_mut_ptr() as *mut _);
+        }
     }
 }
 
@@ -737,13 +1202,26 @@ impl<'a> ExData<'a> {
 
 fn get_ex_data_from_ptr<'a, T>(ptr: *const SSL, idx: c_int) -> Option<&'a mut T> {
     unsafe {
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
         let data = SSL_get_ex_data(ptr, idx) as *mut T;
+        #[cfg(feature = "boringssl-bssl-sys")]
+        let data = bssl_sys::SSL_get_ex_data(ptr as *const _, idx) as *mut T;
+
         data.as_mut()
     }
 }
 
 fn get_cipher_from_ptr(cipher: *const SSL_CIPHER) -> Result<crypto::Algorithm> {
-    let cipher_id = unsafe { SSL_CIPHER_get_id(cipher) };
+    let cipher_id = unsafe {
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            SSL_CIPHER_get_id(cipher)
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            bssl_sys::SSL_CIPHER_get_id(cipher as *const _)
+        }
+    };
 
     let alg = match cipher_id {
         0x0300_1301 => crypto::Algorithm::AES128_GCM,
@@ -753,6 +1231,39 @@ fn get_cipher_from_ptr(cipher: *const SSL_CIPHER) -> Result<crypto::Algorithm> {
     };
 
     Ok(alg)
+}
+
+#[cfg(feature = "boringssl-bssl-sys")]
+fn from_bssl_level(
+    level: bssl_sys::ssl_encryption_level_t,
+) -> Option<crypto::Level> {
+    match level {
+        bssl_sys::ssl_encryption_level_t_ssl_encryption_initial => {
+            Some(crypto::Level::Initial)
+        },
+        bssl_sys::ssl_encryption_level_t_ssl_encryption_early_data => {
+            Some(crypto::Level::ZeroRTT)
+        },
+        bssl_sys::ssl_encryption_level_t_ssl_encryption_handshake => {
+            Some(crypto::Level::Handshake)
+        },
+        bssl_sys::ssl_encryption_level_t_ssl_encryption_application => {
+            Some(crypto::Level::OneRTT)
+        },
+        _ => None,
+    }
+}
+
+#[cfg(feature = "boringssl-bssl-sys")]
+unsafe extern "C" fn bssl_set_read_secret(
+    ssl: *mut SSL, level: bssl_sys::ssl_encryption_level_t,
+    cipher: *const SSL_CIPHER, secret: *const u8, secret_len: usize,
+) -> c_int {
+    let level = match from_bssl_level(level) {
+        Some(v) => v,
+        None => return 0,
+    };
+    set_read_secret(ssl, level, cipher, secret, secret_len)
 }
 
 extern "C" fn set_read_secret(
@@ -769,12 +1280,15 @@ extern "C" fn set_read_secret(
 
     let space = match level {
         crypto::Level::Initial => &mut ex_data.crypto_ctx[packet::Epoch::Initial],
-        crypto::Level::ZeroRTT =>
-            &mut ex_data.crypto_ctx[packet::Epoch::Application],
-        crypto::Level::Handshake =>
-            &mut ex_data.crypto_ctx[packet::Epoch::Handshake],
-        crypto::Level::OneRTT =>
-            &mut ex_data.crypto_ctx[packet::Epoch::Application],
+        crypto::Level::ZeroRTT => {
+            &mut ex_data.crypto_ctx[packet::Epoch::Application]
+        },
+        crypto::Level::Handshake => {
+            &mut ex_data.crypto_ctx[packet::Epoch::Handshake]
+        },
+        crypto::Level::OneRTT => {
+            &mut ex_data.crypto_ctx[packet::Epoch::Application]
+        },
     };
 
     let aead = match get_cipher_from_ptr(cipher) {
@@ -802,6 +1316,18 @@ extern "C" fn set_read_secret(
     }
 
     1
+}
+
+#[cfg(feature = "boringssl-bssl-sys")]
+unsafe extern "C" fn bssl_set_write_secret(
+    ssl: *mut SSL, level: bssl_sys::ssl_encryption_level_t,
+    cipher: *const SSL_CIPHER, secret: *const u8, secret_len: usize,
+) -> c_int {
+    let level = match from_bssl_level(level) {
+        Some(v) => v,
+        None => return 0,
+    };
+    set_write_secret(ssl, level, cipher, secret, secret_len)
 }
 
 extern "C" fn set_write_secret(
@@ -848,6 +1374,18 @@ extern "C" fn set_write_secret(
     1
 }
 
+#[cfg(feature = "boringssl-bssl-sys")]
+unsafe extern "C" fn bssl_add_handshake_data(
+    ssl: *mut SSL, level: bssl_sys::ssl_encryption_level_t, data: *const u8,
+    len: usize,
+) -> c_int {
+    let level = match from_bssl_level(level) {
+        Some(v) => v,
+        None => return 0,
+    };
+    add_handshake_data(ssl, level, data, len)
+}
+
 extern "C" fn add_handshake_data(
     ssl: *mut SSL, level: crypto::Level, data: *const u8, len: usize,
 ) -> c_int {
@@ -882,11 +1420,27 @@ extern "C" fn add_handshake_data(
     1
 }
 
+#[cfg(feature = "boringssl-bssl-sys")]
+unsafe extern "C" fn bssl_flush_flight(ssl: *mut SSL) -> c_int {
+    flush_flight(ssl)
+}
+
 extern "C" fn flush_flight(_ssl: *mut SSL) -> c_int {
     // We don't really need to anything here since the output packets are
     // generated separately, when conn.send() is called.
 
     1
+}
+
+#[cfg(feature = "boringssl-bssl-sys")]
+unsafe extern "C" fn bssl_send_alert(
+    ssl: *mut SSL, level: bssl_sys::ssl_encryption_level_t, alert: u8,
+) -> c_int {
+    let level = match from_bssl_level(level) {
+        Some(v) => v,
+        None => return 0,
+    };
+    send_alert(ssl, level, alert)
 }
 
 extern "C" fn send_alert(
@@ -1067,8 +1621,20 @@ fn log_ssl_error() {
     let mut err = [0u8; 1024];
 
     unsafe {
-        let e = ERR_peek_error();
-        ERR_error_string_n(e, err.as_mut_ptr() as *mut c_char, err.len());
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
+        {
+            let e = ERR_peek_error();
+            ERR_error_string_n(e, err.as_mut_ptr() as *mut c_char, err.len());
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        {
+            let e = bssl_sys::ERR_peek_error();
+            bssl_sys::ERR_error_string_n(
+                e,
+                err.as_mut_ptr() as *mut c_char,
+                err.len(),
+            );
+        }
     }
 
     let cstr = ffi::CStr::from_bytes_until_nul(&err)
@@ -1081,6 +1647,7 @@ fn log_ssl_error() {
     );
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 extern "C" {
     // Note: some vendor-specific methods are implemented in the boringssl
     // submodule.
@@ -1248,5 +1815,12 @@ extern "C" {
 
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 mod boringssl;
-use boringssl::*;
+#[cfg(not(feature = "boringssl-bssl-sys"))]
+pub(crate) use boringssl::*;
+
+#[cfg(feature = "boringssl-bssl-sys")]
+mod boringssl_bssl_sys;
+#[cfg(feature = "boringssl-bssl-sys")]
+pub(crate) use boringssl_bssl_sys::*;

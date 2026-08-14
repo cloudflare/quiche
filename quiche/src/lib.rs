@@ -384,6 +384,9 @@
 #[macro_use]
 extern crate log;
 
+#[cfg(all(feature = "boringssl-boring-crate", feature = "boringssl-bssl-sys"))]
+compile_error!("Features 'boringssl-boring-crate' and 'boringssl-bssl-sys' are mutually exclusive and cannot be enabled together.");
+
 use std::cmp;
 
 use std::collections::VecDeque;
@@ -7610,7 +7613,15 @@ impl<F: BufFactory> Connection<F> {
 
     /// Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
     #[inline]
+    #[cfg(not(feature = "boringssl-bssl-sys"))]
     pub fn peer_cert(&self) -> Option<&[u8]> {
+        self.handshake.peer_cert()
+    }
+
+    /// Returns the peer's leaf certificate (if any) as a DER-encoded buffer.
+    #[inline]
+    #[cfg(feature = "boringssl-bssl-sys")]
+    pub fn peer_cert(&self) -> Option<Vec<u8>> {
         self.handshake.peer_cert()
     }
 
@@ -7621,7 +7632,20 @@ impl<F: BufFactory> Connection<F> {
     /// certificates (if any) are the chain certificate authorities used to
     /// sign the leaf certificate.
     #[inline]
+    #[cfg(not(feature = "boringssl-bssl-sys"))]
     pub fn peer_cert_chain(&self) -> Option<Vec<&[u8]>> {
+        self.handshake.peer_cert_chain()
+    }
+
+    /// Returns the peer's certificate chain (if any) as a vector of DER-encoded
+    /// buffers.
+    ///
+    /// The certificate at index 0 is the peer's leaf certificate, the other
+    /// certificates (if any) are the chain certificate authorities used to
+    /// sign the leaf certificate.
+    #[inline]
+    #[cfg(feature = "boringssl-bssl-sys")]
+    pub fn peer_cert_chain(&self) -> Option<Vec<Vec<u8>>> {
         self.handshake.peer_cert_chain()
     }
 
@@ -9547,3 +9571,6 @@ mod recovery;
 mod stream;
 mod tls;
 mod transport_params;
+
+#[cfg(feature = "boringssl-bssl-sys")]
+mod ffi_slice;

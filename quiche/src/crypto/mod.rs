@@ -24,9 +24,13 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 use libc::c_int;
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 use libc::c_void;
 
+#[cfg(feature = "boringssl-bssl-sys")]
+use crate::ffi_slice::FfiSlice;
 use crate::Error;
 use crate::Result;
 
@@ -75,10 +79,24 @@ pub enum Algorithm {
 // submodule.
 impl Algorithm {
     fn get_evp_digest(self) -> *const EVP_MD {
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
         match self {
             Algorithm::AES128_GCM => unsafe { EVP_sha256() },
             Algorithm::AES256_GCM => unsafe { EVP_sha384() },
             Algorithm::ChaCha20_Poly1305 => unsafe { EVP_sha256() },
+        }
+        #[cfg(feature = "boringssl-bssl-sys")]
+        match self {
+            // SAFETY: FFI call, but there are no safety preconditions.
+            Algorithm::AES128_GCM => unsafe {
+                bssl_sys::EVP_sha256() as *const _
+            },
+            Algorithm::AES256_GCM => unsafe {
+                bssl_sys::EVP_sha384() as *const _
+            },
+            Algorithm::ChaCha20_Poly1305 => unsafe {
+                bssl_sys::EVP_sha256() as *const _
+            },
         }
     }
 
@@ -111,17 +129,22 @@ impl Algorithm {
     }
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 pub struct EVP_AEAD {
     _unused: c_void,
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 struct EVP_MD {
     _unused: c_void,
 }
+
+#[cfg(feature = "boringssl-bssl-sys")]
+use bssl_sys::EVP_MD;
 
 type HeaderProtectionMask = [u8; HP_MASK_LEN];
 
@@ -510,7 +533,13 @@ pub fn verify_slices_are_equal(a: &[u8], b: &[u8]) -> Result<()> {
         return Err(Error::CryptoFail);
     }
 
+    #[cfg(not(feature = "boringssl-bssl-sys"))]
     let rc = unsafe { CRYPTO_memcmp(a.as_ptr(), b.as_ptr(), a.len()) };
+    #[cfg(feature = "boringssl-bssl-sys")]
+    // SAFETY: FFI call, but there are no safety preconditions.
+    let rc = unsafe {
+        bssl_sys::CRYPTO_memcmp(a.as_ffi_void_ptr(), b.as_ffi_void_ptr(), a.len())
+    };
 
     if rc == 0 {
         return Ok(());
@@ -519,6 +548,7 @@ pub fn verify_slices_are_equal(a: &[u8], b: &[u8]) -> Result<()> {
     Err(Error::CryptoFail)
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 extern "C" {
     fn EVP_sha256() -> *const EVP_MD;
 
@@ -667,5 +697,12 @@ mod tests {
     }
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 mod boringssl;
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 pub(crate) use boringssl::*;
+
+#[cfg(feature = "boringssl-bssl-sys")]
+mod boringssl_bssl_sys;
+#[cfg(feature = "boringssl-bssl-sys")]
+pub(crate) use boringssl_bssl_sys::*;
