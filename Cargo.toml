@@ -44,6 +44,7 @@ publish = false
 anyhow = { version = "1" }
 assert_matches = { version = "1" }
 boring = { version = "4.3" }
+bssl-sys = { git = "https://boringssl.googlesource.com/boringssl" }
 buffer-pool = { version = "0.2.1", path = "./buffer-pool" }
 bytes = { version = "1.11.1" }
 crossbeam = { version = "0.8.1", default-features = false }

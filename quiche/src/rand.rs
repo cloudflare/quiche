@@ -26,7 +26,10 @@
 
 pub fn rand_bytes(buf: &mut [u8]) {
     unsafe {
+        #[cfg(not(feature = "boringssl-bssl-sys"))]
         RAND_bytes(buf.as_mut_ptr(), buf.len());
+        #[cfg(feature = "boringssl-bssl-sys")]
+        bssl_sys::RAND_bytes(buf.as_mut_ptr(), buf.len());
     }
 }
 
@@ -59,6 +62,7 @@ pub fn rand_u64_uniform(max: u64) -> u64 {
     r / chunk_size
 }
 
+#[cfg(not(feature = "boringssl-bssl-sys"))]
 extern "C" {
     fn RAND_bytes(buf: *mut u8, len: libc::size_t) -> libc::c_int;
 }
