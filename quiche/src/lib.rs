@@ -3251,6 +3251,15 @@ impl<F: BufFactory> Connection<F> {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
         })?;
 
+        // RFC 9000 requires the reserved bits to be zero after header
+        // protection is removed. Keep the value until packet protection has
+        // been authenticated; only then can a peer be penalized for it.
+        let reserved_bits = if hdr.ty == Type::Short {
+            b.buf()[0] & 0x18
+        } else {
+            b.buf()[0] & 0x0c
+        };
+
         let pn = packet::decode_pkt_num(
             self.pkt_num_spaces[epoch].largest_rx_pkt_num,
             hdr.pkt_num,
@@ -3319,6 +3328,10 @@ impl<F: BufFactory> Connection<F> {
         .map_err(|e| {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
         })?;
+
+        if reserved_bits != 0 {
+            return Err(Error::InvalidPacket);
+        }
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
