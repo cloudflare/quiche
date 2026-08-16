@@ -9686,10 +9686,17 @@ fn last_tx_data_larger_than_tx_data(
 
     pipe.server.on_timeout();
 
-    // Server sends PTO probe (not limited to cwnd),
-    // to update last_tx_data.
+    // Server sends PTO probe (not limited to cwnd), to update last_tx_data.
+    //
+    // The probe carries stream 8. Stream 4 was cycled to the back of the
+    // flushable queue on each of the packets that carried its 10000 bytes,
+    // while stream 8 has not been serviced at all, so round-robin picks
+    // stream 8 first. Only one STREAM frame goes in a packet, and connection
+    // flow control leaves stream 8 with 800 bytes buffered, so the length is
+    // 800 of stream data plus 48 of framing: a 5 byte STREAM header, 9 bytes
+    // of ACK and DATA_BLOCKED, an 18 byte short header, and a 16 byte tag.
     let (len, _) = pipe.server.send(&mut buf).unwrap();
-    assert_eq!(len, 1200);
+    assert_eq!(len, 848);
 
     // Client sends STOP_SENDING to decrease tx_data
     // by unsent data. It will make last_tx_data > tx_data
@@ -12930,4 +12937,357 @@ fn server_qlog() {
     } else {
         panic!("expected Qlog event");
     }
+}
+
+/// Incremental streams of equal urgency take turns on the wire: none of them
+/// sends a second time before every other stream with data has sent once.
+///
+/// This is what the round-robin sequence in the priority key exists to
+/// provide. Without it one stream monopolises the connection until it runs
+/// out of data.
+#[test]
+fn incremental_stream_round_robin() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(10000);
+    config.set_initial_max_stream_data_bidi_remote(10000);
+    config.set_initial_max_streams_bidi(10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // More than one packet's worth on each stream, so the rotation has to
+    // come back around. All streams are incremental by default.
+    let data = vec![0u8; 2500];
+    for id in [4, 8, 12] {
+        assert_eq!(pipe.client.stream_send(id, &data, false), Ok(2500));
+    }
+
+    let mut buf = [0; 1350];
+    let mut send_order = Vec::new();
+
+    while let Ok((len, _)) = pipe.client.send(&mut buf) {
+        let frames =
+            test_utils::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
+
+        send_order.extend(frames.iter().filter_map(|f| match f {
+            frame::Frame::Stream { stream_id, .. } => Some(*stream_id),
+            _ => None,
+        }));
+    }
+
+    assert_eq!(send_order, vec![4, 8, 12, 4, 8, 12, 4, 8, 12]);
+}
+
+/// A stream that empties its send buffer leaves the flushable queue. When the
+/// application writes to it again it must re-enter at the back of its priority
+/// group, so that it cannot preempt a stream still waiting to be serviced.
+///
+/// Cycling on service rather than on queue membership is what provides this. If
+/// the cycle were skipped for a stream that just left the queue, the stream
+/// would keep its old position and could preempt the same peer on every refill.
+#[test]
+fn emptied_stream_reflushes_at_back() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(50000);
+    config.set_initial_max_stream_data_bidi_remote(50000);
+    config.set_initial_max_streams_bidi(10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Stream 4 fits in one packet; stream 8 needs several, so it stays queued
+    // and is never fully serviced below.
+    assert_eq!(pipe.client.stream_send(4, b"aaaaaaaaaa", false), Ok(10));
+    assert_eq!(pipe.client.stream_send(8, &[0; 5000], false), Ok(5000));
+
+    let mut buf = [0; 1350];
+    assert!(pipe.client.send(&mut buf).is_ok());
+
+    // Stream 4 emptied and left the queue.
+    assert_eq!(pipe.client.streams.peek_flushable().map(|k| k.id), Some(8));
+
+    // Stream 4 has more to send. Stream 8 has been waiting since before that
+    // first packet, so it keeps its place at the front.
+    assert_eq!(pipe.client.stream_send(4, b"bbbbbbbbbb", false), Ok(10));
+
+    assert_eq!(pipe.client.streams.peek_flushable().map(|k| k.id), Some(8));
+}
+
+/// A stream that is fully drained leaves the readable queue. When new data
+/// arrives it must re-enter at the back of its priority group rather than at
+/// the front, so that it does not preempt a stream that has never been
+/// serviced.
+#[test]
+fn drained_stream_reenters_at_back() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(10000);
+    config.set_initial_max_stream_data_bidi_remote(10000);
+    config.set_initial_max_streams_bidi(10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Streams 4 and 8 both have data pending; 8 is never serviced below.
+    assert_eq!(pipe.client.stream_send(4, b"aaaaaaaaaa", false), Ok(10));
+    assert_eq!(pipe.client.stream_send(8, b"bbbbbbbbbb", false), Ok(10));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.readable().collect::<Vec<u64>>(), vec![4, 8]);
+
+    // Drain stream 4 completely, so it leaves the readable queue.
+    let mut buf = [0; 100];
+    while pipe.server.stream_recv(4, &mut buf).is_ok() {}
+
+    assert_eq!(pipe.server.readable().collect::<Vec<u64>>(), vec![8]);
+
+    // More data arrives for stream 4. Stream 8 has been waiting the whole
+    // time and has never been read, so it must still be served first.
+    assert_eq!(pipe.client.stream_send(4, b"cccccccccc", false), Ok(10));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.readable().collect::<Vec<u64>>(), vec![8, 4]);
+}
+
+/// A stream that has written up to its flow control limit leaves the writable
+/// queue. When the peer extends the limit it must re-enter at the back of its
+/// priority group, so that an application which keeps one stream at its limit
+/// is still told about the streams queued behind it.
+#[test]
+fn blocked_stream_returns_writable_at_back() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(10000);
+    config.set_initial_max_stream_data_bidi_remote(2000);
+    config.set_initial_max_streams_bidi(10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Stream 4 uses all of its flow control capacity and leaves the queue.
+    // Stream 8 keeps capacity and is not written again below.
+    assert_eq!(pipe.client.stream_send(4, b"aaaaaaaaaa", false), Ok(10));
+    assert_eq!(pipe.client.stream_send(8, b"bbbbbbbbbb", false), Ok(10));
+
+    assert_eq!(pipe.client.writable().collect::<Vec<u64>>(), vec![4, 8]);
+
+    assert_eq!(pipe.client.stream_send(4, &[0; 1990], false), Ok(1990));
+
+    assert_eq!(pipe.client.writable().collect::<Vec<u64>>(), vec![8]);
+
+    // The peer consumes stream 4 and extends its limit. Stream 8 has been
+    // waiting since before stream 4 was last written, so it comes first.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut buf = [0; 2000];
+    while pipe.server.stream_recv(4, &mut buf).is_ok() {}
+
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.client.writable().collect::<Vec<u64>>(), vec![8, 4]);
+}
+
+/// `stream_writable_next()` hands a stream to the application and takes it out
+/// of the writable queue, which is that queue's form of service. When
+/// `stream_writable()` puts it back it must re-enter at the back, so that an
+/// application which is handed a stream, cannot write to it, and re-arms does
+/// not keep being handed the same stream while another waits.
+#[test]
+fn writable_next_stream_rearms_at_back() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    // Connection capacity well below the stream limits, so re-arming for more
+    // than it holds leaves the stream writable but connection blocked.
+    config.set_initial_max_data(20);
+    config.set_initial_max_stream_data_bidi_local(10000);
+    config.set_initial_max_stream_data_bidi_remote(10000);
+    config.set_initial_max_streams_bidi(10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+
+    assert_eq!(pipe.client.writable().collect::<Vec<u64>>(), vec![4, 8]);
+
+    // Stream 4 is handed out and leaves the queue.
+    assert_eq!(pipe.client.stream_writable_next(), Some(4));
+
+    assert_eq!(pipe.client.writable().collect::<Vec<u64>>(), vec![8]);
+
+    // Stream 4 re-arms for more capacity than the connection has, so it goes
+    // back in the queue. Stream 8 has not been handed out at all, so it keeps
+    // its place at the front.
+    assert_eq!(pipe.client.stream_writable(4, 100), Ok(false));
+
+    assert_eq!(pipe.client.writable().collect::<Vec<u64>>(), vec![8, 4]);
+}
+
+/// Buffered data is never invisible to the readable queue.
+///
+/// `stream_readable_next()` takes the stream out of the queue as it hands it to
+/// the application. If the application then reads only part of what is
+/// buffered, the stream still has data, so it belongs in the queue again: the
+/// queue holds the streams that are readable, not the streams that have not
+/// been offered yet. Nothing else puts it back, since a stream re-enters on
+/// becoming readable and this one never stopped being readable.
+///
+/// Both cases matter and they used to differ: the round-robin shuffle this
+/// replaces put an incremental stream back as a side effect and left a
+/// non-incremental one out.
+#[rstest]
+fn partially_read_stream_stays_readable(
+    #[values(true, false)] incremental: bool,
+) {
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello world", false), Ok(11));
+    assert_eq!(pipe.client.stream_send(8, b"hello world", false), Ok(11));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    pipe.server.stream_priority(4, 127, incremental).unwrap();
+    pipe.server.stream_priority(8, 127, incremental).unwrap();
+
+    assert_eq!(pipe.server.stream_readable_next(), Some(4));
+    assert_eq!(pipe.server.readable().collect::<Vec<u64>>(), vec![8]);
+
+    let mut buf = [0; 2];
+    assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((2, false)));
+
+    // Stream 4 is back in the queue. A read is a service, so an incremental
+    // stream re-enters behind a stream that has never been read from; a
+    // non-incremental one has no round-robin position and stays in ID order.
+    let expected = if incremental { vec![8, 4] } else { vec![4, 8] };
+
+    assert_eq!(pipe.server.readable().collect::<Vec<u64>>(), expected);
+    assert_eq!(pipe.server.stream_readable_next(), Some(expected[0]));
+}
+
+/// The writable twin of `partially_read_stream_stays_readable`.
+///
+/// `stream_writable_next()` also takes the stream out of the queue as it hands
+/// it over, so a stream that still has capacity after being written to belongs
+/// back in it. As above, the shuffle this replaces did that only for
+/// incremental streams.
+#[rstest]
+fn partially_written_stream_stays_writable(
+    #[values(true, false)] incremental: bool,
+) {
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"a", false), Ok(1));
+    pipe.client.stream_priority(4, 127, incremental).unwrap();
+
+    assert_eq!(pipe.client.stream_writable_next(), Some(4));
+    assert!(pipe.client.writable().next().is_none());
+
+    // The stream keeps capacity after this write, so it is still writable.
+    assert_eq!(pipe.client.stream_send(4, b"b", false), Ok(1));
+
+    assert_eq!(pipe.client.writable().collect::<Vec<u64>>(), vec![4]);
+    assert_eq!(pipe.client.stream_writable_next(), Some(4));
+}
+
+/// Reading from a stream must not reorder what is sent on it.
+///
+/// The three queues carry a round-robin position each, so servicing a stream in
+/// one must leave the other two alone. Send scheduling follows the peer's
+/// priority signals, not how promptly the local application drains its receive
+/// buffers.
+///
+/// Asserted at the connection level because that is where the queue to cycle is
+/// chosen: a service point that names the wrong queue, or one that cycles a
+/// queue it did not service, is invisible to the `StreamMap` tests.
+#[test]
+fn reading_a_stream_does_not_reorder_sending() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(50000);
+    config.set_initial_max_stream_data_bidi_remote(50000);
+    config.set_initial_max_streams_bidi(10);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // The server sees streams 4 and 8 created in that order.
+    assert_eq!(pipe.client.stream_send(4, b"aaaaaaaaaa", false), Ok(10));
+    assert_eq!(pipe.client.stream_send(8, b"bbbbbbbbbb", false), Ok(10));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Both have data to send, so both are queued to flush, 4 ahead of 8.
+    assert_eq!(pipe.server.stream_send(4, &[0; 4000], false), Ok(4000));
+    assert_eq!(pipe.server.stream_send(8, &[0; 4000], false), Ok(4000));
+
+    assert_eq!(pipe.server.streams.peek_flushable().map(|k| k.id), Some(4));
+
+    // The application drains stream 4's receive buffer. Nothing was sent on
+    // stream 4, so its place in the flushable queue must not move.
+    let mut buf = [0; 100];
+    assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((10, false)));
+
+    assert_eq!(pipe.server.streams.peek_flushable().map(|k| k.id), Some(4));
 }
