@@ -52,6 +52,27 @@ use crate::quic::HandshakeInfo;
 use crate::quic::Incoming;
 use crate::quic::QuicheConnection;
 use crate::socket::Socket;
+use crate::socket::SocketCapabilities;
+
+fn writer_config(
+    peer_addr: std::net::SocketAddr, local_addr: std::net::SocketAddr,
+    capabilities: SocketCapabilities,
+) -> WriterConfig {
+    WriterConfig {
+        pending_cid: None, // only used for unmapping in IPR
+        peer_addr,
+        local_addr,
+        with_gso: capabilities.has_gso,
+        pacing_offload: capabilities.has_txtime,
+        with_pktinfo: if local_addr.is_ipv4() {
+            capabilities.has_ippktinfo
+        } else {
+            capabilities.has_ipv6pktinfo
+        },
+        // Match the default `QuicSettings::pool_send_buffer` (pooling on).
+        pool_send_buffer: true,
+    }
+}
 
 /// Result of manually wrapping a [`quiche::Connection`] in an
 /// [`InitialQuicConnection`].
@@ -98,6 +119,7 @@ where
         send: socket,
         local_addr,
         peer_addr,
+        capabilities,
         ..
     } = tx_socket;
     let (shutdown_tx, worker_shutdown_rx) = mpsc::channel(1);
@@ -105,17 +127,7 @@ where
 
     let scid = quiche_conn.source_id().into_owned();
 
-    let writer_cfg = WriterConfig {
-        pending_cid: None, // only used for unmapping in IPR
-        peer_addr,
-        local_addr,
-        // TODO: try to read Tx' SocketCaps. false is always a safe default.
-        with_gso: false,
-        pacing_offload: false,
-        with_pktinfo: false,
-        // Match the default `QuicSettings::pool_send_buffer` (pooling on).
-        pool_send_buffer: true,
-    };
+    let writer_cfg = writer_config(peer_addr, local_addr, capabilities);
 
     let conn_params = QuicConnectionParams {
         writer_cfg,
@@ -169,5 +181,29 @@ impl ConnCloseReceiver {
     /// Waits for a `connection closed` notification.
     pub async fn recv(&mut self) {
         std::future::poll_fn(|cx| self.poll_recv(cx)).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::writer_config;
+    use crate::socket::SocketCapabilities;
+
+    #[test]
+    fn raw_writer_preserves_socket_send_capabilities() {
+        let local_addr = "127.0.0.1:443".parse().unwrap();
+        let peer_addr = "127.0.0.1:8443".parse().unwrap();
+        let capabilities = SocketCapabilities {
+            has_gso: true,
+            has_txtime: true,
+            has_ippktinfo: true,
+            ..SocketCapabilities::default()
+        };
+
+        let config = writer_config(peer_addr, local_addr, capabilities);
+
+        assert!(config.with_gso);
+        assert!(config.pacing_offload);
+        assert!(config.with_pktinfo);
     }
 }
