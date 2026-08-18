@@ -43,20 +43,20 @@ use datagram_socket::DatagramSocketRecv;
 use datagram_socket::DatagramSocketSend;
 use datagram_socket::DatagramSocketSendExt;
 use foundations::telemetry::log;
+use hashlink::LinkedHashMap;
 use quiche::ConnectionId;
 use quiche::Header;
 use quiche::MAX_CONN_ID_LEN;
-use std::collections::HashSet;
 use std::default::Default;
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::task::ready;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
 use task_killswitch::spawn_with_killswitch;
@@ -81,6 +81,7 @@ const PACKET_RX_YIELD_AFTER: usize = 30;
 const CONN_MAP_CMD_BATCH_SIZE: usize = 128;
 
 const STATELESS_RESET_QUEUE_CAPACITY: usize = 64;
+const STATELESS_RESET_EXPIRATION: Duration = Duration::from_millis(100);
 
 struct StatelessReset {
     payload: Vec<u8>,
@@ -93,48 +94,49 @@ struct StatelessReset {
 /// server-side connection and a reset key is configured. Clients neither send
 /// resets nor advertise key-derived tokens on SCIDs. Note that this isn't an
 /// RFC requirement, but a design choice to reduce the attack surface.
-///
-/// We use a hashset to ensure that for any 2-tuple, we can have at most one
-/// reset in flight at a time and we cap the maximum number of resets in flight
-/// to [`STATELESS_RESET_QUEUE_CAPACITY`]. Note that the definition of in flight
-/// is a bit loose here - we consider a reset in flight from the moment it is
-/// queued until its socket send completes, which normally means its just
-/// copied to the socket buffer.
 struct StatelessResetCtx {
     key: quiche::StatelessResetKey,
     tx: mpsc::Sender<StatelessReset>,
-    /// Peers with a reset queued or sending. At most one slot per address,
-    /// capped at [`STATELESS_RESET_QUEUE_CAPACITY`].
-    in_flight: Arc<Mutex<HashSet<SocketAddr>>>,
+    recent_peers: LinkedHashMap<SocketAddr, Instant>,
 }
 
 impl StatelessResetCtx {
-    fn try_insert_in_flight(&self, peer: SocketAddr) -> bool {
-        insert_in_flight(
-            &mut self.in_flight.lock().unwrap(),
+    fn try_reserve(&mut self, peer: SocketAddr) -> bool {
+        try_reserve_stateless_reset(
+            &mut self.recent_peers,
             peer,
+            Instant::now(),
             STATELESS_RESET_QUEUE_CAPACITY,
+            STATELESS_RESET_EXPIRATION,
         )
     }
 
-    fn remove_in_flight(&self, peer: SocketAddr) {
-        self.in_flight.lock().unwrap().remove(&peer);
+    fn cancel_reservation(&mut self, peer: SocketAddr) {
+        self.recent_peers.remove(&peer);
     }
 }
 
-fn insert_in_flight(
-    in_flight: &mut HashSet<SocketAddr>, peer: SocketAddr, max: usize,
+fn try_reserve_stateless_reset(
+    recent_peers: &mut LinkedHashMap<SocketAddr, Instant>, peer: SocketAddr,
+    now: Instant, max: usize, expiration: Duration,
 ) -> bool {
-    if in_flight.contains(&peer) || in_flight.len() >= max {
+    while recent_peers.front().is_some_and(|(_, sent_at)| {
+        now.saturating_duration_since(*sent_at) >= expiration
+    }) {
+        recent_peers.pop_front();
+    }
+
+    if recent_peers.contains_key(&peer) || recent_peers.len() >= max {
         return false;
     }
-    in_flight.insert(peer);
+
+    recent_peers.insert(peer, now);
     true
 }
 
 #[allow(unused_variables)]
 fn start_stateless_reset_writer<Tx, M>(
-    socket: Arc<Tx>, in_flight: Arc<Mutex<HashSet<SocketAddr>>>, metrics: M,
+    socket: Arc<Tx>, metrics: M,
 ) -> mpsc::Sender<StatelessReset>
 where
     Tx: DatagramSocketSend + Send + 'static,
@@ -151,7 +153,6 @@ where
         let send_to_wouldblock_duration_s =
             metrics.send_to_wouldblock_duration_s();
         while let Some(reset) = rx.recv().await {
-            let peer = reset.to;
             let sent = send_stateless_reset(
                 &socket,
                 &reset,
@@ -166,8 +167,6 @@ where
             } else {
                 crate::metrics::quic::stateless_reset_dropped_count().inc();
             }
-
-            in_flight.lock().unwrap().remove(&peer);
         }
     });
 
@@ -334,18 +333,16 @@ where
             incoming_packet_handler.is_server(),
             config.stateless_reset_key,
         ) {
-            (true, Some(key)) => {
-                let in_flight = Arc::new(Mutex::new(HashSet::new()));
-                Some(StatelessResetCtx {
-                    key,
-                    tx: start_stateless_reset_writer(
-                        Arc::clone(&socket_tx),
-                        Arc::clone(&in_flight),
-                        metrics.clone(),
-                    ),
-                    in_flight,
-                })
-            },
+            (true, Some(key)) => Some(StatelessResetCtx {
+                key,
+                tx: start_stateless_reset_writer(
+                    Arc::clone(&socket_tx),
+                    metrics.clone(),
+                ),
+                recent_peers: LinkedHashMap::with_capacity(
+                    STATELESS_RESET_QUEUE_CAPACITY,
+                ),
+            }),
             _ => None,
         };
 
@@ -572,12 +569,14 @@ where
         Ok(())
     }
 
-    fn enqueue_stateless_reset(&self, incoming: &Incoming, dcid: &ConnectionId) {
-        let Some(ctx) = &self.stateless_reset else {
+    fn enqueue_stateless_reset(
+        &mut self, incoming: &Incoming, dcid: &ConnectionId,
+    ) {
+        let Some(ctx) = &mut self.stateless_reset else {
             return;
         };
         let peer = incoming.peer_addr;
-        if !ctx.try_insert_in_flight(peer) {
+        if !ctx.try_reserve(peer) {
             crate::metrics::quic::stateless_reset_dropped_count().inc();
             return;
         }
@@ -591,7 +590,7 @@ where
             dcid.as_ref(),
             datagram_len,
         ) else {
-            ctx.remove_in_flight(peer);
+            ctx.cancel_reservation(peer);
             crate::metrics::quic::stateless_reset_dropped_count().inc();
             return;
         };
@@ -613,7 +612,7 @@ where
             })
             .is_err()
         {
-            ctx.remove_in_flight(peer);
+            ctx.cancel_reservation(peer);
             crate::metrics::quic::stateless_reset_dropped_count().inc();
         }
     }
@@ -1249,37 +1248,62 @@ mod tests {
     }
 
     #[test]
-    fn stateless_reset_in_flight_caps_peers() {
-        let mut in_flight = HashSet::new();
+    fn stateless_reset_reservations_are_rate_limited_and_bounded() {
+        let mut recent_peers = LinkedHashMap::new();
         let a: SocketAddr = "1.1.1.1:443".parse().unwrap();
-        let b: SocketAddr = "2.2.2.2:443".parse().unwrap();
-        let c: SocketAddr = "3.3.3.3:443".parse().unwrap();
-
-        assert!(insert_in_flight(&mut in_flight, a, 2));
-        assert!(
-            !insert_in_flight(&mut in_flight, a, 2),
-            "same peer cannot hold two slots"
-        );
-        assert!(insert_in_flight(&mut in_flight, b, 2));
-        assert!(
-            !insert_in_flight(&mut in_flight, c, 2),
-            "cap blocks a third peer"
-        );
-
-        in_flight.remove(&a);
-        assert!(
-            insert_in_flight(&mut in_flight, c, 2),
-            "release frees a slot"
-        );
-        assert!(
-            !insert_in_flight(&mut in_flight, a, 2),
-            "b and c still occupy the cap"
-        );
-        // Same IP different port is a distinct peer.
         let a2: SocketAddr = "1.1.1.1:444".parse().unwrap();
-        assert!(!insert_in_flight(&mut in_flight, a2, 2), "still at cap");
-        in_flight.remove(&b);
-        assert!(insert_in_flight(&mut in_flight, a2, 2));
+        let b: SocketAddr = "2.2.2.2:443".parse().unwrap();
+        let start = Instant::now();
+        let expiration = Duration::from_millis(100);
+
+        assert!(try_reserve_stateless_reset(
+            &mut recent_peers,
+            a,
+            start,
+            2,
+            expiration,
+        ));
+        assert!(try_reserve_stateless_reset(
+            &mut recent_peers,
+            a2,
+            start + Duration::from_millis(50),
+            2,
+            expiration,
+        ));
+        assert!(
+            !try_reserve_stateless_reset(
+                &mut recent_peers,
+                a,
+                start + Duration::from_millis(99),
+                2,
+                expiration,
+            ),
+            "same peer is limited until its reservation expires"
+        );
+        assert!(
+            !try_reserve_stateless_reset(
+                &mut recent_peers,
+                b,
+                start + Duration::from_millis(99),
+                2,
+                expiration,
+            ),
+            "capacity blocks a third peer"
+        );
+        assert!(try_reserve_stateless_reset(
+            &mut recent_peers,
+            a,
+            start + expiration,
+            2,
+            expiration,
+        ));
+        assert!(try_reserve_stateless_reset(
+            &mut recent_peers,
+            b,
+            start + Duration::from_millis(150),
+            2,
+            expiration,
+        ));
     }
 
     #[tokio::test]
@@ -1287,12 +1311,8 @@ mod tests {
         // This socket never completes a send, keeping the writer occupied with
         // the first reset while subsequent resets accumulate in the queue.
         let socket = Arc::new(PendingSocket::default());
-        let in_flight = Arc::new(Mutex::new(HashSet::new()));
-        let stateless_reset_tx = start_stateless_reset_writer(
-            Arc::clone(&socket),
-            Arc::clone(&in_flight),
-            DefaultMetrics,
-        );
+        let stateless_reset_tx =
+            start_stateless_reset_writer(Arc::clone(&socket), DefaultMetrics);
         let reset = || StatelessReset {
             payload: vec![0; quiche::MIN_STATELESS_RESET_LEN],
             to: "127.0.0.1:443".parse().unwrap(),
