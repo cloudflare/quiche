@@ -506,8 +506,73 @@ fn make_nonce(iv: &[u8], counter: u64) -> [u8; MAX_NONCE_LEN] {
     nonce
 }
 
+/// Length of a stateless reset token in bytes.
+pub const STATELESS_RESET_TOKEN_LEN: usize = 16;
+
 /// Minimum length of a valid QUIC stateless reset packet (RFC 9000 §10.3).
-pub const MIN_STATELESS_RESET_LEN: usize = 21;
+///
+/// This consists of a five-byte prefix containing two fixed bits and at least
+/// 38 unpredictable bits, followed by the stateless reset token.
+pub const MIN_STATELESS_RESET_LEN: usize = STATELESS_RESET_TOKEN_LEN + 5;
+
+/// A static key used to derive stateless reset tokens.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct StatelessResetKey([u8; 16]);
+
+/// A stateless reset token.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct StatelessResetToken([u8; STATELESS_RESET_TOKEN_LEN]);
+
+impl StatelessResetToken {
+    /// Creates a stateless reset token from its wire representation.
+    pub const fn from_bytes(bytes: [u8; STATELESS_RESET_TOKEN_LEN]) -> Self {
+        Self(bytes)
+    }
+
+    /// Creates a stateless reset token from a legacy numeric token value.
+    pub const fn from_u128(value: u128) -> Self {
+        Self(value.to_be_bytes())
+    }
+
+    /// Returns the token's wire representation.
+    pub const fn as_bytes(&self) -> &[u8; STATELESS_RESET_TOKEN_LEN] {
+        &self.0
+    }
+
+    /// Converts the token to the representation used by legacy APIs.
+    pub const fn into_u128(self) -> u128 {
+        u128::from_be_bytes(self.0)
+    }
+}
+
+impl StatelessResetKey {
+    /// Creates a stateless reset key from 16 bytes of key material.
+    pub const fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self(bytes)
+    }
+
+    /// Creates a stateless reset key from a legacy numeric key value.
+    pub const fn from_u128(value: u128) -> Self {
+        Self(value.to_be_bytes())
+    }
+
+    /// Derives a stateless reset token for a connection ID.
+    ///
+    /// This computes HMAC-SHA256(static_key, cid) and returns the first
+    /// [`STATELESS_RESET_TOKEN_LEN`] bytes.
+    pub fn derive_token(&self, cid: &[u8]) -> Result<StatelessResetToken> {
+        // We use AES128_GCM because it maps to SHA-256 digest algorithm in
+        // boringssl.
+        let mut hmac_out = [0u8; 32]; // SHA-256 output
+        hkdf_extract(Algorithm::AES128_GCM, &mut hmac_out, cid, &self.0)?;
+
+        // Take the first 16 bytes as the stateless reset token
+        hmac_out[..STATELESS_RESET_TOKEN_LEN]
+            .try_into()
+            .map(StatelessResetToken::from_bytes)
+            .map_err(|_| Error::CryptoFail)
+    }
+}
 
 /// A Stateless Reset that is smaller than 41 bytes might be identifiable
 /// as a Stateless Reset by an observer according to RFC 9000 §10.3.3.
@@ -518,23 +583,6 @@ pub const RECOMMENDED_STATELESS_RESET_LEN: usize = 41;
 /// (`RECOMMENDED` + 7).
 pub const MAX_STATELESS_RESET_LEN: usize = RECOMMENDED_STATELESS_RESET_LEN + 7;
 
-/// Derives a stateless reset token from a static key and connection ID.
-///
-/// This computes HMAC-SHA256(static_key, cid) and returns the first 16 bytes
-/// as a u128 token.
-pub fn derive_stateless_reset_wire_token(
-    static_key: &[u8], cid: &[u8],
-) -> Result<u128> {
-    // We use AES128_GCM because it maps to SHA-256 digest algorithm in boringssl.
-    let mut hmac_out = [0u8; 32]; // SHA-256 output
-    hkdf_extract(Algorithm::AES128_GCM, &mut hmac_out, cid, static_key)?;
-
-    // Take the first 16 bytes as the stateless reset token
-    let token_bytes: [u8; 16] =
-        hmac_out[..16].try_into().map_err(|_| Error::CryptoFail)?;
-    Ok(u128::from_be_bytes(token_bytes))
-}
-
 /// Builds a QUIC stateless reset packet for `cid`.
 ///
 /// Length is [`RECOMMENDED_STATELESS_RESET_LEN`] plus 0..=7 random bytes,
@@ -542,7 +590,7 @@ pub fn derive_stateless_reset_wire_token(
 /// randomization idea is inspired by msquic's implementation.
 /// Returns `None` when `triggering_len` is too small to produce a valid reset.
 pub fn build_stateless_reset_packet(
-    static_key: &[u8], cid: &[u8], triggering_len: usize,
+    static_key: &StatelessResetKey, cid: &[u8], triggering_len: usize,
 ) -> Option<Vec<u8>> {
     let max_len = triggering_len.checked_sub(1)?;
     // Roll a dice between 0 and 7 (included) and use that as the length of extra
@@ -554,7 +602,7 @@ pub fn build_stateless_reset_packet(
         return None;
     }
 
-    let token = derive_stateless_reset_wire_token(static_key, cid).ok()?;
+    let token = static_key.derive_token(cid).ok()?;
 
     // Make the packet indistinguishable from a short-header packet: randomize
     // its unpredictable bytes, clear the header form bit, and set the fixed bit.
@@ -562,8 +610,8 @@ pub fn build_stateless_reset_packet(
     rand::rand_bytes(&mut reset);
     reset[0] = (reset[0] & 0x3f) | 0x40;
 
-    // A stateless reset is identified by its token in the final 16 bytes.
-    reset[len - 16..].copy_from_slice(&token.to_be_bytes());
+    // A stateless reset is identified by its token in the final bytes.
+    reset[len - STATELESS_RESET_TOKEN_LEN..].copy_from_slice(token.as_bytes());
     Some(reset)
 }
 

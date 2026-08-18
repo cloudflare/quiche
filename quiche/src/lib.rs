@@ -423,10 +423,12 @@ use smallvec::SmallVec;
 use crate::buffers::DefaultBufFactory;
 
 pub use crate::crypto::build_stateless_reset_packet;
-pub use crate::crypto::derive_stateless_reset_wire_token;
+pub use crate::crypto::StatelessResetKey;
+pub use crate::crypto::StatelessResetToken;
 pub use crate::crypto::MAX_STATELESS_RESET_LEN;
 pub use crate::crypto::MIN_STATELESS_RESET_LEN;
 pub use crate::crypto::RECOMMENDED_STATELESS_RESET_LEN;
+pub use crate::crypto::STATELESS_RESET_TOKEN_LEN;
 use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
@@ -567,7 +569,7 @@ pub enum QlogLevel {
 pub struct Config {
     local_transport_params: TransportParams,
 
-    stateless_reset_key: Option<u128>,
+    stateless_reset_key: Option<StatelessResetKey>,
 
     version: u32,
 
@@ -1227,7 +1229,7 @@ impl Config {
     /// client has no effect on the connection.
     ///
     /// The default value is `None`.
-    pub fn set_stateless_reset_key(&mut self, v: Option<u128>) {
+    pub fn set_stateless_reset_key(&mut self, v: Option<StatelessResetKey>) {
         self.stateless_reset_key = v;
     }
 
@@ -1239,7 +1241,7 @@ impl Config {
     /// [`set_stateless_reset_key()`]: Config::set_stateless_reset_key
     #[deprecated(note = "use set_stateless_reset_key() instead")]
     pub fn set_stateless_reset_token(&mut self, v: Option<u128>) {
-        self.set_stateless_reset_key(v);
+        self.set_stateless_reset_key(v.map(StatelessResetKey::from_u128));
     }
 
     /// Sets whether the QUIC connection should avoid reusing DCIDs over
@@ -2027,13 +2029,9 @@ impl<F: BufFactory> Connection<F> {
         let reset_token = if is_server {
             config
                 .stateless_reset_key
-                .map(|static_key| {
-                    derive_stateless_reset_wire_token(
-                        &static_key.to_be_bytes(),
-                        scid.as_ref(),
-                    )
-                })
+                .map(|static_key| static_key.derive_token(scid.as_ref()))
                 .transpose()?
+                .map(StatelessResetToken::into_u128)
         } else {
             None
         };
@@ -2957,12 +2955,11 @@ impl<F: BufFactory> Connection<F> {
     fn is_stateless_reset(&self, buf: &[u8]) -> bool {
         // If the packet is too small, then we just throw it away.
         let buf_len = buf.len();
-        if buf_len < 21 {
+        if buf_len < MIN_STATELESS_RESET_LEN {
             return false;
         }
 
-        let token_len = 16;
-        let candidate = &buf[buf_len - token_len..];
+        let candidate = &buf[buf_len - STATELESS_RESET_TOKEN_LEN..];
 
         self.active_dcid_reset_tokens().any(|token| {
             crypto::verify_slices_are_equal(&token.to_be_bytes(), candidate)

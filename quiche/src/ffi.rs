@@ -426,7 +426,8 @@ fn set_stateless_reset_key_from_ptr(config: &mut Config, v: *const u8) {
         Ok(rt) => rt,
         Err(_) => unreachable!(),
     };
-    config.set_stateless_reset_key(Some(u128::from_be_bytes(reset_key)));
+    config
+        .set_stateless_reset_key(Some(StatelessResetKey::from_bytes(reset_key)));
 }
 
 #[no_mangle]

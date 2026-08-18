@@ -236,7 +236,7 @@ impl AsMut<[u8]> for TransientSendBuf {
 
 pub struct WriterConfig {
     pub pending_cid: Option<ConnectionId<'static>>,
-    pub stateless_reset_key: Option<u128>,
+    pub stateless_reset_key: Option<quiche::StatelessResetKey>,
     pub peer_addr: SocketAddr,
     pub local_addr: SocketAddr,
     pub with_gso: bool,
@@ -1313,16 +1313,15 @@ impl<M: Metrics> Drop for TrackMidHandshakeFlush<M> {
     }
 }
 
-fn reset_token_for_cid(static_key: Option<u128>, cid: &ConnectionId) -> u128 {
+fn reset_token_for_cid(
+    static_key: Option<quiche::StatelessResetKey>, cid: &ConnectionId,
+) -> u128 {
     let Some(static_key) = static_key else {
         return random_u128();
     };
 
-    match quiche::derive_stateless_reset_wire_token(
-        &static_key.to_be_bytes(),
-        cid.as_ref(),
-    ) {
-        Ok(reset_token) => reset_token,
+    match static_key.derive_token(cid.as_ref()) {
+        Ok(reset_token) => reset_token.into_u128(),
         Err(error) => {
             log::error!("failed to derive stateless reset token, using a random token"; "error" => ?error);
             random_u128()
@@ -1405,7 +1404,7 @@ mod tests {
 
     #[test]
     fn reset_token_for_cid_is_derived_when_key_is_configured() {
-        let static_key = u128::from_be_bytes([0xba; 16]);
+        let static_key = quiche::StatelessResetKey::from_bytes([0xba; 16]);
         let cid = ConnectionId::from_ref(b"cid");
 
         assert_eq!(

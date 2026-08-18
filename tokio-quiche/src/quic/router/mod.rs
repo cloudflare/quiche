@@ -101,7 +101,7 @@ struct StatelessReset {
 /// queued until its socket send completes, which normally means its just
 /// copied to the socket buffer.
 struct StatelessResetCtx {
-    key: u128,
+    key: quiche::StatelessResetKey,
     tx: mpsc::Sender<StatelessReset>,
     /// Peers with a reset queued or sending. At most one slot per address,
     /// capped at [`STATELESS_RESET_QUEUE_CAPACITY`].
@@ -132,8 +132,9 @@ fn insert_in_flight(
     true
 }
 
+#[allow(unused_variables)]
 fn start_stateless_reset_writer<Tx, M>(
-    socket: Arc<Tx>, in_flight: Arc<Mutex<HashSet<SocketAddr>>>, _metrics: M,
+    socket: Arc<Tx>, in_flight: Arc<Mutex<HashSet<SocketAddr>>>, metrics: M,
 ) -> mpsc::Sender<StatelessReset>
 where
     Tx: DatagramSocketSend + Send + 'static,
@@ -145,10 +146,10 @@ where
     spawn_with_killswitch(async move {
         #[cfg(target_os = "linux")]
         let would_block_metric =
-            _metrics.write_errors(labels::QuicWriteError::WouldBlock);
+            metrics.write_errors(labels::QuicWriteError::WouldBlock);
         #[cfg(target_os = "linux")]
         let send_to_wouldblock_duration_s =
-            _metrics.send_to_wouldblock_duration_s();
+            metrics.send_to_wouldblock_duration_s();
         while let Some(reset) = rx.recv().await {
             let peer = reset.to;
             let sent = send_stateless_reset(
@@ -405,9 +406,11 @@ where
             }
 
             // We only support receiving stateless reset packets for client
-            // connections and sending stateless reset packets for server connections.
+            // connections and sending stateless reset packets for server
+            // connections.
             if self.incoming_packet_handler.is_server() {
-                if has_quic_fixed_bit(&incoming.buf) && self.stateless_reset.is_some()
+                if has_quic_fixed_bit(&incoming.buf) &&
+                    self.stateless_reset.is_some()
                 {
                     self.enqueue_stateless_reset(&incoming, &dcid);
                 }
@@ -421,8 +424,9 @@ where
                 }
             }
 
-            // No connection found for this DCID, drop the this short header packet.
-            return Ok(())
+            // No connection found for this DCID, drop the this short header
+            // packet.
+            return Ok(());
         }
 
         let hdr = Header::from_slice(&mut incoming.buf, MAX_CONN_ID_LEN)
@@ -583,7 +587,7 @@ where
             .unwrap_or(incoming.buf.len())
             .min(incoming.buf.len());
         let Some(payload) = quiche::build_stateless_reset_packet(
-            &ctx.key.to_be_bytes(),
+            &ctx.key,
             dcid.as_ref(),
             datagram_len,
         ) else {
@@ -1323,7 +1327,7 @@ mod tests {
     #[test]
     fn stateless_reset_packet_layout() {
         let dcid = ConnectionId::from_ref(&[0x42; MAX_CONN_ID_LEN]);
-        let key = STATELESS_RESET_KEY.to_be_bytes();
+        let key = quiche::StatelessResetKey::from_u128(STATELESS_RESET_KEY);
 
         assert!(
             quiche::build_stateless_reset_packet(&key, dcid.as_ref(), 21)
@@ -1335,10 +1339,8 @@ mod tests {
         assert_eq!(reset.len(), 21);
         assert_eq!(reset[0] >> 6, 0b01);
         assert_eq!(
-            &reset[reset.len() - 16..],
-            &quiche::derive_stateless_reset_wire_token(&key, dcid.as_ref())
-                .unwrap()
-                .to_be_bytes(),
+            &reset[reset.len() - quiche::STATELESS_RESET_TOKEN_LEN..],
+            key.derive_token(dcid.as_ref()).unwrap().as_bytes(),
         );
 
         let reset =
@@ -1350,10 +1352,8 @@ mod tests {
         assert!(reset.len() < 1200);
         assert_eq!(reset[0] >> 6, 0b01);
         assert_eq!(
-            &reset[reset.len() - 16..],
-            &quiche::derive_stateless_reset_wire_token(&key, dcid.as_ref())
-                .unwrap()
-                .to_be_bytes(),
+            &reset[reset.len() - quiche::STATELESS_RESET_TOKEN_LEN..],
+            key.derive_token(dcid.as_ref()).unwrap().as_bytes(),
         );
     }
 
@@ -1575,13 +1575,11 @@ mod tests {
             .contains(&len));
         assert_eq!(reset[0] >> 6, 0b01);
         assert_eq!(
-            &reset[len - 16..len],
-            &quiche::derive_stateless_reset_wire_token(
-                &STATELESS_RESET_KEY.to_be_bytes(),
-                &dcid,
-            )
-            .unwrap()
-            .to_be_bytes(),
+            &reset[len - quiche::STATELESS_RESET_TOKEN_LEN..len],
+            quiche::StatelessResetKey::from_u128(STATELESS_RESET_KEY)
+                .derive_token(&dcid)
+                .unwrap()
+                .as_bytes(),
         );
 
         router.abort();

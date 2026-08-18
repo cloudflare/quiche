@@ -96,10 +96,11 @@ fn transport_params() {
     assert_eq!(new_tp, tp);
 }
 
-fn stateless_reset_packet(token: u128) -> [u8; 21] {
-    let mut packet = [0; 21];
+fn stateless_reset_packet(token: u128) -> [u8; MIN_STATELESS_RESET_LEN] {
+    let mut packet = [0; MIN_STATELESS_RESET_LEN];
     packet[0] = 0x40;
-    packet[5..].copy_from_slice(&token.to_be_bytes());
+    packet[MIN_STATELESS_RESET_LEN - STATELESS_RESET_TOKEN_LEN..]
+        .copy_from_slice(&token.to_be_bytes());
     packet
 }
 
@@ -113,7 +114,7 @@ fn stateless_reset_packet(token: u128) -> [u8; 21] {
 /// 5. Reset ends with the derived token.
 #[test]
 fn build_stateless_reset_validation() {
-    let static_key = [0xba; 16];
+    let static_key = StatelessResetKey::from_bytes([0xba; 16]);
     let cid = b"cid";
 
     // MIN_STATELESS_RESET_LEN is 21, so a 21-byte packet cannot trigger a
@@ -125,10 +126,8 @@ fn build_stateless_reset_validation() {
     assert_eq!(reset.len(), 21);
     assert_eq!(reset[0] >> 6, 0b01);
     assert_eq!(
-        &reset[reset.len() - 16..],
-        &derive_stateless_reset_wire_token(&static_key, cid)
-            .unwrap()
-            .to_be_bytes(),
+        &reset[reset.len() - STATELESS_RESET_TOKEN_LEN..],
+        static_key.derive_token(cid).unwrap().as_bytes(),
     );
 
     // Typical Initial-sized trigger: recommended size plus 0..=7 jitter.
@@ -139,29 +138,26 @@ fn build_stateless_reset_validation() {
         assert!(reset.len() < 1200);
         assert_eq!(reset[0] >> 6, 0b01);
         assert_eq!(
-            &reset[reset.len() - 16..],
-            &derive_stateless_reset_wire_token(&static_key, cid)
-                .unwrap()
-                .to_be_bytes(),
+            &reset[reset.len() - STATELESS_RESET_TOKEN_LEN..],
+            static_key.derive_token(cid).unwrap().as_bytes(),
         );
     }
 }
 
 #[test]
 fn stateless_reset_key_derives_server_token() {
-    let static_key = u128::from_be_bytes([0xba; 16]);
+    let static_key = StatelessResetKey::from_bytes([0xba; 16]);
     let mut config = test_utils::Pipe::default_config("cubic").unwrap();
     config.set_stateless_reset_key(Some(static_key));
 
-    assert_eq!(config.stateless_reset_key, Some(static_key));
+    assert!(config.stateless_reset_key == Some(static_key));
     assert_eq!(config.local_transport_params.stateless_reset_token, None);
 
     let pipe = test_utils::Pipe::with_config(&mut config).unwrap();
-    let expected = derive_stateless_reset_wire_token(
-        &static_key.to_be_bytes(),
-        pipe.server.source_id().as_ref(),
-    )
-    .unwrap();
+    let expected = static_key
+        .derive_token(pipe.server.source_id().as_ref())
+        .unwrap()
+        .into_u128();
 
     assert_eq!(
         pipe.server.local_transport_params.stateless_reset_token,
@@ -217,7 +213,8 @@ fn stateless_reset_uses_active_dcid_tokens() {
 #[test]
 fn stateless_reset_enters_draining() {
     let mut config = test_utils::Pipe::default_config("cubic").unwrap();
-    config.set_stateless_reset_key(Some(u128::from_be_bytes([0xba; 16])));
+    config
+        .set_stateless_reset_key(Some(StatelessResetKey::from_bytes([0xba; 16])));
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     pipe.handshake().unwrap();
     let token = pipe.client.ids.get_dcid(0).unwrap().reset_token.unwrap();

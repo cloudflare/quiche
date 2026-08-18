@@ -388,8 +388,12 @@ impl QuicSettings {
     /// [`stateless_reset_key`]: QuicSettings::stateless_reset_key
     /// [`stateless_reset_token`]: QuicSettings::stateless_reset_token
     #[allow(deprecated)]
-    pub(crate) fn resolved_stateless_reset_key(&self) -> Option<u128> {
-        self.stateless_reset_key.or(self.stateless_reset_token)
+    pub(crate) fn resolved_stateless_reset_key(
+        &self,
+    ) -> Option<quiche::StatelessResetKey> {
+        self.stateless_reset_key
+            .or(self.stateless_reset_token)
+            .map(quiche::StatelessResetKey::from_u128)
     }
 
     #[inline]
@@ -547,19 +551,28 @@ mod test {
             r#"{ "stateless_reset_token": 1 }"#,
         )
         .unwrap();
-        assert_eq!(token_only.resolved_stateless_reset_key(), Some(1));
+        assert!(
+            token_only.resolved_stateless_reset_key() ==
+                Some(quiche::StatelessResetKey::from_u128(1))
+        );
 
         let key_only = serde_json::from_str::<QuicSettings>(
             r#"{ "stateless_reset_key": 2 }"#,
         )
         .unwrap();
-        assert_eq!(key_only.resolved_stateless_reset_key(), Some(2));
+        assert!(
+            key_only.resolved_stateless_reset_key() ==
+                Some(quiche::StatelessResetKey::from_u128(2))
+        );
 
         let both = serde_json::from_str::<QuicSettings>(
             r#"{ "stateless_reset_key": 2, "stateless_reset_token": 1 }"#,
         )
         .unwrap();
-        assert_eq!(both.resolved_stateless_reset_key(), Some(2));
+        assert!(
+            both.resolved_stateless_reset_key() ==
+                Some(quiche::StatelessResetKey::from_u128(2))
+        );
     }
 
     #[test]
@@ -570,7 +583,10 @@ mod test {
             ..Default::default()
         };
 
-        assert_eq!(settings.resolved_stateless_reset_key(), Some(0xba));
+        assert!(
+            settings.resolved_stateless_reset_key() ==
+                Some(quiche::StatelessResetKey::from_u128(0xba))
+        );
         assert_eq!(settings.stateless_reset_key, None);
     }
 }

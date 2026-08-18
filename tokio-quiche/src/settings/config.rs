@@ -54,7 +54,7 @@ pub(crate) struct Config {
     pub keylog_file: Option<File>,
     pub listen_backlog: usize,
     pub handshake_timeout: Option<Duration>,
-    pub stateless_reset_key: Option<u128>,
+    pub stateless_reset_key: Option<quiche::StatelessResetKey>,
     pub has_ippktinfo: bool,
     pub has_ipv6pktinfo: bool,
     pub pool_send_buffer: bool,
@@ -294,6 +294,9 @@ mod tests {
             ConnectionParams::new_client(settings, None, Hooks::default());
         let config = Config::new(&params, SocketCapabilities::default()).unwrap();
 
-        assert_eq!(config.stateless_reset_key, Some(0xba));
+        assert!(
+            config.stateless_reset_key ==
+                Some(quiche::StatelessResetKey::from_u128(0xba))
+        );
     }
 }
