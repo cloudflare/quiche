@@ -5478,6 +5478,60 @@ fn stream_zero_length_fin_deferred_collection(
 }
 
 #[rstest]
+/// Tests that a zero-length fin is not dropped when the ack for the stream
+/// data arrives between the fin being written and the frame carrying it being
+/// built.
+///
+/// The fin sets the final offset to one that is already fully acked, which used
+/// to make the send side report itself complete. Collecting the stream on the
+/// strength of that discarded the queued fin, and the peer read every byte but
+/// never saw the end of the stream.
+fn stream_zero_length_fin_not_collected_before_sent(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // A local unidirectional stream: its completion depends only on the send
+    // side, so nothing else keeps it alive.
+    assert_eq!(pipe.client.stream_send(2, b"hello", false), Ok(5));
+
+    // Put the data on the wire, holding back the server's ack.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // Write the fin. It is queued but has not been built into a frame yet.
+    assert_eq!(pipe.client.stream_send(2, b"", true), Ok(0));
+
+    // Let the ack in. Every byte is now acked, but the fin still has to be sent.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // A collected stream is gone from the connection, which stream_capacity()
+    // reports as an invalid state.
+    assert!(
+        pipe.client.stream_capacity(2).is_ok(),
+        "stream was collected with the fin still unsent"
+    );
+
+    // Flush the fin.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    let mut buf = [0; 16];
+    assert_eq!(pipe.server.stream_recv(2, &mut buf), Ok((5, true)));
+    assert_eq!(&buf[..5], b"hello");
+
+    // Now that the fin is delivered and acked, the stream can be collected.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    assert_eq!(
+        pipe.client.stream_capacity(2),
+        Err(Error::InvalidStreamState(2))
+    );
+}
+
+#[rstest]
 /// Tests that the stream gets created with stream_send() even if there's
 /// no data in the buffer and the fin flag is not set.
 fn stream_zero_length_non_fin(
