@@ -42,7 +42,7 @@ use tokio_quiche::ClientH3Driver;
 use tokio_quiche::ConnectionParams;
 
 /// Client: hold an H3 connection until a stateless reset, or flood
-/// unknown short-header packets to show the server's in-flight cap.
+/// unknown short-header packets to show the server's reset rate limit.
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
@@ -149,18 +149,19 @@ async fn flood(peer: SocketAddr, n: usize, unique_ports: bool) {
     packet[0] = 0x40;
     boring::rand::rand_bytes(&mut packet[1..21]).ok();
 
-    let mut sockets = Vec::new();
-    if unique_ports {
-        for _ in 0..n {
-            sockets.push(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        }
-    } else {
+    let socket_count = if unique_ports { n } else { 1 };
+    let mut sockets = Vec::with_capacity(socket_count);
+    for _ in 0..socket_count {
         sockets.push(UdpSocket::bind("127.0.0.1:0").await.unwrap());
     }
 
-    for (i, socket) in sockets.iter().enumerate() {
-        let _ = socket.send_to(&packet, peer).await;
-        if unique_ports && i + 1 < n {
+    let mut sent = 0;
+    for i in 0..n {
+        let socket = &sockets[if unique_ports { i } else { 0 }];
+        if socket.send_to(&packet, peer).await.is_ok() {
+            sent += 1;
+        }
+        if i + 1 < n {
             boring::rand::rand_bytes(&mut packet[1..21]).ok();
         }
     }
@@ -185,5 +186,5 @@ async fn flood(peer: SocketAddr, n: usize, unique_ports: bool) {
         recvd += result.unwrap_or(0);
     }
 
-    println!("sent={n} recv={recvd} unique_ports={unique_ports}");
+    println!("sent={sent} recv={recvd} unique_ports={unique_ports}");
 }
