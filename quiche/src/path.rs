@@ -251,7 +251,14 @@ impl Path {
                         .unwrap_or(c.max_send_udp_payload_size),
                     c.max_send_udp_payload_size,
                 );
-                Some(pmtud::Pmtud::new(maximum_supported_mtu, c.pmtud_max_probes))
+                Some(pmtud::Pmtud::new(
+                    maximum_supported_mtu,
+                    pmtud::PmtudConfig {
+                        enable: c.pmtud,
+                        max_probes: c.pmtud_max_probes,
+                        pkts_between_probes: c.pmtud_pkts_between_probes,
+                    },
+                ))
             } else {
                 None
             }
@@ -908,15 +915,11 @@ impl PathMap {
 
     /// Configures path MTU discovery on all existing paths.
     pub fn set_discover_pmtu_on_existing_paths(
-        &mut self, discover: bool, max_send_udp_payload_size: usize,
-        pmtud_max_probes: u8,
+        &mut self, params: pmtud::PmtudConfig, max_send_udp_payload_size: usize,
     ) {
         for (_, path) in self.paths.iter_mut() {
-            path.pmtud = if discover {
-                Some(pmtud::Pmtud::new(
-                    max_send_udp_payload_size,
-                    pmtud_max_probes,
-                ))
+            path.pmtud = if params.enable {
+                Some(pmtud::Pmtud::new(max_send_udp_payload_size, params))
             } else {
                 None
             };
