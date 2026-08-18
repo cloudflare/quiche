@@ -2899,14 +2899,17 @@ impl<F: BufFactory> Connection<F> {
                 Err(Error::Done) => {
                     // If the packet can't be processed or decrypted, check if
                     // it's a stateless reset.
-                    if self.is_stateless_reset(&buf[len - left..len]) {
+                    if !self.is_draining() &&
+                        self.is_stateless_reset(&buf[len - left..len])
+                    {
                         trace!("{} packet is a stateless reset", self.trace_id);
 
                         // A stateless reset terminates the connection without a
                         // response, so remain in draining for three PTOs.
-                        let path = self.paths.get_active()?;
-                        self.draining_timer =
-                            Some(Instant::now() + (path.recovery.pto() * 3));
+                        if let Ok(path) = self.paths.get_active() {
+                            self.draining_timer =
+                                Some(Instant::now() + (path.recovery.pto() * 3));
+                        }
                     }
 
                     left

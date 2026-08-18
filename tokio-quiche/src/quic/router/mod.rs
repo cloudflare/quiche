@@ -95,7 +95,8 @@ struct StatelessReset {
 /// resets nor advertise key-derived tokens on SCIDs. Note that this isn't an
 /// RFC requirement, but a design choice to reduce the attack surface.
 ///
-/// We have a rate limit that limits the number of resets per 2-tuple to 1 per 100ms.
+/// We have a rate limit that limits the number of resets per 2-tuple to 1 per
+/// 100ms.
 struct StatelessResetCtx {
     key: quiche::StatelessResetKey,
     tx: mpsc::Sender<StatelessReset>,

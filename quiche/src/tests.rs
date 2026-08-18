@@ -234,6 +234,12 @@ fn stateless_reset_enters_draining() {
     assert_eq!(pipe.client.recv(&mut packet, info), Ok(packet.len()));
     assert!(pipe.client.is_draining());
     assert!(!pipe.client.is_closed());
+
+    let draining_timer = Instant::now();
+    pipe.client.draining_timer = Some(draining_timer);
+    let mut replay = stateless_reset_packet(token);
+    assert_eq!(pipe.client.recv(&mut replay, info), Ok(replay.len()));
+    assert_eq!(pipe.client.draining_timer, Some(draining_timer));
 }
 
 #[test]

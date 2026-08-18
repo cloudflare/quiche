@@ -343,7 +343,7 @@ pub(crate) mod quic {
     /// Number of stateless reset packets sent
     pub fn stateless_reset_sent_count() -> Counter;
 
-    /// Number of outbound stateless resets that were not dropped because of
+    /// Number of outbound stateless resets that were dropped because of
     /// rate limiting
     pub fn stateless_reset_dropped_count() -> Counter;
 
