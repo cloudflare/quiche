@@ -7614,6 +7614,18 @@ impl<F: BufFactory> Connection<F> {
         self.handshake.peer_cert()
     }
 
+    /// Fills the provided buffer with TLS exporter keying material.
+    ///
+    /// The exporter is available after the TLS handshake completes. The label
+    /// identifies the protocol usage, while the optional context can separate
+    /// exporter instances within that usage.
+    #[inline]
+    pub fn export_keying_material(
+        &self, out: &mut [u8], label: &[u8], context: Option<&[u8]>,
+    ) -> Result<()> {
+        self.handshake.export_keying_material(out, label, context)
+    }
+
     /// Returns the peer's certificate chain (if any) as a vector of DER-encoded
     /// buffers.
     ///
