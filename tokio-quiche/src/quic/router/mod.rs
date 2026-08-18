@@ -94,9 +94,13 @@ struct StatelessReset {
 /// server-side connection and a reset key is configured. Clients neither send
 /// resets nor advertise key-derived tokens on SCIDs. Note that this isn't an
 /// RFC requirement, but a design choice to reduce the attack surface.
+///
+/// We have a rate limit that limits the number of resets per 2-tuple to 1 per 100ms.
 struct StatelessResetCtx {
     key: quiche::StatelessResetKey,
     tx: mpsc::Sender<StatelessReset>,
+    /// Peers with a reset recently queued, ordered by reservation time for
+    /// opportunistic expiration and capped at the reset queue capacity.
     recent_peers: LinkedHashMap<SocketAddr, Instant>,
 }
 
