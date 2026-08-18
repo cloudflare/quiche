@@ -422,7 +422,7 @@ use smallvec::SmallVec;
 
 use crate::buffers::DefaultBufFactory;
 
-pub use crate::crypto::build_stateless_reset;
+pub use crate::crypto::build_stateless_reset_packet;
 pub use crate::crypto::derive_stateless_reset_wire_token;
 pub use crate::crypto::MAX_STATELESS_RESET_LEN;
 pub use crate::crypto::MIN_STATELESS_RESET_LEN;
@@ -1237,6 +1237,7 @@ impl Config {
     /// compatibility.
     ///
     /// [`set_stateless_reset_key()`]: Config::set_stateless_reset_key
+    #[deprecated(note = "use set_stateless_reset_key() instead")]
     pub fn set_stateless_reset_token(&mut self, v: Option<u128>) {
         self.set_stateless_reset_key(v);
     }

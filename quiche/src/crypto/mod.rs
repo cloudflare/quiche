@@ -541,7 +541,7 @@ pub fn derive_stateless_reset_wire_token(
 /// then clamped to `triggering_len - 1` so the reset cannot loop. This
 /// randomization idea is inspired by msquic's implementation.
 /// Returns `None` when `triggering_len` is too small to produce a valid reset.
-pub fn build_stateless_reset(
+pub fn build_stateless_reset_packet(
     static_key: &[u8], cid: &[u8], triggering_len: usize,
 ) -> Option<Vec<u8>> {
     let max_len = triggering_len.checked_sub(1)?;

@@ -118,10 +118,10 @@ fn build_stateless_reset_validation() {
 
     // MIN_STATELESS_RESET_LEN is 21, so a 21-byte packet cannot trigger a
     // strictly shorter valid reset.
-    assert!(build_stateless_reset(&static_key, cid, 21).is_none());
+    assert!(build_stateless_reset_packet(&static_key, cid, 21).is_none());
 
     // Trigger just above the minimum: length is clamped to trigger - 1.
-    let reset = build_stateless_reset(&static_key, cid, 22).unwrap();
+    let reset = build_stateless_reset_packet(&static_key, cid, 22).unwrap();
     assert_eq!(reset.len(), 21);
     assert_eq!(reset[0] >> 6, 0b01);
     assert_eq!(
@@ -133,7 +133,7 @@ fn build_stateless_reset_validation() {
 
     // Typical Initial-sized trigger: recommended size plus 0..=7 jitter.
     for _ in 0..16 {
-        let reset = build_stateless_reset(&static_key, cid, 1200).unwrap();
+        let reset = build_stateless_reset_packet(&static_key, cid, 1200).unwrap();
         assert!((RECOMMENDED_STATELESS_RESET_LEN..=MAX_STATELESS_RESET_LEN)
             .contains(&reset.len()));
         assert!(reset.len() < 1200);
@@ -151,7 +151,7 @@ fn build_stateless_reset_validation() {
 fn stateless_reset_key_derives_server_token() {
     let static_key = u128::from_be_bytes([0xba; 16]);
     let mut config = test_utils::Pipe::default_config("cubic").unwrap();
-    config.set_stateless_reset_token(Some(static_key));
+    config.set_stateless_reset_key(Some(static_key));
 
     assert_eq!(config.stateless_reset_key, Some(static_key));
     assert_eq!(config.local_transport_params.stateless_reset_token, None);

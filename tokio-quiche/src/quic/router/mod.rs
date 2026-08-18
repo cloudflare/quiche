@@ -398,30 +398,31 @@ where
         #[cfg(feature = "perf-quic-listener-metrics")]
         let start = std::time::Instant::now();
 
-        if let Some(dcid) =
-            short_dcid(&incoming.buf).map(ConnectionId::into_owned)
-        {
+        if let Some(dcid) = short_dcid(&incoming.buf) {
             if let Some(ev_sender) = self.conns.get(&dcid) {
                 let _ = ev_sender.try_send(incoming);
                 return Ok(());
             }
 
             // We only support receiving stateless reset packets for client
-            // connections. A client socket has a single connection,
-            // so an unmatched DCID can be forwarded to it for token
-            // validation.
-            if !self.incoming_packet_handler.is_server() {
+            // connections and sending stateless reset packets for server connections.
+            if self.incoming_packet_handler.is_server() {
+                if has_quic_fixed_bit(&incoming.buf) && self.stateless_reset.is_some()
+                {
+                    self.enqueue_stateless_reset(&incoming, &dcid);
+                }
+            } else {
+                // A client socket has a single connection,
+                // so an unmatched DCID can be forwarded to it for token
+                // validation.
                 if let Some(ev_sender) = self.conns.get_any() {
                     let _ = ev_sender.try_send(incoming);
                     return Ok(());
                 }
             }
 
-            if has_quic_fixed_bit(&incoming.buf) && self.stateless_reset.is_some()
-            {
-                self.enqueue_stateless_reset(&incoming, &dcid);
-                return Ok(());
-            }
+            // No connection found for this DCID, drop the this short header packet.
+            return Ok(())
         }
 
         let hdr = Header::from_slice(&mut incoming.buf, MAX_CONN_ID_LEN)
@@ -581,7 +582,7 @@ where
             .and_then(|len| usize::try_from(len).ok())
             .unwrap_or(incoming.buf.len())
             .min(incoming.buf.len());
-        let Some(payload) = quiche::build_stateless_reset(
+        let Some(payload) = quiche::build_stateless_reset_packet(
             &ctx.key.to_be_bytes(),
             dcid.as_ref(),
             datagram_len,
@@ -1324,10 +1325,13 @@ mod tests {
         let dcid = ConnectionId::from_ref(&[0x42; MAX_CONN_ID_LEN]);
         let key = STATELESS_RESET_KEY.to_be_bytes();
 
-        assert!(quiche::build_stateless_reset(&key, dcid.as_ref(), 21).is_none());
+        assert!(
+            quiche::build_stateless_reset_packet(&key, dcid.as_ref(), 21)
+                .is_none()
+        );
 
-        let reset =
-            quiche::build_stateless_reset(&key, dcid.as_ref(), 22).unwrap();
+        let reset = quiche::build_stateless_reset_packet(&key, dcid.as_ref(), 22)
+            .unwrap();
         assert_eq!(reset.len(), 21);
         assert_eq!(reset[0] >> 6, 0b01);
         assert_eq!(
@@ -1338,7 +1342,8 @@ mod tests {
         );
 
         let reset =
-            quiche::build_stateless_reset(&key, dcid.as_ref(), 1200).unwrap();
+            quiche::build_stateless_reset_packet(&key, dcid.as_ref(), 1200)
+                .unwrap();
         assert!((quiche::RECOMMENDED_STATELESS_RESET_LEN..=
             quiche::MAX_STATELESS_RESET_LEN)
             .contains(&reset.len()));
