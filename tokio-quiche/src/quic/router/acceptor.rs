@@ -214,6 +214,10 @@ where
     S: DatagramSocketSend + Send + 'static,
     M: Metrics,
 {
+    fn is_server(&self) -> bool {
+        true
+    }
+
     fn handle_initials(
         &mut self, incoming: Incoming, hdr: quiche::Header<'static>,
         quiche_config: &mut quiche::Config,

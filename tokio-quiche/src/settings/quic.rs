@@ -24,12 +24,69 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#![allow(deprecated)]
+
 use foundations::settings::settings;
+use foundations::settings::Settings;
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
+use serde::Serializer;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
+use std::fmt;
 use std::time::Duration;
 
 pub use qlog::writer::QlogCompression;
+
+const REDACTED_STATELESS_RESET_KEY: &str = "[REDACTED]";
+
+/// A stateless reset key that is redacted from debug and serialized output.
+#[derive(Clone, Default, Eq, PartialEq)]
+pub struct RedactedStatelessResetKey(u128);
+
+impl RedactedStatelessResetKey {
+    /// Creates a redacted stateless reset key wrapper.
+    pub const fn new(value: u128) -> Self {
+        Self(value)
+    }
+
+    pub(crate) const fn expose(&self) -> u128 {
+        self.0
+    }
+}
+
+impl From<u128> for RedactedStatelessResetKey {
+    fn from(value: u128) -> Self {
+        Self::new(value)
+    }
+}
+
+impl fmt::Debug for RedactedStatelessResetKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(REDACTED_STATELESS_RESET_KEY)
+    }
+}
+
+impl Serialize for RedactedStatelessResetKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(REDACTED_STATELESS_RESET_KEY)
+    }
+}
+
+impl<'de> Deserialize<'de> for RedactedStatelessResetKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        u128::deserialize(deserializer).map(Self::new)
+    }
+}
+
+impl Settings for RedactedStatelessResetKey {}
 
 /// QUIC configuration parameters.
 #[serde_as]
@@ -325,13 +382,27 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_max_path_challenge_recv_queue_len")]
     pub max_path_challenge_recv_queue_len: usize,
 
-    /// Sets the initial stateless reset token.
+    /// Sets the static key used to derive stateless reset tokens.
     ///
     /// Note that this applies only to server-side connections - on client-side
-    /// connections, this is a no-op.
+    /// connections, this is a no-op. The user of this feature must ensure that
+    /// their routing / load-balancing infrastructure is configured to forward
+    /// stateless reset packets that have the same DCID to the same server
+    /// instance to avoid the oracle attack described in RFC 9000 §21.11.
     ///
     /// Defaults to `None`.
-    pub stateless_reset_token: Option<u128>,
+    pub stateless_reset_key: Option<RedactedStatelessResetKey>,
+
+    /// Legacy alias for [`stateless_reset_key`].
+    ///
+    /// Prefer [`stateless_reset_key`]. If both are set,
+    /// [`stateless_reset_key`] is used.
+    ///
+    /// [`stateless_reset_key`]: QuicSettings::stateless_reset_key
+    #[deprecated(
+        note = "use `stateless_reset_key` as this field is treated as the static key"
+    )]
+    pub stateless_reset_token: Option<RedactedStatelessResetKey>,
 
     /// Sets whether the QUIC connection should avoid reusing DCIDs over
     /// different paths.
@@ -367,6 +438,24 @@ pub struct QuicSettings {
 }
 
 impl QuicSettings {
+    /// Returns the configured stateless reset key.
+    ///
+    /// Prefers [`stateless_reset_key`] and falls back to the deprecated
+    /// [`stateless_reset_token`] alias.
+    ///
+    /// [`stateless_reset_key`]: QuicSettings::stateless_reset_key
+    /// [`stateless_reset_token`]: QuicSettings::stateless_reset_token
+    #[allow(deprecated)]
+    pub(crate) fn resolved_stateless_reset_key(
+        &self,
+    ) -> Option<quiche::StatelessResetKey> {
+        self.stateless_reset_key
+            .as_ref()
+            .or(self.stateless_reset_token.as_ref())
+            .map(RedactedStatelessResetKey::expose)
+            .map(quiche::StatelessResetKey::from_u128)
+    }
+
     #[inline]
     fn default_alpn() -> Vec<Vec<u8>> {
         quiche::h3::APPLICATION_PROTOCOL
@@ -503,6 +592,8 @@ impl QuicSettings {
 #[cfg(test)]
 mod test {
     use super::QuicSettings;
+    use super::RedactedStatelessResetKey;
+    use super::REDACTED_STATELESS_RESET_KEY;
     use std::time::Duration;
 
     #[test]
@@ -514,5 +605,81 @@ mod test {
 
         assert_eq!(quic.handshake_timeout.unwrap(), Duration::from_secs(5));
         assert_eq!(quic.max_idle_timeout.unwrap(), Duration::from_secs(7));
+    }
+
+    #[test]
+    fn resolved_stateless_reset_key_prefers_new_field() {
+        let token_only = serde_json::from_str::<QuicSettings>(
+            r#"{ "stateless_reset_token": 1 }"#,
+        )
+        .unwrap();
+        assert!(
+            token_only.resolved_stateless_reset_key() ==
+                Some(quiche::StatelessResetKey::from_u128(1))
+        );
+
+        let key_only = serde_json::from_str::<QuicSettings>(
+            r#"{ "stateless_reset_key": 2 }"#,
+        )
+        .unwrap();
+        assert!(
+            key_only.resolved_stateless_reset_key() ==
+                Some(quiche::StatelessResetKey::from_u128(2))
+        );
+
+        let both = serde_json::from_str::<QuicSettings>(
+            r#"{ "stateless_reset_key": 2, "stateless_reset_token": 1 }"#,
+        )
+        .unwrap();
+        assert!(
+            both.resolved_stateless_reset_key() ==
+                Some(quiche::StatelessResetKey::from_u128(2))
+        );
+    }
+
+    #[test]
+    fn stateless_reset_keys_are_redacted() {
+        let value = 0xdead_beef_dead_beef_dead_beef_dead_beef;
+        let key = RedactedStatelessResetKey::new(value);
+        assert_eq!(format!("{key:?}"), REDACTED_STATELESS_RESET_KEY);
+        assert_eq!(
+            serde_json::to_string(&key).unwrap(),
+            format!("\"{REDACTED_STATELESS_RESET_KEY}\"")
+        );
+        assert_eq!(
+            serde_json::from_str::<RedactedStatelessResetKey>(&value.to_string())
+                .unwrap(),
+            key
+        );
+
+        let settings = QuicSettings {
+            stateless_reset_key: Some(key.clone()),
+            stateless_reset_token: Some(key),
+            ..Default::default()
+        };
+        let debug = format!("{settings:?}");
+        let serialized = serde_json::to_string(&settings).unwrap();
+        let yaml = foundations::settings::to_yaml_string(&settings).unwrap();
+        assert!(!debug.contains(&value.to_string()));
+        assert!(!serialized.contains(&value.to_string()));
+        assert!(!yaml.contains(&value.to_string()));
+        assert_eq!(debug.matches(REDACTED_STATELESS_RESET_KEY).count(), 2);
+        assert_eq!(serialized.matches(REDACTED_STATELESS_RESET_KEY).count(), 2);
+        assert_eq!(yaml.matches(REDACTED_STATELESS_RESET_KEY).count(), 2);
+    }
+
+    #[test]
+    fn legacy_stateless_reset_token_field_still_resolves() {
+        #[allow(deprecated)]
+        let settings = QuicSettings {
+            stateless_reset_token: Some(RedactedStatelessResetKey::new(0xba)),
+            ..Default::default()
+        };
+
+        assert!(
+            settings.resolved_stateless_reset_key() ==
+                Some(quiche::StatelessResetKey::from_u128(0xba))
+        );
+        assert_eq!(settings.stateless_reset_key, None);
     }
 }

@@ -41,7 +41,9 @@ use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::settings::Config;
 use datagram_socket::DatagramSocketRecv;
 use datagram_socket::DatagramSocketSend;
+use datagram_socket::DatagramSocketSendExt;
 use foundations::telemetry::log;
+use hashlink::LinkedHashMap;
 use quiche::ConnectionId;
 use quiche::Header;
 use quiche::MAX_CONN_ID_LEN;
@@ -54,6 +56,7 @@ use std::sync::Arc;
 use std::task::ready;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
 use task_killswitch::spawn_with_killswitch;
@@ -76,6 +79,143 @@ type ConnStream<Tx, M> = mpsc::Receiver<io::Result<InitialQuicConnection<Tx, M>>
 const PACKET_RX_YIELD_AFTER: usize = 30;
 /// `ConnectionMapCommand` processing batch size to amortize receive operations.
 const CONN_MAP_CMD_BATCH_SIZE: usize = 128;
+
+const STATELESS_RESET_QUEUE_CAPACITY: usize = 256;
+const STATELESS_RESET_EXPIRATION: Duration = Duration::from_millis(100);
+
+struct StatelessReset {
+    payload: Vec<u8>,
+    to: SocketAddr,
+    #[cfg(target_os = "linux")]
+    from: Option<SocketAddr>,
+}
+
+/// Server-side stateless reset state. Present only when the router is a
+/// server-side connection and a reset key is configured. Clients neither send
+/// resets nor advertise key-derived tokens on SCIDs. Note that this isn't an
+/// RFC requirement, but a design choice to reduce the attack surface.
+///
+/// We have a rate limit that limits the number of resets per 2-tuple to 1 per
+/// 100ms.
+struct StatelessResetCtx {
+    key: quiche::StatelessResetKey,
+    tx: mpsc::Sender<StatelessReset>,
+    /// Peers with a reset recently queued, ordered by reservation time for
+    /// opportunistic expiration and capped at the reset queue capacity.
+    recent_peers: LinkedHashMap<SocketAddr, Instant>,
+}
+
+impl StatelessResetCtx {
+    fn try_reserve(&mut self, peer: SocketAddr) -> bool {
+        try_reserve_stateless_reset(
+            &mut self.recent_peers,
+            peer,
+            Instant::now(),
+            STATELESS_RESET_QUEUE_CAPACITY,
+            STATELESS_RESET_EXPIRATION,
+        )
+    }
+
+    fn cancel_reservation(&mut self, peer: SocketAddr) {
+        self.recent_peers.remove(&peer);
+    }
+}
+
+fn try_reserve_stateless_reset(
+    recent_peers: &mut LinkedHashMap<SocketAddr, Instant>, peer: SocketAddr,
+    now: Instant, max: usize, expiration: Duration,
+) -> bool {
+    while recent_peers.front().is_some_and(|(_, sent_at)| {
+        now.saturating_duration_since(*sent_at) >= expiration
+    }) {
+        recent_peers.pop_front();
+    }
+
+    if recent_peers.contains_key(&peer) || recent_peers.len() >= max {
+        return false;
+    }
+
+    recent_peers.insert(peer, now);
+    true
+}
+
+#[allow(unused_variables)]
+fn start_stateless_reset_writer<Tx, M>(
+    socket: Arc<Tx>, metrics: M,
+) -> mpsc::Sender<StatelessReset>
+where
+    Tx: DatagramSocketSend + Send + 'static,
+    M: Metrics,
+{
+    let (tx, mut rx) =
+        mpsc::channel::<StatelessReset>(STATELESS_RESET_QUEUE_CAPACITY);
+
+    spawn_with_killswitch(async move {
+        #[cfg(target_os = "linux")]
+        let would_block_metric =
+            metrics.write_errors(labels::QuicWriteError::WouldBlock);
+        #[cfg(target_os = "linux")]
+        let send_to_wouldblock_duration_s =
+            metrics.send_to_wouldblock_duration_s();
+        while let Some(reset) = rx.recv().await {
+            let sent = send_stateless_reset(
+                &socket,
+                &reset,
+                #[cfg(target_os = "linux")]
+                &would_block_metric,
+                #[cfg(target_os = "linux")]
+                &send_to_wouldblock_duration_s,
+            )
+            .await;
+            if sent {
+                crate::metrics::quic::stateless_reset_sent_count().inc();
+            } else {
+                crate::metrics::quic::stateless_reset_dropped_count().inc();
+            }
+        }
+    });
+
+    tx
+}
+
+async fn send_stateless_reset<Tx>(
+    socket: &Arc<Tx>, reset: &StatelessReset,
+    #[cfg(target_os = "linux")]
+    would_block_metric: &foundations::telemetry::metrics::Counter,
+    #[cfg(target_os = "linux")] send_to_wouldblock_duration_s: &foundations::telemetry::metrics::TimeHistogram,
+) -> bool
+where
+    Tx: DatagramSocketSend + Send + 'static,
+{
+    let result = if let Some(_udp) = socket.as_udp_socket() {
+        #[cfg(target_os = "linux")]
+        {
+            crate::quic::io::gso::send_to(
+                _udp,
+                reset.to,
+                reset.from,
+                &reset.payload,
+                reset.payload.len(),
+                None,
+                would_block_metric.clone(),
+                send_to_wouldblock_duration_s.clone(),
+            )
+            .await
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        socket.send_to(&reset.payload, reset.to).await
+    } else {
+        socket.send_to(&reset.payload, reset.to).await
+    };
+
+    if let Err(error) = result {
+        log::debug!("Failed to send stateless reset"; "error" => ?error);
+        false
+    } else {
+        true
+    }
+}
 
 #[cfg(feature = "perf-quic-listener-metrics")]
 mod listener_stage_timer {
@@ -162,6 +302,7 @@ where
     /// should be 0 outside of `poll_conn_map_commands`.
     conn_map_cmd_buf: Vec<ConnectionMapCommand>,
     accept_sink: mpsc::Sender<io::Result<InitialQuicConnection<Tx, M>>>,
+    stateless_reset: Option<StatelessResetCtx>,
     metrics: M,
     #[cfg(target_os = "linux")]
     udp_drop_count: u32,
@@ -193,6 +334,22 @@ where
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let (accept_sink, accept_stream) = mpsc::channel(config.listen_backlog);
         let (conn_map_cmd_tx, conn_map_cmd_rx) = mpsc::unbounded_channel();
+        let stateless_reset = match (
+            incoming_packet_handler.is_server(),
+            config.stateless_reset_key,
+        ) {
+            (true, Some(key)) => Some(StatelessResetCtx {
+                key,
+                tx: start_stateless_reset_writer(
+                    Arc::clone(&socket_tx),
+                    metrics.clone(),
+                ),
+                recent_peers: LinkedHashMap::with_capacity(
+                    STATELESS_RESET_QUEUE_CAPACITY,
+                ),
+            }),
+            _ => None,
+        };
 
         (
             InboundPacketRouter {
@@ -207,6 +364,7 @@ where
                 conn_map_cmd_rx,
                 conn_map_cmd_buf: Vec::with_capacity(4),
                 accept_sink,
+                stateless_reset,
                 #[cfg(target_os = "linux")]
                 udp_drop_count: 0,
                 #[cfg(target_os = "linux")]
@@ -248,6 +406,28 @@ where
                 let _ = ev_sender.try_send(incoming);
                 return Ok(());
             }
+
+            // We only support receiving stateless reset packets for client
+            // connections and sending stateless reset packets for server
+            // connections.
+            if self.incoming_packet_handler.is_server() {
+                if has_quic_fixed_bit(&incoming.buf) &&
+                    self.stateless_reset.is_some()
+                {
+                    self.enqueue_stateless_reset(&incoming, &dcid);
+                }
+            } else {
+                // A client socket has a single connection,
+                // so an unmatched DCID can be forwarded to it for token
+                // validation.
+                if let Some(ev_sender) = self.conns.get_any() {
+                    let _ = ev_sender.try_send(incoming);
+                    return Ok(());
+                }
+            }
+
+            // No connection found for this DCID, drop this short header packet.
+            return Ok(());
         }
 
         let hdr = Header::from_slice(&mut incoming.buf, MAX_CONN_ID_LEN)
@@ -331,6 +511,7 @@ where
             peer_addr,
             local_addr,
             pending_cid: pending_cid.clone(),
+            stateless_reset_key: self.stateless_reset.as_ref().map(|s| s.key),
             with_gso: self.config.has_gso,
             pacing_offload: self.config.pacing_offload,
             with_pktinfo: if self.local_addr.is_ipv4() {
@@ -390,6 +571,54 @@ where
 
         send_permit.send(Ok(conn));
         Ok(())
+    }
+
+    fn enqueue_stateless_reset(
+        &mut self, incoming: &Incoming, dcid: &ConnectionId,
+    ) {
+        let Some(ctx) = &mut self.stateless_reset else {
+            return;
+        };
+        let peer = incoming.peer_addr;
+        if !ctx.try_reserve(peer) {
+            crate::metrics::quic::stateless_reset_dropped_count().inc();
+            return;
+        }
+        let datagram_len = incoming
+            .gro
+            .and_then(|len| usize::try_from(len).ok())
+            .unwrap_or(incoming.buf.len())
+            .min(incoming.buf.len());
+        let Some(payload) = quiche::build_stateless_reset_packet(
+            &ctx.key,
+            dcid.as_ref(),
+            datagram_len,
+        ) else {
+            ctx.cancel_reservation(peer);
+            crate::metrics::quic::stateless_reset_dropped_count().inc();
+            return;
+        };
+        #[cfg(target_os = "linux")]
+        let from = if incoming.local_addr.is_ipv4() {
+            self.config.has_ippktinfo
+        } else {
+            self.config.has_ipv6pktinfo
+        }
+        .then_some(incoming.local_addr);
+
+        if ctx
+            .tx
+            .try_send(StatelessReset {
+                payload,
+                to: peer,
+                #[cfg(target_os = "linux")]
+                from,
+            })
+            .is_err()
+        {
+            ctx.cancel_reservation(peer);
+            crate::metrics::quic::stateless_reset_dropped_count().inc();
+        }
     }
 }
 
@@ -731,6 +960,10 @@ where
     }
 }
 
+fn has_quic_fixed_bit(buf: &[u8]) -> bool {
+    buf.first().is_some_and(|first| first & 0x40 != 0)
+}
+
 // Quickly extract the connection id of a short quic packet without allocating
 fn short_dcid(buf: &[u8]) -> Option<ConnectionId<'_>> {
     let is_short_dcid = buf.first()? >> 7 == 0;
@@ -853,6 +1086,10 @@ pub trait InitialPacketHandler {
         Ok(())
     }
 
+    fn is_server(&self) -> bool {
+        false
+    }
+
     fn handle_initials(
         &mut self, incoming: Incoming, hdr: Header<'static>,
         quiche_config: &mut quiche::Config,
@@ -882,24 +1119,107 @@ mod tests {
 
     use crate::http3::settings::Http3Settings;
     use crate::metrics::DefaultMetrics;
+    use crate::quic::connect_with_config;
+    use crate::quic::connection::ApplicationOverQuic;
     use crate::quic::connection::SimpleConnectionIdGenerator;
     use crate::settings::Config;
     use crate::settings::Hooks;
     use crate::settings::QuicSettings;
     use crate::settings::TlsCertificatePaths;
+    use crate::socket::Socket;
     use crate::socket::SocketCapabilities;
     use crate::ConnectionIdGenerator as _;
     use crate::ConnectionParams;
+    use crate::QuicResult;
     use crate::ServerH3Driver;
 
     use datagram_socket::MAX_DATAGRAM_SIZE;
     use futures::FutureExt as _;
     use h3i::actions::h3::Action;
     use std::net::Ipv4Addr;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::net::UdpSocket;
+    use tokio::sync::oneshot;
     use tokio::time;
+
+    const STATELESS_RESET_KEY: u128 = u128::from_be_bytes([0xba; 16]);
+
+    struct ResetTestApplication {
+        established_tx: Option<oneshot::Sender<()>>,
+        draining_tx: Option<oneshot::Sender<()>>,
+        send_rx: mpsc::Receiver<()>,
+        send_pending: bool,
+    }
+
+    impl ApplicationOverQuic for ResetTestApplication {
+        fn on_conn_established(
+            &mut self, _qconn: &mut QuicheConnection,
+            _handshake_info: &HandshakeInfo,
+        ) -> QuicResult<()> {
+            if let Some(tx) = self.established_tx.take() {
+                let _ = tx.send(());
+            }
+            Ok(())
+        }
+
+        fn should_act(&self) -> bool {
+            true
+        }
+
+        async fn wait_for_data(
+            &mut self, _qconn: &mut QuicheConnection,
+        ) -> QuicResult<()> {
+            if self.send_rx.recv().await.is_some() {
+                self.send_pending = true;
+                return Ok(());
+            }
+            std::future::pending().await
+        }
+
+        fn process_reads(
+            &mut self, qconn: &mut QuicheConnection,
+        ) -> QuicResult<()> {
+            if qconn.is_draining() {
+                if let Some(tx) = self.draining_tx.take() {
+                    let _ = tx.send(());
+                }
+            }
+            Ok(())
+        }
+
+        fn process_writes(
+            &mut self, qconn: &mut QuicheConnection,
+        ) -> QuicResult<()> {
+            if self.send_pending {
+                qconn.send_ack_eliciting()?;
+                self.send_pending = false;
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct PendingSocket {
+        send_polled: AtomicBool,
+    }
+
+    impl DatagramSocketSend for PendingSocket {
+        fn poll_send(
+            &self, _cx: &mut Context, _buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            self.send_polled.store(true, Ordering::Relaxed);
+            Poll::Pending
+        }
+
+        fn poll_send_to(
+            &self, cx: &mut Context, buf: &[u8], _addr: SocketAddr,
+        ) -> Poll<io::Result<usize>> {
+            self.poll_send(cx, buf)
+        }
+    }
 
     const TEST_CERT_FILE: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -929,6 +1249,364 @@ mod tests {
         let actions = vec![Action::ConnectionClose { error: conn_close }];
 
         let _ = h3i::client::sync_client::connect(h3i_config, actions, None);
+    }
+
+    #[test]
+    fn stateless_reset_reservations_are_rate_limited_and_bounded() {
+        let mut recent_peers = LinkedHashMap::new();
+        let a: SocketAddr = "1.1.1.1:443".parse().unwrap();
+        let a2: SocketAddr = "1.1.1.1:444".parse().unwrap();
+        let b: SocketAddr = "2.2.2.2:443".parse().unwrap();
+        let start = Instant::now();
+        let expiration = Duration::from_millis(100);
+
+        assert!(try_reserve_stateless_reset(
+            &mut recent_peers,
+            a,
+            start,
+            2,
+            expiration,
+        ));
+        assert!(try_reserve_stateless_reset(
+            &mut recent_peers,
+            a2,
+            start + Duration::from_millis(50),
+            2,
+            expiration,
+        ));
+        assert!(
+            !try_reserve_stateless_reset(
+                &mut recent_peers,
+                a,
+                start + Duration::from_millis(99),
+                2,
+                expiration,
+            ),
+            "same peer is limited until its reservation expires"
+        );
+        assert!(
+            !try_reserve_stateless_reset(
+                &mut recent_peers,
+                b,
+                start + Duration::from_millis(99),
+                2,
+                expiration,
+            ),
+            "capacity blocks a third peer"
+        );
+        assert!(try_reserve_stateless_reset(
+            &mut recent_peers,
+            a,
+            start + expiration,
+            2,
+            expiration,
+        ));
+        assert!(try_reserve_stateless_reset(
+            &mut recent_peers,
+            b,
+            start + Duration::from_millis(150),
+            2,
+            expiration,
+        ));
+    }
+
+    #[tokio::test]
+    async fn stateless_reset_writer_queue_is_bounded() {
+        // This socket never completes a send, keeping the writer occupied with
+        // the first reset while subsequent resets accumulate in the queue.
+        let socket = Arc::new(PendingSocket::default());
+        let stateless_reset_tx =
+            start_stateless_reset_writer(Arc::clone(&socket), DefaultMetrics);
+        let reset = || StatelessReset {
+            payload: vec![0; quiche::MIN_STATELESS_RESET_LEN],
+            to: "127.0.0.1:443".parse().unwrap(),
+            #[cfg(target_os = "linux")]
+            from: None,
+        };
+
+        stateless_reset_tx.try_send(reset()).unwrap();
+
+        // Wait until the writer has removed the first reset from the queue and
+        // is blocked trying to send it.
+        time::timeout(Duration::from_secs(1), async {
+            while !socket.send_polled.load(Ordering::Relaxed) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        // Fill every queue slot.
+        for _ in 0..STATELESS_RESET_QUEUE_CAPACITY {
+            stateless_reset_tx.try_send(reset()).unwrap();
+        }
+
+        // The next reset should be rejected.
+        assert!(matches!(
+            stateless_reset_tx.try_send(reset()),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+    }
+
+    #[test]
+    fn stateless_reset_packet_layout() {
+        let dcid = ConnectionId::from_ref(&[0x42; MAX_CONN_ID_LEN]);
+        let key = quiche::StatelessResetKey::from_u128(STATELESS_RESET_KEY);
+
+        assert!(
+            quiche::build_stateless_reset_packet(&key, dcid.as_ref(), 21)
+                .is_none()
+        );
+
+        let reset = quiche::build_stateless_reset_packet(&key, dcid.as_ref(), 22)
+            .unwrap();
+        assert_eq!(reset.len(), 21);
+        assert_eq!(reset[0] >> 6, 0b01);
+        assert_eq!(
+            &reset[reset.len() - quiche::STATELESS_RESET_TOKEN_LEN..],
+            key.derive_token(dcid.as_ref()).unwrap().as_bytes(),
+        );
+
+        let reset =
+            quiche::build_stateless_reset_packet(&key, dcid.as_ref(), 1200)
+                .unwrap();
+        assert!((quiche::RECOMMENDED_STATELESS_RESET_LEN..=
+            quiche::MAX_STATELESS_RESET_LEN)
+            .contains(&reset.len()));
+        assert!(reset.len() < 1200);
+        assert_eq!(reset[0] >> 6, 0b01);
+        assert_eq!(
+            &reset[reset.len() - quiche::STATELESS_RESET_TOKEN_LEN..],
+            key.derive_token(dcid.as_ref()).unwrap().as_bytes(),
+        );
+    }
+
+    #[tokio::test]
+    async fn server_stateless_reset_drains_client_connection() {
+        let quic_settings = QuicSettings {
+            stateless_reset_key: Some(STATELESS_RESET_KEY.into()),
+            max_recv_udp_payload_size: MAX_DATAGRAM_SIZE,
+            max_send_udp_payload_size: MAX_DATAGRAM_SIZE,
+            ..Default::default()
+        };
+        let tls_cert_settings = TlsCertificatePaths {
+            cert: TEST_CERT_FILE,
+            private_key: TEST_KEY_FILE,
+            kind: crate::settings::CertificateKind::X509,
+        };
+        let server_params = ConnectionParams::new_server(
+            quic_settings,
+            tls_cert_settings,
+            Hooks::default(),
+        );
+        let config =
+            Config::new(&server_params, SocketCapabilities::default()).unwrap();
+        let server_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = server_socket.local_addr().unwrap();
+        let server_socket_tx = Arc::new(server_socket);
+        let server_socket_rx = Arc::clone(&server_socket_tx);
+        let acceptor = ConnectionAcceptor::new(
+            ConnectionAcceptorConfig {
+                disable_client_ip_validation: config.disable_client_ip_validation,
+                qlog_dir: config.qlog_dir.clone(),
+                qlog_compression: config.qlog_compression,
+                keylog_file: None,
+                #[cfg(target_os = "linux")]
+                with_pktinfo: false,
+            },
+            Arc::clone(&server_socket_tx),
+            Default::default(),
+            Arc::new(SimpleConnectionIdGenerator),
+            DefaultMetrics,
+        );
+        let (server_router, mut incoming) = InboundPacketRouter::new(
+            config,
+            server_socket_tx,
+            server_socket_rx,
+            server_addr,
+            acceptor,
+            DefaultMetrics,
+        );
+        // Drive the router manually so the test can remove its CID mapping.
+        tokio::pin!(server_router);
+
+        let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        client_socket.connect(server_addr).await.unwrap();
+        let client_socket =
+            Socket::<Arc<UdpSocket>, Arc<UdpSocket>>::from_udp(client_socket)
+                .unwrap();
+        let client_params = ConnectionParams::new_client(
+            QuicSettings::default(),
+            None,
+            Hooks::default(),
+        );
+        // The command channel triggers one client packet after server state loss.
+        // The oneshot fires only when the client connection sees
+        // draining.
+        let (client_send_tx, client_send_rx) = mpsc::channel(1);
+        let (draining_tx, draining_rx) = oneshot::channel();
+        let client_app = ResetTestApplication {
+            established_tx: None,
+            draining_tx: Some(draining_tx),
+            send_rx: client_send_rx,
+            send_pending: false,
+        };
+        let client = tokio::spawn(async move {
+            connect_with_config(
+                client_socket,
+                Some("test.com"),
+                &client_params,
+                client_app,
+            )
+            .await
+        });
+
+        // Poll the server router until it creates the server connection from
+        // the client's Initial packet.
+        let initial = time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                result = &mut server_router =>
+                    panic!("server router exited early: {result:?}"),
+                initial = incoming.recv() => initial.unwrap().unwrap(),
+            }
+        })
+        .await
+        .unwrap();
+        let (server_established_tx, server_established_rx) = oneshot::channel();
+        let (server_send_tx, server_send_rx) = mpsc::channel(1);
+        let server_app = ResetTestApplication {
+            established_tx: Some(server_established_tx),
+            draining_tx: None,
+            send_rx: server_send_rx,
+            send_pending: false,
+        };
+        let server_connection = initial.start(server_app);
+        let server_scid = server_connection.scid().clone();
+
+        // Continue polling the router while each worker completes its side of
+        // the handshake.
+        let mut server_established_rx = server_established_rx;
+        time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                result = &mut server_router =>
+                    panic!("server router exited early: {result:?}"),
+                established = &mut server_established_rx => established.unwrap(),
+            }
+        })
+        .await
+        .unwrap();
+
+        let mut client = client;
+        let client_connection = time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                result = &mut server_router =>
+                    panic!("server router exited early: {result:?}"),
+                client = &mut client => client.unwrap().unwrap(),
+            }
+        })
+        .await
+        .unwrap();
+
+        // Simulate silent server state loss: the client still uses this
+        // server-issued CID, but the listener can no longer route it.
+        server_router
+            .as_mut()
+            .get_mut()
+            .conns
+            .unmap_cid(&server_scid);
+        client_send_tx.send(()).await.unwrap();
+
+        // The resulting server reset must be routed to the client
+        // connection, validated by quiche, and transition it to draining.
+        let mut draining_rx = draining_rx;
+        time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                result = &mut server_router =>
+                    panic!("server router exited early: {result:?}"),
+                draining = &mut draining_rx => draining.unwrap(),
+            }
+        })
+        .await
+        .unwrap();
+
+        drop(client_connection);
+        drop(server_send_tx);
+    }
+
+    #[tokio::test]
+    async fn unknown_short_header_triggers_stateless_reset() {
+        let quic_settings = QuicSettings {
+            stateless_reset_key: Some(STATELESS_RESET_KEY.into()),
+            max_recv_udp_payload_size: MAX_DATAGRAM_SIZE,
+            max_send_udp_payload_size: MAX_DATAGRAM_SIZE,
+            ..Default::default()
+        };
+        let tls_cert_settings = TlsCertificatePaths {
+            cert: TEST_CERT_FILE,
+            private_key: TEST_KEY_FILE,
+            kind: crate::settings::CertificateKind::X509,
+        };
+        let params = ConnectionParams::new_server(
+            quic_settings,
+            tls_cert_settings,
+            Hooks::default(),
+        );
+        let config = Config::new(&params, SocketCapabilities::default()).unwrap();
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = socket.local_addr().unwrap();
+        let socket_tx = Arc::new(socket);
+        let socket_rx = Arc::clone(&socket_tx);
+        let acceptor = ConnectionAcceptor::new(
+            ConnectionAcceptorConfig {
+                disable_client_ip_validation: config.disable_client_ip_validation,
+                qlog_dir: config.qlog_dir.clone(),
+                qlog_compression: config.qlog_compression,
+                keylog_file: None,
+                #[cfg(target_os = "linux")]
+                with_pktinfo: false,
+            },
+            Arc::clone(&socket_tx),
+            Default::default(),
+            Arc::new(SimpleConnectionIdGenerator),
+            DefaultMetrics,
+        );
+        let (router, _incoming) = InboundPacketRouter::new(
+            config,
+            socket_tx,
+            socket_rx,
+            local_addr,
+            acceptor,
+            DefaultMetrics,
+        );
+        let router = tokio::spawn(router);
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let dcid = [0x42; MAX_CONN_ID_LEN];
+        let mut packet = [0; 1200];
+        packet[0] = 0x40;
+        packet[1..1 + MAX_CONN_ID_LEN].copy_from_slice(&dcid);
+
+        client.send_to(&packet, local_addr).await.unwrap();
+
+        let mut reset = [0; quiche::MAX_STATELESS_RESET_LEN];
+        let (len, peer) =
+            time::timeout(Duration::from_secs(1), client.recv_from(&mut reset))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(peer, local_addr);
+        assert!((quiche::RECOMMENDED_STATELESS_RESET_LEN..=
+            quiche::MAX_STATELESS_RESET_LEN)
+            .contains(&len));
+        assert_eq!(reset[0] >> 6, 0b01);
+        assert_eq!(
+            &reset[len - quiche::STATELESS_RESET_TOKEN_LEN..len],
+            quiche::StatelessResetKey::from_u128(STATELESS_RESET_KEY)
+                .derive_token(&dcid)
+                .unwrap()
+                .as_bytes(),
+        );
+
+        router.abort();
     }
 
     #[tokio::test]

@@ -96,6 +96,153 @@ fn transport_params() {
     assert_eq!(new_tp, tp);
 }
 
+fn stateless_reset_packet(token: u128) -> [u8; MIN_STATELESS_RESET_LEN] {
+    let mut packet = [0; MIN_STATELESS_RESET_LEN];
+    packet[0] = 0x40;
+    packet[MIN_STATELESS_RESET_LEN - STATELESS_RESET_TOKEN_LEN..]
+        .copy_from_slice(&token.to_be_bytes());
+    packet
+}
+
+/// Checks that [`build_stateless_reset_packet`] follows RFC 9000 §10.3 layout
+/// rules:
+/// 1. Bail on undersized incoming packets.
+/// 2. Reset is strictly shorter than the packet that triggers it.
+/// 3. Small triggers clamp below the recommended size while large ones land in
+///    [`RECOMMENDED_STATELESS_RESET_LEN`]..=[`MAX_STATELESS_RESET_LEN`].
+/// 4. Reset looks like a short-header packet (header form bit clear, fixed bit
+///    set).
+/// 5. Reset ends with the derived token.
+#[test]
+fn build_stateless_reset_validation() {
+    let static_key = StatelessResetKey::from_bytes([0xba; 16]);
+    let cid = b"cid";
+
+    // MIN_STATELESS_RESET_LEN is 21, so a 21-byte packet cannot trigger a
+    // strictly shorter valid reset.
+    assert!(build_stateless_reset_packet(&static_key, cid, 21).is_none());
+
+    // Trigger just above the minimum: length is clamped to trigger - 1.
+    let reset = build_stateless_reset_packet(&static_key, cid, 22).unwrap();
+    assert_eq!(reset.len(), 21);
+    assert_eq!(reset[0] >> 6, 0b01);
+    assert_eq!(
+        &reset[reset.len() - STATELESS_RESET_TOKEN_LEN..],
+        static_key.derive_token(cid).unwrap().as_bytes(),
+    );
+
+    // Typical Initial-sized trigger: recommended size plus 0..=7 jitter.
+    for _ in 0..16 {
+        let reset = build_stateless_reset_packet(&static_key, cid, 1200).unwrap();
+        assert!((RECOMMENDED_STATELESS_RESET_LEN..=MAX_STATELESS_RESET_LEN)
+            .contains(&reset.len()));
+        assert!(reset.len() < 1200);
+        assert_eq!(reset[0] >> 6, 0b01);
+        assert_eq!(
+            &reset[reset.len() - STATELESS_RESET_TOKEN_LEN..],
+            static_key.derive_token(cid).unwrap().as_bytes(),
+        );
+    }
+}
+
+#[test]
+fn stateless_reset_key_derives_server_token() {
+    let static_key = StatelessResetKey::from_bytes([0xba; 16]);
+    let mut config = test_utils::Pipe::default_config("cubic").unwrap();
+    config.set_stateless_reset_key(Some(static_key));
+
+    assert!(config.stateless_reset_key == Some(static_key));
+    assert_eq!(config.local_transport_params.stateless_reset_token, None);
+
+    let pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    let expected = static_key
+        .derive_token(pipe.server.source_id().as_ref())
+        .unwrap()
+        .into_u128();
+
+    assert_eq!(
+        pipe.server.local_transport_params.stateless_reset_token,
+        Some(expected)
+    );
+    assert_eq!(
+        pipe.client.local_transport_params.stateless_reset_token,
+        None
+    );
+}
+
+#[test]
+fn stateless_reset_uses_active_dcid_tokens() {
+    let initial_token = u128::from_be_bytes([0xba; 16]);
+    let additional_token = u128::from_be_bytes([0xbb; 16]);
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+    pipe.client.ids.set_initial_dcid(
+        ConnectionId::from_ref(b"initial").into_owned(),
+        Some(initial_token),
+        Some(0),
+    );
+
+    assert!(pipe
+        .client
+        .is_stateless_reset(&stateless_reset_packet(initial_token)));
+
+    let mut retired_path_ids = SmallVec::new();
+    pipe.client
+        .ids
+        .new_dcid(
+            ConnectionId::from_ref(b"additional").into_owned(),
+            1,
+            additional_token,
+            0,
+            &mut retired_path_ids,
+        )
+        .unwrap();
+    assert!(!pipe
+        .client
+        .is_stateless_reset(&stateless_reset_packet(additional_token)));
+
+    pipe.client.ids.link_dcid_to_path_id(1, 0).unwrap();
+    assert!(pipe
+        .client
+        .is_stateless_reset(&stateless_reset_packet(additional_token)));
+
+    pipe.client.ids.retire_dcid(1).unwrap();
+    assert!(!pipe
+        .client
+        .is_stateless_reset(&stateless_reset_packet(additional_token)));
+}
+
+#[test]
+fn stateless_reset_enters_draining() {
+    let mut config = test_utils::Pipe::default_config("cubic").unwrap();
+    config
+        .set_stateless_reset_key(Some(StatelessResetKey::from_bytes([0xba; 16])));
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    pipe.handshake().unwrap();
+    let token = pipe.client.ids.get_dcid(0).unwrap().reset_token.unwrap();
+    assert_eq!(
+        pipe.client
+            .ids
+            .active_dcid_reset_tokens()
+            .collect::<Vec<_>>(),
+        vec![token]
+    );
+    let mut packet = stateless_reset_packet(token);
+    let info = RecvInfo {
+        from: test_utils::Pipe::server_addr(),
+        to: test_utils::Pipe::client_addr(),
+    };
+
+    assert_eq!(pipe.client.recv(&mut packet, info), Ok(packet.len()));
+    assert!(pipe.client.is_draining());
+    assert!(!pipe.client.is_closed());
+
+    let draining_timer = Instant::now();
+    pipe.client.draining_timer = Some(draining_timer);
+    let mut replay = stateless_reset_packet(token);
+    assert_eq!(pipe.client.recv(&mut replay, info), Ok(replay.len()));
+    assert_eq!(pipe.client.draining_timer, Some(draining_timer));
+}
+
 #[test]
 fn transport_params_forbid_duplicates() {
     // Given an encoded param.

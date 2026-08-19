@@ -34,6 +34,7 @@ use crate::ConnectionId;
 use crate::Error;
 use crate::Result;
 use crate::MAX_STREAM_ID;
+use crate::STATELESS_RESET_TOKEN_LEN;
 
 #[cfg(feature = "qlog")]
 use crate::crypto;
@@ -265,7 +266,7 @@ impl TransportParams {
                     }
 
                     tp.stateless_reset_token = Some(u128::from_be_bytes(
-                        val.get_bytes(16)?
+                        val.get_bytes(STATELESS_RESET_TOKEN_LEN)?
                             .to_vec()
                             .try_into()
                             .map_err(|_| Error::BufferTooShort)?,
@@ -424,7 +425,11 @@ impl TransportParams {
 
         if is_server {
             if let Some(ref token) = tp.stateless_reset_token {
-                TransportParams::encode_param(&mut b, 0x0002, 16)?;
+                TransportParams::encode_param(
+                    &mut b,
+                    0x0002,
+                    STATELESS_RESET_TOKEN_LEN,
+                )?;
                 b.put_bytes(&token.to_be_bytes())?;
             }
         }

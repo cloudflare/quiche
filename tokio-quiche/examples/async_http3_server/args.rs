@@ -62,6 +62,22 @@ pub struct Args {
     /// meaningful when --enable-pacing is set.
     #[arg(long, default_value_t = 0)]
     pub max_pacing_rate: u64,
+
+    /// 32 hex digits used as the static stateless reset key.
+    /// Restart the process with the same key to reset live clients.
+    #[arg(long)]
+    pub stateless_reset_key: Option<String>,
+}
+
+impl Args {
+    pub fn parsed_stateless_reset_key(&self) -> Option<u128> {
+        let hex = self.stateless_reset_key.as_deref()?;
+        assert_eq!(hex.len(), 32, "stateless reset key must be 32 hex digits");
+        Some(
+            u128::from_str_radix(hex, 16)
+                .expect("stateless reset key must be hex"),
+        )
+    }
 }
 
 fn default_cert_path() -> String {

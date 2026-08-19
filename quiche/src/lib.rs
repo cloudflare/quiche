@@ -422,6 +422,13 @@ use smallvec::SmallVec;
 
 use crate::buffers::DefaultBufFactory;
 
+pub use crate::crypto::build_stateless_reset_packet;
+pub use crate::crypto::StatelessResetKey;
+pub use crate::crypto::StatelessResetToken;
+pub use crate::crypto::MAX_STATELESS_RESET_LEN;
+pub use crate::crypto::MIN_STATELESS_RESET_LEN;
+pub use crate::crypto::RECOMMENDED_STATELESS_RESET_LEN;
+pub use crate::crypto::STATELESS_RESET_TOKEN_LEN;
 use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
@@ -562,6 +569,8 @@ pub enum QlogLevel {
 pub struct Config {
     local_transport_params: TransportParams,
 
+    stateless_reset_key: Option<StatelessResetKey>,
+
     version: u32,
 
     tls_ctx: tls::Context,
@@ -647,6 +656,7 @@ impl Config {
 
         Ok(Config {
             local_transport_params: TransportParams::default(),
+            stateless_reset_key: None,
             version,
             tls_ctx,
             application_protos: Vec::new(),
@@ -1213,14 +1223,28 @@ impl Config {
         self.max_stream_window = v;
     }
 
-    /// Sets the initial stateless reset token.
+    /// Sets the static key used to derive stateless reset tokens.
     ///
-    /// This value is only advertised by servers. Setting a stateless retry
-    /// token as a client has no effect on the connection.
+    /// This value is only used by servers. Setting a stateless reset key as a
+    /// client has no effect on the connection.  The user of this feature must
+    /// ensure that their routing / load-balancing infrastructure is configured
+    /// to forward stateless reset packets that have the same DCID to the same
+    /// server instance to avoid the oracle attack described in RFC 9000 §21.11.
     ///
     /// The default value is `None`.
+    pub fn set_stateless_reset_key(&mut self, v: Option<StatelessResetKey>) {
+        self.stateless_reset_key = v;
+    }
+
+    /// Sets the static key used to derive stateless reset tokens.
+    ///
+    /// This is an alias for [`set_stateless_reset_key()`] retained for API
+    /// compatibility.
+    ///
+    /// [`set_stateless_reset_key()`]: Config::set_stateless_reset_key
+    #[deprecated(note = "use set_stateless_reset_key() instead")]
     pub fn set_stateless_reset_token(&mut self, v: Option<u128>) {
-        self.local_transport_params.stateless_reset_token = v;
+        self.set_stateless_reset_key(v.map(StatelessResetKey::from_u128));
     }
 
     /// Sets whether the QUIC connection should avoid reusing DCIDs over
@@ -2006,10 +2030,18 @@ impl<F: BufFactory> Connection<F> {
             scid.iter().map(|b| format!("{b:02x}")).collect();
 
         let reset_token = if is_server {
-            config.local_transport_params.stateless_reset_token
+            config
+                .stateless_reset_key
+                .map(|static_key| static_key.derive_token(scid.as_ref()))
+                .transpose()?
+                .map(StatelessResetToken::into_u128)
         } else {
             None
         };
+
+        // Transport parameters advertise the stateless reset token.
+        let mut local_transport_params = config.local_transport_params.clone();
+        local_transport_params.stateless_reset_token = reset_token;
 
         let recovery_config = recovery::RecoveryConfig::from_config(config);
 
@@ -2072,7 +2104,7 @@ impl<F: BufFactory> Connection<F> {
             peer_transport_params_track_unknown: config
                 .track_unknown_transport_params,
 
-            local_transport_params: config.local_transport_params.clone(),
+            local_transport_params,
 
             handshake: tls,
 
@@ -2870,10 +2902,17 @@ impl<F: BufFactory> Connection<F> {
                 Err(Error::Done) => {
                     // If the packet can't be processed or decrypted, check if
                     // it's a stateless reset.
-                    if self.is_stateless_reset(&buf[len - left..len]) {
+                    if !self.is_draining() &&
+                        self.is_stateless_reset(&buf[len - left..len])
+                    {
                         trace!("{} packet is a stateless reset", self.trace_id);
 
-                        self.mark_closed();
+                        // A stateless reset terminates the connection without a
+                        // response, so remain in draining for three PTOs.
+                        if let Ok(path) = self.paths.get_active() {
+                            self.draining_timer =
+                                Some(Instant::now() + (path.recovery.pto() * 3));
+                        }
                     }
 
                     left
@@ -2922,25 +2961,16 @@ impl<F: BufFactory> Connection<F> {
     fn is_stateless_reset(&self, buf: &[u8]) -> bool {
         // If the packet is too small, then we just throw it away.
         let buf_len = buf.len();
-        if buf_len < 21 {
+        if buf_len < MIN_STATELESS_RESET_LEN {
             return false;
         }
 
-        // TODO: we should iterate over all active destination connection IDs
-        // and check against their reset token.
-        match self.peer_transport_params.stateless_reset_token {
-            Some(token) => {
-                let token_len = 16;
+        let candidate = &buf[buf_len - STATELESS_RESET_TOKEN_LEN..];
 
-                crypto::verify_slices_are_equal(
-                    &token.to_be_bytes(),
-                    &buf[buf_len - token_len..buf_len],
-                )
+        self.active_dcid_reset_tokens().any(|token| {
+            crypto::verify_slices_are_equal(&token.to_be_bytes(), candidate)
                 .is_ok()
-            },
-
-            None => false,
-        }
+        })
     }
 
     /// Processes a single QUIC packet received from the peer.
@@ -7461,6 +7491,14 @@ impl<F: BufFactory> Connection<F> {
         self.ids.available_dcids()
     }
 
+    /// Returns stateless reset tokens for active destination connection IDs
+    /// that have been used.
+    pub(crate) fn active_dcid_reset_tokens(
+        &self,
+    ) -> impl Iterator<Item = u128> + '_ {
+        self.ids.active_dcid_reset_tokens()
+    }
+
     /// Returns an iterator over destination `SockAddr`s whose association
     /// with `from` forms a known QUIC path on which packets can be sent to.
     ///
@@ -8000,6 +8038,13 @@ impl<F: BufFactory> Connection<F> {
         // Record the max_active_conn_id parameter advertised by the peer.
         self.ids
             .set_source_conn_id_limit(peer_params.active_conn_id_limit);
+
+        if !self.is_server {
+            // The stateless reset token from the server belongs to the initial
+            // destination connection ID selected during the handshake.
+            self.ids
+                .set_initial_dcid_reset_token(peer_params.stateless_reset_token);
+        }
 
         self.peer_transport_params = peer_params;
 

@@ -54,6 +54,7 @@ pub(crate) struct Config {
     pub keylog_file: Option<File>,
     pub listen_backlog: usize,
     pub handshake_timeout: Option<Duration>,
+    pub stateless_reset_key: Option<quiche::StatelessResetKey>,
     pub has_ippktinfo: bool,
     pub has_ipv6pktinfo: bool,
     pub pool_send_buffer: bool,
@@ -109,6 +110,7 @@ impl Config {
             keylog_file,
             listen_backlog: quic_settings.listen_backlog,
             handshake_timeout: quic_settings.handshake_timeout,
+            stateless_reset_key: quic_settings.resolved_stateless_reset_key(),
             has_ippktinfo,
             has_ipv6pktinfo,
             pool_send_buffer: quic_settings.pool_send_buffer,
@@ -205,7 +207,7 @@ fn make_quiche_config(
     config.set_path_challenge_recv_max_queue_len(
         quic_settings.max_path_challenge_recv_queue_len,
     );
-    config.set_stateless_reset_token(quic_settings.stateless_reset_token);
+    config.set_stateless_reset_key(quic_settings.resolved_stateless_reset_key());
     config.set_disable_dcid_reuse(quic_settings.disable_dcid_reuse);
 
     if let Some(track_unknown_transport_params) =
@@ -271,4 +273,31 @@ fn read_file(path: &str) -> QuicResult<Vec<u8>> {
     std::fs::read(path)
         .with_context(|| format!("read {path}"))
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+    use crate::settings::ConnectionParams;
+    use crate::settings::Hooks;
+    use crate::settings::QuicSettings;
+    use crate::settings::RedactedStatelessResetKey;
+    use crate::socket::SocketCapabilities;
+
+    #[test]
+    fn config_uses_legacy_stateless_reset_token() {
+        #[allow(deprecated)]
+        let settings = QuicSettings {
+            stateless_reset_token: Some(RedactedStatelessResetKey::new(0xba)),
+            ..Default::default()
+        };
+        let params =
+            ConnectionParams::new_client(settings, None, Hooks::default());
+        let config = Config::new(&params, SocketCapabilities::default()).unwrap();
+
+        assert!(
+            config.stateless_reset_key ==
+                Some(quiche::StatelessResetKey::from_u128(0xba))
+        );
+    }
 }
