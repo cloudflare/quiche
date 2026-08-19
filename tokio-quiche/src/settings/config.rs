@@ -281,13 +281,14 @@ mod tests {
     use crate::settings::ConnectionParams;
     use crate::settings::Hooks;
     use crate::settings::QuicSettings;
+    use crate::settings::RedactedStatelessResetKey;
     use crate::socket::SocketCapabilities;
 
     #[test]
     fn config_uses_legacy_stateless_reset_token() {
         #[allow(deprecated)]
         let settings = QuicSettings {
-            stateless_reset_token: Some(0xba),
+            stateless_reset_token: Some(RedactedStatelessResetKey::new(0xba)),
             ..Default::default()
         };
         let params =

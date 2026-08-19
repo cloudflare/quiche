@@ -1226,7 +1226,10 @@ impl Config {
     /// Sets the static key used to derive stateless reset tokens.
     ///
     /// This value is only used by servers. Setting a stateless reset key as a
-    /// client has no effect on the connection.
+    /// client has no effect on the connection.  The user of this feature must
+    /// ensure that their routing / load-balancing infrastructure is configured
+    /// to forward stateless reset packets that have the same DCID to the same
+    /// server instance to avoid the oracle attack described in RFC 9000 §21.11.
     ///
     /// The default value is `None`.
     pub fn set_stateless_reset_key(&mut self, v: Option<StatelessResetKey>) {

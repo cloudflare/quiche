@@ -80,7 +80,7 @@ const PACKET_RX_YIELD_AFTER: usize = 30;
 /// `ConnectionMapCommand` processing batch size to amortize receive operations.
 const CONN_MAP_CMD_BATCH_SIZE: usize = 128;
 
-const STATELESS_RESET_QUEUE_CAPACITY: usize = 64;
+const STATELESS_RESET_QUEUE_CAPACITY: usize = 256;
 const STATELESS_RESET_EXPIRATION: Duration = Duration::from_millis(100);
 
 struct StatelessReset {
@@ -1385,7 +1385,7 @@ mod tests {
     #[tokio::test]
     async fn server_stateless_reset_drains_client_connection() {
         let quic_settings = QuicSettings {
-            stateless_reset_key: Some(STATELESS_RESET_KEY),
+            stateless_reset_key: Some(STATELESS_RESET_KEY.into()),
             max_recv_udp_payload_size: MAX_DATAGRAM_SIZE,
             max_send_udp_payload_size: MAX_DATAGRAM_SIZE,
             ..Default::default()
@@ -1537,7 +1537,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_short_header_triggers_stateless_reset() {
         let quic_settings = QuicSettings {
-            stateless_reset_key: Some(STATELESS_RESET_KEY),
+            stateless_reset_key: Some(STATELESS_RESET_KEY.into()),
             max_recv_udp_payload_size: MAX_DATAGRAM_SIZE,
             max_send_udp_payload_size: MAX_DATAGRAM_SIZE,
             ..Default::default()
