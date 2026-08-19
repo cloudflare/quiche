@@ -426,8 +426,7 @@ where
                 }
             }
 
-            // No connection found for this DCID, drop the this short header
-            // packet.
+            // No connection found for this DCID, drop this short header packet.
             return Ok(());
         }
 

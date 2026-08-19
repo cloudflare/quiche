@@ -51,6 +51,8 @@ use crate::packet;
 const TLS1_3_VERSION: u16 = 0x0304;
 const TLS_ALERT_ERROR: u64 = 0x100;
 const INTERNAL_ERROR: u64 = 0x01;
+// Retry, 20-byte CIDs, DATAGRAM, and a stateless reset token need 140 bytes.
+const MAX_TRANSPORT_PARAMS_LEN: usize = 256;
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
@@ -462,7 +464,7 @@ impl Handshake {
     pub fn set_quic_transport_params(
         &mut self, params: &crate::TransportParams, is_server: bool,
     ) -> Result<()> {
-        let mut raw_params = [0; 256];
+        let mut raw_params = [0; MAX_TRANSPORT_PARAMS_LEN];
 
         let raw_params =
             crate::TransportParams::encode(params, is_server, &mut raw_params)?;

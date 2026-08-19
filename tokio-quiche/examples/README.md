@@ -65,15 +65,15 @@ RUST_LOG=info cargo run -p tokio-quiche --example stateless_reset_client -- --ho
 Restart the server with the same key. The client PINGs until it sees a
 stateless reset and drains.
 
-In-flight cap (server still running):
+Stateless reset rate limit (server still running):
 
 ```shell
-# one source 2-tuple: at most one in-flight reset
+# one source 2-tuple: at most one reset every 100ms
 cargo run -p tokio-quiche --example stateless_reset_client -- --flood 200
 
-# many source ports: replies stop around the 64-slot cap
+# many source ports: a burst is capped at 256 recent peers
 cargo run -p tokio-quiche --example stateless_reset_client -- \
-  --flood 200 --unique-ports
+  --flood 400 --unique-ports
 ```
 
 The client prints `sent=… recv=…`. `recv` is how many reset datagrams came back.

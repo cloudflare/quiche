@@ -104,7 +104,8 @@ fn stateless_reset_packet(token: u128) -> [u8; MIN_STATELESS_RESET_LEN] {
     packet
 }
 
-/// Checks that [`build_stateless_reset`] follows RFC 9000 §10.3 layout rules:
+/// Checks that [`build_stateless_reset_packet`] follows RFC 9000 §10.3 layout
+/// rules:
 /// 1. Bail on undersized incoming packets.
 /// 2. Reset is strictly shorter than the packet that triggers it.
 /// 3. Small triggers clamp below the recommended size while large ones land in
