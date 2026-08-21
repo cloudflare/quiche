@@ -1,0 +1,41 @@
+Cargo.toml
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 58
+tokio-quiche/Cargo.toml
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 74,81
+tokio-quiche/src/http3/driver/client.rs
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 39-40,48,140-144,148-150,240,246,249-252,265-269,307,356-366
+tokio-quiche/src/http3/driver/hooks.rs
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 30,35,80-92
+tokio-quiche/src/http3/driver/datagram.rs
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 27-31,33,39-40,45-55,60,84-86,88,93,103-104,106-109,160-331,394-592
+tokio-quiche/src/http3/driver/AGENTS.md
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 12,45-49
+quiche/src/h3/mod.rs
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 441-446,449-451
+tokio-quiche/src/http3/driver/server.rs
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 33-34,42,173-175,203-210,215-226,254,274-279,293,346-373
+tokio-quiche/src/http3/driver/mod.rs
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 41,142-176,240-251,271-274,283-286,361,367,413,487-516,520-527,565,1008-1010,1019-1020,1081-1082,1084-1088,1123-1148,1228-1229,1235-1246,1320,1406-1407
+tokio-quiche/src/http3/driver/streams.rs
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 37,66,174,176,178-179,184-188,192
+tokio-quiche/src/http3/driver/test_utils.rs
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 59-67,88-107,266-282,427-435,437-443
+tokio-quiche/src/http3/driver/tests.rs
+  s_b75b2040c6e9f5::t_1958343c4a0b9c 4,175,1010-1011,2234-2236,2238,2240-2242,2244-2245,2418-2420,2422,2439-2449,2452-2453,2455,2457-2461,2463,2466-2468,2474-2477,2479-2487,2548-3370
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e633b59af26fffca10b061c2a87a4b8dc28bf7dd",
+  "prompts": {},
+  "sessions": {
+    "s_b75b2040c6e9f5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdb07b243ffeTQhO72F82G268V",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Minaz Inamdar <minaz@cloudflare.com>"
+    }
+  }
+}
