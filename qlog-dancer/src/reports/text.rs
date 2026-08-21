@@ -86,6 +86,8 @@ pub fn request_timing_table(
         let style = Style::empty().vertical(',');
 
         table.with(style);
+    } else {
+        table.with(Style::ascii());
     }
 
     Some(table)
