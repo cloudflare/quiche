@@ -29,8 +29,8 @@ pub(crate) struct AES_KEY {
 impl Algorithm {
     fn get_evp_aead(self) -> *const EVP_AEAD {
         match self {
-            Algorithm::AES128_GCM => unsafe { EVP_aead_aes_128_gcm_tls13() },
-            Algorithm::AES256_GCM => unsafe { EVP_aead_aes_256_gcm_tls13() },
+            Algorithm::AES128_GCM => unsafe { EVP_aead_aes_128_gcm() },
+            Algorithm::AES256_GCM => unsafe { EVP_aead_aes_256_gcm() },
             Algorithm::ChaCha20_Poly1305 => unsafe {
                 EVP_aead_chacha20_poly1305()
             },
@@ -320,10 +320,8 @@ pub(crate) fn hkdf_expand(
 }
 
 extern "C" {
-    fn EVP_aead_aes_128_gcm_tls13() -> *const EVP_AEAD;
-
-    fn EVP_aead_aes_256_gcm_tls13() -> *const EVP_AEAD;
-
+    fn EVP_aead_aes_128_gcm() -> *const EVP_AEAD;
+    fn EVP_aead_aes_256_gcm() -> *const EVP_AEAD;
     fn EVP_aead_chacha20_poly1305() -> *const EVP_AEAD;
 
     // HKDF
