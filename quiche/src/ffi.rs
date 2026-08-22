@@ -1248,6 +1248,11 @@ pub extern "C" fn quiche_conn_is_established(conn: &Connection) -> bool {
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_conn_is_handshake_confirmed(conn: &Connection) -> bool {
+    conn.is_handshake_confirmed()
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_is_resumed(conn: &Connection) -> bool {
     conn.is_resumed()
 }
@@ -2364,6 +2369,31 @@ mod tests {
         ));
 
         quiche_connection_id_iter_free(iter);
+    }
+
+    #[test]
+    fn handshake_confirmation_matches_rust_api() {
+        let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+
+        assert_eq!(
+            quiche_conn_is_handshake_confirmed(&pipe.client),
+            pipe.client.is_handshake_confirmed()
+        );
+        assert_eq!(
+            quiche_conn_is_handshake_confirmed(&pipe.server),
+            pipe.server.is_handshake_confirmed()
+        );
+
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        assert_eq!(
+            quiche_conn_is_handshake_confirmed(&pipe.client),
+            pipe.client.is_handshake_confirmed()
+        );
+        assert_eq!(
+            quiche_conn_is_handshake_confirmed(&pipe.server),
+            pipe.server.is_handshake_confirmed()
+        );
     }
 
     #[cfg(not(windows))]

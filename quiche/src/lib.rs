@@ -7715,6 +7715,16 @@ impl<F: BufFactory> Connection<F> {
         self.handshake_completed
     }
 
+    /// Returns true if the connection handshake is confirmed.
+    ///
+    /// The handshake is confirmed immediately after it completes on the
+    /// server. On the client, it is confirmed after receiving a
+    /// `HANDSHAKE_DONE` frame from the server.
+    #[inline]
+    pub fn is_handshake_confirmed(&self) -> bool {
+        self.handshake_confirmed
+    }
+
     /// Returns true if the connection is resumed.
     #[inline]
     pub fn is_resumed(&self) -> bool {

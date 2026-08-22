@@ -519,6 +519,11 @@ void quiche_conn_server_name(const quiche_conn *conn, const uint8_t **out, size_
 // Returns true if the connection handshake is complete.
 bool quiche_conn_is_established(const quiche_conn *conn);
 
+// Returns true if the connection handshake is confirmed. The handshake is
+// confirmed immediately after it completes on the server. On the client, it is
+// confirmed after receiving a HANDSHAKE_DONE frame from the server.
+bool quiche_conn_is_handshake_confirmed(const quiche_conn *conn);
+
 // Returns true if the connection is resumed.
 bool quiche_conn_is_resumed(const quiche_conn *conn);
 
