@@ -12705,6 +12705,94 @@ fn stop_sending_no_retransmit_after_fin(
 }
 
 #[rstest]
+/// Tests that a zero-length FIN is sent and acknowledged before the stream is
+/// collected.
+fn stream_empty_fin_is_not_complete_until_fin_acked(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((5, true)));
+
+    assert_eq!(pipe.server.stream_send(4, b"response", false), Ok(8));
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((8, false)));
+
+    assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    assert!(!pipe.server.streams.is_collected(4));
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let mut frames = Vec::new();
+
+    for (mut pkt, _) in flight {
+        frames
+            .extend(test_utils::decode_pkt(&mut pipe.client, &mut pkt).unwrap());
+    }
+
+    assert!(frames.iter().any(|f| matches!(
+        f,
+        frame::Frame::Stream { stream_id: 4, data }
+            if data.off() == 8 && data.is_empty() && data.fin()
+    )));
+}
+
+#[rstest]
+/// Tests that a lost zero-length FIN is retransmitted after all stream data has
+/// already been acknowledged.
+fn stream_empty_fin_is_retransmitted(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((5, true)));
+
+    assert_eq!(pipe.server.stream_send(4, b"response", false), Ok(8));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((8, false)));
+
+    assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    assert!(frames.iter().any(|f| matches!(
+        f,
+        frame::Frame::Stream { stream_id: 4, data }
+            if data.off() == 8 && data.is_empty() && data.fin()
+    )));
+
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    assert!(frames.iter().any(|f| matches!(
+        f,
+        frame::Frame::Stream { stream_id: 4, data }
+            if data.off() == 8 && data.is_empty() && data.fin()
+    )));
+}
+
+#[rstest]
 /// Tests that MAX_STREAMS_BIDI frames are retransmitted if lost
 fn max_streams_bidi_frame_retransmit(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
