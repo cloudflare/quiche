@@ -8752,6 +8752,51 @@ fn close(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
 }
 
 #[rstest]
+fn close_rejects_out_of_range_error_code(
+    #[values(false, true)] app: bool,
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(
+        pipe.client.close(app, octets::MAX_VAR_INT + 1, b"invalid"),
+        Err(Error::InvalidState)
+    );
+    assert_eq!(pipe.client.local_error(), None);
+
+    assert_eq!(
+        pipe.client.close(app, octets::MAX_VAR_INT, b"valid"),
+        Ok(())
+    );
+    assert_eq!(
+        pipe.client.close(app, octets::MAX_VAR_INT + 1, b"invalid"),
+        Err(Error::Done)
+    );
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
+
+    let expected = if app {
+        frame::Frame::ApplicationClose {
+            error_code: octets::MAX_VAR_INT,
+            reason: b"valid".to_vec(),
+        }
+    } else {
+        frame::Frame::ConnectionClose {
+            error_code: octets::MAX_VAR_INT,
+            frame_type: 0,
+            reason: b"valid".to_vec(),
+        }
+    };
+
+    assert_eq!(frames.first(), Some(&expected));
+}
+
+#[rstest]
 fn app_close_by_client(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
