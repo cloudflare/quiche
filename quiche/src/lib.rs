@@ -7538,6 +7538,8 @@ impl<F: BufFactory> Connection<F> {
     /// cleared.
     ///
     /// Returns [`Done`] if the connection had already been closed.
+    /// Returns [`InvalidState`] if `err` is not a valid QUIC variable-length
+    /// integer.
     ///
     /// Note that the connection will not be closed immediately. An application
     /// should continue calling the [`recv()`], [`send()`], [`timeout()`] and
@@ -7545,6 +7547,7 @@ impl<F: BufFactory> Connection<F> {
     /// returns `true`.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`send()`]: struct.Connection.html#method.send
     /// [`timeout()`]: struct.Connection.html#method.timeout
@@ -7557,6 +7560,10 @@ impl<F: BufFactory> Connection<F> {
 
         if self.local_error.is_some() {
             return Err(Error::Done);
+        }
+
+        if err > octets::MAX_VAR_INT {
+            return Err(Error::InvalidState);
         }
 
         let is_safe_to_send_app_data =
