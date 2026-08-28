@@ -496,7 +496,13 @@ const MAX_PROBING_TIMEOUTS: usize = 3;
 const DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 10;
 
 // The maximum data offset that can be stored in a crypto stream.
-const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
+pub(crate) const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
+
+// TODO: Removed once https://github.com/cloudflare/quiche/pull/2453 is done.
+// This used to be the value of MAX_STREAM_OVERHEAD (but it's incorrect for
+// that purpose) and is now only used for gcongestion recovery for
+// app-limited tracking. Cf. https://github.com/cloudflare/quiche/pull/2492
+const LEGACY_APP_LIMITED_BYTE_THRESHOLD: usize = 12;
 
 // The send capacity factor.
 const TX_CAP_FACTOR: f64 = 1.0;
@@ -5172,7 +5178,6 @@ impl<F: BufFactory> Connection<F> {
 
         // Create a single STREAM frame for the first stream that is flushable.
         if (pkt_type == Type::Short || pkt_type == Type::ZeroRTT) &&
-            left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing &&
             path.active() &&
             !dgram_emitted
@@ -5212,13 +5217,24 @@ impl<F: BufFactory> Connection<F> {
                     octets::varint_len(stream_off) + // offset
                     2; // length, always encode as 2-byte varint
 
+                // Require at least 1 byte of payload beyond the header
+                // or an empty FIN
+                //
+                // If even the minimum payload (hdr_len + 1 byte (or empty fin)
+                // doesn't fit, stop trying.  We could continue to the next
+                // stream (a lower stream_id or offset might encode in fewer
+                // varint bytes), but we'd need to keep track of  which streams
+                // we've tried to avoid looping forever.
                 let max_len = match left.checked_sub(hdr_len) {
-                    Some(v) => v,
-                    None => {
-                        let priority_key = Arc::clone(&stream.priority_key);
-                        self.streams.remove_flushable(&priority_key);
-
-                        continue;
+                    Some(v) if v > 0 || stream.send.empty_fin_next() => v,
+                    _ => {
+                        if stream.incremental {
+                            // Shuffle the incremental stream to the back of the
+                            // queue (of streams with the same priority).
+                            self.streams.remove_flushable(&priority_key);
+                            self.streams.insert_flushable(&priority_key);
+                        }
+                        break;
                     },
                 };
 
@@ -5228,6 +5244,14 @@ impl<F: BufFactory> Connection<F> {
                 // Write stream data into the packet buffer.
                 let (len, fin) =
                     stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
+
+                // The stream was flushable and max_len ≥ 1, so emit() must
+                // have produced at least one byte, or set FIN. While a zero
+                // length non-fin STREAM frame is legal, it's silly.
+                debug_assert!(
+                    len > 0 || fin,
+                    "emit() from flushable stream produced 0 bytes without FIN"
+                );
 
                 // Encode the frame's header.
                 //
@@ -5277,10 +5301,9 @@ impl<F: BufFactory> Connection<F> {
 
                 #[cfg(feature = "fuzzing")]
                 // Coalesce STREAM frames when fuzzing.
-                if left > frame::MAX_STREAM_OVERHEAD {
-                    continue;
-                }
+                continue;
 
+                #[cfg(not(feature = "fuzzing"))]
                 break;
             }
         }
@@ -5313,12 +5336,13 @@ impl<F: BufFactory> Connection<F> {
 
         if !has_data &&
             !dgram_emitted &&
-            cwnd_available > frame::MAX_STREAM_OVERHEAD
+            cwnd_available > LEGACY_APP_LIMITED_BYTE_THRESHOLD
         {
             path.recovery.on_app_limited();
         }
 
         if frames.is_empty() {
+            // Used by legacy recovery.
             // When we reach this point we are not able to write more, so set
             // app_limited to false.
             path.recovery.update_app_limited(false);
