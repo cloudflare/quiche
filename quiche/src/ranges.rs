@@ -376,7 +376,7 @@ impl std::fmt::Debug for RangeSet {
         let ranges: Vec<Range<u64>> = self
             .iter()
             .map(|mut r| {
-                r.end -= 1;
+                r.end = r.end.saturating_sub(1);
                 r
             })
             .collect();
