@@ -518,10 +518,25 @@ impl<'a> OctetsMut<'a> {
 
     /// Writes an unsigned variable-length integer of the specified length, in
     /// network byte-order at the current offset and advances the buffer.
+    ///
+    /// Returns [`BufferTooShortError`] when the buffer is too short or the
+    /// value cannot be represented in the specified length.
     pub fn put_varint_with_len(
         &mut self, v: u64, len: usize,
     ) -> Result<&mut [u8]> {
         if self.cap() < len {
+            return Err(BufferTooShortError);
+        }
+
+        let max = match len {
+            1 => 63,
+            2 => 16_383,
+            4 => 1_073_741_823,
+            8 => MAX_VAR_INT,
+            _ => panic!("value is too large for varint"),
+        };
+
+        if v > max {
             return Err(BufferTooShortError);
         }
 
@@ -546,7 +561,7 @@ impl<'a> OctetsMut<'a> {
                 buf
             },
 
-            _ => panic!("value is too large for varint"),
+            _ => unreachable!(),
         };
 
         Ok(buf)
@@ -1252,6 +1267,59 @@ mod tests {
         }
         let exp = [0; 3];
         assert_eq!(&d, &exp);
+    }
+
+    #[test]
+    fn put_varint_with_len_boundaries() {
+        let cases = [
+            (63, 1),
+            (37, 2),
+            (16_383, 2),
+            (37, 4),
+            (1_073_741_823, 4),
+            (37, 8),
+            (MAX_VAR_INT, 8),
+        ];
+
+        for (value, len) in cases {
+            let mut d = [0; 8];
+
+            {
+                let mut b = OctetsMut::with_slice(&mut d[..len]);
+                assert!(b.put_varint_with_len(value, len).is_ok());
+                assert_eq!(b.off(), len);
+                assert_eq!(b.cap(), 0);
+            }
+
+            let mut b = Octets::with_slice(&d[..len]);
+            assert_eq!(b.get_varint().unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn put_varint_with_len_rejects_values_that_do_not_fit() {
+        let cases = [
+            (256, 1),
+            (64, 1),
+            (16_384, 2),
+            (1_073_741_824, 4),
+            (MAX_VAR_INT + 1, 8),
+        ];
+
+        for (value, len) in cases {
+            let mut d = [0xa5; 9];
+            let mut b = OctetsMut::with_slice(&mut d);
+            b.put_u8(0x5a).unwrap();
+
+            let before = b.buf().to_vec();
+            let off = b.off();
+            let cap = b.cap();
+
+            assert!(b.put_varint_with_len(value, len).is_err());
+            assert_eq!(b.buf(), before);
+            assert_eq!(b.off(), off);
+            assert_eq!(b.cap(), cap);
+        }
     }
 
     #[test]
