@@ -5685,7 +5685,13 @@ fn retry_with_pto(
 
     let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
 
-    // Client sends initial flight.
+    // Client's first Initial is lost, so the Retry answers its PTO probe.
+    pipe.client.send(&mut buf).unwrap();
+
+    let timer = pipe.client.timeout().unwrap();
+    std::thread::sleep(timer + Duration::from_millis(1));
+    pipe.client.on_timeout();
+
     let (mut len, _) = pipe.client.send(&mut buf).unwrap();
 
     // Server sends Retry packet.
@@ -5705,6 +5711,9 @@ fn retry_with_pto(
 
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
+
+    let recovery = &pipe.client.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.pto_count(), 0);
 
     let (len, send_info) = pipe.client.send(&mut buf).unwrap();
 
