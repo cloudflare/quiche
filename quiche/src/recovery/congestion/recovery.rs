@@ -864,6 +864,10 @@ impl RecoveryOps for LegacyRecovery {
         epoch.loss_probes = 0;
         epoch.in_flight_count = 0;
 
+        // Discarding a packet number space is forward progress, so the PTO
+        // backoff starts over (RFC 9002, Appendix A.11).
+        self.pto_count = 0;
+
         self.set_loss_detection_timer(handshake_status, now);
     }
 
@@ -1157,6 +1161,25 @@ mod tests {
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryConfig;
     use std::time::Instant;
+
+    #[test]
+    fn test_pkt_num_space_discard_resets_pto_count() {
+        let config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut r = LegacyRecovery::new_with_config(&recovery_config);
+
+        let handshake_status = HandshakeStatus {
+            completed: false,
+            has_handshake_keys: true,
+            peer_verified_address: true,
+        };
+        let now = Instant::now();
+
+        r.pto_count = 3;
+        r.on_pkt_num_space_discarded(Epoch::Initial, handshake_status, now);
+
+        assert_eq!(r.pto_count(), 0);
+    }
 
     #[test]
     fn test_high_pto_count_no_panic() {
