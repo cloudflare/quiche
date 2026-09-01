@@ -121,8 +121,16 @@ impl RecvBuf {
             self.fin_off = Some(buf.max_off());
         }
 
-        // No need to store empty buffer that doesn't carry the fin flag.
+        // No need to store empty buffer that doesn't carry the fin flag, but
+        // its offset still advances the largest received offset (RFC 9000
+        // Section 19.8). The caller charges connection-level flow control
+        // from that offset, so the high-water mark must advance in lockstep:
+        // otherwise the gap up to the frame's offset is charged a second
+        // time when the in-flight data covering it arrives, and the
+        // accumulated double-counting eventually makes a perfectly legal
+        // frame appear to exceed MAX_DATA.
         if !buf.fin() && buf.is_empty() {
+            self.len = cmp::max(self.len, buf.max_off());
             return Ok(());
         }
 
@@ -542,10 +550,12 @@ mod tests {
 
         assert_emit_discard(&mut recv, emit, 32, 5, false, None);
 
-        // Don't store non-fin empty buffer.
+        // A non-fin empty buffer is not stored, but its offset advances the
+        // largest received offset: connection-level flow control is charged
+        // from that offset, so the high-water mark must track it.
         let buf = RangeBuf::from(b"", 10, false);
         assert!(recv.write(buf).is_ok());
-        assert_eq!(recv.len, 5);
+        assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 0);
 
@@ -553,34 +563,38 @@ mod tests {
         let buf = RangeBuf::from(b"", 16, false);
         assert_eq!(recv.write(buf), Err(Error::FlowControl));
 
-        // Store fin empty buffer.
+        // A final size below the advanced largest offset is an error
+        // (RFC 9000 Section 4.5).
         let buf = RangeBuf::from(b"", 5, true);
+        assert_eq!(recv.write(buf), Err(Error::FinalSize));
+
+        // Store fin empty buffer at the largest received offset.
+        let buf = RangeBuf::from(b"", 10, true);
         assert!(recv.write(buf).is_ok());
-        assert_eq!(recv.len, 5);
+        assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 1);
 
         // Don't store additional fin empty buffers.
-        let buf = RangeBuf::from(b"", 5, true);
+        let buf = RangeBuf::from(b"", 10, true);
         assert!(recv.write(buf).is_ok());
-        assert_eq!(recv.len, 5);
+        assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 1);
 
-        // Don't store additional fin non-empty buffers.
+        // A fin buffer whose end disagrees with the known final size errors.
         let buf = RangeBuf::from(b"aa", 3, true);
-        assert!(recv.write(buf).is_ok());
-        assert_eq!(recv.len, 5);
-        assert_eq!(recv.off, 5);
-        assert_eq!(recv.data.len(), 1);
+        assert_eq!(recv.write(buf), Err(Error::FinalSize));
 
         // Validate final size with fin empty buffers.
-        let buf = RangeBuf::from(b"", 6, true);
+        let buf = RangeBuf::from(b"", 11, true);
         assert_eq!(recv.write(buf), Err(Error::FinalSize));
-        let buf = RangeBuf::from(b"", 4, true);
+        let buf = RangeBuf::from(b"", 9, true);
         assert_eq!(recv.write(buf), Err(Error::FinalSize));
 
-        assert_emit_discard(&mut recv, emit, 32, 0, true, None);
+        // The range (5..10) was never received, so the stream cannot reach
+        // its fin and nothing further is readable.
+        assert_emit_discard_done(&mut recv, emit);
     }
 
     #[rstest]
