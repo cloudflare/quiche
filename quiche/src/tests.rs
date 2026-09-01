@@ -1554,6 +1554,143 @@ fn flow_control_limit_dup(
 }
 
 #[rstest]
+fn flow_control_empty_stream_frame_not_double_counted(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // The connection-level limit is 30 bytes, the stream-level limit 15.
+    assert_eq!(pipe.server.max_rx_data(), 30);
+
+    // A zero-length non-fin frame ahead of the received data advances the
+    // stream's largest received offset (RFC 9000 Section 19.8): offsets
+    // 5..15 are charged against connection flow control here, before the
+    // data covering them arrives.
+    let frames = [
+        frame::Frame::Stream {
+            stream_id: 0,
+            data: <RangeBuf>::from(b"aaaaa", 0, false),
+        },
+        frame::Frame::Stream {
+            stream_id: 0,
+            data: <RangeBuf>::from(b"", 15, false),
+        },
+    ];
+
+    let pkt_type = Type::Short;
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+    assert_eq!(pipe.server.rx_data, 15);
+
+    // The gap's data must not be charged again when it arrives: the
+    // connection has exactly 15 bytes of credit left, and filling a second
+    // stream to its stream-level limit consumes exactly that. Before the
+    // fix, the gap (5..15) was double-counted on arrival and this legal
+    // packet was rejected with a connection-level flow control violation.
+    let frames = [
+        frame::Frame::Stream {
+            stream_id: 0,
+            data: <RangeBuf>::from(b"aaaaaaaaaa", 5, false),
+        },
+        frame::Frame::Stream {
+            stream_id: 4,
+            data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
+        },
+    ];
+
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+    assert_eq!(pipe.server.rx_data, 30);
+}
+
+#[rstest]
+fn zero_length_stream_frame_not_sent(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(4_000_000_000);
+    config.set_initial_max_stream_data_bidi_local(2_000_000_000);
+    config.set_initial_max_stream_data_bidi_remote(2_000_000_000);
+    config.set_initial_max_streams_bidi(20);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // A zero-length STREAM frame can only be produced by the packet-size
+    // squeeze when the frame header exceeds MAX_STREAM_OVERHEAD (12), which
+    // requires a two-byte stream id varint and an eight-byte offset varint.
+    // Seed the stream's send state at 2^30 so the squeeze is reachable
+    // without transferring a gigabyte.
+    assert_eq!(pipe.client.stream_send(64, b"", false), Ok(0));
+    pipe.client
+        .streams
+        .get_mut(64)
+        .unwrap()
+        .send
+        .seed_offsets_for_test(1 << 30);
+
+    let data = [0xa; 4096];
+    assert_eq!(pipe.client.stream_send(64, &data, false), Ok(4096));
+
+    // Sweep output buffer sizes across the range where the packet has room
+    // for the STREAM frame header but not for any payload. A zero-length
+    // non-fin STREAM frame would advance the peer's largest received offset
+    // for the stream (RFC 9000 Section 19.8) — an offset the peer charges
+    // against connection-level flow control — so it must never be emitted.
+    for cap in 25..80 {
+        match pipe.client.send(&mut buf[..cap]) {
+            Ok((written, _)) => {
+                let frames =
+                    test_utils::decode_pkt(&mut pipe.server, &mut buf[..written])
+                        .unwrap();
+
+                for frame in &frames {
+                    if let frame::Frame::Stream { data, .. } = frame {
+                        assert!(
+                            !data.is_empty() || data.fin(),
+                            "zero-length non-fin STREAM frame sent at cap {cap}",
+                        );
+                    }
+                }
+            },
+
+            Err(Error::Done) | Err(Error::BufferTooShort) => (),
+
+            Err(e) => panic!("unexpected send error: {e:?}"),
+        }
+    }
+
+    // The skip also must not mark the sender app-limited (data is pending:
+    // it is size-limited on that packet). That transition is excluded in
+    // send_single via `stream_data_skipped`; a deterministic assertion here
+    // would require an ACK-bearing packet at exactly the skip-sized cap,
+    // and pure-ACK packets under a size-limited sweep already trip the
+    // pre-existing app-limited heuristic independently of this change.
+
+    // The skipped data is not lost: it is delivered once packets have room.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(
+        pipe.server.streams.get(64).unwrap().recv.max_off(),
+        (1 << 30) + 4096
+    );
+}
+
+#[rstest]
 fn flow_control_update(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
