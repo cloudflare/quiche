@@ -729,6 +729,7 @@ impl CongestionControl for BBRv2 {
                 &self.params,
                 recovery_stats,
                 self.get_congestion_window(),
+                self.cwnd_limits.min(),
             )
         {
             mode_changes_allowed -= 1;
