@@ -444,7 +444,11 @@ impl LegacyRecovery {
         // Iterate over all packet number spaces starting from Handshake.
         for e in [Epoch::Handshake, Epoch::Application] {
             let new_time = self.epochs[e].loss_time;
-            if time.is_none() || new_time < time {
+
+            // Skip spaces without a loss time: comparing the options
+            // directly would let None, which sorts before Some(_),
+            // overwrite an existing deadline.
+            if new_time.is_some() && (time.is_none() || new_time < time) {
                 time = new_time;
                 epoch = e;
             }
@@ -1156,7 +1160,33 @@ mod tests {
     use super::*;
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryConfig;
+    use std::time::Duration;
     use std::time::Instant;
+
+    // Regression test for the loss time selection across packet number
+    // spaces: a space without a loss time must not overwrite the deadline
+    // of an earlier space, per RFC 9002 Section 6.2.1.
+    //
+    // https://github.com/cloudflare/quiche/issues/2694
+    #[test]
+    fn loss_time_and_space_ignores_empty_spaces() {
+        let config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut r = LegacyRecovery::new_with_config(&recovery_config);
+
+        let now = Instant::now();
+
+        r.epochs[Epoch::Initial].loss_time =
+            Some(now + Duration::from_millis(30));
+        r.epochs[Epoch::Handshake].loss_time =
+            Some(now + Duration::from_millis(10));
+        r.epochs[Epoch::Application].loss_time = None;
+
+        let (loss_time, epoch) = r.loss_time_and_space();
+
+        assert_eq!(loss_time, Some(now + Duration::from_millis(10)));
+        assert_eq!(epoch, Epoch::Handshake);
+    }
 
     #[test]
     fn test_high_pto_count_no_panic() {
