@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["APPLICATION_PROTOCOL","PRIORITY_UPDATE_FRAME_PAYLOAD_MAX_SIZE_DEFAULT","SETTINGS_MAX_FIELD_SECTION_SIZE_DEFAULT"],"enum":["Error","Event","WireErrorCode"],"fn":["grease_value"],"struct":["Config","Connection","Header","HeaderRef","Priority","Stats"],"trait":["NameValue"],"type":["Result"]};
