@@ -197,8 +197,8 @@ impl MaxUtilizedBandwidthEstimator {
             start: time,
         });
 
-        // Unlike acked and lost count, sent count is computed over a window 1 rtt
-        // in the past.
+        // Unlike acknowledged and lost byte counts, the sent byte count uses a
+        // window one RTT in the past.
         self.bytes_sent_prev_round = bytes_sent;
 
         let bytes_acked = self.rounds.iter().map(|v| v.bytes_acked).sum::<u64>();
@@ -335,10 +335,8 @@ where
                 sample: new_sample,
                 time: new_time,
             });
-            // Need to iterate one more time. Check if the new best estimate is
-            // outside the window as well, since it may also have been recorded a
-            // long time ago. Don't need to iterate once more since we cover that
-            // case at the beginning of the method.
+            // The new best estimate may also be stale. Check it once more. The
+            // check at the start of the method handles further stale samples.
             if new_time - self.estimates[0].unwrap().time > self.window_length {
                 self.estimates[0] = self.estimates[1];
                 self.estimates[1] = self.estimates[2];
@@ -349,9 +347,8 @@ where
         if self.estimates[1].unwrap().sample == self.estimates[0].unwrap().sample &&
             new_time - self.estimates[1].unwrap().time > self.window_length / 4
         {
-            // A quarter of the window has passed without a better sample, so the
-            // second-best estimate is taken from the second quarter of the
-            // window.
+            // No better sample arrived for a quarter of the window, so take the
+            // second-best estimate from the second quarter.
             self.estimates[1] = Some(Sample {
                 sample: new_sample,
                 time: new_time,
@@ -390,7 +387,8 @@ mod tests {
         // First round send 30M, nothing gets acked
         estimator.new_round(now, 30_000_000, 0, 0);
 
-        assert_eq!(estimator.get().bandwidth, 0); // Not enough rounds for estimate yet
+        // There are not enough rounds for an estimate yet.
+        assert_eq!(estimator.get().bandwidth, 0);
         assert!(estimator.estimate.get_best().is_none());
 
         now += Duration::from_secs(30);
@@ -398,8 +396,9 @@ mod tests {
         // Send 60M, previous 30M gets acked
         estimator.new_round(now, 60_000_000, 0, 30_000_000);
 
-        // 30M over 30s = 1MBps = 8Mbps
-        assert_eq!(estimator.get().bandwidth, 0); // Not enough rounds for estimate yet
+        // 30 MB over 30 seconds is 1 MBps, or 8 Mbps.
+        // There are not enough rounds for an estimate yet.
+        assert_eq!(estimator.get().bandwidth, 0);
         assert_eq!(estimator.estimate.get_best().unwrap().bandwidth, 8_000_000);
 
         now += Duration::from_secs(30);
@@ -407,8 +406,9 @@ mod tests {
         // Send 90M, previous 60M gets acked
         estimator.new_round(now, 90_000_000, 0, 60_000_000);
 
-        // 90M over 60s = 1.5MBps = 12Mbps
-        assert_eq!(estimator.get().bandwidth, 0); // Not enough rounds for estimate yet
+        // 90 MB over 60 seconds is 1.5 MBps, or 12 Mbps.
+        // There are not enough rounds for an estimate yet.
+        assert_eq!(estimator.get().bandwidth, 0);
         assert_eq!(estimator.estimate.get_best().unwrap().bandwidth, 12_000_000);
 
         now += Duration::from_secs(30);
@@ -416,8 +416,9 @@ mod tests {
         // Send 10M, previous 90M gets acked
         estimator.new_round(now, 30_000_000, 0, 90_000_000);
 
-        // 180M over 90s = 2MBps = 16Mbps
-        assert_eq!(estimator.get().bandwidth, 0); // Not enough rounds for estimate yet
+        // 180 MB over 90 seconds is 2 MBps, or 16 Mbps.
+        // There are not enough rounds for an estimate yet.
+        assert_eq!(estimator.get().bandwidth, 0);
         assert_eq!(estimator.estimate.get_best().unwrap().bandwidth, 16_000_000);
 
         for _ in 0..4 {

@@ -85,10 +85,9 @@ impl ConsumeBuffer {
     }
 
     pub fn into_vec(mut self) -> Vec<u8> {
-        // As ConsumeBuffer has a Drop impl we have use `take` to get at the inner
-        // vec out instead of being able to move it out directly. This also means
-        // we need to update the metrics by hand as the buffer is no longer owned
-        // by us.
+        // `ConsumeBuffer` implements Drop, so use `take` instead of moving the
+        // vector out directly. Update metrics manually because this object no
+        // longer owns the buffer.
         let mut inner = std::mem::take(&mut self.inner);
         consume_buffer_total_bytes().dec_by(inner.capacity() as u64);
         inner.drain(0..self.head);

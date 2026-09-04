@@ -390,8 +390,8 @@ where
             handshake_fut,
         );
 
-        // `AbortOnDropHandle` simulates task-killswitch behavior without needing
-        // to give up ownership of the `JoinHandle`.
+        // `AbortOnDropHandle` simulates task-killswitch behavior without
+        // needing to give up ownership of the `JoinHandle`.
         let handshake_abort_handle = AbortOnDropHandle::new(handshake_handle);
 
         let worker = handshake_abort_handle.await??;

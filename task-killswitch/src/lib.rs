@@ -117,7 +117,7 @@ impl TaskKillswitch {
 
         let res = self.storage.add_task_if(handle, || !self.was_activated());
         if let Err(handle) = res {
-            // Killswitch was activated by the time we got a lock on the map shard
+            // The killswitch was activated before the map shard was locked.
             handle.abort();
             return None;
         }

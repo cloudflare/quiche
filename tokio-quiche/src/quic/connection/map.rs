@@ -87,8 +87,7 @@ impl From<&ConnectionId<'_>> for CidOwned {
             .enumerate()
             .for_each(|(i, v)| cid[i] = v);
 
-        // In order to differentiate cids with zeroes as opposed to shorter cids,
-        // append the cid length.
+        // Append its length to distinguish a short CID from trailing zeroes.
         *cid.last_mut().unwrap() |= (value.len() as u64) << 56;
 
         CidOwned::Optimized(cid)

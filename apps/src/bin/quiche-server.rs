@@ -495,8 +495,8 @@ fn main() {
                 let conn = &mut client.conn;
                 let partial_responses = &mut client.partial_responses;
 
-                // Visit all writable response streams to send any remaining HTTP
-                // content.
+                // Visit all writable response streams to send any remaining
+                // HTTP content.
                 for stream_id in writable_response_streams(conn) {
                     http_conn.handle_writable(conn, partial_responses, stream_id);
                 }
@@ -540,7 +540,7 @@ fn main() {
         // packets to be sent.
         continue_write = false;
         for client in clients.values_mut() {
-            // Reduce max_send_burst by 25% if loss is increasing more than 0.1%.
+            // Reduce `max_send_burst` by 25% when loss rises by more than 0.1%.
             let loss_rate =
                 client.conn.stats().lost as f64 / client.conn.stats().sent as f64;
             if loss_rate > client.loss_rate + 0.001 {

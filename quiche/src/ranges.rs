@@ -209,16 +209,16 @@ impl InlineRangeSet {
                         return;
                     }
 
-                    // At this point we know (start <= *e)
+                    // At this point, `start <= *e`.
                     if start < *s {
                         // We know we are completely past the previous range, so
-                        // we can simply adjust the lower bound
+                        // we can simply adjust the lower bound.
                         *s = start;
                     }
 
                     if end > *e {
-                        // We adjusted the upper bound of an existing range, we
-                        // must now check it does not overlap with the next range
+                        // Check for overlap between the expanded range and the
+                        // next range.
                         *e = end;
                         break;
                     } else {

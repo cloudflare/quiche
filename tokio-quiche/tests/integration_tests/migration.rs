@@ -149,8 +149,8 @@ async fn run_migration_test(active: bool, base_port: u16) {
             .expect("active migration should succeed");
         migrated_addr
     } else {
-        // We keep using the original client address to simulate the fact that the
-        // client doesn't know that the path changes (e.g. due to NAT rebinding).
+        // Keep the original client address to emulate an unrecognized path
+        // change, such as NAT rebinding.
         client_addr
     };
 

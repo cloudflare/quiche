@@ -1103,9 +1103,8 @@ mod tests {
 
     #[test]
     fn settings_h2_prohibited() {
-        // We need to test the prohibited values (0x0 | 0x2 | 0x3 | 0x4 | 0x5)
-        // but the quiche API doesn't support that, so use a manually created
-        // frame data buffer where d[frame_header_len] is the SETTING type field.
+        // Test prohibited values manually because the quiche API cannot create
+        // them. `d[frame_header_len]` contains the SETTINGS type.
         let frame_payload_len = 2u64;
         let frame_header_len = 2;
         let mut d = [

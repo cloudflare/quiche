@@ -254,11 +254,10 @@ mod tests {
     use crate::OnAckReceivedOutcome;
     use std::ops::Range;
 
-    // A [RateSample](delivery_rate::RateSample) is app_limited if it was
-    // generated when the [Rate](delivery_rate::Rate) was app_limited.
+    // A `RateSample` generated while `Rate` is app-limited inherits that state.
     //
-    // The following test generates RateSamples before and after Rate is
-    // app_limited and asserts on app_limited status for samples.
+    // This test generates samples before and after `Rate` becomes app-limited
+    // and checks each sample's state.
     #[test]
     fn sample_is_app_limited() {
         let config = Config::new(0xbabababa).unwrap();
@@ -266,57 +265,56 @@ mod tests {
         let mut now = Instant::now();
         let mss = r.max_datagram_size();
 
-        // Not App Limited prior to any activity
+        // `Rate` is not app-limited before any activity.
         assert!(!r.congestion.delivery_rate.app_limited());
         assert_eq!(r.congestion.delivery_rate.end_of_app_limited, 0);
         assert!(!r.congestion.delivery_rate.sample_is_app_limited());
 
-        // Send/Ack first batch to generate a new delivery_rate sample.
+        // Generate a delivery-rate sample from the first batch.
         let rtt = Duration::from_secs(2);
         helper_send_and_ack_packets(&mut r, 0..4, now, rtt, mss);
 
-        // Marking Rate as app_limited.
+        // Mark `Rate` as app-limited.
         r.delivery_rate_update_app_limited(true);
         assert!(r.congestion.delivery_rate.app_limited());
         assert_eq!(r.congestion.delivery_rate.end_of_app_limited, 3);
 
-        // Rate is app_limited.
+        // `Rate` is app-limited.
         assert!(r.congestion.delivery_rate.app_limited());
         assert!(!r.congestion.delivery_rate.sample_is_app_limited());
 
-        // Send/Ack second batch to generate a new delivery_rate sample.
+        // Send and acknowledge the second batch to generate another sample.
         now += rtt;
         helper_send_and_ack_packets(&mut r, 4..8, now, rtt, mss);
 
-        // Rate is no longer app limited since we sent a packet larger than
-        // `end_of_app_limited`
+        // `Rate` is no longer app-limited after sending a packet beyond
+        // `end_of_app_limited`.
         assert!(!r.congestion.delivery_rate.app_limited());
         assert_eq!(r.congestion.delivery_rate.end_of_app_limited, 0);
-        // The RateSample is also app_limited
+        // The resulting `RateSample` remains app-limited.
         assert!(r.congestion.delivery_rate.sample_is_app_limited());
     }
 
-    // A [RateSample](delivery_rate::RateSample) is is only updated if either not
-    // app_limited or greater than the previous value.
+    // A `RateSample` updates the delivery rate only when it is not app-limited
+    // or its rate exceeds the previous value.
     #[test]
     fn app_limited_delivery_rate() {
-        // confirm that rate sample is not generated when app limited
+        // Confirm that a rate sample is not generated when app-limited.
         let config = Config::new(0xbabababa).unwrap();
         let mut r = LegacyRecovery::new(&config);
         let mut now = Instant::now();
         let mss = r.max_datagram_size();
 
-        // Not App Limited prior to any activity
+        // `Rate` is not app-limited before any activity.
         assert!(!r.congestion.delivery_rate.app_limited());
         assert_eq!(r.congestion.delivery_rate.end_of_app_limited, 0);
         assert!(!r.congestion.delivery_rate.sample_is_app_limited());
 
-        // First batch
-        // Send/Ack first batch to generate a new delivery_rate sample.
+        // Generate a delivery-rate sample from the first batch.
         let mut rtt = Duration::from_secs(2);
         helper_send_and_ack_packets(&mut r, 0..2, now, rtt, mss);
 
-        // Marking Rate as app_limited.
+        // Mark `Rate` as app-limited.
         r.delivery_rate_update_app_limited(true);
         assert!(r.congestion.delivery_rate.app_limited());
         assert_eq!(r.congestion.delivery_rate.end_of_app_limited, 1);
@@ -327,50 +325,46 @@ mod tests {
         assert_eq!(expected_delivery_rate, 1200);
         assert_eq!(first_delivery_rate, expected_delivery_rate);
 
-        // Second batch
-        // Since Rtt is larger, the delivery_rate will be smaller and not generate
-        // a new RateSample.
+        // A larger RTT produces a lower delivery rate, which does not replace
+        // the app-limited sample.
         now += rtt;
         rtt = Duration::from_secs(4);
         helper_send_and_ack_packets(&mut r, 2..4, now, rtt, mss);
 
-        // Rate is no longer app limited since we sent a packet larger than
-        // `end_of_app_limited`
+        // `Rate` is no longer app-limited after sending a packet beyond
+        // `end_of_app_limited`.
         assert!(!r.congestion.delivery_rate.app_limited());
         assert_eq!(r.congestion.delivery_rate.end_of_app_limited, 0);
-        // The RateSample is also app_limited
+        // The resulting `RateSample` remains app-limited.
         assert!(r.congestion.delivery_rate.sample_is_app_limited());
 
-        // Delivery rate NOT updated since the delivery rate is less than previous
-        // value
+        // The lower delivery rate does not replace the previous value.
         let expected_delivery_rate = (mss * 2) as u64 / rtt.as_secs();
         assert_eq!(expected_delivery_rate, 600);
         let app_limited_delivery_rate = r.delivery_rate().to_bytes_per_second();
         assert_eq!(app_limited_delivery_rate, first_delivery_rate);
 
-        // Marking Rate as app_limited.
+        // Mark `Rate` as app-limited.
         r.delivery_rate_update_app_limited(true);
         assert!(r.congestion.delivery_rate.app_limited());
         assert_eq!(r.congestion.delivery_rate.end_of_app_limited, 3);
-        // The RateSample is also app_limited
+        // The resulting `RateSample` remains app-limited.
         assert!(r.congestion.delivery_rate.sample_is_app_limited());
 
-        // Third batch
-        // Since Rtt is smaller, the delivery_rate will be larger and not generate
-        // a new RateSample even when app_limited.
+        // A smaller RTT produces a higher delivery rate, which replaces the
+        // previous value even while app-limited.
         now += rtt;
         rtt = Duration::from_secs(1);
         helper_send_and_ack_packets(&mut r, 4..6, now, rtt, mss);
 
-        // Rate is no longer app limited since we sent a packet larger than
-        // `end_of_app_limited`
+        // `Rate` is no longer app-limited after sending a packet beyond
+        // `end_of_app_limited`.
         assert!(!r.congestion.delivery_rate.app_limited());
         assert_eq!(r.congestion.delivery_rate.end_of_app_limited, 0);
-        // The RateSample is also app_limited
+        // The resulting `RateSample` remains app-limited.
         assert!(r.congestion.delivery_rate.sample_is_app_limited());
 
-        // Delivery rate NOT updated since the delivery rate is less than previous
-        // value
+        // The higher delivery rate replaces the previous value.
         let expected_delivery_rate = (mss * 2) as u64 / rtt.as_secs();
         assert_eq!(expected_delivery_rate, 2400);
         let app_limited_delivery_rate = r.delivery_rate().to_bytes_per_second();

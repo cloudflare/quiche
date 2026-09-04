@@ -171,9 +171,8 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
     /// individual packets happens in the NIC, if it supports GSO. The
     /// parameter specifies the packet size.
     pub fn gso(&mut self) -> io::Result<()> {
-        // We initialize GSO on the socket with the maximum possible segment size
-        // to prevent accidentally setting it too small and running into
-        // issues when increasing max_send_udp_payload_size later on.
+        // Initialize GSO with the maximum segment size so later increases to
+        // `max_send_udp_payload_size` do not exceed the initial setting.
         //
         // https://elixir.bootlin.com/linux/v6.14.6/source/net/ipv4/udp.c#L2998
         // https://elixir.bootlin.com/linux/v6.14.6/source/include/vdso/limits.h#L5

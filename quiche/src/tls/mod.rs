@@ -286,8 +286,8 @@ impl Context {
         // false -> 0x00 SSL_VERIFY_NONE
         let mode = i32::from(verify);
 
-        // Note: Base on two used modes(see above), it seems ok for both, bssl and
-        // ossl. If mode needs to be ored then it may need to be adjusted.
+        // The two modes above work for both BoringSSL and OpenSSL. This may
+        // need adjustment if modes must be combined.
         unsafe {
             SSL_CTX_set_verify(self.as_mut_ptr(), mode, None);
         }

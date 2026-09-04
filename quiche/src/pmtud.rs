@@ -535,19 +535,21 @@ mod tests {
             let probe_size = pmtud.get_probe_size();
 
             if probe_size <= target_mtu {
-                // First probe fails (random loss)
+                // The first probe fails due to random loss.
                 pmtud.failed_probe(probe_size);
                 assert_eq!(pmtud.probe_failure_count, 1);
 
-                // Second probe succeeds
+                // The second probe succeeds.
                 pmtud.successful_probe(probe_size);
-                assert_eq!(pmtud.probe_failure_count, 0); // Reset on success
+                // A successful probe resets the failure count.
+                assert_eq!(pmtud.probe_failure_count, 0);
             } else {
-                // Size exceeds MTU - all probes fail
+                // All probes fail because their size exceeds the MTU.
                 let old_probe_size = probe_size;
                 fail_probe_max_times(&mut pmtud, probe_size);
 
-                // After max failures, probe_failure_count resets and size changes
+                // After the maximum failures, `probe_failure_count` resets and
+                // the probe size changes.
                 assert_eq!(pmtud.probe_failure_count, 0);
                 if pmtud.get_pmtu().is_none() {
                     assert!(pmtud.get_probe_size() < old_probe_size);

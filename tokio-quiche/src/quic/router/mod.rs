@@ -316,11 +316,11 @@ where
         } = new_connection;
 
         let Some(ref shutdown_tx) = self.shutdown_tx else {
-            // don't create new connections if we're shutting down.
+            // Do not create new connections while shutting down.
             return Ok(());
         };
         let Ok(send_permit) = self.accept_sink.try_reserve() else {
-            // drop the connection if the backlog is full. the client will retry.
+            // Drop the connection when the backlog is full. The client retries.
             return Err(
                 labels::QuicInvalidInitialPacketError::AcceptQueueOverflow.into(),
             );
@@ -472,9 +472,7 @@ where
                     Ok(r) => {
                         let filled_buf =
                             r.iovs().next().map(Vec::from).unwrap_or_default();
-                        // The slices returend by `nix::socket::recvmsg`'s result
-                        // add up to `r.bytes`. This assert is just to make sure
-                        // the code handles the result correctly.
+                        // Verify that the `recvmsg` slices total `r.bytes`.
                         debug_assert_eq!(r.bytes, filled_buf.len());
 
                         let address = match r.address {
@@ -555,10 +553,8 @@ where
                                     );
                                 },
                                 ControlMessageOwned::Ipv6OrigDstAddr(val) => {
-                                    // Don't have to flip IPv6 bytes since it's a
-                                    // byte array, not a
-                                    // series of bytes parsed as a u32 as in the
-                                    // IPv4 case
+                                    // IPv6 is a byte array and needs no swap.
+                                    // IPv4 is parsed as a `u32` and does.
                                     let source_addr = std::net::Ipv6Addr::from(
                                         val.sin6_addr.s6_addr,
                                     );
@@ -600,8 +596,9 @@ where
                                         let Ok(arr) =
                                             <[u8; 4]>::try_from(data_bytes)
                                         else {
-                                            // Should be unreachable as SO_MARK is
-                                            // a u32: https://elixir.bootlin.com/linux/v6.17/source/include/net/sock.h#L487
+                                            // SO_MARK is a `u32`. This should
+                                            // always succeed.
+                                            // https://elixir.bootlin.com/linux/v6.17/source/include/net/sock.h#L487
                                             continue;
                                         };
 
@@ -808,14 +805,13 @@ where
                 });
             }
 
-            // Fourth, update ConnectionMap before receiving packets. This ensures
-            // our SCID destinations are up-to-date (as of this moment).
-            // If this returns pending, we have processed all available commands
-            // and are registered for a wakeup on the next command.
+            // Fourth, update ConnectionMap before receiving packets so SCID
+            // destinations are current. A pending result means all available
+            // commands were processed and the next command will wake us.
             let _ = self.poll_conn_map_commands(cx);
 
-            // Finally, process up to `PACKET_RX_YIELD_AFTER` packet (batches) at
-            // once. If no more packets are available, we wait to be woken again.
+            // Finally, process up to `PACKET_RX_YIELD_AFTER` packet batches. If
+            // no more packets are available, wait to be woken again.
             for _ in 0..PACKET_RX_YIELD_AFTER {
                 ready!(self.poll_process_packet(cx));
             }
@@ -1000,12 +996,12 @@ mod tests {
         let drop_check = conn.incoming_ev_sender.clone();
         let _conn = conn.start(h3_driver);
 
-        // Poll the incoming until the connection is dropped
+        // Poll incoming events until the connection is dropped.
         time::advance(Duration::new(30, 0)).await;
         time::resume();
 
-        // NOTE: this is a smoke test - in case of issues `notified()` future will
-        // never resolve hanging the test.
+        // This is a smoke test. A failure leaves `notified()` unresolved and
+        // hangs the test.
         drop_check.closed().await;
     }
 

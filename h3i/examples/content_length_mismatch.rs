@@ -69,8 +69,8 @@ fn main() {
         },
     ];
 
-    // This example doesn't use close trigger frames, since we manually close the
-    // connection upon receiving a HEADERS frame on stream 0.
+    // This example needs no close-trigger frames because it closes the
+    // connection after receiving HEADERS on stream 0.
     let close_trigger_frames = None;
 
     let summary = sync_client::connect(config, actions, close_trigger_frames)

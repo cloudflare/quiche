@@ -1996,8 +1996,8 @@ mod tests {
 
         let mut streams = <StreamMap>::new(100, 100, 100);
 
-        // Streams where the urgency descends (becomes more important). No stream
-        // shares an urgency.
+        // Streams where the urgency descends (becomes more important). No
+        // stream shares an urgency.
         let input = vec![
             (0, 100),
             (4, 90),
@@ -2235,8 +2235,8 @@ mod tests {
             prioritized_writable.iter().map(|s| s.id).collect();
         assert_eq!(walk_1, vec![0, 4, 8, 12]);
 
-        // Default keys could cause duplicate entries, this is normally protected
-        // against via StreamMap.
+        // Default keys could cause duplicate entries. `StreamMap` normally
+        // prevents this.
         for id in [0, 4, 8, 12] {
             let s = Arc::new(StreamPriorityKey {
                 urgency: 0,
@@ -2408,7 +2408,7 @@ mod tests {
 
         let stream_id = 0u64;
 
-        // Write data: both stream.send.buffered_bytes() and tx_buffered increase.
+        // Writing raises `stream.send.buffered_bytes()` and `tx_buffered`.
         {
             let stream = streams
                 .get_or_create(
@@ -2426,7 +2426,7 @@ mod tests {
         assert_eq!(streams.tx_buffered(), 5);
         assert!(streams.tx_buffered_is_consistent());
 
-        // Emit data: both stream.send.buffered_bytes() and tx_buffered decrease.
+        // Emitting lowers `stream.send.buffered_bytes()` and `tx_buffered`.
         let mut buf = [0; 10];
         let written = {
             let stream = streams.get_mut(stream_id).unwrap();
@@ -2439,8 +2439,7 @@ mod tests {
         assert_eq!(streams.tx_buffered(), 0);
         assert!(streams.tx_buffered_is_consistent());
 
-        // Retransmit: both stream.send.buffered_bytes() and tx_buffered increase
-        // by actual amount retransmitted.
+        // Retransmitting raises both values by the amount retransmitted.
         let retransmitted = {
             let stream = streams.get_mut(stream_id).unwrap();
             stream.send.retransmit(0, 5)
