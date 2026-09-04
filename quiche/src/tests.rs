@@ -6119,6 +6119,73 @@ fn data_blocked(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) 
 }
 
 #[rstest]
+fn data_blocked_retransmit(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"aaaaaaaaaa", false), Ok(10));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.stream_send(4, b"aaaaaaaaaa", false), Ok(10));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.stream_send(8, b"aaaaaaaaaaa", false), Ok(10));
+
+    // Emit DATA_BLOCKED without delivering it to the server.
+    assert!(test_utils::emit_flight(&mut pipe.client).is_ok());
+    assert_eq!(pipe.server.data_blocked_recv_count, 0);
+
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let server_path = pipe.server.paths.get_active().unwrap();
+    let info = RecvInfo {
+        to: server_path.local_addr(),
+        from: server_path.peer_addr(),
+    };
+    pipe.server.recv(&mut buf[..len], info).unwrap();
+
+    assert_eq!(pipe.server.data_blocked_recv_count, 1);
+}
+
+#[rstest]
+fn data_blocked_not_retransmitted_after_max_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"aaaaaaaaaa", false), Ok(10));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.stream_send(4, b"aaaaaaaaaa", false), Ok(10));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.stream_send(8, b"aaaaaaaaaaa", false), Ok(10));
+
+    // Emit DATA_BLOCKED without delivering it to the server.
+    assert!(test_utils::emit_flight(&mut pipe.client).is_ok());
+
+    let mut recv_buf = [0; 10];
+    assert_eq!(pipe.server.stream_recv(0, &mut recv_buf), Ok((10, false)));
+    assert_eq!(pipe.server.stream_recv(4, &mut recv_buf), Ok((10, false)));
+
+    // Deliver a newer MAX_DATA before processing the lost blocked frame.
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    pipe.client_recv(&mut buf[..len]).unwrap();
+    assert!(pipe.client.max_tx_data > 30);
+
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    pipe.server_recv(&mut buf[..len]).unwrap();
+
+    assert_eq!(pipe.server.data_blocked_recv_count, 0);
+}
+
+#[rstest]
 fn stream_data_blocked(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
@@ -6195,6 +6262,102 @@ fn stream_data_blocked(
     );
     assert_eq!(pipe.client.streams.blocked().len(), 0);
     assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
+}
+
+#[rstest]
+fn stream_data_blocked_retransmit(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
+    assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
+    assert_eq!(pipe.client.stream_send(0, b"aaaaaa", false), Ok(5));
+
+    // Emit STREAM_DATA_BLOCKED without delivering it to the server.
+    assert!(test_utils::emit_flight(&mut pipe.client).is_ok());
+    assert_eq!(pipe.server.stream_data_blocked_recv_count, 0);
+
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let server_path = pipe.server.paths.get_active().unwrap();
+    let info = RecvInfo {
+        to: server_path.local_addr(),
+        from: server_path.peer_addr(),
+    };
+    pipe.server.recv(&mut buf[..len], info).unwrap();
+
+    assert_eq!(pipe.server.stream_data_blocked_recv_count, 1);
+}
+
+#[rstest]
+fn stream_data_blocked_not_retransmitted_after_max_stream_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"aaaaaaaaaa", false), Ok(10));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut recv_buf = [0; 10];
+    assert_eq!(pipe.server.stream_recv(0, &mut recv_buf), Ok((10, false)));
+
+    assert_eq!(pipe.client.stream_send(0, b"aaaaaa", false), Ok(5));
+
+    // Emit STREAM_DATA_BLOCKED without delivering it to the server.
+    assert!(test_utils::emit_flight(&mut pipe.client).is_ok());
+
+    // Deliver a newer MAX_STREAM_DATA before processing the lost blocked
+    // frame.
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    pipe.client_recv(&mut buf[..len]).unwrap();
+    assert!(pipe.client.stream_capacity(0).unwrap() > 0);
+
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    pipe.server_recv(&mut buf[..len]).unwrap();
+
+    assert_eq!(pipe.server.stream_data_blocked_recv_count, 0);
+}
+
+#[rstest]
+fn stream_data_blocked_not_retransmitted_after_send_terminated(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] peer_stops: bool,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"aaaaa", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.stream_send(0, b"aaaaaaaaaaa", false), Ok(10));
+
+    // Emit STREAM_DATA_BLOCKED without delivering it to the server.
+    assert!(test_utils::emit_flight(&mut pipe.client).is_ok());
+    test_utils::trigger_ack_based_loss(&mut pipe.client, &mut pipe.server);
+
+    if peer_stops {
+        assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+        pipe.client_recv(&mut buf[..len]).unwrap();
+    } else {
+        assert_eq!(pipe.client.stream_shutdown(0, Shutdown::Write, 42), Ok(()));
+    }
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    pipe.server_recv(&mut buf[..len]).unwrap();
+
+    assert_eq!(pipe.server.stream_data_blocked_recv_count, 0);
 }
 
 #[rstest]
