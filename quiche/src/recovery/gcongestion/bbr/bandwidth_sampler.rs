@@ -363,8 +363,7 @@ impl MaxAckHeightTracker {
             }
         }
 
-        // If any packet sent after the start of the epoch has been acked, start a
-        // new epoch.
+        // Start a new epoch if this epoch includes any acknowledged packet.
         if self.start_new_aggregation_epoch_after_full_round &&
             last_acked_packet_number >
                 self.last_sent_packet_number_before_epoch
@@ -389,8 +388,8 @@ impl MaxAckHeightTracker {
         let aggregation_delta = ack_time.duration_since(epoch_start_time);
         let expected_bytes_acked =
             bandwidth_estimate.to_bytes_per_period(aggregation_delta) as usize;
-        // Reset the current aggregation epoch as soon as the ack arrival rate is
-        // less than or equal to the max bandwidth.
+        // Reset the current aggregation epoch as soon as the ack arrival rate
+        // is less than or equal to the max bandwidth.
         if self.aggregation_epoch_bytes <=
             (self.ack_aggregation_bandwidth_threshold *
                 expected_bytes_acked as f64) as usize
@@ -638,10 +637,9 @@ impl BandwidthSampler {
         } else if !last_acked_packet_send_state.is_valid {
             event_sample.last_packet_send_state = last_lost_packet_send_state;
         } else {
-            // If two packets are inflight and an alarm is armed to lose a packet
-            // and it wakes up late, then the first of two in flight packets could
-            // have been acknowledged before the wakeup, which re-evaluates loss
-            // detection, and could declare the later of the two lost.
+            // If a loss alarm for two in-flight packets fires late, the first
+            // packet may already be acknowledged. Reevaluating loss detection
+            // could then declare the second packet lost.
             event_sample.last_packet_send_state =
                 if last_acked_packet_num > last_lost_packet_num {
                     last_acked_packet_send_state
@@ -711,9 +709,8 @@ impl BandwidthSampler {
             self.last_acked_packet_ack_time,
             newly_acked_bytes,
         );
-        // If `extra_acked` is zero, i.e. this ack event marks the start of a new
-        // ack aggregation epoch, save `less_recent_point`, which is the
-        // last ack point of the previous epoch, as a A0 candidate.
+        // If `extra_acked` is zero, this ACK starts a new aggregation epoch.
+        // Save the previous epoch's last ACK point as an A0 candidate.
         if self.overestimate_avoidance && extra_acked == 0 {
             self.a0_candidates.push_back(
                 self.recent_ack_points
@@ -742,11 +739,8 @@ impl BandwidthSampler {
         }
 
         if self.is_app_limited {
-            // Exit app-limited phase in two cases:
-            // (1) end_of_app_limited_phase is not initialized, i.e., so far all
-            // packets are sent while there are buffered packets or pending data.
-            // (2) The current acked packet is after the sent packet marked as the
-            // end of the app limit phase.
+            // Exit the app-limited phase if no end packet was recorded, or if
+            // this acknowledged packet was sent after the recorded end packet.
             if self.end_of_app_limited_phase.is_none() ||
                 Some(packet_number) > self.end_of_app_limited_phase
             {
@@ -1062,8 +1056,8 @@ mod bandwidth_sampler_tests {
                 self.advance_time(time_between_packets);
             }
 
-            // Ack packets 1 to 20, while sending new packets at the same rate as
-            // before.
+            // Acknowledge packets 1 to 20 while sending new packets at the same
+            // rate as before.
             for i in 1..=20 {
                 self.ack_packet(i);
                 self.send_packet(i + 20, REGULAR_PACKET_SIZE, true);
@@ -1306,8 +1300,8 @@ mod bandwidth_sampler_tests {
         // Ensure only congestion controlled packets are tracked.
         assert_eq!(10, test_sender.number_of_tracked_packets());
 
-        // Ack packets 2 to 21, ignoring every even-numbered packet, while sending
-        // new packets at the same rate as before.
+        // Acknowledge packets 2 to 21, ignoring every even-numbered packet,
+        // while sending new packets at the same rate as before.
         for i in 1..=20 {
             if i % 2 == 0 {
                 test_sender.ack_packet(i);
@@ -1385,8 +1379,8 @@ mod bandwidth_sampler_tests {
 
         test_sender.send_40_and_ack_first_20(time_between_packets);
 
-        // Ack the packets 21 to 40 in the reverse order, while sending packets 41
-        // to 60.
+        // Acknowledge packets 21 to 40 in reverse order while sending packets
+        // 41 to 60.
         for i in 0..20 {
             let last_bandwidth = test_sender.ack_packet(40 - i).bandwidth;
             assert_eq!(expected_bandwidth, last_bandwidth);
@@ -1434,8 +1428,8 @@ mod bandwidth_sampler_tests {
             test_sender.advance_time(time_between_packets);
         }
 
-        // We are now app-limited. Ack 21 to 40 as usual, but do not send anything
-        // for now.
+        // We are now app-limited. Acknowledge 21 to 40 as usual, but do not
+        // send anything for now.
         test_sender.sampler.on_app_limited();
         for i in 21..=40 {
             let sample = test_sender.ack_packet(i);
@@ -1453,8 +1447,8 @@ mod bandwidth_sampler_tests {
             test_sender.advance_time(time_between_packets);
         }
 
-        // Ack packets 41 to 60, while sending packets 61 to 80.  41 to 60 should
-        // be app-limited and underestimate the bandwidth due to that.
+        // Acknowledge packets 41 to 60 while sending packets 61 to 80. These
+        // app-limited ACKs should underestimate bandwidth.
         for i in 41..=60 {
             let sample = test_sender.ack_packet(i);
             assert!(sample.state_at_send.is_app_limited, "{i}");
@@ -1467,8 +1461,8 @@ mod bandwidth_sampler_tests {
                     expected_bandwidth * 0.7
                 );
             } else {
-                // Needs further investigation: when using overestimate_avoidance,
-                // sample.bandwidth increases 17 packet earlier than expected.
+                // Needs further investigation. With `overestimate_avoidance`,
+                // `sample.bandwidth` rises 17 packets too soon.
                 assert_eq!(sample.bandwidth, expected_bandwidth, "{i}");
             }
             test_sender.send_packet(i + 20, REGULAR_PACKET_SIZE, true);
@@ -1517,9 +1511,8 @@ mod bandwidth_sampler_tests {
             test_sender.advance_time(time_between_packets);
         }
 
-        // The final measured sample for the first flight of sample is expected to
-        // be smaller than the real bandwidth, yet it should not lose more
-        // than 10%. The specific value of the error depends on the
+        // The final sample for the first flight should underestimate the real
+        // bandwidth by no more than 10%. The exact error depends on the
         // difference between the RTT and the time it takes to exhaust the
         // congestion window (i.e. in the limit when all packets are sent
         // simultaneously, last sample would indicate the real bandwidth).

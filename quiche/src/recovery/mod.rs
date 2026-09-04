@@ -289,8 +289,8 @@ pub trait RecoveryOps {
     #[cfg(test)]
     fn pto_count(&self) -> u32;
 
-    // This value might be `None` when experiment `enable_relaxed_loss_threshold`
-    // is enabled for gcongestion
+    // This value might be `None` when the `enable_relaxed_loss_threshold`
+    // experiment is enabled for gcongestion.
     #[cfg(test)]
     fn pkt_thresh(&self) -> Option<u64>;
 
@@ -1491,9 +1491,9 @@ mod tests {
         let mut r = Recovery::new(&cfg);
         assert_eq!(r.rtt(), DEFAULT_INITIAL_RTT);
 
-        // Pick time between and above thresholds for testing threshold increase.
+        // Choose times around the threshold to test its increase.
         //
-        //```
+        // ```
         //              between_thresh_ms
         //                         |
         //    initial_thresh_ms    |     spurious_thresh_ms
@@ -1502,7 +1502,7 @@ mod tests {
         //      | ................ | ..................... |
         //            THRESH_GAP         THRESH_GAP
         // ```
-        // 
+        //
         // Threshold gap time.
         const THRESH_GAP: Duration = Duration::from_millis(30);
         // Initial time theshold based on inital RTT.
@@ -1652,8 +1652,8 @@ mod tests {
         );
     }
 
-    // TODO: Implement enable_relaxed_loss_threshold and enable this test for the
-    // congestion module.
+    // TODO: Implement `enable_relaxed_loss_threshold` and enable this test for
+    // the congestion module.
     #[rstest]
     fn relaxed_thresholds_on_reordering(
         #[values("bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -1666,9 +1666,9 @@ mod tests {
         let mut r = Recovery::new(&cfg);
         assert_eq!(r.rtt(), DEFAULT_INITIAL_RTT);
 
-        // Pick time between and above thresholds for testing threshold increase.
+        // Choose times around the threshold to test its increase.
         //
-        //```
+        // ```
         //              between_thresh_ms
         //                         |
         //    initial_thresh_ms    |     spurious_thresh_ms
@@ -2839,8 +2839,8 @@ mod tests {
         );
 
         // 3. Acknowledge the Initial packet.
-        // This empties the Initial space, but Application space still has data in
-        // flight.
+        // This empties the Initial space, but Application space still has data
+        // in flight.
         let mut ranges = RangeSet::default();
         ranges.insert(0..1);
         r.on_ack_received(

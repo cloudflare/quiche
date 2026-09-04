@@ -69,8 +69,7 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
         });
     }
 
-    // This last action should fail due to request limits on the connection being
-    // breached
+    // This final action should exceed the request limit and fail.
     actions.push(send_headers_frame(MAX_REQS * 4, true, default_headers()));
     actions.push(Action::FlushPackets);
 

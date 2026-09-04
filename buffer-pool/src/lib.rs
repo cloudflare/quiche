@@ -312,9 +312,8 @@ mod tests {
             bufs.len() as u64
         );
 
-        // Now drop the buffers, they will not go into the pool because they have
-        // no capacity, so reuse returns false. What is the point in
-        // pooling empty buffers?
+        // Empty buffers cannot be reused, so dropping them does not return them
+        // to the pool.
         drop(bufs);
         assert_eq!(buffer_pool::pool_active_count(POOL_NAME).get(), 0);
         assert_eq!(buffer_pool::pool_idle_count(POOL_NAME).get(), 0);

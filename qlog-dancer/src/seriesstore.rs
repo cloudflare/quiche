@@ -267,8 +267,7 @@ impl SeriesStore {
         if let Some(onertt_pkts) =
             &data_store.packet_sent.get(&crate::PacketType::OneRtt)
         {
-            // TODO: perhaps better to take these counts when processing recovery
-            // metrics
+            // TODO: Gather these counts during recovery-metric processing.
             let mut sent_count = 0;
             let mut delivered_count = 0;
             let mut lost_count = 0;
@@ -284,8 +283,8 @@ impl SeriesStore {
                     (pkt_info.created_time, sent_count),
                 );
 
-                // Hacky way to detect lost packets. We don't have the actual
-                // time the loss happened, so just reuse the packet creation time
+                // The actual loss time is unavailable, so use the packet's
+                // creation time.
                 if pkt_info.acked.is_none() {
                     self.onertt_packet_lost_hacky
                         .push((pkt_info.created_time, *pkt_num));

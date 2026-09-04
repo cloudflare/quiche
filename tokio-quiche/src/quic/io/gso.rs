@@ -121,8 +121,8 @@ pub async fn send_to(
     send_buf: &[u8], segment_size: usize, tx_time: Option<Instant>,
     would_block_metric: Counter, send_to_wouldblock_duration_s: TimeHistogram,
 ) -> io::Result<usize> {
-    // An instant with the value of zero, since [`Instant`] is backed by a version
-    // of timespec this allows to extract raw values from an [`Instant`]
+    // SAFETY: This Linux-only code assumes `Instant` uses the same layout as a
+    // zero-valid timespec. The zero instant allows raw time extraction.
     const INSTANT_ZERO: Instant = unsafe { std::mem::transmute(0u128) };
 
     let mut sendmsg_retry_timer = None;

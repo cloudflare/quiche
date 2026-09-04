@@ -383,11 +383,9 @@ where
         let sleep = time::sleep(DEFAULT_SLEEP);
         tokio::pin!(sleep);
 
-        // When pooling is disabled we keep one persistent egress buffer for the
-        // whole connection, owned here in the IO worker and held across the loop
-        // below (including while the connection is idle) -- the pre-pooling
-        // behavior. When pooling is enabled this stays `None` and each send
-        // burst borrows a transient buffer from the per-worker pool instead.
+        // Without pooling, the IO worker owns one egress buffer for the entire
+        // connection, including idle periods. With pooling, this remains `None`
+        // and each send burst borrows a buffer from the per-worker pool.
         let mut persistent_send_buf: Option<Box<[u8]>> =
             (!self.cfg.pool_send_buffer).then(alloc_send_buffer);
 
@@ -406,10 +404,8 @@ where
             while self.write_state.has_pending_data {
                 let mut packets_sent = 0;
 
-                // Try to clear all received packets every so often, because
-                // incoming packets contain acks, and because the
-                // receive queue has a very limited size, once it is full incoming
-                // packets get stalled indefinitely
+                // Drain received packets periodically because they contain ACKs
+                // and the bounded receive queue stalls new packets when full.
                 let mut did_recv = false;
                 while let Some(pkt) = ctx
                     .in_pkt
@@ -669,8 +665,8 @@ where
             }
 
             if gcongestion_enabled {
-                // If the release time of next packet is different, or it can't be
-                // part of a burst, start the next batch
+                // Start a new batch if the next packet has a different release
+                // time or cannot be part of a burst.
                 if let Some(initial_release_decision) = initial_release_decision {
                     match qconn.get_next_release_time() {
                         Some(release)
@@ -899,24 +895,21 @@ where
         Ok(())
     }
 
-    // When a connection is established, process application data, if not the task
-    // is probably polled following a wakeup from boring, so we check if quiche
-    // has any handshake packets to send.
+    // Process application data after establishment. Before then, a BoringSSL
+    // wakeup might require quiche to send handshake packets.
     //
-    // TODO(erittenhouse): would be nice to decouple wait_for_data from the
-    // application, but wait_for_quiche relies on IOW methods, so we can't write a
-    // default implementation for ConnectionStage
+    // TODO(erittenhouse): Decouple `wait_for_data` from the application.
+    // `wait_for_quiche` depends on IOW methods, preventing a default
+    // `ConnectionStage` implementation.
     //
     // # Cancel safety
     //
-    // This future is polled as an arm of the `select!` in [`Self::work_loop`],
-    // so it MUST be cancel safe: it may be dropped at any `.await` point when
-    // another arm completes first. It stays cancel safe because
-    // [`ApplicationOverQuic::wait_for_data`] is itself required to be cancel
-    // safe, and the handshake branch keeps no state across its `.await` beyond
-    // the local `send_buf` (which is returned to the free list or freed if the
-    // future is cancelled; any bytes gathered into it are re-gathered on the
-    // next poll). Take care to preserve this property when modifying it.
+    // This future is polled as an arm of the `select!` in `Self::work_loop`, so
+    // it must be cancel-safe. Another arm may complete first and drop it at any
+    // `.await`. `ApplicationOverQuic::wait_for_data` is also cancel-safe, and
+    // the handshake branch retains only its local `send_buf` across `.await`.
+    // Cancellation returns or frees that buffer. The next poll gathers its
+    // bytes again. Preserve this property when modifying the function.
     async fn wait_for_data_or_handshake<A: ApplicationOverQuic>(
         &mut self, qconn: &mut QuicheConnection, quic_application: &mut A,
     ) -> QuicResult<WaitForDataOrHandshakeDirective> {
@@ -978,12 +971,9 @@ where
                 true,
             ) {
                 Ok(bytes_written) => {
-                    // We need to avoid consecutive calls to gather(), which write
-                    // data to the buffer, without a flush().
-                    // If we don't avoid those consecutive calls, we end
-                    // up overwriting data in the buffer or unnecessarily waiting
-                    // for more calls to drive_handshake()
-                    // before calling the handshake complete.
+                    // Do not call `gather()` twice without an intervening
+                    // `flush()`. Consecutive calls may overwrite data or delay
+                    // handshake completion.
                     if bytes_written == 0 && self.write_state.bytes_written == 0 {
                         Poll::Pending
                     } else {
@@ -1048,11 +1038,9 @@ where
     where
         A: ApplicationOverQuic,
     {
-        // This makes an assumption that the waker being set in ex_data is stable
-        // across the active task's lifetime. Moving a future that encompasses an
-        // async callback from this task across a channel, for example, will
-        // cause issues as this waker will then be stale and attempt to
-        // wake the wrong task.
+        // The `ex_data` waker must remain stable for this task. Moving a future
+        // with an async callback to another task leaves a stale waker that
+        // wakes the wrong task.
         std::future::poll_fn(|cx| {
             // Deref to pick `Connection::as_mut` over `Box::as_mut`.
             let ssl = (*qconn).as_mut();

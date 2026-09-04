@@ -377,8 +377,7 @@ impl TransportParams {
                 // Track unknown transport parameters specially.
                 unknown_tp_id => {
                     if let Some(unknown_params) = &mut tp.unknown_params {
-                        // It is _not_ an error not to have space enough to track
-                        // an unknown parameter.
+                        // Failing to track an unknown parameter is harmless.
                         let _ = unknown_params.push(UnknownTransportParameter {
                             id: unknown_tp_id,
                             value: val.buf(),

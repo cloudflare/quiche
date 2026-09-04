@@ -107,8 +107,8 @@ pub struct TransportParameters {
 impl From<String> for TransportParameters {
     // Example string:
     // [Client legacy[version 00000001] [chosen_version 00000001 other_versions
-    // 00000001] max_idle_timeout 30000 max_udp_payload_size 1472 initial_max_data
-    // 15728640 initial_max_stream_data_bidi_local 6291456
+    // 00000001] max_idle_timeout 30000 max_udp_payload_size 1472
+    // initial_max_data 15728640 initial_max_stream_data_bidi_local 6291456
     // initial_max_stream_data_bidi_remote 6291456 initial_max_stream_data_uni
     // 6291456 initial_max_streams_bidi 100 initial_max_streams_uni 103
     // initial_source_connection_id 0 max_datagram_frame_size 65536]

@@ -232,9 +232,9 @@ fn on_packet_acked(
     // Detecting spurious congestion events.
     // <https://tools.ietf.org/id/draft-ietf-tcpm-rfc8312bis-00.html#section-4.9>
     //
-    // When the recovery episode ends with recovering
-    // a few packets (less than cwnd / mss * ROLLBACK_THRESHOLD_PERCENT(%)), it's
-    // considered as spurious and restore to the previous state.
+    // If recovery ends after fewer than
+    // `cwnd / mss * ROLLBACK_THRESHOLD_PERCENT` packets, treat the congestion
+    // event as spurious and restore the previous state.
     if r.congestion_recovery_start_time.is_some() {
         let new_lost = r.lost_count - r.cubic_state.prior.lost_count;
 

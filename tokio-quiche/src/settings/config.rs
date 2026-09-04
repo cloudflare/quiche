@@ -236,7 +236,7 @@ fn quiche_config_with_tls(
     match tls.kind {
         #[cfg(not(feature = "rpk"))]
         CertificateKind::RawPublicKey => {
-            // TODO: don't compile this enum variant unless rpk feature is enabled
+            // TODO: Gate this variant on the `rpk` feature.
             panic!("Can't use RPK when compiled without rpk feature");
         },
         #[cfg(feature = "rpk")]

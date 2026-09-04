@@ -1650,10 +1650,8 @@ impl Connection {
                 let (mut n, rem) =
                     conn.stream_send_zc(stream_id, body.clone(), fin)?;
                 if rem.as_ref().is_some_and(|v| !v.as_ref().is_empty()) {
-                    // `rem` should always be None or empty.
-                    // `do_send_body()` should have checked the capacity and
-                    // ensured that there is enough capacity to write the header +
-                    // fully body.
+                    // `do_send_body()` checked capacity before this write, so
+                    // `rem` should always be `None` or empty.
                     debug_assert!(false);
                     return Err(Error::InternalError);
                 }
@@ -2798,8 +2796,8 @@ impl Connection {
                         Err(_) => continue,
                     };
 
-                    // DATA frames are handled uniquely. After this point we lose
-                    // visibility of DATA framing, so just log here.
+                    // DATA frames are handled uniquely. Log them here because
+                    // DATA framing is no longer visible after this point.
                     if Some(frame::DATA_FRAME_TYPE_ID) == stream.frame_type() {
                         trace!(
                             "{} rx frm DATA stream={} wire_payload_len={}",
@@ -2860,10 +2858,8 @@ impl Connection {
                         Ok(ev) => return Ok(ev),
 
                         Err(Error::Done) => {
-                            // This might be a frame that is processed internally
-                            // without needing to bubble up to the user as an
-                            // event. Check whether the frame has FIN'd by QUIC
-                            // to prevent trying to read again on a closed stream.
+                            // Internal frames do not produce events. Avoid
+                            // reading again if QUIC marked the stream finished.
                             if conn.stream_finished(stream_id) {
                                 break;
                             }
@@ -4017,9 +4013,8 @@ mod tests {
         assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
         assert_eq!(s.poll_client(), Err(Error::Done));
 
-        // We expect to be able to read multiple data frames in a single call and
-        // reads don't have to end on frame boundaries. So let's try to read
-        // 1.5 times the amount we sent in one frame.
+        // Reads may span multiple DATA frames and need not end at frame
+        // boundaries. Read one and a half times the payload of one frame.
         let how_much_to_read_per_call = data.len() * 2 / 3;
         let mut remaining_to_read = total_data_frames * data.len();
         let mut recv_buf = Vec::new().limit(how_much_to_read_per_call);
@@ -6314,8 +6309,8 @@ mod tests {
         s.handshake().unwrap();
 
         // After the HTTP handshake, some bytes of connection flow control have
-        // been consumed. Fill the connection with more grease data on the control
-        // stream.
+        // been consumed. Fill the connection with more grease data on the
+        // control stream.
         let d = [42; 28];
         assert_eq!(s.pipe.client.stream_send(2, &d, false), Ok(23));
 
@@ -6440,7 +6435,8 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
-        config.set_initial_max_data(10000); // large connection-level flow control
+        // Use generous connection-level flow control.
+        config.set_initial_max_data(10000);
         config.set_initial_max_stream_data_bidi_local(80);
         config.set_initial_max_stream_data_bidi_remote(80);
         config.set_initial_max_stream_data_uni(150);
@@ -6574,7 +6570,8 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
-        config.set_initial_max_data(100000); // large connection-level flow control
+        // Use generous connection-level flow control.
+        config.set_initial_max_data(100000);
         config.set_initial_max_stream_data_bidi_local(100000);
         config.set_initial_max_stream_data_bidi_remote(50000);
         config.set_initial_max_stream_data_uni(150);
@@ -6646,7 +6643,8 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
-        config.set_initial_max_data(100000); // large connection-level flow control
+        // Use generous connection-level flow control.
+        config.set_initial_max_data(100000);
         config.set_initial_max_stream_data_bidi_local(100000);
         config.set_initial_max_stream_data_bidi_remote(50000);
         config.set_initial_max_stream_data_uni(150);
@@ -6818,7 +6816,7 @@ mod tests {
 
         s.advance().ok();
 
-        // Once the server gives flow control credits back, we can send the body.
+        // Flow-control credit from the server allows the body to be sent.
         assert_eq!(s.pipe.client.stream_writable_next(), Some(0));
         assert_eq!(s.client.send_body(&mut s.pipe.client, 0, b"", true), Ok(0));
     }
@@ -7780,7 +7778,7 @@ mod tests {
 
         assert_eq!(s.recv_body_server(r1_id, &mut recv_buf), Ok(r1_body.len()));
 
-        // Send a new request to ensure cross-stream events don't break rearming.
+        // Send a new request to test cross-stream event rearming.
         let (r2_id, r2_hdrs) = s.send_request(false).unwrap();
         let r2_ev_headers = Event::Headers {
             list: r2_hdrs,
@@ -7844,7 +7842,7 @@ mod tests {
             more_frames: true,
         };
 
-        // Manually send an incomplete DATA frame (i.e. only the header is sent).
+        // Manually send an incomplete DATA frame containing only its header.
         {
             let mut d = [42; 10];
             let mut b = octets::OctetsMut::with_slice(&mut d);

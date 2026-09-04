@@ -316,9 +316,8 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                 *error_code,
             ) {
                 log::error!("can't send reset_stream: {e}");
-                // Clients can't reset streams they don't own. If we attempt to do
-                // this, stream_shutdown would fail, and we
-                // shouldn't create a parser.
+                // Clients cannot reset streams they do not own. If attempted,
+                // `stream_shutdown()` fails and no parser should be created.
                 return;
             }
 
@@ -343,8 +342,8 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                 log::error!("can't send stop_sending: {e}");
             }
 
-            // A `STOP_SENDING` should elicit a `RESET_STREAM` in response, which
-            // the frame parser can automatically handle.
+            // A `STOP_SENDING` should elicit a `RESET_STREAM` in response,
+            // which the frame parser can automatically handle.
             stream_parsers
                 .entry(*stream_id)
                 .or_insert_with(|| FrameParser::new(*stream_id));
