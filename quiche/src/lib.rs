@@ -9155,6 +9155,39 @@ impl<F: BufFactory> Connection<F> {
                 self.paths.get_mut(active_path_id)?.active_dcid_seq;
         }
 
+        // The DCID used on the previous path is not reused by the new active
+        // path, so it is no longer associated with an actively used address
+        // and the peer should be asked to retire it (RFC 9000 Section 5.1.2).
+        //
+        // The old path is kept usable to fall back on if the new path fails
+        // validation, so only retire the DCID if there is a spare one to
+        // replace it on that path.
+        if !self.ids.zero_length_dcid() {
+            let new_dcid_seq = self.paths.get(new_pid)?.active_dcid_seq;
+
+            if let Some(old_dcid_seq) =
+                self.paths.get(active_path_id)?.active_dcid_seq
+            {
+                if new_dcid_seq != Some(old_dcid_seq) {
+                    if let Some(dcid_seq) = self.ids.lowest_available_dcid_seq() {
+                        self.ids.retire_dcid(old_dcid_seq)?;
+
+                        self.ids
+                            .link_dcid_to_path_id(dcid_seq, active_path_id)?;
+
+                        self.paths.get_mut(active_path_id)?.active_dcid_seq =
+                            Some(dcid_seq);
+
+                        trace!(
+                            "{} path ID {} changed DCID after peer migration: old seq num {} new seq num {}",
+                            self.trace_id, active_path_id, old_dcid_seq,
+                            dcid_seq
+                        );
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
