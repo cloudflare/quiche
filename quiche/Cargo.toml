@@ -81,7 +81,7 @@ qlog = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { version = "1.0", optional = true }
 serde_with = { workspace = true, features = ["macros"], optional = true }
-sfv = { version = "0.9", optional = true }
+sfv = { version = "0.15", optional = true }
 slab = "0.4"
 smallvec = { workspace = true, features = ["union"] }
 enum_dispatch = "0.3"
