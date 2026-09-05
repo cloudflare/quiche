@@ -11181,6 +11181,98 @@ fn connection_migration(
 }
 
 #[rstest]
+fn peer_migration_retires_previous_dcid(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(3);
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(15);
+    config.set_initial_max_stream_data_bidi_remote(15);
+    config.set_initial_max_stream_data_uni(10);
+    config.set_initial_max_streams_bidi(3);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 2);
+
+    let server_addr = test_utils::Pipe::server_addr();
+    let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+
+    // Probe the new client address first, so that the server creates the
+    // path for it and assigns it a spare DCID.
+    assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(
+        pipe.client.path_event_next(),
+        Some(PathEvent::Validated(client_addr_2, server_addr))
+    );
+    assert_eq!(pipe.client.path_event_next(), None);
+    assert_eq!(
+        pipe.server.path_event_next(),
+        Some(PathEvent::New(server_addr, client_addr_2))
+    );
+    assert_eq!(
+        pipe.server.path_event_next(),
+        Some(PathEvent::Validated(server_addr, client_addr_2))
+    );
+    assert_eq!(pipe.server.path_event_next(), None);
+
+    // The original path uses DCID seq 0 on the server side.
+    assert_eq!(
+        pipe.server
+            .paths
+            .get_active()
+            .expect("no active")
+            .active_dcid_seq,
+        Some(0)
+    );
+
+    // Client migrates to the probed path.
+    assert_eq!(pipe.client.migrate(client_addr_2, server_addr), Ok(1));
+    assert_eq!(pipe.client.stream_send(0, b"data", true), Ok(4));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(
+        pipe.server.path_event_next(),
+        Some(PathEvent::PeerMigrated(server_addr, client_addr_2))
+    );
+    assert_eq!(pipe.server.path_event_next(), None);
+
+    // The new active path uses a different DCID, assigned when the probed
+    // path was created.
+    let new_dcid_seq = pipe
+        .server
+        .paths
+        .get_active()
+        .expect("no active")
+        .active_dcid_seq;
+    assert_ne!(new_dcid_seq, Some(0));
+
+    // The DCID used on the previous path is no longer in use, so the server
+    // retires it, replacing it on the old path with the next available DCID
+    // (the old path is kept usable to fall back on if the new path fails
+    // validation).
+    assert_ne!(pipe.server.paths.get(0).unwrap().active_dcid_seq, Some(0));
+    assert!(pipe.server.ids.get_dcid(0).is_err());
+
+    // The retirement was advertised to the peer...
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.server.ids.retire_dcid_seqs().is_empty());
+
+    // ...and the client acknowledged it by retiring the corresponding SCID.
+    assert_eq!(pipe.client.retired_scids(), 1);
+}
+
+#[rstest]
 fn connection_migration_zero_length_cid(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
