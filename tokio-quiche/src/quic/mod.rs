@@ -108,6 +108,7 @@ mod hooks;
 mod io;
 pub mod raw;
 mod router;
+mod stats;
 
 use self::connection::ApplicationOverQuic;
 use self::connection::ConnectionIdGenerator as _;
@@ -122,9 +123,10 @@ pub use self::connection::HandshakeError;
 pub use self::connection::HandshakeInfo;
 pub use self::connection::Incoming;
 pub use self::connection::QuicCommand;
-pub use self::connection::QuicConnectionStats;
 pub use self::connection::SimpleConnectionIdGenerator;
 pub use self::hooks::ConnectionHook;
+pub use self::stats::PathEventStats;
+pub use self::stats::QuicConnectionStats;
 
 /// Alias of [quiche::Connection] used internally by the crate.
 pub type QuicheConnection = quiche::Connection<crate::buf_factory::BufFactory>;

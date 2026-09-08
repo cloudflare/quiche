@@ -34,7 +34,7 @@ use crate::quic::connection::ApplicationOverQuic;
 use crate::quic::connection::HandshakeError;
 use crate::quic::connection::HandshakeInfo;
 use crate::quic::connection::Incoming;
-use crate::quic::connection::QuicConnectionStatsShared;
+use crate::quic::stats::QuicConnectionStatsShared;
 use crate::quic::QuicheConnection;
 use crate::QuicResult;
 

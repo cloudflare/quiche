@@ -72,115 +72,9 @@ use crate::quic::io::worker::IoWorker;
 use crate::quic::io::worker::WriterConfig;
 use crate::quic::io::worker::INCOMING_QUEUE_SIZE;
 use crate::quic::router::ConnectionMapCommand;
+use crate::quic::stats::QuicConnectionStats;
+use crate::quic::stats::QuicConnectionStatsShared;
 use crate::QuicResult;
-
-/// Wrapper for connection statistics recorded by [quiche].
-#[derive(Debug)]
-pub struct QuicConnectionStats {
-    /// Aggregate connection statistics across all paths.
-    pub stats: quiche::Stats,
-    /// Specific statistics about the connection's active path.
-    pub path_stats: Option<quiche::PathStats>,
-}
-pub(crate) type QuicConnectionStatsShared = Arc<Mutex<QuicConnectionStats>>;
-
-impl QuicConnectionStats {
-    pub(crate) fn from_conn(qconn: &QuicheConnection) -> Self {
-        Self {
-            stats: qconn.stats(),
-            path_stats: qconn.path_stats().next(),
-        }
-    }
-
-    fn startup_exit_to_socket_stats(
-        value: quiche::StartupExit,
-    ) -> datagram_socket::StartupExit {
-        let reason = match value.reason {
-            quiche::StartupExitReason::Loss =>
-                datagram_socket::StartupExitReason::Loss,
-            quiche::StartupExitReason::BandwidthPlateau =>
-                datagram_socket::StartupExitReason::BandwidthPlateau,
-            quiche::StartupExitReason::PersistentQueue =>
-                datagram_socket::StartupExitReason::PersistentQueue,
-            quiche::StartupExitReason::ConservativeSlowStartRounds =>
-                datagram_socket::StartupExitReason::ConservativeSlowStartRounds,
-        };
-
-        datagram_socket::StartupExit {
-            cwnd: value.cwnd,
-            bandwidth: value.bandwidth,
-            reason,
-        }
-    }
-}
-
-impl AsSocketStats for QuicConnectionStats {
-    fn as_socket_stats(&self) -> SocketStats {
-        SocketStats {
-            pmtu: self
-                .path_stats
-                .as_ref()
-                .map(|p| p.pmtu as u16)
-                .unwrap_or_default(),
-            rtt_us: self
-                .path_stats
-                .as_ref()
-                .map(|p| p.rtt.as_micros() as i64)
-                .unwrap_or_default(),
-            min_rtt_us: self
-                .path_stats
-                .as_ref()
-                .and_then(|p| p.min_rtt.map(|x| x.as_micros() as i64))
-                .unwrap_or_default(),
-            max_rtt_us: self
-                .path_stats
-                .as_ref()
-                .and_then(|p| p.max_rtt.map(|x| x.as_micros() as i64))
-                .unwrap_or_default(),
-            rtt_var_us: self
-                .path_stats
-                .as_ref()
-                .map(|p| p.rttvar.as_micros() as i64)
-                .unwrap_or_default(),
-            cwnd: self
-                .path_stats
-                .as_ref()
-                .map(|p| p.cwnd as u64)
-                .unwrap_or_default(),
-            total_pto_count: self
-                .path_stats
-                .as_ref()
-                .map(|p| p.total_pto_count as u64)
-                .unwrap_or_default(),
-            packets_sent: self.stats.sent as u64,
-            packets_recvd: self.stats.recv as u64,
-            packets_lost: self.stats.lost as u64,
-            packets_lost_spurious: self.stats.spurious_lost as u64,
-            packets_retrans: self.stats.retrans as u64,
-            bytes_sent: self.stats.sent_bytes,
-            bytes_recvd: self.stats.recv_bytes,
-            bytes_lost: self.stats.lost_bytes,
-            bytes_retrans: self.stats.stream_retrans_bytes,
-            bytes_unsent: 0, /* not implemented yet, kept for compatibility
-                              * with TCP */
-            delivery_rate: self
-                .path_stats
-                .as_ref()
-                .map(|p| p.delivery_rate)
-                .unwrap_or_default(),
-            max_bandwidth: self.path_stats.as_ref().and_then(|p| p.max_bandwidth),
-            startup_exit: self
-                .path_stats
-                .as_ref()
-                .and_then(|p| p.startup_exit)
-                .map(QuicConnectionStats::startup_exit_to_socket_stats),
-            bytes_in_flight_duration_us: self
-                .stats
-                .bytes_in_flight_duration
-                .as_micros() as u64,
-        }
-    }
-}
 
 /// A received network packet with additional metadata.
 #[derive(Debug)]
@@ -295,7 +189,8 @@ where
     ///
     /// # Note
     /// Initially, these stats represent the state when the [quiche::Connection]
-    /// was created. They are updated when the connection is closed, so this
+    /// was created. Path event counts are updated during the connection, while
+    /// the other statistics are updated when the connection is closed. This
     /// getter exists primarily to grab a handle early on.
     #[inline]
     pub fn stats(&self) -> &QuicConnectionStatsShared {
@@ -531,7 +426,8 @@ impl QuicConnection {
     ///
     /// # Note
     /// Initially, these stats represent the state when the [quiche::Connection]
-    /// was created. They are updated when the connection is closed, so this
+    /// was created. Path event counts are updated during the connection, while
+    /// the other statistics are updated when the connection is closed. This
     /// getter exists primarily to grab a handle early on.
     #[inline]
     pub fn stats(&self) -> &QuicConnectionStatsShared {

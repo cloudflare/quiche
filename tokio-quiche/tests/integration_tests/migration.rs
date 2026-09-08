@@ -26,6 +26,13 @@
 
 use h3i::quiche;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
+use tokio::sync::oneshot;
+use tokio::time::timeout;
+use tokio_quiche::quic::PathEventStats;
+use tokio_quiche::quic::QuicConnectionStats;
 use tokio_quiche::quic::SimpleConnectionIdGenerator;
 use tokio_quiche::ConnectionIdGenerator as _;
 
@@ -68,11 +75,26 @@ async fn run_migration_test(active: bool, base_port: u16) {
     quic_settings.disable_active_migration = !active;
     quic_settings.disable_dcid_reuse = false;
 
+    let (server_stats_tx, server_stats_rx) =
+        oneshot::channel::<Arc<Mutex<QuicConnectionStats>>>();
+    let server_stats_tx = Arc::new(Mutex::new(Some(server_stats_tx)));
+
     let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
         TestConnectionHook::new(),
-        handle_connection,
+        move |connection: ServerH3Connection| {
+            let stats = Arc::clone(connection.stats());
+            let tx = Arc::clone(&server_stats_tx);
+
+            async move {
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(stats);
+                }
+
+                handle_connection(connection).await;
+            }
+        },
     );
     let server_addr = extract_host_ipv4(&url);
 
@@ -116,6 +138,10 @@ async fn run_migration_test(active: bool, base_port: u16) {
         emit_flight(&socket, &mut conn).await;
         process_flight(&socket, client_addr, &mut conn).await;
     }
+
+    let server_stats = server_stats_rx
+        .await
+        .expect("server should expose its connection statistics");
 
     // Create a new HTTP/3 connection once the QUIC connection is established.
     let h3_config = quiche::h3::Config::new().unwrap();
@@ -173,6 +199,40 @@ async fn run_migration_test(active: bool, base_port: u16) {
     process_flight(&migrated_socket, client_addr, &mut conn).await;
 
     assert_eq!(process_h3_events(&mut h3_conn, &mut conn), (true, true));
+
+    let path_event_stats = timeout(Duration::from_secs(1), async {
+        loop {
+            let path_event_stats = server_stats.lock().unwrap().path_event_stats;
+            if path_event_stats.peer_migrated_count > 0 {
+                break path_event_stats;
+            }
+
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("server should record the peer migration");
+
+    let expected_path_event_stats = if active {
+        PathEventStats {
+            new_path_count: 1,
+            validated_count: 1,
+            failed_validation_count: 0,
+            closed_count: 0,
+            reused_source_connection_id_count: 0,
+            peer_migrated_count: 1,
+        }
+    } else {
+        PathEventStats {
+            new_path_count: 1,
+            validated_count: 0,
+            failed_validation_count: 1,
+            closed_count: 0,
+            reused_source_connection_id_count: 1,
+            peer_migrated_count: 1,
+        }
+    };
+    assert_eq!(path_event_stats, expected_path_event_stats);
 }
 
 async fn emit_flight(
