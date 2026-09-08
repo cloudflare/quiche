@@ -122,6 +122,9 @@ where
     /// The final stream offset written to the stream, if any.
     fin_off: Option<u64>,
 
+    /// Whether a STREAM frame carrying FIN has been acknowledged.
+    fin_acked: bool,
+
     /// Whether the stream's send-side has been shut down.
     shutdown: bool,
 
@@ -324,6 +327,11 @@ impl<F: BufFactory> SendBuf<F> {
         self.acked.insert(off..off + len as u64);
     }
 
+    /// Marks the stream's final size as acknowledged by the peer.
+    pub(crate) fn ack_fin(&mut self) {
+        self.fin_acked = true;
+    }
+
     pub fn ack_and_drop(&mut self, off: u64, len: usize) -> usize {
         self.ack(off, len);
 
@@ -520,11 +528,13 @@ impl<F: BufFactory> SendBuf<F> {
 
     /// Returns true if the send-side of the stream is complete.
     ///
-    /// This happens when the stream's send final size is known, and the peer
-    /// has already acked all stream data up to that point.
+    /// This happens when the peer has acknowledged the stream's final size and
+    /// all stream data up to that point, or the stream has been reset.
     pub fn is_complete(&self) -> bool {
         if let Some(fin_off) = self.fin_off {
-            if self.acked == (0..fin_off) {
+            if (self.fin_acked || self.shutdown || self.error.is_some()) &&
+                self.acked == (0..fin_off)
+            {
                 return true;
             }
         }
