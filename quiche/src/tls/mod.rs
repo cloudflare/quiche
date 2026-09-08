@@ -575,6 +575,28 @@ impl Handshake {
         get_cipher_from_ptr(cipher.ok()?).ok()
     }
 
+    pub fn export_keying_material(
+        &self, out: &mut [u8], label: &[u8], context: Option<&[u8]>,
+    ) -> Result<()> {
+        let (context_ptr, context_len, use_context) = match context {
+            Some(context) => (context.as_ptr(), context.len(), 1),
+            None => (ptr::null(), 0, 0),
+        };
+
+        map_result(unsafe {
+            SSL_export_keying_material(
+                self.as_ptr(),
+                out.as_mut_ptr(),
+                out.len(),
+                label.as_ptr().cast(),
+                label.len(),
+                context_ptr,
+                context_len,
+                use_context,
+            )
+        })
+    }
+
     #[cfg(test)]
     pub fn set_options(&mut self, opts: u32) {
         unsafe {
@@ -1167,6 +1189,12 @@ extern "C" {
     fn SSL_get_ex_data(ssl: *const SSL, idx: c_int) -> *mut c_void;
 
     fn SSL_get_current_cipher(ssl: *const SSL) -> *const SSL_CIPHER;
+
+    fn SSL_export_keying_material(
+        ssl: *const SSL, out: *mut u8, out_len: usize, label: *const c_char,
+        label_len: usize, context: *const u8, context_len: usize,
+        use_context: c_int,
+    ) -> c_int;
 
     fn SSL_set_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int;
 

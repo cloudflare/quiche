@@ -461,6 +461,42 @@ fn handshake(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     assert_eq!(pipe.server.server_name(), Some("quic.tech"));
 }
 
+#[test]
+fn export_keying_material() {
+    let mut pipe = test_utils::Pipe::new("cubic").unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let mut client = [0; 32];
+    let mut server = [0; 32];
+    pipe.client
+        .export_keying_material(&mut client, b"EXPORTER-quiche-test", None)
+        .unwrap();
+    pipe.server
+        .export_keying_material(&mut server, b"EXPORTER-quiche-test", None)
+        .unwrap();
+    assert_eq!(client, server);
+
+    let mut other_label = [0; 32];
+    pipe.client
+        .export_keying_material(
+            &mut other_label,
+            b"EXPORTER-quiche-other-test",
+            None,
+        )
+        .unwrap();
+    assert_ne!(client, other_label);
+
+    let mut with_context = [0; 32];
+    pipe.client
+        .export_keying_material(
+            &mut with_context,
+            b"EXPORTER-quiche-test",
+            Some(b"context"),
+        )
+        .unwrap();
+    assert_ne!(client, with_context);
+}
+
 #[rstest]
 fn handshake_done(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
