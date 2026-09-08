@@ -133,6 +133,81 @@ fn transport_params_forbid_duplicates() {
 }
 
 #[test]
+fn transport_params_reject_zero_length_integer() {
+    // RFC 9000 Section 16: a varint must be at least 1 byte.
+    // A transport parameter with an integer value encoded as zero-length
+    // is invalid and must be rejected with TRANSPORT_PARAMETER_ERROR.
+
+    // max_idle_timeout (0x01) with length 0: invalid.
+    let raw_params: &[u8] = &[0x01, 0x00];
+    assert_eq!(
+        TransportParams::decode(raw_params, true, None),
+        Err(Error::InvalidTransportParam)
+    );
+
+    // max_ack_delay (0x0b) with length 0: invalid.
+    let raw_params: &[u8] = &[0x0b, 0x00];
+    assert_eq!(
+        TransportParams::decode(raw_params, true, None),
+        Err(Error::InvalidTransportParam)
+    );
+
+    // initial_max_data (0x04) with length 0: invalid.
+    let raw_params: &[u8] = &[0x04, 0x00];
+    assert_eq!(
+        TransportParams::decode(raw_params, true, None),
+        Err(Error::InvalidTransportParam)
+    );
+
+    // initial_max_streams_bidi (0x08) with length 0: invalid.
+    let raw_params: &[u8] = &[0x08, 0x00];
+    assert_eq!(
+        TransportParams::decode(raw_params, true, None),
+        Err(Error::InvalidTransportParam)
+    );
+
+    // ack_delay_exponent (0x0a) with length 0: invalid.
+    let raw_params: &[u8] = &[0x0a, 0x00];
+    assert_eq!(
+        TransportParams::decode(raw_params, true, None),
+        Err(Error::InvalidTransportParam)
+    );
+
+    // max_datagram_frame_size (0x20) with length 0: invalid.
+    let raw_params: &[u8] = &[0x20, 0x00];
+    assert_eq!(
+        TransportParams::decode(raw_params, true, None),
+        Err(Error::InvalidTransportParam)
+    );
+}
+
+#[test]
+fn transport_params_accept_legal_zero_integer() {
+    // A varint value of 0 encoded as a single byte (0x00) is valid.
+    // max_idle_timeout (0x01) with length 1, value 0x00 = varint 0.
+    let raw_params: &[u8] = &[0x01, 0x01, 0x00];
+    let tp = TransportParams::decode(raw_params, true, None).unwrap();
+    assert_eq!(tp.max_idle_timeout, 0);
+
+    // max_ack_delay (0x0b) with length 1, value 0x00 = varint 0.
+    let raw_params: &[u8] = &[0x0b, 0x01, 0x00];
+    let tp = TransportParams::decode(raw_params, true, None).unwrap();
+    assert_eq!(tp.max_ack_delay, 0);
+}
+
+#[test]
+fn transport_params_reject_trailing_bytes_in_integer() {
+    // A varint that does not exactly consume the value length is invalid.
+    // max_idle_timeout (0x01) with length 2, value 0x00 (1-byte varint)
+    // + trailing 0x00 byte.
+    let raw_params: &[u8] = &[0x01, 0x02, 0x00, 0x00];
+    assert_eq!(
+        TransportParams::decode(raw_params, true, None),
+        Err(Error::InvalidTransportParam)
+    );
+}
+
+#[test]
 fn transport_params_unknown_zero_space() {
     let mut unknown_params: UnknownTransportParameters =
         UnknownTransportParameters {
