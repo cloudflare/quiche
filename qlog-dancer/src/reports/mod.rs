@@ -26,8 +26,7 @@
 
 //! Reporting (tables etc.)
 
-use events::sqlog_event_list;
-use tabled::settings::Style;
+use events::print_sqlog_events;
 
 use crate::config::AppConfig;
 use crate::LogFileParseResult;
@@ -55,10 +54,7 @@ pub fn report(log_file: &LogFileParseResult, config: &AppConfig) {
             match &data.raw {
                 crate::RawLogEvents::QlogJson { events: _ } => todo!(),
                 crate::RawLogEvents::QlogJsonSeq { events } => {
-                    let mut table = sqlog_event_list(events).build();
-                    table.with(Style::sharp());
-                    println!("Qlog events");
-                    println!("{}", table);
+                    print_sqlog_events(events);
                 },
                 crate::RawLogEvents::Netlog => todo!(),
             }
