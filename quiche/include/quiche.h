@@ -458,6 +458,11 @@ int64_t quiche_conn_stream_writable_next(quiche_conn *conn);
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(const quiche_conn *conn, uint64_t stream_id);
 
+// Returns true if the peer has acked all the data sent on the specified
+// stream, including the fin flag.
+bool quiche_conn_stream_send_complete(const quiche_conn *conn,
+                                      uint64_t stream_id);
+
 typedef struct quiche_stream_iter quiche_stream_iter;
 
 // Returns an iterator over streams that have outstanding data to read.
