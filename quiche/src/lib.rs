@@ -576,6 +576,7 @@ pub struct Config {
     enable_relaxed_loss_threshold: bool,
     enable_cubic_idle_restart_fix: bool,
     enable_send_streams_blocked: bool,
+    enable_ack_latency_loss_floor: bool,
 
     pmtud: bool,
     pmtud_max_probes: u8,
@@ -658,6 +659,7 @@ impl Config {
             enable_relaxed_loss_threshold: false,
             enable_cubic_idle_restart_fix: true,
             enable_send_streams_blocked: false,
+            enable_ack_latency_loss_floor: false,
             pmtud: false,
             pmtud_max_probes: pmtud::MAX_PROBES_DEFAULT,
             hystart: true,
@@ -1148,6 +1150,23 @@ impl Config {
     /// The default value is false.
     pub fn set_enable_send_streams_blocked(&mut self, enable: bool) {
         self.enable_send_streams_blocked = enable;
+    }
+
+    /// Configure whether the loss delay is floored at the ack latency the
+    /// connection has observed.
+    ///
+    /// Acknowledgements are processed in batches, and the RTT estimate only
+    /// samples the freshest packet of each batch. On a path whose RTT is
+    /// close to or below the granularity of ack processing, the time and
+    /// packet thresholds declare packets lost whose acknowledgements have
+    /// not had a chance to be processed yet. With this enabled, the loss
+    /// delay is never lower than the slowest send-to-processed-ack loop
+    /// observed in the last half second, and the packet reordering
+    /// threshold only applies to packets older than that loop.
+    ///
+    /// The default value is false.
+    pub fn set_enable_ack_latency_loss_floor(&mut self, enable: bool) {
+        self.enable_ack_latency_loss_floor = enable;
     }
 
     /// Configures whether to enable HyStart++.

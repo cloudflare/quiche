@@ -59,6 +59,7 @@ use crate::recovery::LossDetectionTimer;
 use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
+use crate::recovery::ACK_LOOP_WINDOW;
 use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
@@ -221,8 +222,8 @@ impl RecoveryEpoch {
     }
 
     fn detect_lost_packets(
-        &mut self, loss_delay: Duration, pkt_thresh: u64, now: Instant,
-        trace_id: &str, epoch: Epoch,
+        &mut self, loss_delay: Duration, pkt_thresh: u64, pkt_age_gate: Duration,
+        now: Instant, trace_id: &str, epoch: Epoch,
     ) -> LossDetectionResult {
         self.loss_time = None;
 
@@ -232,6 +233,9 @@ impl RecoveryEpoch {
 
         // Packets sent before this time are deemed lost.
         let lost_send_time = now.checked_sub(loss_delay).unwrap();
+        // The reordering threshold only convicts a packet old enough
+        // that its acknowledgement had a fair chance to be processed.
+        let pkt_gate_time = now.checked_sub(pkt_age_gate).unwrap();
 
         let mut lost_packets = 0;
         let mut lost_bytes = 0;
@@ -249,7 +253,8 @@ impl RecoveryEpoch {
         for unacked in unacked_iter {
             // Mark packet as lost, or set time when it should be marked.
             if unacked.time_sent <= lost_send_time ||
-                largest_acked >= unacked.pkt_num + pkt_thresh
+                (largest_acked >= unacked.pkt_num + pkt_thresh &&
+                    unacked.time_sent <= pkt_gate_time)
             {
                 self.lost_frames_ack.extend(unacked.frames.drain(..));
 
@@ -357,6 +362,16 @@ pub struct LegacyRecovery {
 
     loss_timer: LossDetectionTimer,
 
+    // The worst full-loop ack latency (send to processed acknowledgement)
+    // seen in the current window, and when it was recorded. A loss delay
+    // below this declares packets whose acknowledgements could not have
+    // been processed yet whatever the RTT estimate says, because RTT is
+    // sampled from the freshest packet of each ack batch and batched ack
+    // processing hides exactly the latency that matters here.
+    ack_loop_max: Duration,
+    ack_loop_at: Option<Instant>,
+    ack_latency_loss_floor: bool,
+
     pto_count: u32,
 
     rtt_stats: RttStats,
@@ -396,6 +411,9 @@ impl LegacyRecovery {
             epochs: Default::default(),
 
             loss_timer: Default::default(),
+            ack_loop_max: Duration::ZERO,
+            ack_loop_at: None,
+            ack_latency_loss_floor: recovery_config.enable_ack_latency_loss_floor,
 
             pto_count: 0,
 
@@ -531,12 +549,19 @@ impl LegacyRecovery {
     fn detect_lost_packets(
         &mut self, epoch: Epoch, now: Instant, trace_id: &str,
     ) -> (usize, usize) {
-        let loss_delay = cmp::max(self.rtt_stats.latest_rtt, self.rtt())
+        let mut loss_delay = cmp::max(self.rtt_stats.latest_rtt, self.rtt())
             .mul_f64(self.time_thresh);
+        if self.ack_latency_loss_floor {
+            loss_delay = cmp::max(
+                loss_delay,
+                self.ack_loop_max.saturating_add(GRANULARITY),
+            );
+        }
 
         let loss = self.epochs[epoch].detect_lost_packets(
             loss_delay,
             self.pkt_thresh,
+            self.ack_loop_max,
             now,
             trace_id,
             epoch,
@@ -703,6 +728,25 @@ impl RecoveryOps for LegacyRecovery {
 
         if self.newly_acked.is_empty() {
             return Ok(OnAckReceivedOutcome::default());
+        }
+
+        // The slowest acknowledgement in this batch proves how late an
+        // honest ack can currently be. Windowed so a transient stall
+        // stops inflating the loss delay shortly after it passes.
+        if self.ack_latency_loss_floor {
+            let batch_loop = self
+                .newly_acked
+                .iter()
+                .map(|acked| now.saturating_duration_since(acked.time_sent))
+                .max()
+                .unwrap_or(Duration::ZERO);
+            let expired = self.ack_loop_at.is_none_or(|at| {
+                now.saturating_duration_since(at) > ACK_LOOP_WINDOW
+            });
+            if expired || batch_loop >= self.ack_loop_max {
+                self.ack_loop_max = batch_loop;
+                self.ack_loop_at = Some(now);
+            }
         }
 
         let largest_newly_acked = self.newly_acked.last().unwrap();
