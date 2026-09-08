@@ -313,6 +313,8 @@ pub enum QuicEventType {
     UdpDatagramsReceived,
     UdpDatagramDropped,
     StreamStateUpdated,
+    FramesCreated,
+    FramesParsed,
     FramesProcessed,
     StreamDataMoved,
     DatagramDataMoved,
@@ -357,13 +359,13 @@ pub enum ConnectionState {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionClosedTrigger {
-    Clean,
-    HandshakeTimeout,
     IdleTimeout,
-    Error,
-    StatelessReset,
-    VersionMismatch,
     Application,
+    Error,
+    VersionMismatch,
+    StatelessReset,
+    Aborted,
+    Unspecified,
 }
 
 #[serde_with::skip_serializing_none]
@@ -402,7 +404,7 @@ pub struct ConnectionClosed {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ConnectionIdUpdated {
-    pub owner: Option<TransportInitiator>,
+    pub initiator: TransportInitiator,
 
     pub old: Option<Bytes>,
     pub new: Option<Bytes>,
@@ -450,7 +452,7 @@ pub enum PacketSentTrigger {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum PacketReceivedTrigger {
-    KeysUnavailable,
+    KeysAvailable,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -460,8 +462,10 @@ pub enum PacketDroppedTrigger {
     Rejected,
     Unsupported,
     Invalid,
+    Duplicate,
     ConnectionUnknown,
     DecryptionFailure,
+    KeyUnavailable,
     General,
 }
 
@@ -865,10 +869,26 @@ pub struct StreamStateUpdated {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+pub struct FramesCreated {
+    pub frames: Vec<QuicFrame>,
+
+    pub packet_numbers: Option<Vec<u64>>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+pub struct FramesParsed {
+    pub frames: Vec<QuicFrame>,
+
+    pub packet_numbers: Option<Vec<u64>>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 pub struct FramesProcessed {
     pub frames: Vec<QuicFrame>,
 
-    pub packet_numbers: Option<u64>,
+    pub packet_numbers: Option<Vec<u64>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
