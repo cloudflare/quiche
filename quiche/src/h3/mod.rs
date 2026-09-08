@@ -6526,7 +6526,7 @@ mod tests {
         let pkt_type = crate::packet::Type::Short;
         assert_eq!(
             s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Ok(39),
+            Ok(40),
         );
 
         let sent = s
@@ -8035,7 +8035,7 @@ mod tests {
         let pkt_type = crate::packet::Type::Short;
         assert_eq!(
             s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Ok(39)
+            Ok(40)
         );
 
         // Server issues Reset event for the stream.
@@ -8045,7 +8045,7 @@ mod tests {
         // Sending RESET_STREAM again shouldn't trigger another Reset event.
         assert_eq!(
             s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Ok(39)
+            Ok(40)
         );
 
         assert_eq!(s.poll_server(), Err(Error::Done));
@@ -8402,7 +8402,7 @@ mod tests {
         let pkt_type = crate::packet::Type::Short;
         assert_eq!(
             s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Ok(39)
+            Ok(40)
         );
 
         assert_eq!(s.pipe.advance(), Ok(()));
