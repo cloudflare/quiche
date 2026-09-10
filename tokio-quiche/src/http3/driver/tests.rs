@@ -1097,6 +1097,98 @@ mod server_side_driver {
         assert_eq!(audit_stats.downstream_bytes_sent(), 5);
     }
 
+    /// The per-stream wire counter stays isolated across two streams sharing
+    /// one connection, even though the driver reads the HEADERS length from the
+    /// connection-wide `last_headers_wire_len` cache. Writing different header
+    /// sizes on each stream must attribute each stream its own bytes.
+    #[test]
+    fn server_wire_counters_isolated_across_streams() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Two requests on two streams.
+        helper
+            .peer_client_send_request(make_request_headers("GET"), true)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let req0 = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { incoming_headers, .. } => { incoming_headers }
+        );
+        let to_client0 = req0.send.get_ref().unwrap().clone();
+        let stats0 = req0.h3_audit_stats;
+
+        // Second request on a second stream. Drain events until the new
+        // stream's Headers arrives (a prior stream may emit FIN/body events
+        // first).
+        helper
+            .peer_client_send_request(make_request_headers("GET"), true)
+            .unwrap();
+        let (to_client1, stats1) = loop {
+            helper.advance_and_run_loop().unwrap();
+            match helper.driver_recv_server_event().unwrap() {
+                ServerH3Event::Headers {
+                    incoming_headers, ..
+                } if incoming_headers.stream_id != req0.stream_id => {
+                    break (
+                        incoming_headers.send.get_ref().unwrap().clone(),
+                        incoming_headers.h3_audit_stats,
+                    );
+                },
+                _ => continue,
+            }
+        };
+        assert_ne!(
+            Arc::as_ptr(&stats0),
+            Arc::as_ptr(&stats1),
+            "each stream has its own per-stream audit stats"
+        );
+
+        // Small HEADERS on stream 0.
+        let small = make_response_headers();
+        to_client0
+            .try_send(OutboundFrame::Headers(small.clone(), None))
+            .unwrap();
+        for _ in 0..8 {
+            helper.advance_and_run_loop().unwrap();
+            if stats0.wire_bytes_sent() != 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            stats0.wire_bytes_sent(),
+            headers_wire_bytes(&small),
+            "stream 0 must be charged its own small HEADERS"
+        );
+
+        // Larger HEADERS on stream 1 must not be misattributed to stream 0.
+        let mut large = make_response_headers();
+        large.push(h3::Header::new(
+            b"x-long-header",
+            b"some-unusually-long-value-to-distinguish-the-two-streams",
+        ));
+        to_client1
+            .try_send(OutboundFrame::Headers(large.clone(), None))
+            .unwrap();
+        for _ in 0..8 {
+            helper.advance_and_run_loop().unwrap();
+            if stats1.wire_bytes_sent() != 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            stats1.wire_bytes_sent(),
+            headers_wire_bytes(&large),
+            "stream 1 must count its own larger HEADERS"
+        );
+        assert_eq!(
+            stats0.wire_bytes_sent(),
+            headers_wire_bytes(&small),
+            "stream 0's counter must be unaffected by stream 1's write"
+        );
+    }
+
     #[test]
     fn client_fin_before_server_body() {
         let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();

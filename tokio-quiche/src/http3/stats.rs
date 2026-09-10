@@ -40,9 +40,13 @@ pub struct H3AuditStats {
     stream_id: u64,
     /// The number of bytes sent over the stream.
     downstream_bytes_sent: AtomicU64,
-    /// The total number of wire bytes written to the stream: HEADERS/trailers
-    /// framing plus their QPACK field section, plus every DATA frame's framing
-    /// and payload. This is the stream's `bs` (byte-count) input.
+    /// The total number of wire bytes written by the outbound response/stream
+    /// write path: HEADERS/trailers framing plus their QPACK field section,
+    /// plus every DATA frame's framing and payload. Excludes request
+    /// HEADERS (written before this per-stream stats handle exists),
+    /// GREASE, QUIC packet/framing overhead, retransmissions, and
+    /// control-stream bytes. This is the stream's `bs` (byte-count) input
+    /// for downstream responses.
     wire_bytes_sent: AtomicU64,
     /// The number of bytes received over the stream.
     downstream_bytes_recvd: AtomicU64,
@@ -104,9 +108,11 @@ impl H3AuditStats {
         self.downstream_bytes_sent.load(Ordering::SeqCst)
     }
 
-    /// The total number of wire bytes written to the stream: HEADERS/trailers
-    /// framing plus their QPACK field section, plus every DATA frame's framing
-    /// and payload.
+    /// The total number of wire bytes written by the outbound response/stream
+    /// write path: HEADERS/trailers framing plus their QPACK field section,
+    /// plus every DATA frame's framing and payload. Excludes request
+    /// HEADERS, GREASE, QUIC framing/retransmissions, and control-stream
+    /// bytes.
     #[inline]
     pub fn wire_bytes_sent(&self) -> u64 {
         self.wire_bytes_sent.load(Ordering::SeqCst)
