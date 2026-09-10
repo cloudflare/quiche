@@ -782,6 +782,9 @@ impl Config {
 
     /// Configures whether to do path MTU discovery.
     ///
+    /// PMTUD-driven packet limit updates are reported to the application
+    /// through [`PathEvent::PmtuUpdated`].
+    ///
     /// The default value is `false`.
     pub fn discover_pmtu(&mut self, discover: bool) {
         self.pmtud = discover;
@@ -3531,24 +3534,29 @@ impl<F: BufFactory> Connection<F> {
 
         // Process acked frames. Note that several packets from several paths
         // might have been acked by the received packet.
-        for (_, p) in self.paths.iter_mut() {
+        let (paths, path_events) = self.paths.iter_mut_and_events();
+        for (_, p) in paths {
             while let Some(acked) = p.recovery.next_acked_frame(epoch) {
                 match acked {
                     frame::Frame::Ping {
                         mtu_probe: Some(mtu_probe),
                     } => {
+                        trace!(
+                            "{} pmtud probe acked; probe size {:?}",
+                            self.trace_id,
+                            mtu_probe
+                        );
+
+                        let local = p.local_addr();
+                        let peer = p.peer_addr();
                         if let Some(pmtud) = p.pmtud.as_mut() {
-                            trace!(
-                                "{} pmtud probe acked; probe size {:?}",
-                                self.trace_id,
-                                mtu_probe
-                            );
+                            let old_pmtu = pmtud.get_current_mtu();
+                            let current_mtu = pmtud.successful_probe(mtu_probe);
+                            let new_pmtu = pmtud.get_current_mtu();
 
                             // Update the datagram size only after validating
                             // the MTU.
-                            if let Some(current_mtu) =
-                                pmtud.successful_probe(mtu_probe)
-                            {
+                            if let Some(current_mtu) = current_mtu {
                                 qlog_with_type!(
                                     EventType::QuicEventType(
                                         QuicEventType::MtuUpdated
@@ -3576,6 +3584,12 @@ impl<F: BufFactory> Connection<F> {
 
                                 p.recovery
                                     .pmtud_update_max_datagram_size(current_mtu);
+                            }
+
+                            if let Some(event) =
+                                path::pmtu_event(local, peer, old_pmtu, new_pmtu)
+                            {
+                                path_events.push_back(event);
                             }
                         }
                     },
@@ -4137,7 +4151,8 @@ impl<F: BufFactory> Connection<F> {
         let crypto_ctx = &mut self.crypto_ctx[epoch];
 
         // Process lost frames. There might be several paths having lost frames.
-        for (_, p) in self.paths.iter_mut() {
+        let (paths, path_events) = self.paths.iter_mut_and_events();
+        for (_, p) in paths {
             while let Some(lost) = p.recovery.next_lost_frame(epoch) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
@@ -4301,9 +4316,27 @@ impl<F: BufFactory> Connection<F> {
                     frame::Frame::Ping { mtu_probe } => {
                         // Ping frames are not retransmitted.
                         if let Some(failed_probe) = mtu_probe {
+                            trace!("pmtud probe dropped: {failed_probe}");
+
+                            let local = p.local_addr();
+                            let peer = p.peer_addr();
                             if let Some(pmtud) = p.pmtud.as_mut() {
-                                trace!("pmtud probe dropped: {failed_probe}");
+                                let old_pmtu = pmtud.get_current_mtu();
                                 pmtud.failed_probe(failed_probe);
+                                let new_pmtu = pmtud.get_current_mtu();
+                                let pmtu_validated = pmtud.get_pmtu().is_some();
+                                let event = path::pmtu_event(
+                                    local, peer, old_pmtu, new_pmtu,
+                                );
+
+                                if pmtu_validated || event.is_some() {
+                                    p.recovery
+                                        .pmtud_update_max_datagram_size(new_pmtu);
+                                }
+
+                                if let Some(event) = event {
+                                    path_events.push_back(event);
+                                }
                             }
                         }
                     },
@@ -7702,12 +7735,29 @@ impl<F: BufFactory> Connection<F> {
     /// Revalidates the PMTU for the active path by sending a new probe packet
     /// of PMTU size. If the probe is dropped PMTUD will restart and find a new
     /// valid PMTU.
+    ///
+    /// If revalidation invalidates a previously discovered larger size, a
+    /// [`PathEvent::PmtuUpdated`] event is queued with QUIC's minimum packet
+    /// size. Further events report larger sizes as probes validate them.
     #[inline]
     pub fn revalidate_pmtu(&mut self) {
-        if let Ok(active_path) = self.paths.get_active_mut() {
+        let event = if let Ok(active_path) = self.paths.get_active_mut() {
+            let local = active_path.local_addr();
+            let peer = active_path.peer_addr();
+
             if let Some(pmtud) = active_path.pmtud.as_mut() {
+                let old_pmtu = pmtud.get_current_mtu();
                 pmtud.revalidate_pmtu();
+                path::pmtu_event(local, peer, old_pmtu, pmtud.get_current_mtu())
+            } else {
+                None
             }
+        } else {
+            None
+        };
+
+        if let Some(event) = event {
+            self.paths.notify_event(event);
         }
     }
 
