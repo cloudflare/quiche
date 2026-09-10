@@ -34,7 +34,8 @@ router/
 
 | Task | File | Symbol/Line |
 |------|------|-------------|
-| Add lifecycle callback | `connection/mod.rs` | `ApplicationOverQuic` trait (~:663) |
+| Add application lifecycle callback | `connection/mod.rs` | `ApplicationOverQuic` trait (~:663) |
+| Add connection/path callback | `hooks.rs` | `ConnectionHook` trait |
 | Connection state machine | `io/connection_stage.rs` | `ConnectionStage` trait, `Handshake`/`RunningApplication`/`Close` |
 | Worker main loop | `io/worker.rs` | `IoWorker::work_loop()` (~:216) |
 | Packet routing/demux | `router/mod.rs` | `InboundPacketRouter::on_incoming()` (~:229) |
@@ -59,6 +60,7 @@ router/
 
 - `IoWorker` is generic: `IoWorker<Tx, M, S: ConnectionStage>`. Stage transitions consume the worker via `From<IoWorker<..>> for IoWorkerParams<..>` and construct a new `IoWorker` with the next stage.
 - `select!` in `work_loop` is **biased** -- timeout arm must stay first to prevent starvation.
+- `IoWorker` drains `PathEvent`s and forwards them synchronously through `ConnectionHook::on_path_event` when a hook is configured; callbacks must not block.
 - `ConnectionMap` uses `CidOwned::Optimized([u64; 3])` for v1 CIDs (<=20 bytes) to avoid heap allocation on lookup.
 - `InboundPacketRouter` implements `Future` directly (not async fn) -- polled as a spawned task.
 - `short_dcid()` fast-path extracts DCID from short header packets without full `Header::from_slice`.

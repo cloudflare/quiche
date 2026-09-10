@@ -66,12 +66,12 @@ fn connection_stats_use_active_path() {
 
 #[tokio::test]
 async fn test_passive_migration() {
-    run_migration_test(false, 12345).await;
+    let _ = run_migration_test(false, 12345).await;
 }
 
 #[tokio::test]
 async fn test_active_migration() {
-    run_migration_test(true, 23456).await;
+    let _ = run_migration_test(true, 23456).await;
 }
 
 /// Tests that the client can migrate either actively or passively.
@@ -95,16 +95,19 @@ async fn test_active_migration() {
 ///
 /// This requires using "plain" quiche as a client to properly control when and
 /// where packets are sent to, which is not possible using h3i.
-async fn run_migration_test(active: bool, base_port: u16) {
+pub(crate) async fn run_migration_test(
+    active: bool, base_port: u16,
+) -> (Vec<quiche::PathEvent>, SocketAddr, SocketAddr) {
     let mut quic_settings = QuicSettings::default();
     quic_settings.active_connection_id_limit = 2;
     quic_settings.disable_active_migration = !active;
     quic_settings.disable_dcid_reuse = false;
 
+    let hook = TestConnectionHook::new();
     let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
-        TestConnectionHook::new(),
+        hook.clone(),
         handle_connection,
     );
     let server_addr = extract_host_ipv4(&url);
@@ -206,6 +209,8 @@ async fn run_migration_test(active: bool, base_port: u16) {
     process_flight(&migrated_socket, client_addr, &mut conn).await;
 
     assert_eq!(process_h3_events(&mut h3_conn, &mut conn), (true, true));
+
+    (hook.path_events(), server_addr, migrated_addr)
 }
 
 async fn emit_flight(

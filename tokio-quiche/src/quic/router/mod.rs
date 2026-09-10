@@ -354,6 +354,7 @@ where
             scid: scid.clone(),
             cid_generator,
             metrics: self.metrics.clone(),
+            connection_hook: self.config.connection_hook.clone(),
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time,
             handshake_info,

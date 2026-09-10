@@ -27,10 +27,12 @@
 use foundations::telemetry::log;
 use std::borrow::Cow;
 use std::fs::File;
+use std::sync::Arc;
 use std::time::Duration;
 
 use qlog::writer::QlogCompression;
 
+use crate::quic::ConnectionHook;
 use crate::result::QuicResult;
 use crate::settings::CertificateKind;
 use crate::settings::ConnectionParams;
@@ -57,6 +59,7 @@ pub(crate) struct Config {
     pub has_ippktinfo: bool,
     pub has_ipv6pktinfo: bool,
     pub pool_send_buffer: bool,
+    pub connection_hook: Option<Arc<dyn ConnectionHook + Send + Sync + 'static>>,
 }
 
 impl AsMut<quiche::Config> for Config {
@@ -112,6 +115,7 @@ impl Config {
             has_ippktinfo,
             has_ipv6pktinfo,
             pool_send_buffer: quic_settings.pool_send_buffer,
+            connection_hook: params.hooks.connection_hook.clone(),
         })
     }
 }

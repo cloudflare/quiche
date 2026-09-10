@@ -26,6 +26,7 @@
 
 use std::fmt::Debug;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::sync::mpsc;
@@ -35,6 +36,7 @@ use crate::quic::connection::HandshakeError;
 use crate::quic::connection::HandshakeInfo;
 use crate::quic::connection::Incoming;
 use crate::quic::connection::QuicConnectionStatsShared;
+use crate::quic::hooks::ConnectionHook;
 use crate::quic::QuicheConnection;
 use crate::QuicResult;
 
@@ -82,6 +84,7 @@ pub struct ConnectionStageContext<A> {
     pub application: A,
     pub incoming_pkt_receiver: mpsc::Receiver<Incoming>,
     pub stats: QuicConnectionStatsShared,
+    pub connection_hook: Option<Arc<dyn ConnectionHook + Send + Sync + 'static>>,
 }
 
 #[derive(Debug)]
