@@ -490,10 +490,10 @@ fn handshake_confirmation(
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
     assert!(!pipe.client.is_established());
-    assert!(!pipe.client.handshake_confirmed);
+    assert!(!pipe.client.is_handshake_confirmed());
 
     assert!(!pipe.server.is_established());
-    assert!(!pipe.server.handshake_confirmed);
+    assert!(!pipe.server.is_handshake_confirmed());
 
     test_utils::process_flight(&mut pipe.client, flight).unwrap();
 
@@ -501,10 +501,10 @@ fn handshake_confirmation(
     let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     assert!(pipe.client.is_established());
-    assert!(!pipe.client.handshake_confirmed);
+    assert!(!pipe.client.is_handshake_confirmed());
 
     assert!(!pipe.server.is_established());
-    assert!(!pipe.server.handshake_confirmed);
+    assert!(!pipe.server.is_handshake_confirmed());
 
     test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
@@ -512,10 +512,10 @@ fn handshake_confirmation(
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
     assert!(pipe.client.is_established());
-    assert!(!pipe.client.handshake_confirmed);
+    assert!(!pipe.client.is_handshake_confirmed());
 
     assert!(pipe.server.is_established());
-    assert!(pipe.server.handshake_confirmed);
+    assert!(pipe.server.is_handshake_confirmed());
 
     test_utils::process_flight(&mut pipe.client, flight).unwrap();
 
@@ -523,18 +523,18 @@ fn handshake_confirmation(
     let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     assert!(pipe.client.is_established());
-    assert!(pipe.client.handshake_confirmed);
+    assert!(pipe.client.is_handshake_confirmed());
 
     assert!(pipe.server.is_established());
-    assert!(pipe.server.handshake_confirmed);
+    assert!(pipe.server.is_handshake_confirmed());
 
     test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
     assert!(pipe.client.is_established());
-    assert!(pipe.client.handshake_confirmed);
+    assert!(pipe.client.is_handshake_confirmed());
 
     assert!(pipe.server.is_established());
-    assert!(pipe.server.handshake_confirmed);
+    assert!(pipe.server.is_handshake_confirmed());
 }
 
 #[rstest]
