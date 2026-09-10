@@ -1034,6 +1034,69 @@ mod server_side_driver {
         assert_eq!(helper.driver.stream_map.len(), 0);
     }
 
+    /// The server's per-stream wire counters accumulate exactly the response
+    /// wire bytes: HEADERS framing + QPACK field section, then each DATA
+    /// frame's framing + payload. This locks the `bs`/`bbs` contract for
+    /// HTTP/3 byte parity.
+    #[test]
+    fn server_wire_counters_accumulate_response_bytes() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Client sends a headers-only request (fin, no request body).
+        helper
+            .peer_client_send_request(make_request_headers("GET"), true)
+            .unwrap();
+
+        // Server reads the request and gets the per-stream outbound channel
+        // plus audit stats.
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { incoming_headers, .. } => { incoming_headers }
+        );
+        let to_client = req.send.get_ref().unwrap().clone();
+        let audit_stats = req.h3_audit_stats.clone();
+        assert_eq!(audit_stats.wire_bytes_sent(), 0);
+        assert_eq!(audit_stats.downstream_bytes_sent(), 0);
+
+        // Server writes response HEADERS.
+        let headers = make_response_headers();
+        to_client
+            .try_send(OutboundFrame::Headers(headers.clone(), None))
+            .unwrap();
+        for _ in 0..8 {
+            helper.advance_and_run_loop().unwrap();
+            if audit_stats.wire_bytes_sent() != 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            audit_stats.wire_bytes_sent(),
+            headers_wire_bytes(&headers),
+            "wire_bytes_sent must equal HEADERS framing + QPACK after the write"
+        );
+        assert_eq!(audit_stats.downstream_bytes_sent(), 0);
+
+        // Server writes a body DATA frame.
+        to_client
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[1; 5]), true))
+            .unwrap();
+        for _ in 0..8 {
+            helper.advance_and_run_loop().unwrap();
+            if audit_stats.downstream_bytes_sent() != 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            audit_stats.wire_bytes_sent(),
+            headers_wire_bytes(&headers) + 5 + frame_varint_len(0x0, 5) as u64,
+            "wire_bytes_sent must add DATA framing + payload"
+        );
+        assert_eq!(audit_stats.downstream_bytes_sent(), 5);
+    }
+
     #[test]
     fn client_fin_before_server_body() {
         let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
