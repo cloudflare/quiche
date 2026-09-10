@@ -54,6 +54,7 @@ use foundations::telemetry::log;
 use futures::FutureExt;
 use futures_util::stream::FuturesUnordered;
 use quiche::h3;
+use quiche::h3::NameValue;
 use quiche::h3::WireErrorCode;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -155,6 +156,29 @@ const DEFAULT_MAX_BODY_RECV_BUF_SIZE: usize = 16 * 1024;
 fn body_recv_buf_size(readable: usize, max: usize) -> usize {
     let floor = MIN_BODY_RECV_BUF_SIZE.min(max);
     readable.clamp(floor, max)
+}
+
+/// The wire length of an HTTP/3 frame header: the frame type varint plus the
+/// payload-length varint.
+fn frame_varint_len(frame_type: u64, payload_len: u64) -> usize {
+    octets::varint_len(frame_type) + octets::varint_len(payload_len)
+}
+
+/// The number of wire bytes an HTTP/3 HEADERS or trailers frame occupies:
+/// the QPACK-encoded field section plus the frame type/length varints.
+///
+/// Sized to the worst-case QPACK encode so [`Encoder::encode`] never fails; a
+/// silent `0` on an oversized set would under-bill `bs`.
+fn headers_wire_bytes(headers: &[h3::Header]) -> u64 {
+    let buf_len = headers
+        .iter()
+        .fold(2, |acc, h| acc + h.value().len() + h.name().len() + 32);
+    let mut buf = vec![0u8; buf_len];
+    let mut encoder = quiche::h3::qpack::Encoder::new();
+    let block_len = encoder
+        .encode(headers, &mut buf)
+        .expect("buffer sized to the worst-case QPACK encode of this header set");
+    (frame_varint_len(0x1, block_len as u64) + block_len) as u64
 }
 
 /// Used by a local task to send [`OutboundFrame`]s to a peer on the
@@ -828,6 +852,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 }
 
                 if res.is_ok() {
+                    audit_stats.add_wire_bytes_sent(headers_wire_bytes(headers));
                     if let Some(first) =
                         ctx.first_full_headers_flush_fail_time.take()
                     {
@@ -858,6 +883,9 @@ impl<H: DriverHooks> H3Driver<H> {
                 let n = conn.send_body_zc(qconn, stream_id, body, *fin)?;
 
                 audit_stats.add_downstream_bytes_sent(n as _);
+                audit_stats.add_wire_bytes_sent(
+                    n as u64 + frame_varint_len(0x0, n as u64) as u64,
+                );
                 if n != len {
                     // Couldn't write the entire body, `send_body_zc` will
                     // have trimmed `body` accordingly. The driver keeps
@@ -885,6 +913,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 );
 
                 if res.is_ok() {
+                    audit_stats.add_wire_bytes_sent(headers_wire_bytes(headers));
                     Self::on_fin_sent(ctx)?;
                 }
                 res
@@ -1590,5 +1619,37 @@ impl<H: DriverHooks> H3Controller<H> {
             }
             .into(),
         );
+    }
+}
+
+#[cfg(test)]
+mod wire_byte_helpers_tests {
+    use quiche::h3;
+
+    use super::frame_varint_len;
+    use super::headers_wire_bytes;
+
+    #[test]
+    fn frame_varint_len_counts_type_and_payload_prefixes() {
+        // DATA frame type (0x0) is a single-byte varint; a 100-byte payload
+        // needs a 2-byte length varint (>= 64).
+        assert_eq!(frame_varint_len(0x0, 100), 3);
+        // A sub-64 payload and single-byte type both fit in one byte each.
+        assert_eq!(frame_varint_len(0x1, 5), 2);
+    }
+
+    #[test]
+    fn headers_wire_bytes_matches_hand_computed_oracle() {
+        // `:status: 200` = QPACK static index 25; block = RIC(0)+Base(0)+indexed
+        // = 3 bytes; HEADERS frame = type(1)+length(1)+block(3) = 5.
+        let headers = [h3::Header::new(b":status", b"200")];
+        assert_eq!(headers_wire_bytes(&headers), 5);
+    }
+
+    #[test]
+    fn headers_wire_bytes_empty_header_set_is_four_bytes() {
+        // Empty field section = QPACK prefix (2) + HEADERS type varint (1) +
+        // length (1).
+        assert_eq!(headers_wire_bytes(&[]), 4);
     }
 }

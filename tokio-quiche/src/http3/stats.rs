@@ -40,6 +40,10 @@ pub struct H3AuditStats {
     stream_id: u64,
     /// The number of bytes sent over the stream.
     downstream_bytes_sent: AtomicU64,
+    /// The total number of wire bytes written to the stream: HEADERS/trailers
+    /// framing plus their QPACK field section, plus every DATA frame's framing
+    /// and payload. This is the stream's `bs` (byte-count) input.
+    wire_bytes_sent: AtomicU64,
     /// The number of bytes received over the stream.
     downstream_bytes_recvd: AtomicU64,
     /// A STOP_SENDING error code received from the peer.
@@ -76,6 +80,7 @@ impl H3AuditStats {
         Self {
             stream_id,
             downstream_bytes_sent: AtomicU64::new(0),
+            wire_bytes_sent: AtomicU64::new(0),
             downstream_bytes_recvd: AtomicU64::new(0),
             recvd_stop_sending_error_code: AtomicI64::new(-1),
             recvd_reset_stream_error_code: AtomicI64::new(-1),
@@ -97,6 +102,14 @@ impl H3AuditStats {
     #[inline]
     pub fn downstream_bytes_sent(&self) -> u64 {
         self.downstream_bytes_sent.load(Ordering::SeqCst)
+    }
+
+    /// The total number of wire bytes written to the stream: HEADERS/trailers
+    /// framing plus their QPACK field section, plus every DATA frame's framing
+    /// and payload.
+    #[inline]
+    pub fn wire_bytes_sent(&self) -> u64 {
+        self.wire_bytes_sent.load(Ordering::SeqCst)
     }
 
     /// The number of bytes received over the stream.
@@ -164,6 +177,11 @@ impl H3AuditStats {
     pub fn add_downstream_bytes_sent(&self, bytes_sent: u64) {
         self.downstream_bytes_sent
             .fetch_add(bytes_sent, Ordering::SeqCst);
+    }
+
+    #[inline]
+    pub fn add_wire_bytes_sent(&self, bytes_sent: u64) {
+        self.wire_bytes_sent.fetch_add(bytes_sent, Ordering::SeqCst);
     }
 
     #[inline]
