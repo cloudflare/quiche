@@ -54,6 +54,7 @@ use foundations::telemetry::log;
 use futures::FutureExt;
 use futures_util::stream::FuturesUnordered;
 use quiche::h3;
+#[cfg(test)]
 use quiche::h3::NameValue;
 use quiche::h3::WireErrorCode;
 use tokio::select;
@@ -167,8 +168,10 @@ fn frame_varint_len(frame_type: u64, payload_len: u64) -> usize {
 /// The number of wire bytes an HTTP/3 HEADERS or trailers frame occupies:
 /// the QPACK-encoded field section plus the frame type/length varints.
 ///
-/// Sized to the worst-case QPACK encode so [`Encoder::encode`] never fails; a
-/// silent `0` on an oversized set would under-bill `bs`.
+/// Test-only oracle: the driver no longer re-encodes (it reads quiche's own
+/// `last_headers_wire_len`), so this independently recomputes the term to
+/// cross-check that quiche reported the expected length.
+#[cfg(test)]
 fn headers_wire_bytes(headers: &[h3::Header]) -> u64 {
     let buf_len = headers
         .iter()
@@ -852,7 +855,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 }
 
                 if res.is_ok() {
-                    audit_stats.add_wire_bytes_sent(headers_wire_bytes(headers));
+                    audit_stats.add_wire_bytes_sent(conn.last_headers_wire_len());
                     if let Some(first) =
                         ctx.first_full_headers_flush_fail_time.take()
                     {
@@ -913,7 +916,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 );
 
                 if res.is_ok() {
-                    audit_stats.add_wire_bytes_sent(headers_wire_bytes(headers));
+                    audit_stats.add_wire_bytes_sent(conn.last_headers_wire_len());
                     Self::on_fin_sent(ctx)?;
                 }
                 res

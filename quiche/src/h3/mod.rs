@@ -1028,6 +1028,10 @@ pub struct Connection {
     peer_goaway_id: Option<u64>,
 
     max_priority_update_size: u64,
+
+    /// Wire length (frame header + QPACK field section) of the most recently
+    /// successfully sent HEADERS or trailers frame. Set by `send_headers`.
+    last_headers_wire_len: u64,
 }
 
 impl Connection {
@@ -1085,6 +1089,8 @@ impl Connection {
             peer_goaway_id: None,
 
             max_priority_update_size: config.max_priority_update_size,
+
+            last_headers_wire_len: 0,
         })
     }
 
@@ -1519,6 +1525,12 @@ impl Connection {
         // Sending header block separately avoids unnecessary copy.
         conn.stream_send(stream_id, &header_block, fin)?;
 
+        // Expose the exact wire length of the HEADERS/trailers frame (frame
+        // header + QPACK field section) so a caller can account for it without
+        // re-encoding. Per-connection, read immediately after a successful send
+        // on a single stream.
+        self.last_headers_wire_len = (overhead + header_block.len()) as u64;
+
         trace!(
             "{} tx frm HEADERS stream={} len={} fin={}",
             conn.trace_id(),
@@ -1559,6 +1571,16 @@ impl Connection {
         }
 
         Ok(())
+    }
+
+    /// Wire length (frame header + QPACK field section) of the most recently
+    /// successfully sent HEADERS or trailers frame on this connection.
+    ///
+    /// Read immediately after a successful `send_response` /
+    /// `send_additional_headers` on a single stream; the value reflects that
+    /// send because quiche processes streams one at a time.
+    pub fn last_headers_wire_len(&self) -> u64 {
+        self.last_headers_wire_len
     }
 
     /// Sends an HTTP/3 body chunk on the given stream.
