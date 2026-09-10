@@ -125,6 +125,7 @@ where
         scid,
         cid_generator: None,
         metrics,
+        connection_hook: None,
         #[cfg(feature = "perf-quic-listener-metrics")]
         init_rx_time: None,
         handshake_info: HandshakeInfo::new(Instant::now(), None),
