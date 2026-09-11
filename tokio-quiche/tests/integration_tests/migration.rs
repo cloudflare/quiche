@@ -25,11 +25,44 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use h3i::quiche;
+use h3i::quiche::test_utils::Pipe;
 use std::net::SocketAddr;
+use tokio_quiche::buf_factory::BufFactory;
+use tokio_quiche::quic::QuicCommand;
 use tokio_quiche::quic::SimpleConnectionIdGenerator;
 use tokio_quiche::ConnectionIdGenerator as _;
 
 use crate::fixtures::*;
+
+#[test]
+fn connection_stats_use_active_path() {
+    let mut config = Pipe::default_config("cubic").unwrap();
+    config.set_active_connection_id_limit(2);
+
+    let mut pipe = Pipe::<BufFactory>::with_config_and_scid_lengths_and_buf(
+        &mut config,
+        0,
+        0,
+    )
+    .unwrap();
+    pipe.handshake().unwrap();
+
+    let migrated_addr: SocketAddr = "127.0.0.1:5678".parse().unwrap();
+    pipe.client.migrate_source(migrated_addr).unwrap();
+
+    assert!(!pipe.client.path_stats().next().unwrap().active);
+
+    let (stats_tx, stats_rx) = std::sync::mpsc::channel();
+    QuicCommand::ConnectionStats(Box::new(move |stats| {
+        stats_tx.send(stats).unwrap();
+    }))
+    .execute(&mut pipe.client);
+
+    let path_stats = stats_rx.recv().unwrap().path_stats.unwrap();
+
+    assert!(path_stats.active);
+    assert_eq!(path_stats.local_addr, migrated_addr);
+}
 
 #[tokio::test]
 async fn test_passive_migration() {

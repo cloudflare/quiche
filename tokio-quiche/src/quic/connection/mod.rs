@@ -88,7 +88,7 @@ impl QuicConnectionStats {
     pub(crate) fn from_conn(qconn: &QuicheConnection) -> Self {
         Self {
             stats: qconn.stats(),
-            path_stats: qconn.path_stats().next(),
+            path_stats: qconn.path_stats().find(|stats| stats.active),
         }
     }
 
