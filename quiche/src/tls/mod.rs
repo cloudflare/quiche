@@ -459,6 +459,23 @@ impl Handshake {
         })
     }
 
+    /// Requires the peer's certificate to carry `ip` as an iPAddress SAN.
+    ///
+    /// This only configures verification: no SNI is sent for an IP address,
+    /// as RFC 6066, Section 3 does not permit address literals there.
+    pub fn set_host_ip_addr(&mut self, ip: std::net::IpAddr) -> Result<()> {
+        let param = unsafe { SSL_get0_param(self.as_mut_ptr()) };
+
+        let octets: &[u8] = match ip {
+            std::net::IpAddr::V4(ref a) => &a.octets()[..],
+            std::net::IpAddr::V6(ref a) => &a.octets()[..],
+        };
+
+        map_result(unsafe {
+            X509_VERIFY_PARAM_set1_ip(param, octets.as_ptr(), octets.len())
+        })
+    }
+
     pub fn set_quic_transport_params(
         &mut self, params: &crate::TransportParams, is_server: bool,
     ) -> Result<()> {
@@ -1225,6 +1242,10 @@ extern "C" {
     // X509_VERIFY_PARAM
     fn X509_VERIFY_PARAM_set1_host(
         param: *mut X509_VERIFY_PARAM, name: *const c_char, namelen: usize,
+    ) -> c_int;
+
+    fn X509_VERIFY_PARAM_set1_ip(
+        param: *mut X509_VERIFY_PARAM, ip: *const u8, iplen: usize,
     ) -> c_int;
 
     // X509_STORE
