@@ -116,6 +116,10 @@ impl Eventable for Event {
         self.ty.into()
     }
 
+    fn name(&self) -> &str {
+        self.data.name()
+    }
+
     fn set_time(&mut self, time: f64) {
         self.time = time;
     }
@@ -146,6 +150,10 @@ pub struct JsonEvent {
 impl Eventable for JsonEvent {
     fn importance(&self) -> EventImportance {
         self.importance
+    }
+
+    fn name(&self) -> &str {
+        &self.name
     }
 
     fn set_time(&mut self, time: f64) {
@@ -286,6 +294,9 @@ impl From<EventType> for EventImportance {
 
 pub trait Eventable {
     fn importance(&self) -> EventImportance;
+
+    /// Qlog wire name, e.g. `"quic:packet_sent"`
+    fn name(&self) -> &str;
 
     fn set_time(&mut self, time: f64);
 }
@@ -428,181 +439,85 @@ pub struct RawInfo {
     pub data: Option<Box<Bytes>>,
 }
 
-#[serde_with::skip_serializing_none]
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-#[serde(tag = "name", content = "data")]
-#[allow(clippy::large_enum_variant)]
-pub enum EventData {
+macro_rules! event_data {
+    ($($variant:ident $body:tt => $wire:literal,)+) => {
+        #[serde_with::skip_serializing_none]
+        #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+        #[serde(tag = "name", content = "data")]
+        #[allow(clippy::large_enum_variant)]
+        pub enum EventData {
+            $(
+                #[serde(rename = $wire)]
+                $variant $body,
+            )+
+        }
+
+        impl EventData {
+            /// The qlog wire name, e.g. `"quic:packet_sent"`.
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $(EventData::$variant { .. } => $wire,)+
+                }
+            }
+        }
+    };
+}
+
+event_data! {
     // QUIC
-    #[serde(rename = "quic:server_listening")]
-    QuicServerListening(quic::ServerListening),
-
-    #[serde(rename = "quic:connection_started")]
-    QuicConnectionStarted(quic::ConnectionStarted),
-
-    #[serde(rename = "quic:connection_closed")]
-    QuicConnectionClosed(quic::ConnectionClosed),
-
-    #[serde(rename = "quic:connection_id_updated")]
-    QuicConnectionIdUpdated(quic::ConnectionIdUpdated),
-
-    #[serde(rename = "quic:spin_bit_updated")]
-    QuicSpinBitUpdated(quic::SpinBitUpdated),
-
-    #[serde(rename = "quic:connection_state_updated")]
-    QuicConnectionStateUpdated(quic::ConnectionStateUpdated),
-
-    #[serde(rename = "quic:tuple_assigned")]
-    QuicTupleAssigned(quic::TupleAssigned),
-
-    #[serde(rename = "quic:mtu_updated")]
-    QuicMtuUpdated(quic::MtuUpdated),
-
-    #[serde(rename = "quic:version_information")]
-    QuicVersionInformation(quic::QuicVersionInformation),
-
-    #[serde(rename = "quic:alpn_information")]
-    QuicAlpnInformation(quic::AlpnInformation),
-
-    #[serde(rename = "quic:parameters_set")]
-    QuicParametersSet(Box<quic::ParametersSet>),
-
-    #[serde(rename = "quic:parameters_restored")]
-    QuicParametersRestored(quic::ParametersRestored),
-
-    #[serde(rename = "quic:packet_sent")]
-    QuicPacketSent(quic::PacketSent),
-
-    #[serde(rename = "quic:packet_received")]
-    QuicPacketReceived(quic::PacketReceived),
-
-    #[serde(rename = "quic:packet_dropped")]
-    QuicPacketDropped(quic::PacketDropped),
-
-    #[serde(rename = "quic:packet_buffered")]
-    QuicPacketBuffered(quic::PacketBuffered),
-
-    #[serde(rename = "quic:packets_acked")]
-    QuicPacketsAcked(quic::PacketsAcked),
-
-    #[serde(rename = "quic:datagrams_sent")]
-    QuicUdpDatagramsSent(quic::UdpDatagramsSent),
-
-    #[serde(rename = "quic:datagrams_received")]
-    QuicUdpDatagramsReceived(quic::UdpDatagramsReceived),
-
-    #[serde(rename = "quic:datagram_dropped")]
-    QuicUdpDatagramDropped(quic::UdpDatagramDropped),
-
-    #[serde(rename = "quic:stream_state_updated")]
-    QuicStreamStateUpdated(quic::StreamStateUpdated),
-
-    #[serde(rename = "quic:frames_processed")]
-    QuicFramesProcessed(quic::FramesProcessed),
-
-    #[serde(rename = "quic:stream_data_moved")]
-    QuicStreamDataMoved(quic::StreamDataMoved),
-
-    #[serde(rename = "quic:datagram_data_moved")]
-    QuicDatagramDataMoved(quic::DatagramDataMoved),
-
-    #[serde(rename = "quic:connection_data_blocked_updated")]
-    QuicConnectionDataBlockedUpdated(quic::ConnectionDataBlockedUpdated),
-
-    #[serde(rename = "quic:stream_data_blocked_updated")]
-    QuicStreamDataBlockedUpdated(quic::StreamDataBlockedUpdated),
-
-    #[serde(rename = "quic:datagram_data_blocked_updated")]
-    QuicDatagramDataBlockedUpdated(quic::DatagramDataBlockedUpdated),
-
-    #[serde(rename = "quic:migration_state_updated")]
-    QuicMigrationStateUpdated(quic::MigrationStateUpdated),
-
-    #[serde(rename = "quic:key_updated")]
-    QuicKeyUpdated(quic::KeyUpdated),
-
-    #[serde(rename = "quic:key_retired")]
-    QuicKeyDiscarded(quic::KeyDiscarded),
-
-    #[serde(rename = "quic:recovery_parameters_set")]
-    QuicRecoveryParametersSet(quic::RecoveryParametersSet),
-
-    #[serde(rename = "quic:recovery_metrics_updated")]
-    QuicMetricsUpdated(quic::RecoveryMetricsUpdated),
-
-    #[serde(rename = "quic:congestion_state_updated")]
-    QuicCongestionStateUpdated(quic::CongestionStateUpdated),
-
-    #[serde(rename = "quic:timer_updated")]
-    QuicTimerUpdated(quic::TimerUpdated),
-
-    #[serde(rename = "quic:packet_lost")]
-    QuicPacketLost(quic::PacketLost),
-
-    #[serde(rename = "quic:marked_for_retransmit")]
-    QuicMarkedForRetransmit(quic::MarkedForRetransmit),
-
-    #[serde(rename = "quic:ecn_state_updated")]
-    QuicEcnStateUpdated(quic::EcnStateUpdated),
-
+    QuicServerListening(quic::ServerListening) => "quic:server_listening",
+    QuicConnectionStarted(quic::ConnectionStarted) => "quic:connection_started",
+    QuicConnectionClosed(quic::ConnectionClosed) => "quic:connection_closed",
+    QuicConnectionIdUpdated(quic::ConnectionIdUpdated) => "quic:connection_id_updated",
+    QuicSpinBitUpdated(quic::SpinBitUpdated) => "quic:spin_bit_updated",
+    QuicConnectionStateUpdated(quic::ConnectionStateUpdated) => "quic:connection_state_updated",
+    QuicTupleAssigned(quic::TupleAssigned) => "quic:tuple_assigned",
+    QuicMtuUpdated(quic::MtuUpdated) => "quic:mtu_updated",
+    QuicVersionInformation(quic::QuicVersionInformation) => "quic:version_information",
+    QuicAlpnInformation(quic::AlpnInformation) => "quic:alpn_information",
+    QuicParametersSet(Box<quic::ParametersSet>) => "quic:parameters_set",
+    QuicParametersRestored(quic::ParametersRestored) => "quic:parameters_restored",
+    QuicPacketSent(quic::PacketSent) => "quic:packet_sent",
+    QuicPacketReceived(quic::PacketReceived) => "quic:packet_received",
+    QuicPacketDropped(quic::PacketDropped) => "quic:packet_dropped",
+    QuicPacketBuffered(quic::PacketBuffered) => "quic:packet_buffered",
+    QuicPacketsAcked(quic::PacketsAcked) => "quic:packets_acked",
+    QuicUdpDatagramsSent(quic::UdpDatagramsSent) => "quic:datagrams_sent",
+    QuicUdpDatagramsReceived(quic::UdpDatagramsReceived) => "quic:datagrams_received",
+    QuicUdpDatagramDropped(quic::UdpDatagramDropped) => "quic:datagram_dropped",
+    QuicStreamStateUpdated(quic::StreamStateUpdated) => "quic:stream_state_updated",
+    QuicFramesProcessed(quic::FramesProcessed) => "quic:frames_processed",
+    QuicStreamDataMoved(quic::StreamDataMoved) => "quic:stream_data_moved",
+    QuicDatagramDataMoved(quic::DatagramDataMoved) => "quic:datagram_data_moved",
+    QuicConnectionDataBlockedUpdated(quic::ConnectionDataBlockedUpdated) => "quic:connection_data_blocked_updated",
+    QuicStreamDataBlockedUpdated(quic::StreamDataBlockedUpdated) => "quic:stream_data_blocked_updated",
+    QuicDatagramDataBlockedUpdated(quic::DatagramDataBlockedUpdated) => "quic:datagram_data_blocked_updated",
+    QuicMigrationStateUpdated(quic::MigrationStateUpdated) => "quic:migration_state_updated",
+    QuicKeyUpdated(quic::KeyUpdated) => "quic:key_updated",
+    QuicKeyDiscarded(quic::KeyDiscarded) => "quic:key_retired",
+    QuicRecoveryParametersSet(quic::RecoveryParametersSet) => "quic:recovery_parameters_set",
+    QuicMetricsUpdated(quic::RecoveryMetricsUpdated) => "quic:recovery_metrics_updated",
+    QuicCongestionStateUpdated(quic::CongestionStateUpdated) => "quic:congestion_state_updated",
+    QuicTimerUpdated(quic::TimerUpdated) => "quic:timer_updated",
+    QuicPacketLost(quic::PacketLost) => "quic:packet_lost",
+    QuicMarkedForRetransmit(quic::MarkedForRetransmit) => "quic:marked_for_retransmit",
+    QuicEcnStateUpdated(quic::EcnStateUpdated) => "quic:ecn_state_updated",
     // HTTP/3
-    #[serde(rename = "http3:parameters_set")]
-    Http3ParametersSet(http3::ParametersSet),
-
-    #[serde(rename = "http3:parameters_restored")]
-    Http3ParametersRestored(http3::ParametersRestored),
-
-    #[serde(rename = "http3:stream_type_set")]
-    Http3StreamTypeSet(http3::StreamTypeSet),
-
-    #[serde(rename = "http3:priority_updated")]
-    Http3PriorityUpdated(http3::PriorityUpdated),
-
-    #[serde(rename = "http3:frame_created")]
-    Http3FrameCreated(http3::FrameCreated),
-
-    #[serde(rename = "http3:frame_parsed")]
-    Http3FrameParsed(http3::FrameParsed),
-
-    #[serde(rename = "http3:datagram_created")]
-    Http3DatagramCreated(http3::DatagramCreated),
-
-    #[serde(rename = "http3:datagram_parsed")]
-    Http3DatagramParsed(http3::DatagramParsed),
-
-    #[serde(rename = "http3:push_resolved")]
-    Http3PushResolved(http3::PushResolved),
-
+    Http3ParametersSet(http3::ParametersSet) => "http3:parameters_set",
+    Http3ParametersRestored(http3::ParametersRestored) => "http3:parameters_restored",
+    Http3StreamTypeSet(http3::StreamTypeSet) => "http3:stream_type_set",
+    Http3PriorityUpdated(http3::PriorityUpdated) => "http3:priority_updated",
+    Http3FrameCreated(http3::FrameCreated) => "http3:frame_created",
+    Http3FrameParsed(http3::FrameParsed) => "http3:frame_parsed",
+    Http3DatagramCreated(http3::DatagramCreated) => "http3:datagram_created",
+    Http3DatagramParsed(http3::DatagramParsed) => "http3:datagram_parsed",
+    Http3PushResolved(http3::PushResolved) => "http3:push_resolved",
     // LogLevel
-    #[serde(rename = "loglevel:error")]
-    LogLevelError {
-        code: Option<u64>,
-        message: Option<String>,
-    },
-
-    #[serde(rename = "loglevel:warning")]
-    LogLevelWarning {
-        code: Option<u64>,
-        message: Option<String>,
-    },
-
-    #[serde(rename = "loglevel:info")]
-    LogLevelInfo {
-        code: Option<u64>,
-        message: Option<String>,
-    },
-
-    #[serde(rename = "loglevel:debug")]
-    LogLevelDebug {
-        code: Option<u64>,
-        message: Option<String>,
-    },
-
-    #[serde(rename = "loglevel:verbose")]
-    LogLevelVerbose {
-        code: Option<u64>,
-        message: Option<String>,
-    },
+    LogLevelError { code: Option<u64>, message: Option<String>, } => "loglevel:error",
+    LogLevelWarning { code: Option<u64>, message: Option<String>, } => "loglevel:warning",
+    LogLevelInfo { code: Option<u64>, message: Option<String>, } => "loglevel:info",
+    LogLevelDebug { code: Option<u64>, message: Option<String>, } => "loglevel:debug",
+    LogLevelVerbose { code: Option<u64>, message: Option<String>, } => "loglevel:verbose",
 }
 
 impl EventData {

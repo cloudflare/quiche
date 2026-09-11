@@ -96,6 +96,7 @@ pub struct QlogStreamer {
     qlog: QlogSeq,
     state: StreamerState,
     log_level: EventImportance,
+    name_filter: Option<fn(&str) -> bool>,
     time_precision: EventTimePrecision,
 }
 
@@ -116,6 +117,29 @@ impl QlogStreamer {
         log_level: EventImportance, time_precision: EventTimePrecision,
         writer: Box<dyn std::io::Write + Send + Sync>,
     ) -> Self {
+        Self::with_name_filter(
+            title,
+            description,
+            start_time,
+            trace,
+            log_level,
+            time_precision,
+            writer,
+            None,
+        )
+    }
+
+    /// Like [`Self::new`], additionally filtering logged events by qlog wire
+    /// name (e.g. `"quic:packet_sent"`, or an application's own event name),
+    /// on top of `log_level`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_name_filter(
+        title: Option<String>, description: Option<String>,
+        start_time: std::time::Instant, trace: TraceSeq,
+        log_level: EventImportance, time_precision: EventTimePrecision,
+        writer: Box<dyn std::io::Write + Send + Sync>,
+        name_filter: Option<fn(&str) -> bool>,
+    ) -> Self {
         let qlog = QlogSeq {
             file_schema: QLOGFILESEQ_URI.to_string(),
             serialization_format: "JSON-SEQ".to_string(),
@@ -130,8 +154,14 @@ impl QlogStreamer {
             qlog,
             state: StreamerState::Initial,
             log_level,
+            name_filter,
             time_precision,
         }
+    }
+
+    /// Returns true if `name_filter` admits the given event name.
+    fn filter_name(&self, name: &str) -> bool {
+        self.name_filter.is_none_or(|f| f(name))
     }
 
     /// Starts qlog streaming serialization.
@@ -221,7 +251,9 @@ impl QlogStreamer {
             return Err(Error::InvalidState);
         }
 
-        if !event.importance().is_contained_in(&self.log_level) {
+        if !event.importance().is_contained_in(&self.log_level) ||
+            !self.filter_name(event.name())
+        {
             return Err(Error::Done);
         }
 
@@ -329,6 +361,10 @@ impl QlogStreamer {
             ex_data,
         );
 
+        if !self.filter_name(event.name()) {
+            return Err(Error::Done);
+        }
+
         if pretty {
             self.add_event_pretty(event)
         } else {
@@ -359,7 +395,9 @@ impl QlogStreamer {
             return Err(Error::InvalidState);
         }
 
-        if !event.importance().is_contained_in(&self.log_level) {
+        if !event.importance().is_contained_in(&self.log_level) ||
+            !self.filter_name(event.name())
+        {
             return Err(Error::Done);
         }
 

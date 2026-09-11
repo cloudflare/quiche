@@ -2315,6 +2315,30 @@ impl<F: BufFactory> Connection<F> {
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String, qlog_level: QlogLevel,
     ) {
+        self.set_qlog_with_level_and_name_filter(
+            writer,
+            title,
+            description,
+            qlog_level,
+            None,
+        )
+    }
+
+    /// Like [`Self::set_qlog_with_level`], additionally filtering logged
+    /// events by qlog wire name (e.g. `"quic:packet_sent"`, or an
+    /// application's own event name), on top of the given `QlogLevel`.
+    ///
+    /// This needs to be called as soon as the connection is created, to avoid
+    /// missing some early logs.
+    ///
+    /// [`Writer`]: https://doc.rust-lang.org/std/io/trait.Write.html
+    #[cfg(feature = "qlog")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
+    pub fn set_qlog_with_level_and_name_filter(
+        &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
+        description: String, qlog_level: QlogLevel,
+        name_filter: Option<fn(&str) -> bool>,
+    ) {
         use qlog::events::quic::TransportInitiator;
         use qlog::events::HTTP3_URI;
         use qlog::events::QUIC_URI;
@@ -2357,7 +2381,7 @@ impl<F: BufFactory> Connection<F> {
             vec![QUIC_URI.to_string(), HTTP3_URI.to_string()],
         );
 
-        let mut streamer = qlog::streamer::QlogStreamer::new(
+        let mut streamer = qlog::streamer::QlogStreamer::with_name_filter(
             Some(title),
             Some(description),
             now,
@@ -2365,6 +2389,7 @@ impl<F: BufFactory> Connection<F> {
             self.qlog.level,
             qlog::streamer::EventTimePrecision::MicroSeconds,
             writer,
+            name_filter,
         );
 
         streamer.start_log().ok();
