@@ -1145,24 +1145,14 @@ mod server_side_driver {
             "each stream has its own per-stream audit stats"
         );
 
-        // Small HEADERS on stream 0.
+        // Queue both HEADERS before processing either, so a single pass
+        // has both writes pending at once — this is what actually exercises
+        // the shared `last_headers_wire_len` cache.
         let small = make_response_headers();
         to_client0
             .try_send(OutboundFrame::Headers(small.clone(), None))
             .unwrap();
-        for _ in 0..8 {
-            helper.advance_and_run_loop().unwrap();
-            if stats0.wire_bytes_sent() != 0 {
-                break;
-            }
-        }
-        assert_eq!(
-            stats0.wire_bytes_sent(),
-            headers_wire_bytes(&small),
-            "stream 0 must be charged its own small HEADERS"
-        );
 
-        // Larger HEADERS on stream 1 must not be misattributed to stream 0.
         let mut large = make_response_headers();
         large.push(h3::Header::new(
             b"x-long-header",
@@ -1171,21 +1161,22 @@ mod server_side_driver {
         to_client1
             .try_send(OutboundFrame::Headers(large.clone(), None))
             .unwrap();
+
         for _ in 0..8 {
             helper.advance_and_run_loop().unwrap();
-            if stats1.wire_bytes_sent() != 0 {
+            if stats0.wire_bytes_sent() != 0 && stats1.wire_bytes_sent() != 0 {
                 break;
             }
         }
         assert_eq!(
-            stats1.wire_bytes_sent(),
-            headers_wire_bytes(&large),
-            "stream 1 must count its own larger HEADERS"
-        );
-        assert_eq!(
             stats0.wire_bytes_sent(),
             headers_wire_bytes(&small),
-            "stream 0's counter must be unaffected by stream 1's write"
+            "stream 0 must be charged its own small HEADERS, not stream 1's"
+        );
+        assert_eq!(
+            stats1.wire_bytes_sent(),
+            headers_wire_bytes(&large),
+            "stream 1 must be charged its own larger HEADERS, not stream 0's"
         );
     }
 
