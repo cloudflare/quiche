@@ -4328,11 +4328,25 @@ impl<F: BufFactory> Connection<F> {
                         );
                     },
 
-                    // Data blocked frames are an optional advisory
-                    // signal. We choose to not retransmit them to
-                    // avoid unnecessary network usage.
-                    frame::Frame::DataBlocked { .. } |
-                    frame::Frame::StreamDataBlocked { .. } => (),
+                    frame::Frame::DataBlocked { limit } => {
+                        if self.max_tx_data == limit {
+                            self.blocked_limit = Some(limit);
+                        }
+                    },
+
+                    frame::Frame::StreamDataBlocked { stream_id, limit } => {
+                        let still_blocked =
+                            self.streams.get(stream_id).is_some_and(|stream| {
+                                !stream.send.is_shutdown() &&
+                                    !stream.send.is_stopped() &&
+                                    stream.send.blocked_at() == Some(limit) &&
+                                    stream.send.max_off() == limit
+                            });
+
+                        if still_blocked {
+                            self.streams.insert_blocked(stream_id, limit);
+                        }
+                    },
 
                     // Path challenge and response have their own
                     // retry logic. They should not be retransmitted
