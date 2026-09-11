@@ -4221,6 +4221,39 @@ fn stream_shutdown_write(
 }
 
 #[rstest]
+// Regression test for https://github.com/cloudflare/quiche/issues/2634:
+// stream_shutdown() shares the same error-code-to-frame path as close(), so
+// an out-of-range error code must also be rejected here rather than panic
+// later in send() when the RESET_STREAM/STOP_SENDING frame is serialized.
+fn stream_shutdown_with_invalid_error_code(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello, world", false), Ok(12));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let invalid_err = octets::MAX_VAR_INT + 1;
+
+    assert_eq!(
+        pipe.server.stream_shutdown(4, Shutdown::Write, invalid_err),
+        Err(Error::InvalidErrorCode)
+    );
+    assert_eq!(
+        pipe.server.stream_shutdown(4, Shutdown::Read, invalid_err),
+        Err(Error::InvalidErrorCode)
+    );
+
+    // The stream must still be usable: no reset/stop was recorded, and
+    // send() must not panic.
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+    assert!(pipe.server.send(&mut buf).is_ok());
+}
+
+#[rstest]
 /// Tests that shutting down a stream restores flow control for unsent data.
 fn stream_shutdown_write_unsent_tx_cap(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -8746,6 +8779,36 @@ fn close(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
             reason: b"hello?".to_vec(),
         })
     );
+}
+
+#[rstest]
+// Regression test for https://github.com/cloudflare/quiche/issues/2634:
+// an out-of-range error code used to be accepted by `close()` and only
+// discovered (as a panic in `octets::varint_len()`) when `send()` later
+// tried to serialize the CONNECTION_CLOSE frame.
+fn close_with_invalid_error_code(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let invalid_err = octets::MAX_VAR_INT + 1;
+
+    assert_eq!(
+        pipe.client.close(false, invalid_err, b"hello?"),
+        Err(Error::InvalidErrorCode)
+    );
+    assert_eq!(
+        pipe.client.close(true, invalid_err, b"hello!"),
+        Err(Error::InvalidErrorCode)
+    );
+
+    // The connection must still be usable: no local error was recorded, and
+    // send() must not panic.
+    assert_eq!(pipe.client.close(false, 0x1234, b"hello?"), Ok(()));
+    assert!(pipe.client.send(&mut buf).is_ok());
 }
 
 #[rstest]

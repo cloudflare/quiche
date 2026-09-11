@@ -137,6 +137,10 @@ enum quiche_error {
 
     /// An invalid DCID was used when connecting to a remote peer.
     QUICHE_ERR_INVALID_DCID_INITIALIZATION = -23,
+
+    // An error code provided by the application does not fit in the QUIC
+    // 62-bit variable-length integer space.
+    QUICHE_ERR_INVALID_ERROR_CODE = -24,
 };
 
 // Returns a human readable string with the quiche version number.

@@ -6206,14 +6206,22 @@ impl<F: BufFactory> Connection<F> {
     /// can only be closed in the [`Shutdown::Read`] direction. Using an
     /// incorrect direction will return [`InvalidStreamState`].
     ///
+    /// Returns [`InvalidErrorCode`] if `err` does not fit in a QUIC 62-bit
+    /// variable-length integer.
+    ///
     /// [`Shutdown::Read`]: enum.Shutdown.html#variant.Read
     /// [`Shutdown::Write`]: enum.Shutdown.html#variant.Write
     /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
     /// [`stream_send()`]: struct.Connection.html#method.stream_send
     /// [`InvalidStreamState`]: enum.Error.html#variant.InvalidStreamState
+    /// [`InvalidErrorCode`]: enum.Error.html#variant.InvalidErrorCode
     pub fn stream_shutdown(
         &mut self, stream_id: u64, direction: Shutdown, err: u64,
     ) -> Result<()> {
+        if err > octets::MAX_VAR_INT {
+            return Err(Error::InvalidErrorCode);
+        }
+
         // Don't try to stop a local unidirectional stream.
         if direction == Shutdown::Read &&
             stream::is_local(stream_id, self.is_server) &&
@@ -7531,12 +7539,16 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// Returns [`Done`] if the connection had already been closed.
     ///
+    /// Returns [`InvalidErrorCode`] if `err` does not fit in a QUIC 62-bit
+    /// variable-length integer.
+    ///
     /// Note that the connection will not be closed immediately. An application
     /// should continue calling the [`recv()`], [`send()`], [`timeout()`] and
     /// [`on_timeout()`] methods as normal, until the [`is_closed()`] method
     /// returns `true`.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
+    /// [`InvalidErrorCode`]: enum.Error.html#variant.InvalidErrorCode
     /// [`recv()`]: struct.Connection.html#method.recv
     /// [`send()`]: struct.Connection.html#method.send
     /// [`timeout()`]: struct.Connection.html#method.timeout
@@ -7549,6 +7561,10 @@ impl<F: BufFactory> Connection<F> {
 
         if self.local_error.is_some() {
             return Err(Error::Done);
+        }
+
+        if err > octets::MAX_VAR_INT {
+            return Err(Error::InvalidErrorCode);
         }
 
         let is_safe_to_send_app_data =
