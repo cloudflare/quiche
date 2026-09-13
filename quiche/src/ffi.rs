@@ -1493,6 +1493,7 @@ pub extern "C" fn quiche_conn_path_stats(
     out.dgram_sent = stats.dgram_sent;
     out.rtt = stats.rtt.as_nanos() as u64;
     out.min_rtt = stats.min_rtt.unwrap_or_default().as_nanos() as u64;
+    out.max_rtt = stats.max_rtt.unwrap_or_default().as_nanos() as u64;
     out.rttvar = stats.rttvar.as_nanos() as u64;
     out.cwnd = stats.cwnd;
     out.sent_bytes = stats.sent_bytes;
