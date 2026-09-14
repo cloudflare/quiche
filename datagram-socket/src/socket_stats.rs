@@ -170,10 +170,9 @@ impl QuicAuditStats {
             ConnectionMigration::Active =>
                 &self.active_connection_migration_count,
         };
-        let _ =
-            counter.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
-                Some(count.saturating_add(1))
-            });
+        let _ = counter.try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+            Some(count.saturating_add(1))
+        });
     }
 
     /// Number of passive peer connection migrations, capped at [`u8::MAX`].
