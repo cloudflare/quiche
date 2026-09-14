@@ -95,6 +95,15 @@ pub enum StartupExitReason {
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+/// The type of a validated peer QUIC connection migration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionMigration {
+    /// The peer reused a server-issued connection ID on the new path.
+    Passive,
+    /// The peer selected a new connection ID for the new path.
+    Active,
+}
+
 #[derive(Debug)]
 pub struct QuicAuditStats {
     /// A transport-level connection error code received from the client.
@@ -115,6 +124,10 @@ pub struct QuicAuditStats {
     max_bandwidth: AtomicU64,
     /// Loss at max recorded bandwidth.
     max_loss_pct: AtomicU8,
+    /// Number of validated passive peer connection migrations.
+    passive_connection_migration_count: AtomicU8,
+    /// Number of validated active peer connection migrations.
+    active_connection_migration_count: AtomicU8,
     /// The value of the first `SO_RECVMARK` control message received for the
     /// connection.
     ///
@@ -140,10 +153,41 @@ impl QuicAuditStats {
             connection_close_reason: RwLock::new(None),
             max_bandwidth: AtomicU64::new(0),
             max_loss_pct: AtomicU8::new(0),
+            passive_connection_migration_count: AtomicU8::new(0),
+            active_connection_migration_count: AtomicU8::new(0),
             #[cfg(target_os = "linux")]
             initial_so_mark: OnceLock::new(),
             quic_connection_id,
         }
+    }
+
+    /// Records a validated peer connection migration.
+    #[inline]
+    pub fn record_connection_migration(&self, migration: ConnectionMigration) {
+        let counter = match migration {
+            ConnectionMigration::Passive =>
+                &self.passive_connection_migration_count,
+            ConnectionMigration::Active =>
+                &self.active_connection_migration_count,
+        };
+        let _ =
+            counter.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                Some(count.saturating_add(1))
+            });
+    }
+
+    /// Number of passive peer connection migrations, capped at [`u8::MAX`].
+    #[inline]
+    pub fn passive_connection_migration_count(&self) -> u8 {
+        self.passive_connection_migration_count
+            .load(Ordering::SeqCst)
+    }
+
+    /// Number of active peer connection migrations, capped at [`u8::MAX`].
+    #[inline]
+    pub fn active_connection_migration_count(&self) -> u8 {
+        self.active_connection_migration_count
+            .load(Ordering::SeqCst)
     }
 
     #[inline]
@@ -276,4 +320,25 @@ pub enum StreamClosureKind {
     None,
     Implicit,
     Explicit,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_migration_counts_saturate() {
+        let stats = QuicAuditStats::new(Vec::new());
+
+        assert_eq!(stats.passive_connection_migration_count(), 0);
+        assert_eq!(stats.active_connection_migration_count(), 0);
+
+        for _ in 0..300 {
+            stats.record_connection_migration(ConnectionMigration::Passive);
+            stats.record_connection_migration(ConnectionMigration::Active);
+        }
+
+        assert_eq!(stats.passive_connection_migration_count(), u8::MAX);
+        assert_eq!(stats.active_connection_migration_count(), u8::MAX);
+    }
 }

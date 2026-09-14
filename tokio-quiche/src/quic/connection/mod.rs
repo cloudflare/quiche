@@ -342,6 +342,7 @@ where
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: self.params.init_rx_time,
             metrics: self.params.metrics.clone(),
+            passive_migration_candidates: Default::default(),
         };
 
         let handshake_fut = async move {

@@ -66,12 +66,12 @@ fn connection_stats_use_active_path() {
 
 #[tokio::test]
 async fn test_passive_migration() {
-    run_migration_test(false, 12345).await;
+    run_migration_test(false).await;
 }
 
 #[tokio::test]
 async fn test_active_migration() {
-    run_migration_test(true, 23456).await;
+    run_migration_test(true).await;
 }
 
 /// Tests that the client can migrate either actively or passively.
@@ -95,13 +95,13 @@ async fn test_active_migration() {
 ///
 /// This requires using "plain" quiche as a client to properly control when and
 /// where packets are sent to, which is not possible using h3i.
-async fn run_migration_test(active: bool, base_port: u16) {
+async fn run_migration_test(active: bool) {
     let mut quic_settings = QuicSettings::default();
     quic_settings.active_connection_id_limit = 2;
     quic_settings.disable_active_migration = !active;
     quic_settings.disable_dcid_reuse = false;
 
-    let (url, _) = start_server_with_settings(
+    let (url, mut audit_stats_rx) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
         TestConnectionHook::new(),
@@ -125,8 +125,8 @@ async fn run_migration_test(active: bool, base_port: u16) {
 
     let client_scid = SimpleConnectionIdGenerator.new_connection_id();
 
-    let client_addr = SocketAddr::new("127.0.0.1".parse().unwrap(), base_port);
-    let socket = tokio::net::UdpSocket::bind(client_addr).await.unwrap();
+    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let client_addr = socket.local_addr().unwrap();
 
     let mut conn = quiche::connect(
         Some("test.com"),
@@ -171,9 +171,11 @@ async fn run_migration_test(active: bool, base_port: u16) {
     assert_eq!(process_h3_events(&mut h3_conn, &mut conn), (true, true));
 
     // Client migrates to new address.
-    let migrated_addr = SocketAddr::new(client_addr.ip(), base_port + 1);
     let migrated_socket =
-        tokio::net::UdpSocket::bind(migrated_addr).await.unwrap();
+        tokio::net::UdpSocket::bind(SocketAddr::new(client_addr.ip(), 0))
+            .await
+            .unwrap();
+    let migrated_addr = migrated_socket.local_addr().unwrap();
 
     let client_addr = if active {
         // We actively switch the connection to `migrated_addr` and report that
@@ -206,6 +208,25 @@ async fn run_migration_test(active: bool, base_port: u16) {
     process_flight(&migrated_socket, client_addr, &mut conn).await;
 
     assert_eq!(process_h3_events(&mut h3_conn, &mut conn), (true, true));
+
+    // The fixture publishes the audit state after the server observes the
+    // connection close.
+    conn.close(true, quiche::h3::WireErrorCode::NoError as u64, b"")
+        .unwrap();
+    emit_flight(&migrated_socket, &mut conn).await;
+
+    let audit_stats = audit_stats_rx
+        .recv()
+        .await
+        .expect("audit stats not received");
+    assert_eq!(
+        audit_stats.passive_connection_migration_count(),
+        (!active) as u8
+    );
+    assert_eq!(
+        audit_stats.active_connection_migration_count(),
+        active as u8
+    );
 }
 
 async fn emit_flight(
