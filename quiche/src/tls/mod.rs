@@ -173,8 +173,11 @@ impl Context {
         }
     }
 
-    pub fn load_verify_locations_from_file(&mut self, file: &str) -> Result<()> {
-        let file = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
+    pub fn load_verify_locations_from_file(
+        &mut self, file: impl AsRef<ffi::OsStr>,
+    ) -> Result<()> {
+        let file = ffi::CString::new(file.as_ref().as_encoded_bytes())
+            .map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
             SSL_CTX_load_verify_locations(
                 self.as_mut_ptr(),
@@ -185,9 +188,10 @@ impl Context {
     }
 
     pub fn load_verify_locations_from_directory(
-        &mut self, path: &str,
+        &mut self, path: impl AsRef<ffi::OsStr>,
     ) -> Result<()> {
-        let path = ffi::CString::new(path).map_err(|_| Error::TlsFail)?;
+        let path = ffi::CString::new(path.as_ref().as_encoded_bytes())
+            .map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
             SSL_CTX_load_verify_locations(
                 self.as_mut_ptr(),
@@ -197,15 +201,21 @@ impl Context {
         })
     }
 
-    pub fn use_certificate_chain_file(&mut self, file: &str) -> Result<()> {
-        let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
+    pub fn use_certificate_chain_file(
+        &mut self, file: impl AsRef<ffi::OsStr>,
+    ) -> Result<()> {
+        let cstr = ffi::CString::new(file.as_ref().as_encoded_bytes())
+            .map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
             SSL_CTX_use_certificate_chain_file(self.as_mut_ptr(), cstr.as_ptr())
         })
     }
 
-    pub fn use_privkey_file(&mut self, file: &str) -> Result<()> {
-        let cstr = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
+    pub fn use_privkey_file(
+        &mut self, file: impl AsRef<ffi::OsStr>,
+    ) -> Result<()> {
+        let cstr = ffi::CString::new(file.as_ref().as_encoded_bytes())
+            .map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
             SSL_CTX_use_PrivateKey_file(self.as_mut_ptr(), cstr.as_ptr(), 1)
         })
