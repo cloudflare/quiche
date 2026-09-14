@@ -2165,7 +2165,7 @@ impl Connection {
                 // Return early if the stream was reset, to avoid returning
                 // a Finished event later as well.
                 Err(Error::TransportError(crate::Error::StreamReset(e))) => {
-                    self.remove_local_finished_stream(s);
+                    self.remove_finished_stream(conn, s);
 
                     return Ok((s, Event::Reset(e)));
                 },
@@ -2985,9 +2985,18 @@ impl Connection {
         }
     }
 
-    fn remove_local_finished_stream(&mut self, stream_id: u64) {
+    // Frees the HTTP/3 state for a stream that is done in both directions:
+    // either the local side finished sending, or the transport already
+    // collected the stream (e.g. the peer reset it before the local side
+    // finished). Otherwise the entry would leak for the lifetime of the
+    // connection.
+    fn remove_finished_stream<F: BufFactory>(
+        &mut self, conn: &super::Connection<F>, stream_id: u64,
+    ) {
         if let hash_map::Entry::Occupied(stream) = self.streams.entry(stream_id) {
-            if stream.get().local_finished() {
+            if stream.get().local_finished() ||
+                conn.streams.is_collected(stream_id)
+            {
                 stream.remove();
             }
         }
@@ -2998,7 +3007,7 @@ impl Connection {
     ) -> Option<(u64, Event)> {
         let finished = self.finished_streams.pop_front()?;
 
-        self.remove_local_finished_stream(finished);
+        self.remove_finished_stream(conn, finished);
 
         if conn.stream_readable(finished) {
             // The stream is finished, but is still readable, it may indicate
@@ -8541,6 +8550,50 @@ mod tests {
         // The server stream should be gone now
         assert_eq!(s.client.streams.len(), init_streams_client);
         assert_eq!(s.server.streams.len(), init_streams_server);
+    }
+
+    #[test]
+    /// A stream reset by the peer before the local side finished sending must
+    /// not leak its HTTP/3 state: the entry should be freed once the stream is
+    /// done in both directions, even though `local_finished()` never became
+    /// true.
+    fn reset_stream_before_local_finish_frees_h3_state() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let init_streams_server = s.server.streams.len();
+
+        // Client sends a request without fin. The server hasn't sent a
+        // response, so its local side is not finished.
+        let (stream, req) = s.send_request(false).unwrap();
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        // Client resets the stream in both directions.
+        s.pipe
+            .client
+            .stream_shutdown(stream, crate::Shutdown::Write, 0x100)
+            .unwrap();
+        s.pipe
+            .client
+            .stream_shutdown(stream, crate::Shutdown::Read, 0x100)
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Ok((stream, Event::Reset(0x100))));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // The HTTP/3 stream state must have been freed.
+        assert_eq!(s.server.streams.len(), init_streams_server);
+        assert!(s.pipe.server.streams.is_collected(stream));
     }
 }
 
