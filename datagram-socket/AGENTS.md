@@ -24,7 +24,7 @@ src/
 | Prepend a flow ID to an outbound datagram | `buffer.rs` | `try_add_prefix` (fast, zero-copy) or `splice_headroom` + retry (slow, O(n)) |
 | Strip a prefix from an inbound datagram | `buffer.rs` | `advance(n)` — zero copy |
 | Implement a new socket type | `datagram.rs` | Implement `DatagramSocketSend` + `DatagramSocketRecv`; `DatagramSocket` is automatic |
-| Batch recv/send on Linux | `mmsg.rs` | Use `poll_recvmmsg!` / `poll_sendmmsg!` macros |
+| Batch recv/send on Linux | `mmsg.rs` | Use `poll_recvmmsg!` / `poll_sendmmsg!` macros; `sendmmsg_with_suffix` appends shared framing to every message |
 | Track connection-level metrics | `socket_stats.rs` | `QuicAuditStats` (atomic/lock-protected); `SocketStats` (plain Copy struct) |
 
 ## DgramBuffer DESIGN
@@ -50,4 +50,5 @@ Wraps a `Vec<u8>` with a `pos` cursor dividing it into `[headroom: 0..pos][paylo
 - In `quiche` itself, `BufFactory::DgramBuf` defaults to `Vec<u8>` — `DgramBuffer` is only used when tokio-quiche's `BufFactory` is active.
 - `DGRAM_HEADROOM = 16` in `tokio-quiche/src/buf_factory.rs` — sized to hold two QUIC varints (max 8 bytes each).
 - `MAX_DATAGRAM_SIZE = 1500` bytes.
+- The send implementation fully populates its `libc::iovec` storage before taking any `mmsghdr.msg_iov` pointers. Do not interleave pushes and pointer creation: a `SmallVec` reallocation would leave pointers for earlier messages dangling across the syscall.
 - `unsafe impl BufMut for DgramBuffer` delegates entirely to `Vec<u8>`'s trusted implementation; `pos` and `BufMut`'s write pointer operate on non-overlapping regions.
