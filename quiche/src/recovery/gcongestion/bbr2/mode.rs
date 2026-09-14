@@ -139,7 +139,7 @@ pub(super) trait ModeImpl: Debug {
         acked_packets: &[Acked], lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         target_bytes_inflight: usize, params: &Params,
-        recovery_stats: &mut RecoveryStats, cwnd: usize,
+        recovery_stats: &mut RecoveryStats, cwnd: usize, min_cwnd: usize,
     ) -> Mode;
 
     fn get_cwnd_limits(&self, params: &Params) -> Limits<usize>;
@@ -191,7 +191,7 @@ impl Mode {
         acked_packets: &[Acked], lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         target_bytes_inflight: usize, params: &Params,
-        recovery_stats: &mut RecoveryStats, cwnd: usize,
+        recovery_stats: &mut RecoveryStats, cwnd: usize, min_cwnd: usize,
     ) -> bool {
         let mode_before = std::mem::discriminant(self);
 
@@ -205,6 +205,7 @@ impl Mode {
             params,
             recovery_stats,
             cwnd,
+            min_cwnd,
         );
 
         let mode_after = std::mem::discriminant(self);
@@ -269,7 +270,7 @@ impl ModeImpl for Placeholder {
     fn on_congestion_event(
         self, _: usize, _: Instant, _: &[Acked], _: &[Lost],
         _: &mut BBRv2CongestionEvent, _: usize, _params: &Params,
-        _recovery_stats: &mut RecoveryStats, _cwnd: usize,
+        _recovery_stats: &mut RecoveryStats, _cwnd: usize, _min_cwnd: usize,
     ) -> Mode {
         unreachable!()
     }

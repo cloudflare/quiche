@@ -91,12 +91,17 @@ impl ModeImpl for ProbeRTT {
         _acked_packets: &[Acked], _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize, params: &Params,
-        _recovery_stats: &mut RecoveryStats, _cwnd: usize,
+        _recovery_stats: &mut RecoveryStats, _cwnd: usize, min_cwnd: usize,
     ) -> Mode {
         match self.exit_time {
             None => {
+                // The sender's cwnd never drops below `min_cwnd`, so when the
+                // inflight target is below that floor in-flight can't reach
+                // it. Start the exit timer at the floor as well, otherwise the
+                // connection would stay in ProbeRTT indefinitely.
                 if congestion_event.bytes_in_flight <=
-                    self.inflight_target(params)
+                    self.inflight_target(params) ||
+                    congestion_event.bytes_in_flight <= min_cwnd
                 {
                     self.exit_time = Some(
                         congestion_event.event_time + params.probe_rtt_duration,

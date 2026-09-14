@@ -63,7 +63,7 @@ impl ModeImpl for Startup {
         _acked_packets: &[Acked], _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize, params: &Params,
-        recovery_stats: &mut RecoveryStats, cwnd: usize,
+        recovery_stats: &mut RecoveryStats, cwnd: usize, _min_cwnd: usize,
     ) -> Mode {
         if self.model.full_bandwidth_reached() {
             return self.into_drain(event_time, Some(congestion_event), params);
