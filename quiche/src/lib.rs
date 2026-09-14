@@ -8030,74 +8030,71 @@ impl<F: BufFactory> Connection<F> {
             return self.handshake.process_post_handshake(&mut ex_data);
         }
 
-        match self.handshake.do_handshake(&mut ex_data) {
-            Ok(_) => (),
+        let handshake_needs_retry =
+            match self.handshake.do_handshake(&mut ex_data) {
+                Ok(_) => false,
+                Err(Error::Done) => true,
+                Err(e) => return Err(e),
+            };
 
-            Err(Error::Done) => {
-                // Apply in-handshake configuration from callbacks if the path's
-                // Recovery module can still be reinitilized.
-                if self
-                    .paths
-                    .get_active()
-                    .map(|p| p.can_reinit_recovery())
-                    .unwrap_or(false)
-                {
-                    if ex_data.recovery_config != self.recovery_config {
-                        if let Ok(path) = self.paths.get_active_mut() {
-                            self.recovery_config = ex_data.recovery_config;
-                            path.reinit_recovery(&self.recovery_config);
-                        }
-                    }
-
-                    if ex_data.tx_cap_factor != self.tx_cap_factor {
-                        self.tx_cap_factor = ex_data.tx_cap_factor;
-                    }
-
-                    if let Some((discover, max_probes)) = ex_data.pmtud {
-                        self.paths.set_discover_pmtu_on_existing_paths(
-                            discover,
-                            self.recovery_config.max_send_udp_payload_size,
-                            max_probes,
-                        );
-                    }
-
-                    if ex_data.local_transport_params !=
-                        self.local_transport_params
-                    {
-                        self.streams.set_max_streams_bidi(
-                            ex_data
-                                .local_transport_params
-                                .initial_max_streams_bidi,
-                        );
-
-                        self.local_transport_params =
-                            ex_data.local_transport_params;
-                    }
+        // BoringSSL reports success when entering early data before the
+        // handshake completes. Apply callback configuration after either
+        // non-fatal outcome so it is not lost on that path.
+        if self
+            .paths
+            .get_active()
+            .map(|p| p.can_reinit_recovery())
+            .unwrap_or(false)
+        {
+            if ex_data.recovery_config != self.recovery_config {
+                if let Ok(path) = self.paths.get_active_mut() {
+                    self.recovery_config = ex_data.recovery_config;
+                    path.reinit_recovery(&self.recovery_config);
                 }
+            }
 
-                // Try to parse transport parameters as soon as the first flight
-                // of handshake data is processed.
-                //
-                // This is potentially dangerous as the handshake hasn't been
-                // completed yet, though it's required to be able to send data
-                // in 0.5 RTT.
-                let raw_params = self.handshake.quic_transport_params();
+            if ex_data.tx_cap_factor != self.tx_cap_factor {
+                self.tx_cap_factor = ex_data.tx_cap_factor;
+            }
 
-                if !self.parsed_peer_transport_params && !raw_params.is_empty() {
-                    let peer_params = TransportParams::decode(
-                        raw_params,
-                        self.is_server,
-                        self.peer_transport_params_track_unknown,
-                    )?;
+            if let Some((discover, max_probes)) = ex_data.pmtud {
+                self.paths.set_discover_pmtu_on_existing_paths(
+                    discover,
+                    self.recovery_config.max_send_udp_payload_size,
+                    max_probes,
+                );
+            }
 
-                    self.parse_peer_transport_params(peer_params)?;
-                }
+            if ex_data.local_transport_params != self.local_transport_params {
+                self.streams.set_max_streams_bidi(
+                    ex_data.local_transport_params.initial_max_streams_bidi,
+                );
 
-                return Ok(());
-            },
+                self.local_transport_params = ex_data.local_transport_params;
+            }
+        }
 
-            Err(e) => return Err(e),
-        };
+        if handshake_needs_retry {
+            // Try to parse transport parameters as soon as the first flight of
+            // handshake data is processed.
+            //
+            // This is potentially dangerous as the handshake hasn't been
+            // completed yet, though it's required to be able to send data in
+            // 0.5 RTT.
+            let raw_params = self.handshake.quic_transport_params();
+
+            if !self.parsed_peer_transport_params && !raw_params.is_empty() {
+                let peer_params = TransportParams::decode(
+                    raw_params,
+                    self.is_server,
+                    self.peer_transport_params_track_unknown,
+                )?;
+
+                self.parse_peer_transport_params(peer_params)?;
+            }
+
+            return Ok(());
+        }
 
         self.handshake_completed = self.handshake.is_completed();
 

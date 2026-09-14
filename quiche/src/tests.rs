@@ -9296,12 +9296,20 @@ fn user_provided_boring_ctx(
 #[rstest]
 fn in_handshake_config(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] use_session: bool,
+    #[values(false, true)] enable_early_data: bool,
 ) -> Result<()> {
     let mut buf = [0; 65535];
 
     const CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 30;
     const CUSTOM_INITIAL_MAX_STREAMS_BIDI: u64 = 30;
     const CUSTOM_MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
+
+    let custom_cc_algorithm = if cc_algorithm_name == "cubic" {
+        CongestionControlAlgorithm::Bbr2Gcongestion
+    } else {
+        CongestionControlAlgorithm::CUBIC
+    };
 
     // Manually construct `SslContextBuilder` for the server so we can modify
     // CWND during the handshake.
@@ -9314,7 +9322,13 @@ fn in_handshake_config(
     server_tls_ctx_builder
         .set_private_key_file("examples/cert.key", boring::ssl::SslFiletype::PEM)
         .unwrap();
-    server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
+    server_tls_ctx_builder.set_select_certificate_callback(move |mut hello| {
+        <Connection>::set_cc_algorithm_in_handshake(
+            hello.ssl_mut(),
+            custom_cc_algorithm,
+        )
+        .unwrap();
+
         <Connection>::set_initial_congestion_window_packets_in_handshake(
             hello.ssl_mut(),
             CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS,
@@ -9360,12 +9374,33 @@ fn in_handshake_config(
         config.set_max_idle_timeout(180_000);
         config.verify_peer(false);
         config.set_ack_delay_exponent(8);
+
+        if enable_early_data {
+            config.enable_early_data();
+        }
     }
+
+    let session = if use_session {
+        let mut pipe = test_utils::Pipe::with_client_and_server_config(
+            &mut client_config,
+            &mut server_config,
+        )?;
+
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        Some(pipe.client.session().unwrap().to_vec())
+    } else {
+        None
+    };
 
     let mut pipe = test_utils::Pipe::with_client_and_server_config(
         &mut client_config,
         &mut server_config,
     )?;
+
+    if let Some(session) = session {
+        pipe.client.set_session(&session)?;
+    }
 
     // Client sends initial flight.
     let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -9374,6 +9409,19 @@ fn in_handshake_config(
 
     // Server receives client's initial flight and updates its config.
     pipe.server_recv(&mut buf[..len]).unwrap();
+
+    assert_eq!(
+        pipe.server.is_in_early_data(),
+        use_session && enable_early_data
+    );
+    assert_eq!(
+        pipe.server.recovery_config.cc_algorithm,
+        custom_cc_algorithm
+    );
+    assert_eq!(
+        pipe.server.paths.get_active().unwrap().recovery.cwnd(),
+        CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
+    );
 
     assert_eq!(
         pipe.server.tx_cap,
@@ -9395,6 +9443,7 @@ fn in_handshake_config(
     );
 
     assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.server.is_resumed(), use_session);
 
     Ok(())
 }
