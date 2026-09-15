@@ -1026,6 +1026,27 @@ impl StreamIter {
             index: 0,
         }
     }
+
+    /// Creates an iterator which uses a closure to determine if an element
+    /// should be yielded. Given an element the closure must return true or
+    /// false. The returned iterator contains only the elements for which
+    /// the closure returns true. This function copies the values to a new
+    /// buffer.
+    #[inline]
+    pub fn filter<P>(&self, mut predicate: P) -> Self
+    where
+        P: FnMut(&u64) -> bool,
+    {
+        Self {
+            streams: self
+                .streams
+                .iter()
+                .filter(|&s| predicate(s))
+                .copied()
+                .collect(),
+            index: 0,
+        }
+    }
 }
 
 impl Iterator for StreamIter {
