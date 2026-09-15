@@ -1678,6 +1678,14 @@ pub fn accept_with_retry<F: BufFactory>(
 /// while the optional `server_name` parameter is used to verify the peer's
 /// certificate.
 ///
+/// `server_name` is sent as the SNI host name and matched against the
+/// certificate's `dNSName` entries. To verify a server identified by an IP
+/// address instead, pass `None` and call [`set_host_ip_addr()`] on the
+/// returned connection. Note that with `None` and no address, the peer's
+/// identity is not checked at all.
+///
+/// [`set_host_ip_addr()`]: struct.Connection.html#method.set_host_ip_addr
+///
 /// ## Examples:
 ///
 /// ```no_run
@@ -2384,6 +2392,38 @@ impl<F: BufFactory> Connection<F> {
     #[cfg_attr(docsrs, doc(cfg(feature = "qlog")))]
     pub fn qlog_streamer(&mut self) -> Option<&mut qlog::streamer::QlogStreamer> {
         self.qlog.streamer.as_mut()
+    }
+
+    /// Requires the server's certificate to be valid for the IP address `ip`.
+    ///
+    /// A server identified by IP address rather than by name is verified
+    /// against the certificate's `iPAddress` subjectAltName entries (RFC
+    /// 5280, Section 4.2.1.6). It receives no SNI, as [RFC 6066] does not
+    /// permit address literals there. An address never matches a `dNSName`
+    /// entry or a subject common name holding the same text.
+    ///
+    /// Use this on a client created with [`connect()`] and `server_name` set
+    /// to `None`. If a server name was also given, the certificate must
+    /// satisfy both.
+    ///
+    /// This must be called immediately after creating a connection, before
+    /// any packet is sent or received; later calls fail with
+    /// [`InvalidState`].
+    ///
+    /// The same effect can be had by reaching the `boring::ssl::SslRef`
+    /// through `AsMut` and calling `set_ip()` on its verify parameters, but
+    /// only when quiche is built with the `boringssl-boring-crate` feature;
+    /// this method does not depend on it.
+    ///
+    /// [`connect()`]: fn.connect.html
+    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [RFC 6066]: https://datatracker.ietf.org/doc/html/rfc6066#section-3
+    pub fn set_host_ip_addr(&mut self, ip: std::net::IpAddr) -> Result<()> {
+        if self.sent_count > 0 || self.recv_count > 0 {
+            return Err(Error::InvalidState);
+        }
+
+        self.handshake.set_host_ip_addr(ip)
     }
 
     /// Configures the given session for resumption.

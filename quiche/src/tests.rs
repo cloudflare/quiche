@@ -12975,3 +12975,147 @@ fn server_qlog() {
         panic!("expected Qlog event");
     }
 }
+
+mod ip_san_verification {
+    use super::*;
+
+    use std::net::IpAddr;
+
+    /// Builds a pipe whose client verifies the server against
+    /// `examples/iptest-ca.crt`, requiring `ip` (and `server_name`, if any),
+    /// and whose server presents the leaf `examples/<leaf>.{crt,key}`.
+    fn make_pipe(
+        server_name: Option<&str>, ip: Option<IpAddr>, leaf: &str,
+    ) -> Result<test_utils::Pipe> {
+        let mut client_config = Config::new(PROTOCOL_VERSION)?;
+        client_config
+            .load_verify_locations_from_file("examples/iptest-ca.crt")?;
+        client_config.verify_peer(true);
+        client_config.set_application_protos(&[b"proto1"])?;
+        client_config.set_initial_max_data(30);
+        client_config.set_initial_max_stream_data_bidi_local(15);
+        client_config.set_initial_max_stream_data_bidi_remote(15);
+        client_config.set_initial_max_streams_bidi(3);
+
+        let mut server_config = Config::new(PROTOCOL_VERSION)?;
+        server_config
+            .load_cert_chain_from_pem_file(&format!("examples/{leaf}.crt"))?;
+        server_config
+            .load_priv_key_from_pem_file(&format!("examples/{leaf}.key"))?;
+        server_config.set_application_protos(&[b"proto1"])?;
+        server_config.set_initial_max_data(30);
+        server_config.set_initial_max_stream_data_bidi_local(15);
+        server_config.set_initial_max_stream_data_bidi_remote(15);
+        server_config.set_initial_max_streams_bidi(3);
+
+        let mut client_scid = [0; 16];
+        rand::rand_bytes(&mut client_scid[..]);
+        let mut server_scid = [0; 16];
+        rand::rand_bytes(&mut server_scid[..]);
+
+        let mut client = connect(
+            server_name,
+            &ConnectionId::from_ref(&client_scid),
+            test_utils::Pipe::client_addr(),
+            test_utils::Pipe::server_addr(),
+            &mut client_config,
+        )?;
+
+        if let Some(ip) = ip {
+            client.set_host_ip_addr(ip)?;
+        }
+
+        Ok(test_utils::Pipe {
+            client,
+            server: accept(
+                &ConnectionId::from_ref(&server_scid),
+                None,
+                test_utils::Pipe::server_addr(),
+                test_utils::Pipe::client_addr(),
+                &mut server_config,
+            )?,
+        })
+    }
+
+    fn handshake(ip: &str, leaf: &str) -> Result<()> {
+        make_pipe(None, Some(ip.parse().unwrap()), leaf)?.handshake()
+    }
+
+    #[test]
+    fn ipv4_matches_ip_san() {
+        assert_eq!(handshake("127.0.0.1", "iptest-ipsan"), Ok(()));
+    }
+
+    #[test]
+    fn ipv6_matches_ip_san() {
+        assert_eq!(handshake("::1", "iptest-ipsan"), Ok(()));
+    }
+
+    #[test]
+    fn wrong_ip_san_rejected() {
+        assert_eq!(
+            handshake("127.0.0.1", "iptest-othersan"),
+            Err(Error::TlsFail)
+        );
+    }
+
+    #[test]
+    fn ip_does_not_match_dns_san() {
+        // A dNSName holding the address text must not satisfy an
+        // address-identified peer.
+        assert_eq!(
+            handshake("127.0.0.1", "iptest-dnsonly"),
+            Err(Error::TlsFail)
+        );
+    }
+
+    #[test]
+    fn ip_does_not_match_common_name() {
+        // Nor may the subject common name, which is only ever consulted as a
+        // legacy fallback for DNS names.
+        assert_eq!(handshake("127.0.0.1", "iptest-cnonly"), Err(Error::TlsFail));
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_does_not_match_ipv4_san() {
+        // iPAddress values are compared as raw octets (RFC 5280, Section
+        // 4.2.1.6): a 16-byte mapped address never equals a 4-byte one.
+        assert_eq!(
+            handshake("::ffff:127.0.0.1", "iptest-ipsan"),
+            Err(Error::TlsFail)
+        );
+    }
+
+    #[test]
+    fn no_sni_for_ip_addresses() {
+        // RFC 6066, Section 3.
+        let ip = "127.0.0.1".parse().unwrap();
+        let mut pipe = make_pipe(None, Some(ip), "iptest-ipsan").unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+        assert_eq!(pipe.server.server_name(), None);
+    }
+
+    #[test]
+    fn name_and_ip_are_both_required() {
+        let ip = "127.0.0.1".parse().unwrap();
+        let mut pipe =
+            make_pipe(Some("quic.tech"), Some(ip), "iptest-ipsan").unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+        assert_eq!(pipe.server.server_name(), Some("quic.tech"));
+
+        // The name matches but the address does not.
+        let ip = "192.0.2.1".parse().unwrap();
+        let mut pipe =
+            make_pipe(Some("quic.tech"), Some(ip), "iptest-ipsan").unwrap();
+        assert_eq!(pipe.handshake(), Err(Error::TlsFail));
+    }
+
+    #[test]
+    fn rejected_once_packets_have_flowed() {
+        let mut pipe = make_pipe(None, None, "iptest-ipsan").unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let ip = "127.0.0.1".parse().unwrap();
+        assert_eq!(pipe.client.set_host_ip_addr(ip), Err(Error::InvalidState));
+    }
+}
