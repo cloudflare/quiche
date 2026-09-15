@@ -2313,6 +2313,36 @@ fn stream_reset_counts(
 }
 
 #[rstest]
+/// A retransmitted RESET_STREAM for an already-reset stream must not increase
+/// the remote reset counter more than once.
+fn stream_reset_count_remote_retransmit(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let frames = [frame::Frame::ResetStream {
+        stream_id: 0,
+        error_code: 42,
+        final_size: 0,
+    }];
+
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+    assert_eq!(pipe.server.stats().reset_stream_count_remote, 1);
+
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+    assert_eq!(pipe.server.stats().reset_stream_count_remote, 1);
+}
+
+#[rstest]
 fn stream_stop_counts(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
