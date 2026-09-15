@@ -107,6 +107,7 @@ where
 
     let writer_cfg = WriterConfig {
         pending_cid: None, // only used for unmapping in IPR
+        stateless_reset_key: None,
         peer_addr,
         local_addr,
         // TODO: try to read Tx' SocketCaps. false is always a safe default.
