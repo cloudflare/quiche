@@ -112,16 +112,14 @@ async fn test_handshake_duration_ioworker() {
         handle_connection,
     );
 
-    // TODO: migrate to h3i client to assert a CONNECTION_CLOSE was received. This
-    // will have to be the sync version so as to isolate the tokio-quiche IO
-    // loop.
+    // TODO: Use the synchronous h3i client to assert that CONNECTION_CLOSE was
+    // received while isolating the tokio-quiche IO loop.
     //
-    // Unfortunately we can't PCAP this test since encryption keys don't seem to
-    // get dumped.
+    // This test cannot use PCAP because its encryption keys are not dumped.
     //
-    // build() spawns the InboundPacketRouter and sends the Initial, which will
-    // kick the handshake off on the server-side. If all goes well, the server
-    // will close the connection and the router will time the connection out.
+    // `build()` spawns `InboundPacketRouter` and sends the Initial, starting
+    // the server handshake. The server then closes the connection, and the
+    // router times it out.
     let url = format!("{url}/1");
     let client_res = h3i_fixtures::request(&url, 1).await;
 

@@ -101,8 +101,8 @@ impl ModeImpl for Startup {
         }
 
         // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not exit
-        // upon excessive losses, if enough bandwidth growth is observed or if the
-        // sample was app limited.
+        // upon excessive losses if enough bandwidth growth is observed or the
+        // sample was app-limited.
         let check_for_excessive_loss = !congestion_event.last_packet_send_state.is_app_limited &&
                 !has_bandwidth_growth &&
                 // check for excessive loss only if not exiting for other reasons

@@ -158,9 +158,9 @@ impl StreamCtx {
         debug_assert!(!self.fin_or_reset_recv);
         self.audit_stats
             .set_sent_stop_sending_error_code(wire_err_code as i64);
-        // It is ok for us to set the `fin_reset_recv` flag here.  While the peer
-        // must still send a fin or reset_stream with its final size, we don't
-        // need to read it from the stream. Quiche will take care of that.
+        // Setting `fin_or_reset_recv` here is safe. The peer must still send
+        // FIN or RESET_STREAM with its final size, but `quiche` handles
+        // that without an application read.
         self.fin_or_reset_recv = true;
         self.send = None;
     }

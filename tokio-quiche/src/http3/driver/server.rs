@@ -115,9 +115,9 @@ impl From<H3Event> for ServerH3Event {
             H3Event::IncomingHeaders(incoming_headers) => {
                 // Server `incoming_headers` are exclusively created in
                 // `ServerHooks::handle_request`, which correctly serializes the
-                // RawPriorityValue and IsInEarlyData values.
+                // `RawPriorityValue` and `IsInEarlyData` values.
                 //
-                // See `H3Driver::process_read_event` for implementation details.
+                // `H3Driver::process_read_event` implements this behavior.
                 Self::Headers {
                     incoming_headers,
                     priority: None,

@@ -286,8 +286,8 @@ impl Context {
         // false -> 0x00 SSL_VERIFY_NONE
         let mode = i32::from(verify);
 
-        // Note: Base on two used modes(see above), it seems ok for both, bssl and
-        // ossl. If mode needs to be ored then it may need to be adjusted.
+        // The two modes above work for both BoringSSL and OpenSSL. This may
+        // need adjustment if modes must be combined.
         unsafe {
             SSL_CTX_set_verify(self.as_mut_ptr(), mode, None);
         }
@@ -333,6 +333,18 @@ impl Context {
                 key.as_ptr(),
                 key.len(),
             )
+        })
+    }
+
+    pub fn set_curves_list(&mut self, curves: &str) -> Result<()> {
+        // Note: BoringSSL exports `SSL_CTX_set1_groups_list` as a real
+        // function; OpenSSL (and openssl-quictls) defines it as a macro
+        // that expands to `SSL_CTX_ctrl`. Each backend provides a
+        // `SSL_CTX_set1_groups_list` shim in the per-vendor module so this
+        // call site can be backend-agnostic.
+        let cstr = ffi::CString::new(curves).map_err(|_| Error::TlsFail)?;
+        map_result(unsafe {
+            SSL_CTX_set1_groups_list(self.as_mut_ptr(), cstr.as_ptr())
         })
     }
 

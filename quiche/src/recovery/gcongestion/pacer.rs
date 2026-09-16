@@ -141,9 +141,8 @@ impl Pacer {
 
         // If in recovery, the connection is not coming out of quiescence.
         if bytes_in_flight == 0 && !self.sender.is_in_recovery() {
-            // Add more burst tokens anytime the connection is leaving quiescence,
-            // but limit it to the equivalent of a single bulk write,
-            // not exceeding the current CWND in packets.
+            // When leaving quiescence, replenish burst tokens up to one bulk
+            // write without exceeding the current CWND in packets.
             self.burst_tokens = self
                 .initial_burst_size
                 .min(self.sender.get_congestion_window_in_packets());
@@ -164,8 +163,8 @@ impl Pacer {
             .transfer_time(bytes as u64);
 
         if !self.pacing_limited || self.lumpy_tokens == 0 {
-            // Reset lumpy_tokens_ if either application or cwnd throttles sending
-            // or token runs out.
+            // Reset `lumpy_tokens` if the application or congestion window
+            // throttles sending, or if the token runs out.
             self.lumpy_tokens = 1.max(LUMPY_PACING_SIZE.min(
                 (self.sender.get_congestion_window_in_packets() as f64 *
                     LUMPY_PACING_CWND_FRACTION) as usize,

@@ -106,8 +106,9 @@ const DEFAULT_PRIO: h3::Priority = h3::Priority::new(3, true);
 // 1MB of max buffered data.
 #[cfg(not(any(test, debug_assertions)))]
 const STREAM_CAPACITY: usize = 16;
+// A single entry stresses `write_pending` in test and debug builds.
 #[cfg(any(test, debug_assertions))]
-const STREAM_CAPACITY: usize = 1; // Set to 1 to stress write_pending under test conditions
+const STREAM_CAPACITY: usize = 1;
 
 // For *all* flows use a shared channel with 2048 entries, which works out
 // to 3MB of max buffered data at 1500 bytes per datagram.
@@ -543,7 +544,8 @@ impl<H: DriverHooks> H3Driver<H> {
                             quiche::Shutdown::Read,
                             err,
                         );
-                        drop(try_reserve_result); // needed to drop the borrow on ctx.
+                        // Release the borrow of `ctx` before updating it.
+                        drop(try_reserve_result);
                         ctx.handle_sent_stop_sending(err);
                         // TODO: should we send an H3Event event to
                         // h3_event_sender? We can only get here if the app
@@ -571,14 +573,10 @@ impl<H: DriverHooks> H3Driver<H> {
                 };
             }
 
-            // Size the receive buffer to the contiguous, in-order data currently
-            // readable on the stream, capped at the configured maximum, so small
-            // or idle bodies don't pay for a full allocation.
-            // The readable length includes H3 framing, so it is enough to drain
-            // all currently readable body bytes. The floor
-            // (`MIN_BODY_RECV_BUF_SIZE`) keeps the allocation non-zero and large
-            // enough that a trickle of tiny reads reuses a single allocation
-            // instead of reallocating each time.
+            // Size the buffer for currently readable, in-order data, capped at
+            // the configured maximum. The readable length includes H3 framing,
+            // so it can drain all readable body bytes. The minimum keeps the
+            // allocation nonzero and amortizes a trickle of small reads.
             let want = body_recv_buf_size(
                 qconn.stream_readable_len(stream_id, self.max_recv_body_buf_size),
                 self.max_recv_body_buf_size,
@@ -588,16 +586,13 @@ impl<H: DriverHooks> H3Driver<H> {
             let body_recv_buf = self
                 .body_recv_buf
                 .get_or_insert_with(|| BytesMut::with_capacity(want).limit(want));
-            // NOTE: `body_recv_buf` is `Limit<BytesMut>` so `remaining_mut()`
-            // reports the space left until the *limit* is reached. (A plain
-            // `BytesMut` can reallocate and would always report space available.)
+            // `Limit<BytesMut>` reports only capacity below its limit. Plain
+            // `BytesMut` can reallocate and always reports available space.
             //
-            // Reallocate whenever the room left is smaller than what we want for
-            // this read. This covers an exhausted buffer, but also grows a
-            // buffer that was previously sized to a smaller readable length so a
-            // later, larger read is not throttled by leftover capacity. Capacity
-            // is kept equal to the limit so the `split()` invariant asserted
-            // below (spare capacity == remaining_mut) continues to hold.
+            // Reallocate when the remaining room cannot hold this read. This
+            // handles exhausted buffers and reads larger than the previous
+            // allocation. Keep capacity equal to the limit to preserve the
+            // `split()` invariant checked below.
             if body_recv_buf.remaining_mut() < want {
                 *body_recv_buf = BytesMut::with_capacity(want).limit(want);
             }
@@ -729,9 +724,8 @@ impl<H: DriverHooks> H3Driver<H> {
             h3::Event::Reset(code) => {
                 if let Some(ctx) = self.stream_map.get_mut(&stream_id) {
                     ctx.handle_recvd_reset(code);
-                    // See if we are waiting on this stream and close the channel
-                    // if we are. If we are not waiting, `handle_recvd_reset()`
-                    // will have taken care of closing.
+                    // Close the channel if this stream is waiting. Otherwise,
+                    // `handle_recvd_reset()` already closed it.
                     for pending in self.waiting_streams.iter_mut() {
                         match pending {
                             WaitForStream::Upstream(
@@ -970,7 +964,8 @@ impl<H: DriverHooks> H3Driver<H> {
         match self.stream_map.get_mut(&stream_id) {
             None => Ok(()),
             Some(stream) => {
-                chan.abort_send(); // Have to do it to release the associated permit
+                // Release the associated permit before retaining the channel.
+                chan.abort_send();
                 stream.send = Some(chan);
                 self.process_h3_data(qconn, stream_id)
             },
@@ -1060,14 +1055,13 @@ impl<H: DriverHooks> H3Driver<H> {
             }
         }
 
-        // Close any DATAGRAM-proxying channels when we close the stream, if they
-        // exist
+        // Close any DATAGRAM-proxying channels associated with the stream.
         if let Some(mapped_flow_id) = stream_ctx.associated_dgram_flow_id {
             self.flow_map.remove(&mapped_flow_id);
         }
 
         if qconn.is_server() {
-            // Signal the server to remove the stream from its map
+            // Signal the server to remove the stream from its map.
             let _ = self
                 .h3_event_sender
                 .send(H3Event::StreamClosed { stream_id }.into());
@@ -1271,9 +1265,8 @@ impl<H: DriverHooks> H3Driver<H> {
                     // stream properly. Once applications code
                     // is fixed, we can remove this check.
                     {
-                        // The channel closed without having written a fin. Send a
-                        // RESET_STREAM to indicate we won't be writing anything
-                        // else
+                        // No FIN was written before closure. Send RESET_STREAM
+                        // because no more data will follow.
                         let err = h3::WireErrorCode::RequestCancelled as u64;
                         let _ = qconn.stream_shutdown(
                             stream_id,

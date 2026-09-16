@@ -58,6 +58,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::select;
 use tokio::sync::mpsc;
 
@@ -87,17 +88,23 @@ pub const TEST_KEY_FILE: &str = concat!(
 
 pub struct TestConnectionHook {
     was_called: Arc<AtomicBool>,
+    path_events: Mutex<Vec<tokio_quiche::quiche::PathEvent>>,
 }
 
 impl TestConnectionHook {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             was_called: Arc::new(AtomicBool::new(false)),
+            path_events: Mutex::new(Vec::new()),
         })
     }
 
     pub fn was_called(&self) -> bool {
         self.was_called.load(Ordering::SeqCst)
+    }
+
+    pub fn path_events(&self) -> Vec<tokio_quiche::quiche::PathEvent> {
+        self.path_events.lock().unwrap().clone()
     }
 }
 
@@ -107,6 +114,13 @@ impl ConnectionHook for TestConnectionHook {
     ) -> Option<boring::ssl::SslContextBuilder> {
         self.was_called.store(true, Ordering::SeqCst);
         None
+    }
+
+    fn on_path_event(
+        &self, _qconn: &mut tokio_quiche::quic::QuicheConnection,
+        event: &tokio_quiche::quiche::PathEvent,
+    ) {
+        self.path_events.lock().unwrap().push(event.clone());
     }
 }
 

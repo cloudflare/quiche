@@ -188,8 +188,8 @@ impl std::fmt::Debug for DgramBuffer {
         }
 
         write!(f, "[0x")?;
-        // Render payload bytes as two-char hex, underscore-separated after every
-        // 4.
+        // Render bytes as two hexadecimal digits, separated every four bytes by
+        // an underscore.
         for (i, byte) in self.as_slice().iter().enumerate() {
             if i > 0 && i % 4 == 0 {
                 f.write_str("_")?;

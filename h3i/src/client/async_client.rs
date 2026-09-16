@@ -185,8 +185,8 @@ impl Future for BuildingConnectionSummary {
         mut self: Pin<&mut Self>, cx: &mut Context<'_>,
     ) -> Poll<Self::Output> {
         while let Poll::Ready(Some(record)) = self.rx.poll_recv(cx) {
-            // Grab all records received from the current event loop iteration and
-            // insert them into the in-progress summary
+            // Add all records from the current event loop iteration to the
+            // in-progress summary.
             let summary = self.summary.as_mut().expect("summary already taken");
 
             match record {
@@ -319,17 +319,16 @@ impl ApplicationOverQuic for H3iDriver {
     }
 
     fn should_act(&self) -> bool {
-        // Even if the connection wasn't established, we should still send
-        // terminal records to the summary
+        // Send terminal records even without an established connection.
         true
     }
 
     fn process_reads(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()> {
         log::trace!("h3i: process_reads");
 
-        // This is executed in process_reads so that work_loop can clear any waits
-        // on the current event loop iteration - if it was in process_writes, we
-        // could potentially miss waits and hang the client.
+        // Register waits during `process_reads()` so `work_loop()` can clear
+        // them during the current event loop iteration. Registering them during
+        // `process_writes()` could miss waits and hang the client.
         self.register_waits();
 
         let stream_events = parse_streams(qconn, self);
@@ -379,10 +378,9 @@ impl ApplicationOverQuic for H3iDriver {
                     }
                 },
                 Action::Wait { .. } => {
-                    // Break out of the write phase if we see a wait, since waits
-                    // have to be registered in the read
-                    // phase. The actions_executed pointer will be
-                    // incremented there as well
+                    // Waits are registered during the read phase. Stop here so
+                    // that phase can register this wait and increment
+                    // `actions_executed`.
                     break;
                 },
                 Action::FlushPackets => {
@@ -403,8 +401,8 @@ impl ApplicationOverQuic for H3iDriver {
         let sleep_fut = if !self.should_fire() {
             sleep_until(self.next_fire_time)
         } else {
-            // If we have nothing to send, allow the IOW to resolve wait_for_data
-            // on its own (whether via Quiche timer or incoming data).
+            // If there is nothing to send, let the IOW resolve `wait_for_data`
+            // through a QUIC timer or incoming data.
             sleep(Duration::MAX)
         };
 

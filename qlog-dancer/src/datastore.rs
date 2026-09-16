@@ -836,8 +836,8 @@ impl Datastore {
 
                 if let Some(sb) = stream_bind.get(&e.params.source_dependency.id)
                 {
-                    // Hat-tip Olivia Trewin: this one cool trick allows u64's to
-                    // be substracted into a correct i64.
+                    // Wrapping subtraction before casting preserves the signed
+                    // difference between the two `u64` timestamps.
                     req.time_discovery = Some(
                         (sb.request_discovery_time
                             .wrapping_sub(session_start_time)

@@ -1347,8 +1347,8 @@ mod tests {
         for subsequent_loss_count in 1..100 {
             // Double the overhead until it caps at `2.0`.
             //
-            // It takes `3` rounds of doubling for INITIAL_TIME_THRESHOLD_OVERHEAD
-            // to equal `1.0`.
+            // The initial time-threshold overhead reaches `1.0` after three
+            // rounds of doubling.
             let new_time_threshold = if subsequent_loss_count <= 3 {
                 1.0 + INITIAL_TIME_THRESHOLD_OVERHEAD *
                     2_f64.powi(subsequent_loss_count as i32)

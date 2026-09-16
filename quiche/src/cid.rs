@@ -509,8 +509,8 @@ impl ConnectionIdentifiers {
         // After processing a NEW_CONNECTION_ID frame and adding and retiring
         // active connection IDs, if the number of active connection IDs exceeds
         // the value advertised in its active_connection_id_limit transport
-        // parameter, an endpoint MUST close the connection with an error of type
-        // CONNECTION_ID_LIMIT_ERROR.
+        // parameter, an endpoint MUST close the connection with an error of
+        // type CONNECTION_ID_LIMIT_ERROR.
         if retire_prior_to > self.largest_peer_retire_prior_to {
             let retired = &mut self.retire_dcid_seqs;
 

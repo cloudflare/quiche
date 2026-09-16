@@ -347,8 +347,8 @@ fn ack_frame_serialize_mixed_ranges() {
 
 #[test]
 fn ack_frame_serialize_unordered_ranges() {
-    // draft-ietf-quic-qlog-quic-events-12 specified that ack ranges can be in any
-    // order
+    // `draft-ietf-quic-qlog-quic-events-12` specified that ACK ranges can
+    // appear in any order.
     let frame = QuicFrame::Ack {
         ack_delay: None,
         acked_ranges: Some(vec![
@@ -389,8 +389,8 @@ fn ack_frame_roundtrip() {
 
 #[test]
 fn ack_frame_roundtrip_preserve_order() {
-    // draft-ietf-quic-qlog-quic-events-12 specifies that ack ranges may appear in
-    // any order.
+    // `draft-ietf-quic-qlog-quic-events-12` specifies that ACK ranges may
+    // appear in any order.
     let frame = QuicFrame::Ack {
         ack_delay: Some(1.5),
         acked_ranges: Some(vec![

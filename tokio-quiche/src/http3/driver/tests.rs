@@ -231,23 +231,23 @@ mod client_side_driver {
             .unwrap();
         helper.advance_and_run_loop().unwrap();
 
-        // server receives client body
+        // The server receives the client body.
         assert_eq!(helper.peer_server_poll(), Ok((0, h3::Event::Data)));
         assert_eq!(helper.peer_server_poll(), Err(h3::Error::Done));
         assert_eq!(helper.peer_server_recv_body_vec(0, 1024), Ok(vec![1; 5]));
 
-        // client sends fin, server sends body and fin
+        // The client sends FIN. The server sends a body and FIN.
         to_server
             .try_send(OutboundFrame::Body(Default::default(), true))
             .unwrap();
         helper.peer_server_send_body(0, &[2; 10], true).unwrap();
 
-        // Server reads fin
+        // The server reads FIN.
         helper.advance_and_run_loop().unwrap();
-        // TODO: the server sees an h3::Event::Data, but it's for an empty buffer.
-        // Ideally, it wouldn't do that.
+        // TODO: The server sees `h3::Event::Data`, but it contains an empty
+        // buffer. Ideally, it wouldn't do that.
         assert_eq!(helper.peer_server_poll(), Ok((0, h3::Event::Data)));
-        // No data to be read
+        // No data remains to be read.
         assert_eq!(
             helper.peer_server_recv_body_vec(0, 1024),
             Err(h3::Error::Done)
@@ -256,25 +256,20 @@ mod client_side_driver {
         assert_eq!(helper.peer_server_poll(), Err(h3::Error::Done));
         helper.advance_and_run_loop().unwrap();
 
-        // client receives the server body
+        // The client receives the server body.
         assert_matches!(from_server.try_recv(), Ok(InboundFrame::Body(buf, fin)) => {
             assert_eq!(buf.to_vec(), vec![2; 10]);
-            // TODO: it would be nice if we could receive the fin here, but that's not
-            // how quiche::h3 works. Instead we need another receive call on the channel
+            // TODO: It would be useful to receive FIN here, but `quiche::h3`
+            // requires another receive call on the channel.
             assert!(!fin);
         });
         helper.work_loop_iter().unwrap();
 
-        // FIXME: This is an edge case. We should not see a `Disconnected` error
-        // here. The `from_server` / `InboudFrame` channel is set to 1 in tests.
-        // What happens, is the driver reads the previous body frame, then it
-        // sees an `Event::Finished` and calls `process_h3_fin`, which sets
-        // `ctx.fin_recv`. Then it processes the pending write that sends the fin
-        // from client to server. The driver now sees both ctx.fin_read &&
-        // ctx.fin_sent and drops the context and thus the channel. Application
-        // code (H3Body) is not affected by -- it treats a disconnected channel
-        // like receiving a fin. It's a different question if it should treat it
-        // as such
+        // FIXME: This should not produce `Disconnected`. The test channel has
+        // capacity one. The driver reads the prior body, observes
+        // `Event::Finished`, then processes the pending client FIN. It drops
+        // the context and channel because both directions are finished.
+        // H3Body treats disconnection as FIN. This behavior may be incorrect.
 
         // assert_matches!(from_server.try_recv(), Ok(InboundFrame::Body(buf,
         // fin)) => {
@@ -291,12 +286,12 @@ mod client_side_driver {
         helper.complete_handshake().unwrap();
         helper.advance_and_run_loop().unwrap();
 
-        // client sends a request with fin
+        // The client sends a request with FIN.
         let stream_id = helper
             .driver_send_request(make_request_headers("GET"), true)
             .unwrap();
 
-        // servers reads request and sends response headers
+        // The server reads the request and sends response headers.
         helper.advance_and_run_loop().unwrap();
         assert_matches!(
             helper.peer_server_poll().unwrap(),
@@ -305,7 +300,7 @@ mod client_side_driver {
         helper.peer_server_send_response(0, false).unwrap();
         helper.advance_and_run_loop().unwrap();
 
-        // Client receives response headers
+        // The client receives response headers.
         let resp = assert_matches!(
             helper.driver_recv_core_event().unwrap(),
             H3Event::IncomingHeaders(headers) => { headers }
@@ -314,30 +309,30 @@ mod client_side_driver {
         assert!(!resp.read_fin);
         let mut from_server = resp.recv;
 
-        // Set the buffer size
+        // Set the buffer size.
         helper.driver_set_body_buf_size(30);
-        // Server sends an initial 10 byte body.
+        // The server sends an initial 10-byte body.
         helper.peer_server_send_body(0, &[2; 10], false).unwrap();
         helper.advance_and_run_loop().unwrap();
-        // client receives the server body
+        // The client receives the server body.
         assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![2; 10]);
-        // another 10 bytes
+        // Receive another ten bytes.
         helper.peer_server_send_body(0, &[3; 10], false).unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![3; 10]);
-        // another 10 bytes. That should have used the initial buffer.
+        // Receive another ten bytes using the initial buffer.
         helper.peer_server_send_body(0, &[4; 10], false).unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![4; 10]);
-        // another 10 bytes. Should transparently use a new buffer
+        // Receive another ten bytes using a new buffer transparently.
         helper.peer_server_send_body(0, &[5; 10], true).unwrap();
         helper.advance_and_run_loop().unwrap();
 
         let (body, fin, _) = helper.driver_try_recv_body(&mut from_server);
         assert_eq!(body, vec![5; 10]);
-        // client receives the server FIN
+        // The client receives the server FIN.
         assert!(fin);
-        // client should have cleaned up the stream as both directions have closed
+        // The client should clean up the stream after both directions close.
         assert_eq!(helper.driver.stream_map.len(), 0);
     }
 
@@ -1184,13 +1179,11 @@ mod server_side_driver {
         );
         helper.advance_and_run_loop().unwrap();
 
-        // the client didn't send any additional data, a try_recv on the server
-        // returns empty
+        // No additional client data leaves the server's `try_recv()` empty.
         assert_matches!(from_client.try_recv(), Err(TryRecvError::Empty));
-        // The way quiche is implemented, we need to attempt a write to the stream
-        // to learn that it's closed. So we add an OutboundFrame to the
-        // channel and let the driver write it. The driver gets a
-        // StreamStopped back and closes the channel.
+        // `quiche` detects the closed stream only after a write attempt.
+        // Queue an `OutboundFrame`. The resulting `StreamStopped` error causes
+        // the driver to close the channel.
         to_client
             .try_send(OutboundFrame::Body(
                 Bytes::copy_from_slice(&[23; 10]),

@@ -14,7 +14,7 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-clap = "4"
+clap = { workspace = true }
 env_logger = { workspace = true }
 futures-util = { version = "0.3", features = ["io", "sink"] }
 js-sys = "0.3"

@@ -44,6 +44,7 @@ pub mod async_callbacks;
 pub mod connection_close;
 pub mod headers;
 pub mod migration;
+pub mod path_events;
 pub mod qlog_compression;
 pub mod stream_limit;
 pub mod timeouts;
@@ -281,8 +282,7 @@ async fn test_so_mark_receive_data() {
 
     let audit_stats = audit_stats_rx.recv().await.expect("should receive stats");
     let so_mark_data = audit_stats.initial_so_mark_data();
-    // We don't actually set SO_MARK anywhere, so we just want to ensure that the
-    // data is `Some`, indicating that we at least received the cmsg from the
-    // socket.
+    // SO_MARK is not set. Only verify that `Some` indicates receipt of the
+    // socket control message.
     assert_eq!(so_mark_data.unwrap(), &[0, 0, 0, 0]);
 }

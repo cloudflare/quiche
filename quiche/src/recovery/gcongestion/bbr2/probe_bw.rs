@@ -212,15 +212,13 @@ impl ProbeBW {
         cycle.rounds_in_phase = 0;
 
         if params.bw_lo_mode != BwLoMode::Default {
-            // Clear bandwidth lo if it was set in PROBE_UP, because losses in
-            // PROBE_UP should not permanently change bandwidth_lo.
-            // It's possible for bandwidth_lo to be set during REFILL, but if that
-            // was a valid value, it'll quickly be rediscovered.
+            // Clear `bandwidth_lo` if it was set in PROBE_UP because losses in
+            // that phase should not change it permanently.
+            // A valid REFILL value for `bandwidth_lo` is quickly rediscovered.
             self.model.clear_bandwidth_lo();
         }
 
-        // Pick probe wait time.
-        // TODO(vlad): actually pick time
+        // TODO(vlad): Choose a probe wait time.
         cycle.rounds_since_probe = 0;
         cycle.probe_wait_time = Some(
             params.probe_bw_probe_base_duration + Duration::from_micros(500),
@@ -321,8 +319,8 @@ impl ProbeBW {
         }
 
         // This exit condition is experimental code from Google quiche which
-        // diverges from the RFC. Use `disable_probe_down_early_exit` to override
-        // the behavior.
+        // diverges from the RFC. Use `disable_probe_down_early_exit` to
+        // override the behavior.
         if self.has_stayed_long_enough_in_probe_down(congestion_event, params) {
             self.enter_probe_cruise(congestion_event.event_time);
             return;
@@ -563,8 +561,8 @@ impl ProbeBW {
     // Used to prevent a BBR2 flow from staying in PROBE_DOWN for too
     // long, as seen in some multi-sender simulator tests.
     //
-    // This is experimental code from Google quiche and diverges from the RFC. Use
-    // `disable_probe_down_early_exit` to override the behavior.
+    // This is experimental code from Google quiche and diverges from the RFC.
+    // Use `disable_probe_down_early_exit` to override the behavior.
     // - RFC: https://www.ietf.org/archive/id/draft-ietf-ccwg-bbr-02.html#name-probebw_down
     // - Google quiche: https://github.com/google/quiche/blob/b370e7a/quiche/quic/core/congestion_control/bbr2_probe_bw.cc#L142
     fn has_stayed_long_enough_in_probe_down(
@@ -581,9 +579,9 @@ impl ProbeBW {
 
     fn raise_inflight_high_slope(&mut self, cwnd: usize) {
         let growth_this_round = 1usize << self.cycle.probe_up_rounds;
-        // The number 30 below means `growth_this_round` is capped at 1G and the
-        // lower bound of `probe_up_bytes` is (practically) 1 mss, at this
-        // speed `inflight_hi`` grows by approximately 1 packet per packet acked.
+        // Capping rounds at 30 limits `growth_this_round` to 1G and keeps
+        // `probe_up_bytes` near one MSS. This grows `inflight_hi` by about one
+        // packet per ACK.
         self.cycle.probe_up_rounds = self.cycle.probe_up_rounds.add(1).min(30);
         let probe_up_bytes = cwnd / growth_this_round;
         self.cycle.probe_up_bytes = Some(probe_up_bytes.max(DEFAULT_MSS));

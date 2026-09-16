@@ -442,10 +442,9 @@ impl QuicSettings {
 
     #[inline]
     fn default_listen_backlog() -> usize {
-        // Given a worst-case 1 minute handshake timeout and up to 4096 concurrent
-        // handshakes, we will dequeue at least 70 connections per second.
-        // This means this backlog size limits the queueing latency to
-        // ~15s.
+        // With a worst-case one-minute timeout and 4096 concurrent handshakes,
+        // at least 70 connections are dequeued per second. A backlog of 1024
+        // therefore limits queueing latency to about 15 seconds.
         1024
     }
 

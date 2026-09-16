@@ -40,8 +40,10 @@ use qlog::events::HTTP3_URI;
 use qlog::events::QUIC_URI;
 use qlog::reader::QlogSeqReader;
 
-use clap::App;
 use clap::Arg;
+use clap::ArgAction;
+use clap::Command;
+
 #[cfg(feature = "async")]
 use tokio_quiche::BoxError;
 
@@ -96,211 +98,198 @@ struct Config {
 }
 
 fn config_from_clap() -> std::result::Result<Config, String> {
-    let matches = App::new("h3i")
+    let matches = Command::new("h3i")
         .version("v0.1.0")
         .about("Interactive HTTP/3 console debugger")
         .arg(
-            Arg::with_name("host:port")
+            Arg::new("host:port")
                 .help("Hostname and port of the HTTP/3 server")
                 .required(true)
                 .index(1),
         )
         .arg(
-            Arg::with_name("omit-sni")
+            Arg::new("omit-sni")
                 .long("omit-sni")
                 .help("Omit the SNI from the TLS handshake")
                 // Requires an OsStr, so we can parse to empty later on
-                .takes_value(false)
+                .action(ArgAction::SetTrue)
         )
         .arg(
-            Arg::with_name("connect-to")
+            Arg::new("connect-to")
                 .long("connect-to")
-                .help("Set a specific IP address to connect to, rather than use DNS resolution")
-                .takes_value(true),
+                .help("Set a specific IP address to connect to, rather than use DNS resolution"),
         )
         .arg(
-            Arg::with_name("no-verify")
+            Arg::new("no-verify")
                 .long("no-verify")
-                .help("Don't verify server's certificate."),
+                .help("Don't verify server's certificate.")
+                .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::with_name("no-qlog-actions-output")
+            Arg::new("no-qlog-actions-output")
                 .long("no-qlog-actions-output")
-                .help("Don't output action sequence as qlog."),
+                .help("Don't output action sequence as qlog.")
+                .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::with_name("qlog-input")
+            Arg::new("qlog-input")
                 .long("qlog-input")
-                .help("Drive connection via qlog rather than cli.")
-                .takes_value(true),
+                .help("Drive connection via qlog rather than cli."),
         )
         .arg(
-            Arg::with_name("idle-timeout")
+            Arg::new("idle-timeout")
                 .long("idle-timeout")
                 .help("The QUIC idle timeout value in milliseconds.")
-                .takes_value(true)
                 .default_value("5000"),
         )
         .arg(
-            Arg::with_name("max-data")
+            Arg::new("max-data")
                 .long("max-data")
                 .help("Flow control limit for the connection in bytes")
-                .takes_value(true)
                 .default_value("10000000"),
         )
         .arg(
-            Arg::with_name("max-stream-data-bidi-local")
+            Arg::new("max-stream-data-bidi-local")
                 .long("max-stream-data-bidi-local")
                 .help("Flow control limit for locally-initiated bidirectional streams in bytes.")
-                .takes_value(true)
                 .default_value("1000000"),
         )
         .arg(
-            Arg::with_name("max-stream-data-bidi-remote")
+            Arg::new("max-stream-data-bidi-remote")
                 .long("max-stream-data-bidi-remote")
                 .help("Flow control limit for remotely-initiated bidirectional streams in bytes.")
-                .takes_value(true)
                 .default_value("1000000"),
         )
         .arg(
-            Arg::with_name("max-stream-data-uni")
+            Arg::new("max-stream-data-uni")
                 .long("max-stream-data-uni")
                 .help("Flow control limit for unidirectional streams in bytes.")
-                .takes_value(true)
                 .default_value("1000000"),
         )
         .arg(
-            Arg::with_name("max-streams-bidi")
+            Arg::new("max-streams-bidi")
                 .long("max-streams-bidi")
                 .help("Maximum count for concurrent remotely-initiated bidirectional streams.")
-                .takes_value(true)
                 .default_value("100"),
         )
         .arg(
-            Arg::with_name("max-streams-uni")
+            Arg::new("max-streams-uni")
                 .long("max-streams-uni")
                 .help("Maximum count for concurrent remotely-initiated unidirectional streams.")
-                .takes_value(true)
                 .default_value("100"),
         )
         .arg(
-            Arg::with_name("max-window")
+            Arg::new("max-window")
                 .long("max-window")
                 .help("Receiver window limit for the connection in bytes.")
-                .takes_value(true)
                 .default_value("25165824"),
         )
         .arg(
-            Arg::with_name("max-stream-window")
+            Arg::new("max-stream-window")
                 .long("max-stream-window")
                 .help("Receiver window limit for a stream in bytes.")
-                .takes_value(true)
                 .default_value("16777216"),
         )
         .arg(
-            Arg::with_name("replay-host-override")
+            Arg::new("replay-host-override")
                 .long("replay-host-override")
                 .help("Override the host or authority field in any replayed request headers.")
-                .requires("qlog-input")
-                .takes_value(true),
+                .requires("qlog-input"),
         )
         .arg(
-            Arg::with_name("enable-dgram")
+            Arg::new("enable-dgram")
                 .long("enable-dgram")
                 .help("Enable datagram reception")
-                .takes_value(false),
+                .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::with_name("dgram-recv-queue-len")
+            Arg::new("dgram-recv-queue-len")
                 .long("dgram-recv-queue-len")
                 .help("Datagram receive queue length")
-                .default_value("65536")
-                .takes_value(true),
+                .default_value("65536"),
         )
         .arg(
-            Arg::with_name("dgram-send-queue-len")
+            Arg::new("dgram-send-queue-len")
                 .long("dgram-send-queue-len")
                 .help("Datagram send queue length")
-                .default_value("65536")
-                .takes_value(true),
+                .default_value("65536"),
         )
         .get_matches();
 
-    let host_port = matches.value_of("host:port").unwrap().to_string();
-    let omit_sni = matches.is_present("omit-sni");
-    let connect_to: Option<String> =
-        matches.value_of("connect-to").map(|s| s.to_string());
-    let verify_peer = !matches.is_present("no-verify");
+    let host_port = matches.get_one::<String>("host:port").unwrap().to_string();
+    let omit_sni = matches.get_flag("omit-sni");
+    let connect_to = matches.get_one::<String>("connect-to").cloned();
+    let verify_peer = !matches.get_flag("no-verify");
     let idle_timeout = matches
-        .value_of("idle-timeout")
+        .get_one::<String>("idle-timeout")
         .unwrap()
         .parse::<u64>()
         .map_err(|e| format!("idle-timeout input error {e}"))?;
 
     let max_data = matches
-        .value_of("max-data")
+        .get_one::<String>("max-data")
         .unwrap()
         .parse::<u64>()
         .map_err(|e| format!("max-data input error {e}"))?;
 
     let max_stream_data_bidi_local = matches
-        .value_of("max-stream-data-bidi-local")
+        .get_one::<String>("max-stream-data-bidi-local")
         .unwrap()
         .parse::<u64>()
         .map_err(|e| format!("max-stream-data-bidi-local input error {e}"))?;
 
     let max_stream_data_bidi_remote = matches
-        .value_of("max-stream-data-bidi-remote")
+        .get_one::<String>("max-stream-data-bidi-remote")
         .unwrap()
         .parse::<u64>()
         .map_err(|e| format!("max-stream-data-bidi-remote input error {e}"))?;
 
     let max_stream_data_uni = matches
-        .value_of("max-stream-data-uni")
+        .get_one::<String>("max-stream-data-uni")
         .unwrap()
         .parse::<u64>()
         .map_err(|e| format!("max-stream-data-uni input error {e}"))?;
 
     let max_streams_bidi = matches
-        .value_of("max-streams-bidi")
+        .get_one::<String>("max-streams-bidi")
         .unwrap()
         .parse::<u64>()
         .map_err(|e| format!("max-streams-bidi input error {e}"))?;
 
     let max_streams_uni = matches
-        .value_of("max-streams-uni")
+        .get_one::<String>("max-streams-uni")
         .unwrap()
         .parse::<u64>()
         .map_err(|e| format!("max-streams-uni input error {e}"))?;
 
     let max_window = matches
-        .value_of("max-window")
+        .get_one::<String>("max-window")
         .unwrap()
         .parse::<u64>()
         .map_err(|e| format!("max-window input error {e}"))?;
 
     let max_stream_window = matches
-        .value_of("max-stream-window")
+        .get_one::<String>("max-stream-window")
         .unwrap()
         .parse::<u64>()
         .map_err(|e| format!("max-stream-window input error {e}"))?;
 
-    let enable_dgram = matches.is_present("enable-dgram");
+    let enable_dgram = matches.get_flag("enable-dgram");
 
     let dgram_recv_queue_len = matches
-        .value_of("dgram-recv-queue-len")
+        .get_one::<String>("dgram-recv-queue-len")
         .unwrap()
         .parse::<usize>()
         .map_err(|e| format!("dgram-recv-queue-len input error {e}"))?;
 
     let dgram_send_queue_len = matches
-        .value_of("dgram-send-queue-len")
+        .get_one::<String>("dgram-send-queue-len")
         .unwrap()
         .parse::<usize>()
         .map_err(|e| format!("dgram-send-queue-len input error {e}"))?;
 
-    let qlog_actions_output = !matches.is_present("no-qlog-actions-output");
-    let qlog_input = matches.value_of("qlog-input").and_then(|q| {
+    let qlog_actions_output = !matches.get_flag("no-qlog-actions-output");
+    let qlog_input = matches.get_one::<String>("qlog-input").and_then(|q| {
         std::path::Path::new(q)
             .file_name()
             .unwrap()
@@ -308,9 +297,8 @@ fn config_from_clap() -> std::result::Result<Config, String> {
             .map(|s| s.to_string())
     });
 
-    let host_override = matches
-        .value_of("replay-host-override")
-        .map(|s| s.to_string());
+    let host_override =
+        matches.get_one::<String>("replay-host-override").cloned();
 
     let library_config = h3i::config::Config {
         host_port,

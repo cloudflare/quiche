@@ -213,7 +213,7 @@ fn main() {
             break;
         }
 
-        // Create a new HTTP/3 connection once the QUIC connection is established.
+        // Create an HTTP/3 connection after QUIC is established.
         if conn.is_established() && http3_conn.is_none() {
             http3_conn = Some(
                 quiche::h3::Connection::with_transport(&mut conn, &h3_config)

@@ -352,10 +352,9 @@ impl BBRv2NetworkModel {
                 sample.last_packet_send_state;
         }
 
-        // Avoid updating `max_bandwidth_filter` if a) this is a loss-only event,
-        // or b) all packets in `acked_packets` did not generate valid
-        // samples. (e.g. ack of ack-only packets). In both cases,
-        // total_bytes_acked() will not change.
+        // Do not update `max_bandwidth_filter` for a loss-only event or when no
+        // acknowledged packet produced a valid sample. In either case,
+        // `total_bytes_acked()` remains unchanged.
         if let Some(sample_max) = sample.sample_max_bandwidth {
             if prior_bytes_acked != self.total_bytes_acked() {
                 congestion_event.sample_max_bandwidth = Some(sample_max);
@@ -539,10 +538,9 @@ impl BBRv2NetworkModel {
             last_bandwidth = sample_max_bandwidth;
         }
         if self.pacing_gain > params.full_bw_threshold {
-            // In STARTUP, `pacing_gain` is applied to `bandwidth_lo` in
-            // update_pacing_rate, so this backs that multiplication out to allow
-            // the pacing rate to decrease, but not below
-            // last_bandwidth * full_bw_threshold.
+            // STARTUP applies `pacing_gain` to `bandwidth_lo`. Remove that
+            // factor so pacing can decrease without falling below
+            // the threshold.
             self.bandwidth_lo = self.bandwidth_lo.max(Some(
                 last_bandwidth * (params.full_bw_threshold / self.pacing_gain),
             ));
@@ -550,8 +548,8 @@ impl BBRv2NetworkModel {
             // Ensure bandwidth_lo isn't lower than last_bandwidth.
             self.bandwidth_lo = self.bandwidth_lo.max(Some(last_bandwidth))
         }
-        // If it's the end of the round, ensure bandwidth_lo doesn't decrease more
-        // than beta.
+        // At the end of a round, ensure `bandwidth_lo` does not decrease by
+        // more than `beta`.
         if congestion_event.end_of_round_trip {
             self.bandwidth_lo = self.bandwidth_lo.max(
                 self.prior_bandwidth_lo

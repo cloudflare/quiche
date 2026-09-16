@@ -246,10 +246,9 @@ pub(crate) fn capture_quiche_logs() {
 
         slog_stdlog::init_with_level(normalized_level).unwrap();
 
-        // The slog Drain becomes `slog::Discard` when the scope_guard is dropped,
-        // and you can't set the global logger again because of a mandate
-        // in the `log` crate. We have to retain the scope guard so that the
-        // logger remains registered for the duration of the process.
+        // Dropping the scope guard replaces the slog Drain with
+        // `slog::Discard`. The `log` crate cannot reset the global
+        // logger, so retain the guard for the process lifetime.
         let _scope_guard = std::mem::ManuallyDrop::new(scope_guard);
     });
 }

@@ -150,8 +150,8 @@ mod tests {
         now += Duration::from_secs(5);
         bytes_in_flight.saturating_subtract(10, now);
         assert_eq!(bytes_in_flight.get(), 0);
-        // Expect the time to be the 7sec + 5sec since those were the open time of
-        // the two bytes in flight intervals.
+        // The two in-flight intervals lasted seven and five seconds, for an
+        // expected total of twelve seconds.
         assert_eq!(bytes_in_flight.get_duration(), Duration::from_secs(12));
     }
 

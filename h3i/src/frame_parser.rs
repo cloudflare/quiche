@@ -141,8 +141,8 @@ impl FrameParser {
             match self.curr_state {
                 FrameState::Type => {
                     let Ok(varint) = self.try_consume_varint() else {
-                        // Map Error::Done's to Retry's because state_buf must be
-                        // resized to fit a larger varint
+                        // Map `Error::Done` to `Retry` because `state_buf` must
+                        // be resized before it can hold a larger varint.
                         return Ok(FrameParseResult::Retry);
                     };
 
@@ -151,8 +151,8 @@ impl FrameParser {
                 },
                 FrameState::Len => {
                     let Ok(varint) = self.try_consume_varint() else {
-                        // Map Error::Done's to Retry's because state_buf must be
-                        // resized to fit a larger varint
+                        // Map `Error::Done` to `Retry` because `state_buf` must
+                        // be resized before it can hold a larger varint.
                         return Ok(FrameParseResult::Retry);
                     };
 

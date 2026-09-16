@@ -50,8 +50,7 @@ use tokio_quiche::ServerH3Driver;
 async fn main() {
     env_logger::builder().format_timestamp_nanos().init();
 
-    // Create listening socket. Note that we use `ConnectionParams::new_server()`
-    // to denote that we're creating a server.
+    // Use `ConnectionParams::new_server()` to create a listening socket.
     let args = Args::parse();
     let socket = UdpSocket::bind(&args.address)
         .await
