@@ -221,6 +221,10 @@ pub struct BbrParams {
     /// initial cwnd by the first RTT estimate.
     pub initial_pacing_rate_bytes_per_second: Option<u64>,
 
+    /// Lower bound on the congestion window in packets.  If not set,
+    /// the initial congestion window is used as the lower bound.
+    pub min_cwnd_packets: Option<usize>,
+
     /// If true, scale the pacing rate when updating mss when doing pmtud.
     pub scale_pacing_rate_by_mss: Option<bool>,
 
