@@ -480,10 +480,7 @@ impl<F: BufFactory> SendBuf<F> {
         Ok(self.reset())
     }
 
-    /// Returns the largest offset of data buffered.
-    /// Pretends `off` bytes were already written and emitted, so tests
-    /// can exercise large-offset encoding without transferring the data.
-    /// Only meaningful on a stream with an empty send buffer.
+    /// Seeds send offsets without buffering the preceding data.
     #[cfg(test)]
     pub fn seed_offsets_for_test(&mut self, off: u64) {
         assert!(self.data.is_empty());
@@ -491,6 +488,7 @@ impl<F: BufFactory> SendBuf<F> {
         self.emit_off = off;
     }
 
+    /// Returns the largest offset of data buffered.
     pub fn off_back(&self) -> u64 {
         self.off
     }

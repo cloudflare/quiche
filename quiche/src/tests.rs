@@ -1565,10 +1565,9 @@ fn flow_control_empty_stream_frame_not_double_counted(
     // The connection-level limit is 30 bytes, the stream-level limit 15.
     assert_eq!(pipe.server.max_rx_data(), 30);
 
-    // A zero-length non-fin frame ahead of the received data advances the
-    // stream's largest received offset (RFC 9000 Section 19.8): offsets
-    // 5..15 are charged against connection flow control here, before the
-    // data covering them arrives.
+    // The empty frame advances the largest received offset to 15, which is
+    // charged to connection flow control before the data covering 5..15
+    // arrives.
     let frames = [
         frame::Frame::Stream {
             stream_id: 0,
@@ -1584,11 +1583,8 @@ fn flow_control_empty_stream_frame_not_double_counted(
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
     assert_eq!(pipe.server.rx_data, 15);
 
-    // The gap's data must not be charged again when it arrives: the
-    // connection has exactly 15 bytes of credit left, and filling a second
-    // stream to its stream-level limit consumes exactly that. Before the
-    // fix, the gap (5..15) was double-counted on arrival and this legal
-    // packet was rejected with a connection-level flow control violation.
+    // Filling the gap must not be charged again: the remaining 15 bytes of
+    // credit go entirely to the second stream.
     let frames = [
         frame::Frame::Stream {
             stream_id: 0,
@@ -1602,6 +1598,47 @@ fn flow_control_empty_stream_frame_not_double_counted(
 
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
     assert_eq!(pipe.server.rx_data, 30);
+}
+
+#[rstest]
+fn flow_control_empty_stream_frame_after_shutdown(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let pkt_type = Type::Short;
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let frames = [frame::Frame::Stream {
+        stream_id: 0,
+        data: <RangeBuf>::from(b"aaaaa", 0, false),
+    }];
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    // A draining stream counts incoming data as consumed as it arrives.
+    assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+    assert_eq!(pipe.server.rx_data, 5);
+    assert_eq!(pipe.server.flow_control.consumed(), 5);
+
+    let frames = [frame::Frame::Stream {
+        stream_id: 0,
+        data: <RangeBuf>::from(b"", 10, false),
+    }];
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+    assert_eq!(pipe.server.rx_data, 10);
+    assert_eq!(pipe.server.flow_control.consumed(), 10);
+
+    // The reset charges and consumes only the bytes beyond the largest
+    // received offset; 5..10 was already consumed above.
+    let frames = [frame::Frame::ResetStream {
+        stream_id: 0,
+        error_code: 42,
+        final_size: 15,
+    }];
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+    assert_eq!(pipe.server.rx_data, 15);
+    assert_eq!(pipe.server.flow_control.consumed(), 15);
 }
 
 #[rstest]
@@ -1630,11 +1667,9 @@ fn zero_length_stream_frame_not_sent(
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
-    // A zero-length STREAM frame can only be produced by the packet-size
-    // squeeze when the frame header exceeds MAX_STREAM_OVERHEAD (12), which
-    // requires a two-byte stream id varint and an eight-byte offset varint.
-    // Seed the stream's send state at 2^30 so the squeeze is reachable
-    // without transferring a gigabyte.
+    // Only a STREAM header longer than MAX_STREAM_OVERHEAD can leave room for
+    // the header but not the payload, which needs an eight-byte offset varint.
+    // Seed the offset rather than transferring a gigabyte.
     assert_eq!(pipe.client.stream_send(64, b"", false), Ok(0));
     pipe.client
         .streams
@@ -1647,10 +1682,7 @@ fn zero_length_stream_frame_not_sent(
     assert_eq!(pipe.client.stream_send(64, &data, false), Ok(4096));
 
     // Sweep output buffer sizes across the range where the packet has room
-    // for the STREAM frame header but not for any payload. A zero-length
-    // non-fin STREAM frame would advance the peer's largest received offset
-    // for the stream (RFC 9000 Section 19.8) — an offset the peer charges
-    // against connection-level flow control — so it must never be emitted.
+    // for the STREAM frame header but not for any payload.
     for cap in 25..80 {
         match pipe.client.send(&mut buf[..cap]) {
             Ok((written, _)) => {
@@ -1674,14 +1706,7 @@ fn zero_length_stream_frame_not_sent(
         }
     }
 
-    // The skip also must not mark the sender app-limited (data is pending:
-    // it is size-limited on that packet). That transition is excluded in
-    // send_single via `stream_data_skipped`; a deterministic assertion here
-    // would require an ACK-bearing packet at exactly the skip-sized cap,
-    // and pure-ACK packets under a size-limited sweep already trip the
-    // pre-existing app-limited heuristic independently of this change.
-
-    // The skipped data is not lost: it is delivered once packets have room.
+    // The skipped data is delivered once packets have room.
     assert_eq!(pipe.advance(), Ok(()));
 
     assert_eq!(

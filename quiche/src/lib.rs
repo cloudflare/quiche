@@ -5230,25 +5230,11 @@ impl<F: BufFactory> Connection<F> {
                 let (len, fin) =
                     stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
 
-                // Skip zero-length non-fin frames: such a frame carries
-                // no data, but its offset still advances the peer's largest
-                // received offset for the stream (RFC 9000 Section 19.8).
-                // The frame is pure overhead — it references bytes already
-                // accounted for when they were buffered — and a receiver
-                // charging connection flow control from the offset advance
-                // must track it exactly to stay consistent, so not emitting
-                // one avoids both the wasted bytes and the hazard.
+                // Don't emit an empty non-fin STREAM frame when only its
+                // header fits: it would carry no data but still advance the
+                // peer's largest received offset.
                 if len == 0 && !fin {
                     stream_data_skipped = true;
-
-                    let priority_key = Arc::clone(&stream.priority_key);
-                    if !stream.is_flushable() {
-                        self.streams.remove_flushable(&priority_key);
-                    } else if stream.incremental {
-                        self.streams.remove_flushable(&priority_key);
-                        self.streams.insert_flushable(&priority_key);
-                    }
-
                     break;
                 }
 
@@ -5334,9 +5320,7 @@ impl<F: BufFactory> Connection<F> {
             path.recovery.ping_sent(epoch);
         }
 
-        // A stream frame skipped for lack of payload space means data is
-        // pending: the sender is size-limited on this packet, not
-        // application-limited.
+        // Pending stream data means the sender is size-, not app-limited.
         if !has_data &&
             !stream_data_skipped &&
             !dgram_emitted &&
