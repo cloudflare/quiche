@@ -5235,6 +5235,15 @@ impl<F: BufFactory> Connection<F> {
                 // peer's largest received offset.
                 if len == 0 && !fin {
                     stream_data_skipped = true;
+
+                    // Rotate incremental streams so a stream whose header
+                    // doesn't leave room for data doesn't block the others.
+                    if stream.incremental {
+                        let priority_key = Arc::clone(&stream.priority_key);
+                        self.streams.remove_flushable(&priority_key);
+                        self.streams.insert_flushable(&priority_key);
+                    }
+
                     break;
                 }
 

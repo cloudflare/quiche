@@ -1716,6 +1716,77 @@ fn zero_length_stream_frame_not_sent(
 }
 
 #[rstest]
+fn zero_length_stream_frame_skip_rotates_incremental(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(4_000_000_000);
+    config.set_initial_max_stream_data_bidi_local(2_000_000_000);
+    config.set_initial_max_stream_data_bidi_remote(2_000_000_000);
+    config.set_initial_max_streams_bidi(20);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Stream 64 heads the flushable queue with a 13-byte STREAM header;
+    // stream 0 follows with a 5-byte one.
+    assert_eq!(pipe.client.stream_send(64, b"", false), Ok(0));
+    pipe.client
+        .streams
+        .get_mut(64)
+        .unwrap()
+        .send
+        .seed_offsets_for_test(1 << 30);
+
+    let data = [0xa; 4096];
+    assert_eq!(pipe.client.stream_send(64, &data, false), Ok(4096));
+    assert_eq!(pipe.client.stream_send(0, &data, false), Ok(4096));
+
+    // Growing the output buffer one byte at a time first reaches the size
+    // where only stream 64's header fits. Skipping it must rotate it behind
+    // stream 0, so the first STREAM frame produced is stream 0's, not 64's.
+    let mut first_stream_id = None;
+
+    for cap in 25..80 {
+        match pipe.client.send(&mut buf[..cap]) {
+            Ok((written, _)) => {
+                let frames =
+                    test_utils::decode_pkt(&mut pipe.server, &mut buf[..written])
+                        .unwrap();
+
+                first_stream_id = frames.iter().find_map(|frame| match frame {
+                    frame::Frame::Stream { stream_id, .. } => Some(*stream_id),
+                    _ => None,
+                });
+
+                if first_stream_id.is_some() {
+                    break;
+                }
+            },
+
+            Err(Error::Done) | Err(Error::BufferTooShort) => (),
+
+            Err(e) => panic!("unexpected send error: {e:?}"),
+        }
+    }
+
+    assert_eq!(first_stream_id, Some(0));
+}
+
+#[rstest]
 fn flow_control_update(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,

@@ -581,7 +581,7 @@ mod tests {
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 1);
 
-        // Don't store additional fin non-empty buffers.
+        // Accept another fin buffer with the same final size.
         let buf = RangeBuf::from(b"aa", 8, true);
         assert!(recv.write(buf).is_ok());
         assert_eq!(recv.len, 10);
