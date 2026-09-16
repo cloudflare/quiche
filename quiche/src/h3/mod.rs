@@ -3482,8 +3482,14 @@ impl Connection {
         &self, conn: &super::Connection<F>,
     ) -> super::StreamIter {
         super::StreamIter::filter(&conn.readable(), |stream_id| {
-            self.streams.get(stream_id).unwrap().ty() ==
-                Some(stream::Type::WebTransport)
+            let Some(stream) = self.streams.get(stream_id) else {
+                return false;
+            };
+            let Some(ty) = stream.ty() else {
+                return false;
+            };
+
+            ty == stream::Type::WebTransport
         })
     }
 
