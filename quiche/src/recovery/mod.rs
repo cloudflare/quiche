@@ -270,7 +270,7 @@ pub trait RecoveryOps {
     #[cfg(test)]
     fn largest_sent_pkt_num_on_path(&self, epoch: packet::Epoch) -> Option<u64>;
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "qlog"))]
     fn app_limited(&self) -> bool;
 
     #[cfg(test)]
@@ -495,6 +495,7 @@ struct QlogMetrics {
     lost_packets: Option<u64>,
     lost_bytes: Option<u64>,
     pto_count: Option<u32>,
+    app_limited: Option<bool>,
 }
 
 #[cfg(feature = "qlog")]
@@ -641,6 +642,13 @@ impl QlogMetrics {
 
         // Build ex_data for rate metrics
         let mut ex_data = CfExData::new();
+        if self.app_limited != latest.app_limited {
+            if let Some(app_limited) = latest.app_limited {
+                self.app_limited = latest.app_limited;
+                emit_event = true;
+                ex_data.insert("cf_app_limited", app_limited);
+            }
+        }
         if self.delivery_rate != latest.delivery_rate {
             if let Some(rate) = latest.delivery_rate {
                 self.delivery_rate = latest.delivery_rate;
@@ -844,6 +852,73 @@ mod tests {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(algo);
         Recovery::new(&cfg)
+    }
+
+    #[cfg(feature = "qlog")]
+    fn app_limited_value(event: EventData) -> Option<serde_json::Value> {
+        let EventData::QuicMetricsUpdated(metrics) = event else {
+            panic!("expected recovery metrics updated event");
+        };
+
+        metrics.ex_data.get("cf_app_limited").cloned()
+    }
+
+    #[cfg(feature = "qlog")]
+    #[test]
+    fn qlog_app_limited_emits_initial_false_and_transitions() {
+        let mut metrics = QlogMetrics::default();
+
+        let event = metrics
+            .maybe_update(QlogMetrics {
+                app_limited: Some(false),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(app_limited_value(event), Some(false.into()));
+
+        let event = metrics
+            .maybe_update(QlogMetrics {
+                app_limited: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(app_limited_value(event), Some(true.into()));
+
+        let event = metrics
+            .maybe_update(QlogMetrics {
+                app_limited: Some(false),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(app_limited_value(event), Some(false.into()));
+    }
+
+    #[cfg(feature = "qlog")]
+    #[test]
+    fn qlog_app_limited_suppresses_unchanged_values() {
+        let mut metrics = QlogMetrics::default();
+        metrics
+            .maybe_update(QlogMetrics {
+                app_limited: Some(false),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(metrics
+            .maybe_update(QlogMetrics {
+                app_limited: Some(false),
+                ..Default::default()
+            })
+            .is_none());
+
+        let event = metrics
+            .maybe_update(QlogMetrics {
+                cwnd: 1,
+                app_limited: Some(false),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(app_limited_value(event), None);
     }
 
     #[test]
