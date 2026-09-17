@@ -87,6 +87,7 @@ fn create_config(args: &Config, should_log_keys: bool) -> quiche::Config {
     config.verify_peer(args.verify_peer);
     config.set_application_protos(&[b"h3"]).unwrap();
     config.set_max_idle_timeout(args.idle_timeout);
+    config.set_send_capacity_factor(args.send_capacity_factor);
     config.set_max_recv_udp_payload_size(MAX_DATAGRAM_SIZE);
     config.set_max_send_udp_payload_size(MAX_DATAGRAM_SIZE);
     config.set_initial_max_data(10_000_000);
