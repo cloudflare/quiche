@@ -86,6 +86,9 @@ const TIME_THRESHOLD_OVERHEAD_MULTIPLIER: f64 = 2.0;
 
 const GRANULARITY: Duration = Duration::from_millis(1);
 
+// How long an observed ack-loop latency keeps flooring the loss delay.
+const ACK_LOOP_WINDOW: Duration = Duration::from_millis(512);
+
 const MAX_PTO_PROBES_COUNT: usize = 2;
 
 const MINIMUM_WINDOW_PACKETS: usize = 2;
@@ -141,6 +144,7 @@ pub struct RecoveryConfig {
     pub initial_congestion_window_packets: usize,
     pub enable_relaxed_loss_threshold: bool,
     pub enable_cubic_idle_restart_fix: bool,
+    pub enable_ack_latency_loss_floor: bool,
 }
 
 impl RecoveryConfig {
@@ -158,6 +162,7 @@ impl RecoveryConfig {
                 .initial_congestion_window_packets,
             enable_relaxed_loss_threshold: config.enable_relaxed_loss_threshold,
             enable_cubic_idle_restart_fix: config.enable_cubic_idle_restart_fix,
+            enable_ack_latency_loss_floor: config.enable_ack_latency_loss_floor,
         }
     }
 }
@@ -1474,6 +1479,206 @@ mod tests {
         } else {
             assert_eq!(r.startup_exit(), None);
         }
+    }
+
+    #[rstest]
+    fn ack_latency_floor_spares_packets_younger_than_the_ack_loop(
+        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
+        cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        cfg.set_enable_ack_latency_loss_floor(true);
+
+        let mut r = Recovery::new(&cfg);
+        let mut now = Instant::now();
+
+        // Two packets whose acks take 4ms to come back, which teaches the
+        // recovery how late an honest ack can be on this path.
+        for i in 0..2 {
+            let p = test_utils::helper_packet_sent(i, now, 1000);
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        now += Duration::from_millis(4);
+
+        let mut acked = RangeSet::default();
+        acked.insert(0..2);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 1000 * 2,
+                spurious_losses: 0,
+            }
+        );
+
+        // Six more packets, followed 1ms later by an ack batch that only
+        // covers the last three. Without the floor the packet threshold
+        // declares 2, 3 and 4 lost on the spot; with it they are younger
+        // than the 4ms ack loop just observed, so they are spared.
+        for i in 2..8 {
+            let p = test_utils::helper_packet_sent(i, now, 1000);
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        now += Duration::from_millis(1);
+
+        let mut acked = RangeSet::default();
+        acked.insert(5..8);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 1000 * 3,
+                spurious_losses: 0,
+            }
+        );
+
+        // The late acks arrive and nothing was ever declared.
+        now += Duration::from_millis(1);
+
+        let mut acked = RangeSet::default();
+        acked.insert(2..5);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 1000 * 3,
+                spurious_losses: 0,
+            }
+        );
+
+        assert_eq!(r.lost_count(), 0);
+        assert_eq!(r.lost_spurious_count(), 0);
+        assert_eq!(r.bytes_in_flight(), 0);
+    }
+
+    #[rstest]
+    fn ack_latency_floor_still_detects_loss_by_time(
+        #[values("reno", "cubic", "bbr2", "bbr2_gcongestion")]
+        cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        cfg.set_enable_ack_latency_loss_floor(true);
+
+        let mut r = Recovery::new(&cfg);
+        let mut now = Instant::now();
+
+        for i in 0..2 {
+            let p = test_utils::helper_packet_sent(i, now, 1000);
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        // Packet 1 is acked 2ms after sending; packet 0 stays out. The
+        // floor lifts the loss delay to 3ms (2ms observed loop plus the
+        // granularity), so packet 0 is not declared here.
+        now += Duration::from_millis(2);
+
+        let mut acked = RangeSet::default();
+        acked.insert(1..2);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 1000,
+                spurious_losses: 0,
+            }
+        );
+
+        // A third packet is sent and acked past the floored delay, and
+        // the time threshold convicts packet 0 on that ack.
+        let p = test_utils::helper_packet_sent(2, now, 1000);
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        now += Duration::from_millis(2);
+
+        let mut acked = RangeSet::default();
+        acked.insert(2..3);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 1,
+                lost_bytes: 1000,
+                acked_bytes: 1000,
+                spurious_losses: 0,
+            }
+        );
+        assert_eq!(r.lost_count(), 1);
     }
 
     // TODO: This should run agains both `congestion` and `gcongestion`.
