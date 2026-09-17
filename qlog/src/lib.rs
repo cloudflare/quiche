@@ -565,7 +565,7 @@ pub struct VantagePoint {
     #[serde(rename = "type")]
     pub ty: VantagePointType,
 
-    pub flow: Option<VantagePointType>,
+    pub flow: Option<VantagePointFlow>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq, Debug)]
@@ -574,6 +574,15 @@ pub enum VantagePointType {
     Client,
     Server,
     Network,
+    #[default]
+    Unknown,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum VantagePointFlow {
+    Client,
+    Server,
     #[default]
     Unknown,
 }
@@ -618,9 +627,8 @@ impl ReferenceTime {
 pub struct CommonFields {
     pub tuple: Option<String>,
     pub group_id: Option<String>,
-    pub protocol_types: Option<Vec<String>>,
 
-    pub reference_time: ReferenceTime,
+    pub reference_time: Option<ReferenceTime>,
     pub time_format: Option<TimeFormat>,
 }
 

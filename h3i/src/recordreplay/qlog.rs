@@ -89,7 +89,6 @@ impl From<&Action> for QlogEvents {
                 let frame_ev = EventData::Http3FrameCreated(FrameCreated {
                     stream_id: *stream_id,
                     frame: frame.to_qlog(),
-                    ..Default::default()
                 });
 
                 let mut ex = BTreeMap::new();
@@ -133,7 +132,6 @@ impl From<&Action> for QlogEvents {
                 let frame_ev = EventData::Http3FrameCreated(FrameCreated {
                     stream_id: *stream_id,
                     frame,
-                    ..Default::default()
                 });
 
                 let mut ex = BTreeMap::new();
