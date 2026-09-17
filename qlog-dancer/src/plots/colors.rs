@@ -43,7 +43,7 @@ pub const TEAL: RGBColor = RGBColor(0, 128, 128);
 /// Cycle through a set of colors
 ///
 /// By default, the set is based on a modified version of the set from
-/// https://stackoverflow.com/a/13781114
+/// <https://stackoverflow.com/a/13781114>
 pub struct ColorCycle {
     pub colors: Vec<RGBColor>,
     pub initial_index: usize,
