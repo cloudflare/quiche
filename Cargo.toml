@@ -82,7 +82,7 @@ qlog = { version = "0.18.0", path = "./qlog" }
 quiche = { version = "0.30.0", path = "./quiche" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
-rstest = { version = "0.26.1" }
+rstest = { version = "0.27.0" }
 serde = { version = "1" }
 serde_json = { version = "1" }
 serde_with = { version = "3.20.0", default-features = false }
