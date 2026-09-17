@@ -1012,6 +1012,11 @@ impl RecoveryOps for GRecovery {
         let epoch = &mut self.epochs[epoch];
         self.bytes_in_flight
             .saturating_subtract(epoch.discard(&mut self.pacer), now);
+
+        // Discarding a packet number space is forward progress, so the PTO
+        // backoff starts over (RFC 9002, Appendix A.11).
+        self.pto_count = 0;
+
         self.set_loss_detection_timer(handshake_status, now);
     }
 
@@ -1363,6 +1368,30 @@ mod tests {
         // Time threshold is capped at 2.0.
         assert_eq!(loss_thresh.pkt_thresh(), None);
         assert_eq!(loss_thresh.time_thresh(), MAX_TIME_THRESHOLD);
+    }
+
+    #[test]
+    fn test_pkt_num_space_discard_resets_pto_count() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Bbr2Gcongestion);
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut r = GRecovery::new(&recovery_config).unwrap();
+
+        let handshake_status = HandshakeStatus {
+            completed: false,
+            has_handshake_keys: true,
+            peer_verified_address: true,
+        };
+        let now = Instant::now();
+
+        r.pto_count = 3;
+        r.on_pkt_num_space_discarded(
+            packet::Epoch::Initial,
+            handshake_status,
+            now,
+        );
+
+        assert_eq!(r.pto_count(), 0);
     }
 
     #[test]
