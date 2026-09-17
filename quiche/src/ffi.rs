@@ -1865,6 +1865,8 @@ pub extern "C" fn quiche_path_event_type(ev: &PathEvent) -> u32 {
         PathEvent::ReusedSourceConnectionId { .. } => 4,
 
         PathEvent::PeerMigrated { .. } => 5,
+
+        PathEvent::PmtuUpdated { .. } => 6,
     }
 }
 
@@ -1964,6 +1966,27 @@ pub extern "C" fn quiche_path_event_peer_migrated(
         PathEvent::PeerMigrated(local, peer) => {
             *local_addr_len = std_addr_to_c(local, local_addr);
             *peer_addr_len = std_addr_to_c(peer, peer_addr);
+        },
+
+        _ => unreachable!(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_path_event_pmtu_updated(
+    ev: &PathEvent, local_addr: &mut sockaddr_storage,
+    local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
+    peer_addr_len: &mut socklen_t, pmtu: &mut size_t,
+) {
+    match ev {
+        PathEvent::PmtuUpdated {
+            local,
+            peer,
+            pmtu: value,
+        } => {
+            *local_addr_len = std_addr_to_c(local, local_addr);
+            *peer_addr_len = std_addr_to_c(peer, peer_addr);
+            *pmtu = *value;
         },
 
         _ => unreachable!(),
@@ -2196,6 +2219,53 @@ mod tests {
     use libc::c_void;
     #[cfg(windows)]
     use windows_sys::Win32::Networking::WinSock::inet_ntop;
+
+    #[test]
+    fn pmtu_updated_path_event() {
+        let local = "127.0.0.1:8080".parse().unwrap();
+        let peer = "127.0.0.2:443".parse().unwrap();
+
+        let event = PathEvent::PmtuUpdated {
+            local,
+            peer,
+            pmtu: 1400,
+        };
+        assert_eq!(quiche_path_event_type(&event), 6);
+
+        let mut local_out: sockaddr_storage = unsafe { std::mem::zeroed() };
+        let mut peer_out: sockaddr_storage = unsafe { std::mem::zeroed() };
+        let mut local_len = 0;
+        let mut peer_len = 0;
+        let mut pmtu = usize::MAX;
+
+        quiche_path_event_pmtu_updated(
+            &event,
+            &mut local_out,
+            &mut local_len,
+            &mut peer_out,
+            &mut peer_len,
+            &mut pmtu,
+        );
+        assert_eq!(pmtu, 1400);
+        assert_eq!(
+            unsafe {
+                std_addr_from_c(
+                    &*(&local_out as *const _ as *const sockaddr),
+                    local_len,
+                )
+            },
+            local
+        );
+        assert_eq!(
+            unsafe {
+                std_addr_from_c(
+                    &*(&peer_out as *const _ as *const sockaddr),
+                    peer_len,
+                )
+            },
+            peer
+        );
+    }
 
     #[test]
     fn addr_v4() {

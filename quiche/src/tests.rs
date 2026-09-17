@@ -12105,6 +12105,7 @@ fn pmtud_probe_success(
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.client.path_event_next(), None);
 
     // Send probe and let it be acknowledged
     assert_eq!(pipe.advance(), Ok(()));
@@ -12126,6 +12127,30 @@ fn pmtud_probe_success(
 
     let path_stats = pipe.client.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, current_mtu);
+    let expected_valid = PathEvent::PmtuUpdated {
+        local: path_stats.local_addr,
+        peer: path_stats.peer_addr,
+        pmtu: current_mtu,
+    };
+    assert_eq!(pipe.client.path_event_next(), Some(expected_valid.clone()));
+    assert_eq!(pipe.client.path_event_next(), None);
+
+    pipe.client.revalidate_pmtu();
+    assert_eq!(
+        pipe.client.path_event_next(),
+        Some(PathEvent::PmtuUpdated {
+            local: path_stats.local_addr,
+            peer: path_stats.peer_addr,
+            pmtu: MIN_CLIENT_INITIAL_LEN,
+        })
+    );
+
+    pipe.client.revalidate_pmtu();
+    assert_eq!(pipe.client.path_event_next(), None);
+
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.path_event_next(), Some(expected_valid));
+    assert_eq!(pipe.client.path_event_next(), None);
 }
 
 #[rstest]
@@ -12287,6 +12312,7 @@ fn pmtud_probe_retry_after_loss(
 
     let path_stats = pipe.client.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, 1200);
+    assert_eq!(pipe.client.path_event_next(), None);
 
     // Make probes succeed til pmtu is found
     assert_eq!(pipe.advance(), Ok(()));
@@ -12309,6 +12335,22 @@ fn pmtud_probe_retry_after_loss(
 
     let path_stats = pipe.client.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, current_mtu);
+    let pmtu_events: Vec<_> =
+        std::iter::from_fn(|| pipe.client.path_event_next()).collect();
+    let pmtus: Vec<_> = pmtu_events
+        .iter()
+        .map(|event| match event {
+            PathEvent::PmtuUpdated { local, peer, pmtu } => {
+                assert_eq!(*local, path_stats.local_addr);
+                assert_eq!(*peer, path_stats.peer_addr);
+                *pmtu
+            },
+            event => panic!("unexpected path event: {event:?}"),
+        })
+        .collect();
+    assert!(pmtus.len() > 1);
+    assert!(pmtus.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(pmtus.last(), Some(&current_mtu));
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
@@ -12383,6 +12425,17 @@ fn enable_pmtud_mid_handshake(
     assert!(active_path.pmtud.is_some());
     assert_eq!(active_path.pmtud.as_mut().unwrap().get_current_mtu(), 1200);
 
+    let path_stats = pipe.server.path_stats().next().unwrap();
+    assert_eq!(
+        pipe.server.path_event_next(),
+        Some(PathEvent::PmtuUpdated {
+            local: path_stats.local_addr,
+            peer: path_stats.peer_addr,
+            pmtu: MIN_CLIENT_INITIAL_LEN,
+        })
+    );
+    assert_eq!(pipe.server.path_event_next(), None);
+
     assert_eq!(pipe.advance(), Ok(()));
 
     let current_mtu = pipe
@@ -12398,6 +12451,15 @@ fn enable_pmtud_mid_handshake(
 
     let path_stats = pipe.server.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, current_mtu);
+    assert_eq!(
+        pipe.server.path_event_next(),
+        Some(PathEvent::PmtuUpdated {
+            local: path_stats.local_addr,
+            peer: path_stats.peer_addr,
+            pmtu: current_mtu,
+        })
+    );
+    assert_eq!(pipe.server.path_event_next(), None);
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
@@ -12466,16 +12528,19 @@ fn disable_pmtud_mid_handshake(
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
     assert!(active_path.pmtud.is_some());
+    assert_eq!(pipe.server.path_event_next(), None);
 
     assert_eq!(pipe.handshake(), Ok(()));
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
     assert!(active_path.pmtud.is_none());
+    assert_eq!(pipe.server.path_event_next(), None);
 
     assert_eq!(pipe.advance(), Ok(()));
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
     assert!(active_path.pmtud.is_none());
+    assert_eq!(pipe.server.path_event_next(), None);
 }
 
 #[rstest]
