@@ -480,6 +480,14 @@ impl<F: BufFactory> SendBuf<F> {
         Ok(self.reset())
     }
 
+    /// Seeds send offsets without buffering the preceding data.
+    #[cfg(test)]
+    pub fn seed_offsets_for_test(&mut self, off: u64) {
+        assert!(self.data.is_empty());
+        self.off = off;
+        self.emit_off = off;
+    }
+
     /// Returns the largest offset of data buffered.
     pub fn off_back(&self) -> u64 {
         self.off

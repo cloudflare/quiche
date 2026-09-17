@@ -4531,6 +4531,7 @@ impl<F: BufFactory> Connection<F> {
         let mut in_flight = false;
         let mut is_pmtud_probe = false;
         let mut has_data = false;
+        let mut stream_data_skipped = false;
 
         // Whether a PING frame must explicitly elicit an ACK when no other
         // frame does so implicitly.
@@ -5262,6 +5263,23 @@ impl<F: BufFactory> Connection<F> {
                 let (len, fin) =
                     stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
 
+                // Don't emit an empty non-fin STREAM frame when only its
+                // header fits: it would carry no data but still advance the
+                // peer's largest received offset.
+                if len == 0 && !fin {
+                    stream_data_skipped = true;
+
+                    // Rotate incremental streams so a stream whose header
+                    // doesn't leave room for data doesn't block the others.
+                    if stream.incremental {
+                        let priority_key = Arc::clone(&stream.priority_key);
+                        self.streams.remove_flushable(&priority_key);
+                        self.streams.insert_flushable(&priority_key);
+                    }
+
+                    break;
+                }
+
                 // Encode the frame's header.
                 //
                 // Due to how `OctetsMut::split_at()` works, `stream_hdr` starts
@@ -5344,7 +5362,9 @@ impl<F: BufFactory> Connection<F> {
             path.recovery.ping_sent(epoch);
         }
 
+        // Pending stream data means the sender is size-, not app-limited.
         if !has_data &&
+            !stream_data_skipped &&
             !dgram_emitted &&
             cwnd_available > frame::MAX_STREAM_OVERHEAD
         {
