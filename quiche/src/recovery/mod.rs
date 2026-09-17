@@ -1024,6 +1024,7 @@ mod tests {
             )
             .expect("ACK should be valid");
         assert_eq!(outcome.acked_bytes, 1_200);
+        assert_eq!(recovery.cwnd(), usize::MAX);
         assert_eq!(recovery.bytes_in_flight(), 0);
         assert_eq!(recovery.rtt(), Duration::from_millis(10));
         assert_eq!(recovery.min_rtt(), Some(Duration::from_millis(10)));
@@ -1559,6 +1560,7 @@ mod tests {
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
+        let initial_cwnd = r.cwnd();
 
         let mut now = Instant::now();
 
@@ -1607,6 +1609,9 @@ mod tests {
                 spurious_losses: 0,
             }
         );
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd(), initial_cwnd);
+        }
         // Since we only remove packets from the back to avoid compaction, the
         // send length remains the same after receiving reordered ACKs
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
@@ -1637,6 +1642,9 @@ mod tests {
                 spurious_losses: 1,
             }
         );
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd(), initial_cwnd);
+        }
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(20));
