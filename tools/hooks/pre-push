@@ -1,0 +1,41 @@
+#!/bin/sh
+
+# To use this pre-push git hook please move this file to: quiche/.git/hooks/pre-push to automatically activate it.
+
+# A hook script to verify what is about to be pushed.  Called by "git
+# push" after it has checked the remote status, but before anything has been
+# pushed.  If this script exits with a non-zero status nothing will be pushed.
+#
+# This hook is called with the following parameters:
+#
+# $1 -- Name of the remote to which the push is being done
+# $2 -- URL to which the push is being done
+#
+# If pushing without using a named remote those arguments will be equal.
+
+remote="$1" 
+#url="$2" # unused argument to pre-push hook script
+
+if [ $remote = "origin" ] 
+then 
+	echo "----------------------------"
+	echo "Running pre-push git hook..."
+	if cargo +nightly fmt -- --check ; then
+		if cargo clippy --features=ffi,qlog,boringssl-boring-crate -- -D warnings; then
+			echo "PASSED"
+			echo "----------------------------"
+		else
+			echo "FAILED: cargo clippy failed. Try: cargo clippy --fix --features=ffi,qlog,boringssl-boring-crate -- -D warnings"
+			echo "If you would like to disable this check: git push --no-verify <remote>"
+			echo "----------------------------"
+			exit 1 # Failed
+		fi
+	else 
+		echo "FAILED: cargo fmt failed. Try: cargo +nightly fmt"
+		echo "If you would like to disable this check: git push --no-verify <remote>"
+		echo "----------------------------"
+		exit 1 # Failed
+	fi
+fi
+
+exit 0 # Passed
