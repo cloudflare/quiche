@@ -28,6 +28,7 @@ use std::convert::TryInto;
 
 use crate::Error;
 use crate::Result;
+use crate::STATELESS_RESET_TOKEN_LEN;
 
 use crate::packet;
 use crate::range_buf::RangeBuf;
@@ -149,7 +150,7 @@ pub enum Frame {
         seq_num: u64,
         retire_prior_to: u64,
         conn_id: Vec<u8>,
-        reset_token: [u8; 16],
+        reset_token: [u8; STATELESS_RESET_TOKEN_LEN],
     },
 
     RetireConnectionId {
@@ -289,7 +290,7 @@ impl Frame {
                     retire_prior_to,
                     conn_id: b.get_bytes(conn_id_len as usize)?.to_vec(),
                     reset_token: b
-                        .get_bytes(16)?
+                        .get_bytes(STATELESS_RESET_TOKEN_LEN)?
                         .buf()
                         .try_into()
                         .map_err(|_| Error::BufferTooShort)?,
@@ -1941,7 +1942,7 @@ mod tests {
             seq_num: 123_213,
             retire_prior_to: 122_211,
             conn_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-            reset_token: [0x42; 16],
+            reset_token: [0x42; STATELESS_RESET_TOKEN_LEN],
         };
 
         let wire_len = {

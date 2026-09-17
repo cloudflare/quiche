@@ -347,6 +347,16 @@ impl ConnectionIdentifiers {
         self.scids.get(seq_num).ok_or(Error::InvalidState)
     }
 
+    /// Associates the peer's transport-parameter stateless reset token with its
+    /// initial destination connection ID.
+    pub(crate) fn set_initial_dcid_reset_token(
+        &mut self, reset_token: Option<u128>,
+    ) {
+        if let Some(cid) = self.dcids.get_mut(0) {
+            cid.reset_token = reset_token;
+        }
+    }
+
     /// Adds a new source identifier, and indicates whether it should be
     /// advertised through a `NEW_CONNECTION_ID` frame or not.
     ///
@@ -724,6 +734,17 @@ impl ConnectionIdentifiers {
     #[inline]
     pub fn oldest_dcid(&self) -> &ConnectionIdEntry {
         self.dcids.get_oldest()
+    }
+
+    /// Returns reset tokens for active destination connection IDs that have
+    /// been used on a path.
+    pub(crate) fn active_dcid_reset_tokens(
+        &self,
+    ) -> impl Iterator<Item = u128> + '_ {
+        self.dcids
+            .iter()
+            .filter(|e| e.path_id.is_some())
+            .filter_map(|e| e.reset_token)
     }
 
     /// Adds or remove the source Connection ID sequence number from the
