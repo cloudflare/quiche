@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TransmissionType"],"fn":["plot_sparks"],"struct":["SparkPlotsParams"]};
