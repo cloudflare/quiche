@@ -50,6 +50,7 @@ use crate::packet;
 
 const TLS1_3_VERSION: u16 = 0x0304;
 const TLS_ALERT_ERROR: u64 = 0x100;
+const SSL_VERIFY_PEER: c_int = 0x01;
 const INTERNAL_ERROR: u64 = 0x01;
 
 #[allow(non_camel_case_types)]
@@ -290,6 +291,16 @@ impl Context {
         // need adjustment if modes must be combined.
         unsafe {
             SSL_CTX_set_verify(self.as_mut_ptr(), mode, None);
+        }
+    }
+
+    pub fn set_verify_optional(&mut self) {
+        unsafe {
+            SSL_CTX_set_verify(
+                self.as_mut_ptr(),
+                SSL_VERIFY_PEER,
+                Some(verify_any_cert),
+            );
         }
     }
 
@@ -898,6 +909,12 @@ extern "C" fn flush_flight(_ssl: *mut SSL) -> c_int {
     // We don't really need to anything here since the output packets are
     // generated separately, when conn.send() is called.
 
+    1
+}
+
+extern "C" fn verify_any_cert(
+    _ok: c_int, _store_ctx: *mut X509_STORE_CTX,
+) -> c_int {
     1
 }
 

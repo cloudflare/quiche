@@ -174,6 +174,10 @@ int quiche_config_set_curves_list(quiche_config *config, const char *curves);
 // Configures whether to verify the peer's certificate.
 void quiche_config_verify_peer(quiche_config *config, bool v);
 
+// Requests the peer's certificate without verifying it, leaving that to the
+// application (see quiche_conn_peer_cert()).
+void quiche_config_verify_peer_optional(quiche_config *config);
+
 // Configures whether to send GREASE.
 void quiche_config_grease(quiche_config *config, bool v);
 
