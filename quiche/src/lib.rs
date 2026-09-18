@@ -9121,35 +9121,38 @@ impl<F: BufFactory> Connection<F> {
         // Automatically probes the new path.
         path.request_validation();
 
-        let pid = self.paths.insert_path(path, self.is_server)?;
+        let (pid, released_dcid_seq) =
+            self.paths.insert_path(path, self.is_server)?;
 
         // Notify the application of CID reuse only after the path was
         // successfully admitted. This bounds event queue growth by path Slab
         // capacity, preventing an attacker from growing the queue unboundedly
         // by rotating source ports.
-        match reused_cid_info {
-            Some((old_pid, old_local_addr, old_peer_addr)) => {
-                trace!(
-                    "{} reused CID seq {} of ({},{}) (path {}) on ({},{})",
-                    self.trace_id,
-                    in_scid_seq,
-                    old_local_addr,
-                    old_peer_addr,
-                    old_pid,
-                    info.to,
-                    info.from
-                );
+        if let Some((old_pid, old_local_addr, old_peer_addr)) = reused_cid_info {
+            trace!(
+                "{} reused CID seq {} of ({},{}) (path {}) on ({},{})",
+                self.trace_id,
+                in_scid_seq,
+                old_local_addr,
+                old_peer_addr,
+                old_pid,
+                info.to,
+                info.from
+            );
 
-                self.paths.notify_event(PathEvent::ReusedSourceConnectionId(
-                    in_scid_seq,
-                    (old_local_addr, old_peer_addr),
-                    (info.to, info.from),
-                ));
-            },
+            self.paths.notify_event(PathEvent::ReusedSourceConnectionId(
+                in_scid_seq,
+                (old_local_addr, old_peer_addr),
+                (info.to, info.from),
+            ));
+        }
 
-            None => {
-                ids.link_scid_to_path_id(in_scid_seq, pid)?;
-            },
+        // The CID is now tracked on the path it was last seen on, so that the
+        // link does not dangle if the previous path gets removed.
+        ids.link_scid_to_path_id(in_scid_seq, pid)?;
+
+        if let Some(seq) = released_dcid_seq {
+            self.release_dcid(seq)?;
         }
 
         Ok(pid)
@@ -9267,13 +9270,32 @@ impl<F: BufFactory> Connection<F> {
         );
         path.active_dcid_seq = Some(dcid_seq);
 
-        let pid = self
+        let (pid, released_dcid_seq) = self
             .paths
             .insert_path(path, false)
             .map_err(|_| Error::OutOfIdentifiers)?;
+
+        if let Some(seq) = released_dcid_seq {
+            self.release_dcid(seq)?;
+        }
+
         self.ids.link_dcid_to_path_id(dcid_seq, pid)?;
 
         Ok(pid)
+    }
+
+    /// Releases the Destination Connection ID a removed path was using.
+    ///
+    /// The ID goes back to the pool of spare IDs a new path can take, unless
+    /// DCID reuse is disabled, in which case it is retired.
+    fn release_dcid(&mut self, dcid_seq: u64) -> Result<()> {
+        if self.disable_dcid_reuse && !self.ids.zero_length_dcid() {
+            self.ids.retire_dcid(dcid_seq)?;
+        } else {
+            self.ids.unlink_dcid(dcid_seq);
+        }
+
+        Ok(())
     }
 
     // Marks the connection as closed and does any related tidyup.
