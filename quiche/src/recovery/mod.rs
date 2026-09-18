@@ -1332,10 +1332,7 @@ mod tests {
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
-        if matches!(
-            cc_algorithm_name,
-            "reno" | "cubic" | "congestion_window_unchecked"
-        ) {
+        if matches!(cc_algorithm_name, "reno" | "cubic") {
             assert!(r.startup_exit().is_some());
             assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
         } else {
@@ -1536,10 +1533,7 @@ mod tests {
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
-        if matches!(
-            cc_algorithm_name,
-            "reno" | "cubic" | "congestion_window_unchecked"
-        ) {
+        if matches!(cc_algorithm_name, "reno" | "cubic") {
             assert!(r.startup_exit().is_some());
             assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
         } else {
@@ -1667,10 +1661,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
 
-        if matches!(
-            cc_algorithm_name,
-            "reno" | "cubic" | "congestion_window_unchecked"
-        ) {
+        if matches!(cc_algorithm_name, "reno" | "cubic") {
             assert!(r.startup_exit().is_some());
             assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
         } else {
