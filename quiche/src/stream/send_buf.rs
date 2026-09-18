@@ -509,6 +509,11 @@ impl<F: BufFactory> SendBuf<F> {
         self.off
     }
 
+    /// Returns true if the next call to [`Self::emit`] will emit an empty FIN.
+    pub fn empty_fin_next(&self) -> bool {
+        self.fin_off == Some(self.off_front())
+    }
+
     /// The maximum offset we are allowed to send to the peer.
     pub fn max_off(&self) -> u64 {
         self.max_data

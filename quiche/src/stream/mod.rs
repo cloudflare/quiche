@@ -2030,6 +2030,24 @@ mod tests {
     }
 
     #[test]
+    fn send_buf_empty_fin_next() {
+        let mut stream = <Stream>::new(0, 0, 20, true, 0, DEFAULT_STREAM_WINDOW);
+
+        assert!(!stream.send.empty_fin_next());
+        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+
+        let mut buf = [0; 5];
+        assert_eq!(stream.send.emit(&mut buf), Ok((5, false)));
+        assert!(!stream.send.empty_fin_next());
+
+        assert_eq!(stream.send.write(b"", true), Ok(0));
+        assert!(stream.send.empty_fin_next());
+
+        let mut empty = [];
+        assert_eq!(stream.send.emit(&mut empty), Ok((0, true)));
+    }
+
+    #[test]
     fn rangebuf_split_off() {
         let mut buf = <RangeBuf>::from(b"helloworld", 5, true);
         assert_eq!(buf.start, 0);
