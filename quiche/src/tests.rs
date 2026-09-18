@@ -386,6 +386,53 @@ fn verify_client_anonymous() {
     assert!(pipe.server.peer_cert().is_none());
 }
 
+#[test]
+fn verify_client_optional() {
+    let mut server_config = Config::new(PROTOCOL_VERSION).unwrap();
+    server_config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    server_config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    server_config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    server_config.set_initial_max_data(30);
+    server_config.set_initial_max_stream_data_bidi_local(15);
+    server_config.set_initial_max_stream_data_bidi_remote(15);
+    server_config.set_initial_max_streams_bidi(3);
+
+    // The server has no CA to verify the client's certificate with, but only
+    // asks for it.
+    server_config.verify_peer_optional();
+
+    let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
+    client_config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    client_config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    client_config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    client_config.set_initial_max_data(30);
+    client_config.set_initial_max_stream_data_bidi_local(15);
+    client_config.set_initial_max_stream_data_bidi_remote(15);
+    client_config.set_initial_max_streams_bidi(3);
+
+    let mut pipe = test_utils::Pipe::with_client_and_server_config(
+        &mut client_config,
+        &mut server_config,
+    )
+    .unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client did send a certificate.
+    assert!(pipe.server.peer_cert().is_some());
+}
+
 #[rstest]
 fn missing_initial_source_connection_id(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,

@@ -780,6 +780,23 @@ impl Config {
         self.tls_ctx.set_verify(verify);
     }
 
+    /// Configures the connection to request the peer's certificate without
+    /// verifying it.
+    ///
+    /// The handshake succeeds regardless of whether the certificate chain
+    /// can be validated, and, on the server-side, regardless of whether the
+    /// client presented a certificate at all. The application is expected to
+    /// authenticate the peer itself, for example by checking the certificate
+    /// returned by [`peer_cert()`] against a set of known certificates.
+    ///
+    /// This overrides any previous call to [`verify_peer()`].
+    ///
+    /// [`peer_cert()`]: struct.Connection.html#method.peer_cert
+    /// [`verify_peer()`]: struct.Config.html#method.verify_peer
+    pub fn verify_peer_optional(&mut self) {
+        self.tls_ctx.set_verify_optional();
+    }
+
     /// Configures whether to do path MTU discovery.
     ///
     /// PMTUD-driven packet limit updates are reported to the application

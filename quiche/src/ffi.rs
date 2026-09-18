@@ -219,6 +219,11 @@ pub extern "C" fn quiche_config_verify_peer(config: &mut Config, v: bool) {
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_verify_peer_optional(config: &mut Config) {
+    config.verify_peer_optional();
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_grease(config: &mut Config, v: bool) {
     config.grease(v);
 }
