@@ -638,6 +638,15 @@ impl ConnectionIdentifiers {
         Ok(())
     }
 
+    /// Updates the Destination Connection ID entry with the provided sequence
+    /// number to indicate that it is no longer linked to any path, so that a
+    /// new path can take it.
+    pub fn unlink_dcid(&mut self, dcid_seq: u64) {
+        if let Some(e) = self.dcids.get_mut(dcid_seq) {
+            e.path_id = None;
+        }
+    }
+
     /// Gets the minimum Source Connection ID sequence number whose removal has
     /// not been requested yet.
     #[inline]
