@@ -833,6 +833,19 @@ pub extern "C" fn quiche_conn_set_session(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_conn_set_host_ip_addr(
+    conn: &mut Connection, addr: &sockaddr, addr_len: socklen_t,
+) -> c_int {
+    let ip = std_addr_from_c(addr, addr_len).ip();
+
+    match conn.set_host_ip_addr(ip) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_set_max_idle_timeout(
     conn: &mut Connection, v: u64,
 ) -> c_int {
@@ -2454,5 +2467,37 @@ mod tests {
         fn inet_ntop(
             af: c_int, src: *const c_void, dst: *mut c_char, size: socklen_t,
         ) -> *mut c_char;
+    }
+
+    #[test]
+    fn set_host_ip_addr() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config.set_application_protos(&[b"proto1"]).unwrap();
+        config.set_initial_max_data(30);
+        config.set_initial_max_stream_data_bidi_local(15);
+        config.set_initial_max_stream_data_bidi_remote(15);
+        config.set_initial_max_streams_bidi(3);
+
+        let scid = ConnectionId::from_ref(&[0xba; 16]);
+        let local = "127.0.0.1:1234".parse().unwrap();
+        let peer = "127.0.0.1:4321".parse().unwrap();
+        let mut conn = connect(None, &scid, local, peer, &mut config).unwrap();
+
+        // Only the address is used; the port is ignored.
+        let ip = "[2001:db8::1]:0".parse().unwrap();
+        let mut out: sockaddr_storage = unsafe { std::mem::zeroed() };
+        let len = std_addr_to_c(&ip, &mut out);
+        let addr = unsafe { &*(&out as *const _ as *const sockaddr) };
+
+        assert_eq!(quiche_conn_set_host_ip_addr(&mut conn, addr, len), 0);
+
+        // Refused once a packet has been sent.
+        let mut buf = [0; 1350];
+        conn.send(&mut buf).unwrap();
+
+        assert_eq!(
+            quiche_conn_set_host_ip_addr(&mut conn, addr, len),
+            Error::InvalidState.to_c() as c_int
+        );
     }
 }
