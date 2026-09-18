@@ -3263,6 +3263,11 @@ impl<F: BufFactory> Connection<F> {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
         })?;
 
+        // RFC 9000 requires the reserved bits to be zero after header
+        // protection is removed. Keep the value until packet protection has
+        // been authenticated; only then can a peer be penalized for it.
+        let reserved_bits = reserved_bits(b.buf()[0], hdr.ty);
+
         let pn = packet::decode_pkt_num(
             self.pkt_num_spaces[epoch].largest_rx_pkt_num,
             hdr.pkt_num,
@@ -3331,6 +3336,17 @@ impl<F: BufFactory> Connection<F> {
         .map_err(|e| {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
         })?;
+
+        // Deliberately not routed through `drop_pkt_on_err` like the other
+        // fallible calls above: RFC 9000 requires the reserved bits to cause
+        // a connection error (PROTOCOL_VIOLATION), but `drop_pkt_on_err`
+        // downgrades everything but a server's first packet to `Error::Done`,
+        // which `recv()` treats as "silently ignore this packet". Keeping
+        // this check bare, rather than harmonizing it with its neighbors,
+        // preserves the MUST from the spec.
+        if reserved_bits != 0 {
+            return Err(Error::InvalidPacket);
+        }
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -9413,6 +9429,22 @@ fn drop_pkt_on_err(
     // Ignore other invalid packets that haven't been authenticated to prevent
     // man-in-the-middle and man-on-the-side attacks.
     Error::Done
+}
+
+/// Returns the reserved bits of a packet's first byte, after header
+/// protection has been removed.
+///
+/// Per RFC 9000 section 17.2 (long header) and section 17.3.1 (short
+/// header), these bits MUST be zero; a non-zero result means the caller
+/// should treat receipt of the packet as a connection error, but only
+/// after packet protection has also been removed (see the reserved-bits
+/// check in `recv_single`).
+fn reserved_bits(first_byte: u8, ty: Type) -> u8 {
+    if ty == Type::Short {
+        first_byte & 0x18
+    } else {
+        first_byte & 0x0c
+    }
 }
 
 struct AddrTupleFmt(SocketAddr, SocketAddr);

@@ -13382,3 +13382,28 @@ fn server_qlog() {
         panic!("expected Qlog event");
     }
 }
+
+// Pins the reserved-bits masks to the values required by RFC 9000 section
+// 17.2 (long header) and section 17.3.1 (short header), so an accidental
+// change to `reserved_bits()` (e.g. `0x0c` becoming `0x0d`) fails a test
+// instead of silently drifting from a MUST-level spec requirement. See
+// `recv_single`'s reserved-bits check, which relies on this function.
+#[test]
+fn reserved_bits_long_header_mask() {
+    // Bits 0b0000_1100 are reserved on a long header; everything else must
+    // be masked away.
+    assert_eq!(reserved_bits(0b1111_1111, Type::Initial), 0x0c);
+    assert_eq!(reserved_bits(0b0000_0000, Type::Initial), 0x00);
+    assert_eq!(reserved_bits(0b0000_1100, Type::Initial), 0x0c);
+    assert_eq!(reserved_bits(0b1111_0011, Type::Initial), 0x00);
+}
+
+#[test]
+fn reserved_bits_short_header_mask() {
+    // Bits 0b0001_1000 are reserved on a short header; everything else must
+    // be masked away.
+    assert_eq!(reserved_bits(0b1111_1111, Type::Short), 0x18);
+    assert_eq!(reserved_bits(0b0000_0000, Type::Short), 0x00);
+    assert_eq!(reserved_bits(0b0001_1000, Type::Short), 0x18);
+    assert_eq!(reserved_bits(0b1110_0111, Type::Short), 0x00);
+}
