@@ -15,6 +15,7 @@ build = "build.rs"
 default = ["qlog-gzip", "qlog-zstd"]
 
 # Forwarded quiche features for re-exports
+congestion_window_unchecked = ["quiche/congestion_window_unchecked_available"]
 fuzzing = ["quiche/fuzzing"]
 quiche_internal = ["quiche/internal"]
 

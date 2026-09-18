@@ -371,6 +371,7 @@ impl Recovery {
 /// algorithms.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
+#[non_exhaustive]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
     Reno            = 0,
@@ -379,6 +380,18 @@ pub enum CongestionControlAlgorithm {
     /// BBRv2 congestion control algorithm implementation from gcongestion
     /// branch. `bbr2_gcongestion` in a string form.
     Bbr2Gcongestion = 4,
+    /// Keeps the congestion window at `usize::MAX` instead of reducing send
+    /// capacity in response to congestion. ACK processing, RTT estimation,
+    /// loss detection, and recovery remain enabled. This provides no
+    /// congestion-window protection and makes optimistic-ACK probes extremely
+    /// infrequent.
+    /// `congestion_window_unchecked` in string form.
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(feature = "congestion_window_unchecked_available"))
+    )]
+    CongestionWindowUnchecked = 5,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -394,6 +407,9 @@ impl FromStr for CongestionControlAlgorithm {
             "bbr" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             "bbr2" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
             "bbr2_gcongestion" => Ok(CongestionControlAlgorithm::Bbr2Gcongestion),
+            #[cfg(feature = "congestion_window_unchecked_available")]
+            "congestion_window_unchecked" =>
+                Ok(CongestionControlAlgorithm::CongestionWindowUnchecked),
             _ => Err(crate::Error::CongestionControl),
         }
     }
@@ -953,10 +969,95 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    fn congestion_window_unchecked_recovery() -> Recovery {
+        let mut config = Config::new(crate::PROTOCOL_VERSION)
+            .expect("configuration should be valid");
+        config
+            .set_cc_algorithm_name("congestion_window_unchecked")
+            .expect("congestion_window_unchecked should be available");
+        Recovery::new(&config)
+    }
+
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    #[test]
+    fn congestion_window_unchecked_keeps_the_send_window_open() {
+        let mut recovery = congestion_window_unchecked_recovery();
+        let now = Instant::now();
+        recovery.on_packet_sent(
+            test_utils::helper_packet_sent(0, now, 1_200),
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        assert_eq!(recovery.cwnd(), usize::MAX);
+        assert_eq!(recovery.bytes_in_flight(), 1_200);
+        assert_eq!(recovery.cwnd_available(), usize::MAX - 1_200);
+    }
+
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    #[test]
+    fn congestion_window_unchecked_retains_recovery_accounting() {
+        let mut recovery = congestion_window_unchecked_recovery();
+        let now = Instant::now();
+        recovery.on_packet_sent(
+            test_utils::helper_packet_sent(0, now, 1_200),
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        let mut acked = RangeSet::default();
+        acked.insert(0..1);
+        let outcome = recovery
+            .on_ack_received(
+                &acked,
+                0,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now + Duration::from_millis(10),
+                None,
+                "",
+            )
+            .expect("ACK should be valid");
+        assert_eq!(outcome.acked_bytes, 1_200);
+        assert_eq!(recovery.cwnd(), usize::MAX);
+        assert_eq!(recovery.bytes_in_flight(), 0);
+        assert_eq!(recovery.rtt(), Duration::from_millis(10));
+        assert_eq!(recovery.min_rtt(), Some(Duration::from_millis(10)));
+
+        let mut recovery = congestion_window_unchecked_recovery();
+        recovery.on_packet_sent(
+            test_utils::helper_packet_sent(
+                0,
+                now + Duration::from_secs(2),
+                1_200,
+            ),
+            packet::Epoch::Initial,
+            HandshakeStatus::default(),
+            now + Duration::from_secs(2),
+            "",
+        );
+        recovery.on_pkt_num_space_discarded(
+            packet::Epoch::Initial,
+            HandshakeStatus::default(),
+            now + Duration::from_secs(3),
+        );
+        assert_eq!(recovery.bytes_in_flight(), 0);
+    }
+
     #[rstest]
-    fn loss_on_pto(
-        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
-    ) {
+    #[case::reno("reno")]
+    #[case::cubic("cubic")]
+    #[case::bbr2_gcongestion("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case::congestion_window_unchecked("congestion_window_unchecked")
+    )]
+    fn loss_on_pto(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
@@ -1231,7 +1332,7 @@ mod tests {
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
-        if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
+        if matches!(cc_algorithm_name, "reno" | "cubic") {
             assert!(r.startup_exit().is_some());
             assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
         } else {
@@ -1240,9 +1341,14 @@ mod tests {
     }
 
     #[rstest]
-    fn loss_on_timer(
-        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
-    ) {
+    #[case::reno("reno")]
+    #[case::cubic("cubic")]
+    #[case::bbr2_gcongestion("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case::congestion_window_unchecked("congestion_window_unchecked")
+    )]
+    fn loss_on_timer(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
@@ -1427,7 +1533,7 @@ mod tests {
         );
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
-        if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
+        if matches!(cc_algorithm_name, "reno" | "cubic") {
             assert!(r.startup_exit().is_some());
             assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
         } else {
@@ -1436,13 +1542,19 @@ mod tests {
     }
 
     #[rstest]
-    fn loss_on_reordering(
-        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
-    ) {
+    #[case::reno("reno")]
+    #[case::cubic("cubic")]
+    #[case::bbr2_gcongestion("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case::congestion_window_unchecked("congestion_window_unchecked")
+    )]
+    fn loss_on_reordering(#[case] cc_algorithm_name: &str) {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
 
         let mut r = Recovery::new(&cfg);
+        let initial_cwnd = r.cwnd();
 
         let mut now = Instant::now();
 
@@ -1491,6 +1603,9 @@ mod tests {
                 spurious_losses: 0,
             }
         );
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd(), initial_cwnd);
+        }
         // Since we only remove packets from the back to avoid compaction, the
         // send length remains the same after receiving reordered ACKs
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
@@ -1521,6 +1636,9 @@ mod tests {
                 spurious_losses: 1,
             }
         );
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd(), initial_cwnd);
+        }
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(20));
@@ -1543,7 +1661,7 @@ mod tests {
         );
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
 
-        if cc_algorithm_name == "reno" || cc_algorithm_name == "cubic" {
+        if matches!(cc_algorithm_name, "reno" | "cubic") {
             assert!(r.startup_exit().is_some());
             assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
         } else {

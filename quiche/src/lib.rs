@@ -372,6 +372,9 @@
 //!   initiating a connection. Dangerous if the DCID does not meet QUIC's
 //!   unpredictability and length requirements.
 //!
+//! * `congestion_window_unchecked_available`: Expose a congestion control
+//!   algorithm that provides no congestion-window protection.
+//!
 //! [feature flags]: https://doc.rust-lang.org/cargo/reference/manifest.html#the-features-section
 //! [boring]: https://crates.io/crates/boring
 //! [qlog]: https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema

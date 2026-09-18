@@ -889,8 +889,9 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         // Open more space (snd_cnt) for PRR when allowed.
-        self.cwnd().saturating_sub(self.bytes_in_flight.get()) +
-            self.congestion.prr.snd_cnt
+        self.cwnd()
+            .saturating_sub(self.bytes_in_flight.get())
+            .saturating_add(self.congestion.prr.snd_cnt)
     }
 
     fn rtt(&self) -> Duration {
@@ -1158,6 +1159,18 @@ mod tests {
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryConfig;
     use std::time::Instant;
+
+    #[test]
+    fn congestion_window_unchecked_saturates_prr_allowance() {
+        let config = crate::Config::new(crate::PROTOCOL_VERSION)
+            .expect("configuration should be valid");
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut recovery = LegacyRecovery::new_with_config(&recovery_config);
+        recovery.congestion.congestion_window = usize::MAX;
+        recovery.congestion.prr.snd_cnt = 1;
+
+        assert_eq!(recovery.cwnd_available(), usize::MAX);
+    }
 
     #[test]
     fn test_high_pto_count_no_panic() {
