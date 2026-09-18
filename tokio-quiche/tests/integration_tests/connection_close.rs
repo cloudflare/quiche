@@ -45,12 +45,13 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
     const MAX_REQS: u64 = 10;
 
     let hook = TestConnectionHook::new();
+
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.max_requests_per_connection = Some(MAX_REQS);
+
     let (url, _) = start_server_with_settings(
         QuicSettings::default(),
-        Http3Settings {
-            max_requests_per_connection: Some(MAX_REQS),
-            ..Default::default()
-        },
+        http3_settings,
         hook,
         handle_connection,
     );
@@ -95,12 +96,13 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
 #[tokio::test]
 async fn test_max_header_list_size_limit() -> QuicResult<()> {
     let hook = TestConnectionHook::new();
+
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.max_header_list_size = Some(5_000);
+
     let (url, mut audit_stats_rx) = start_server_with_settings(
         QuicSettings::default(),
-        Http3Settings {
-            max_header_list_size: Some(5_000),
-            ..Default::default()
-        },
+        http3_settings,
         hook,
         handle_connection,
     );

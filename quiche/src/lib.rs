@@ -782,6 +782,9 @@ impl Config {
 
     /// Configures whether to do path MTU discovery.
     ///
+    /// PMTUD-driven packet limit updates are reported to the application
+    /// through [`PathEvent::PmtuUpdated`].
+    ///
     /// The default value is `false`.
     pub fn discover_pmtu(&mut self, discover: bool) {
         self.pmtud = discover;
@@ -3547,24 +3550,29 @@ impl<F: BufFactory> Connection<F> {
 
         // Process acked frames. Note that several packets from several paths
         // might have been acked by the received packet.
-        for (_, p) in self.paths.iter_mut() {
+        let (paths, path_events) = self.paths.iter_mut_and_events();
+        for (_, p) in paths {
             while let Some(acked) = p.recovery.next_acked_frame(epoch) {
                 match acked {
                     frame::Frame::Ping {
                         mtu_probe: Some(mtu_probe),
                     } => {
+                        trace!(
+                            "{} pmtud probe acked; probe size {:?}",
+                            self.trace_id,
+                            mtu_probe
+                        );
+
+                        let local = p.local_addr();
+                        let peer = p.peer_addr();
                         if let Some(pmtud) = p.pmtud.as_mut() {
-                            trace!(
-                                "{} pmtud probe acked; probe size {:?}",
-                                self.trace_id,
-                                mtu_probe
-                            );
+                            let old_pmtu = pmtud.get_current_mtu();
+                            let current_mtu = pmtud.successful_probe(mtu_probe);
+                            let new_pmtu = pmtud.get_current_mtu();
 
                             // Update the datagram size only after validating
                             // the MTU.
-                            if let Some(current_mtu) =
-                                pmtud.successful_probe(mtu_probe)
-                            {
+                            if let Some(current_mtu) = current_mtu {
                                 qlog_with_type!(
                                     EventType::QuicEventType(
                                         QuicEventType::MtuUpdated
@@ -3592,6 +3600,12 @@ impl<F: BufFactory> Connection<F> {
 
                                 p.recovery
                                     .pmtud_update_max_datagram_size(current_mtu);
+                            }
+
+                            if let Some(event) =
+                                path::pmtu_event(local, peer, old_pmtu, new_pmtu)
+                            {
+                                path_events.push_back(event);
                             }
                         }
                     },
@@ -4153,7 +4167,8 @@ impl<F: BufFactory> Connection<F> {
         let crypto_ctx = &mut self.crypto_ctx[epoch];
 
         // Process lost frames. There might be several paths having lost frames.
-        for (_, p) in self.paths.iter_mut() {
+        let (paths, path_events) = self.paths.iter_mut_and_events();
+        for (_, p) in paths {
             while let Some(lost) = p.recovery.next_lost_frame(epoch) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
@@ -4317,9 +4332,22 @@ impl<F: BufFactory> Connection<F> {
                     frame::Frame::Ping { mtu_probe } => {
                         // Ping frames are not retransmitted.
                         if let Some(failed_probe) = mtu_probe {
+                            trace!("pmtud probe dropped: {failed_probe}");
+
+                            let local = p.local_addr();
+                            let peer = p.peer_addr();
                             if let Some(pmtud) = p.pmtud.as_mut() {
-                                trace!("pmtud probe dropped: {failed_probe}");
+                                let old_pmtu = pmtud.get_current_mtu();
                                 pmtud.failed_probe(failed_probe);
+                                let new_pmtu = pmtud.get_current_mtu();
+
+                                if let Some(event) = path::pmtu_event(
+                                    local, peer, old_pmtu, new_pmtu,
+                                ) {
+                                    p.recovery
+                                        .pmtud_update_max_datagram_size(new_pmtu);
+                                    path_events.push_back(event);
+                                }
                             }
                         }
                     },
@@ -4519,6 +4547,7 @@ impl<F: BufFactory> Connection<F> {
         let mut in_flight = false;
         let mut is_pmtud_probe = false;
         let mut has_data = false;
+        let mut stream_data_skipped = false;
 
         // Whether a PING frame must explicitly elicit an ACK when no other
         // frame does so implicitly.
@@ -5250,6 +5279,23 @@ impl<F: BufFactory> Connection<F> {
                 let (len, fin) =
                     stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
 
+                // Don't emit an empty non-fin STREAM frame when only its
+                // header fits: it would carry no data but still advance the
+                // peer's largest received offset.
+                if len == 0 && !fin {
+                    stream_data_skipped = true;
+
+                    // Rotate incremental streams so a stream whose header
+                    // doesn't leave room for data doesn't block the others.
+                    if stream.incremental {
+                        let priority_key = Arc::clone(&stream.priority_key);
+                        self.streams.remove_flushable(&priority_key);
+                        self.streams.insert_flushable(&priority_key);
+                    }
+
+                    break;
+                }
+
                 // Encode the frame's header.
                 //
                 // Due to how `OctetsMut::split_at()` works, `stream_hdr` starts
@@ -5332,7 +5378,9 @@ impl<F: BufFactory> Connection<F> {
             path.recovery.ping_sent(epoch);
         }
 
+        // Pending stream data means the sender is size-, not app-limited.
         if !has_data &&
+            !stream_data_skipped &&
             !dgram_emitted &&
             cwnd_available > frame::MAX_STREAM_OVERHEAD
         {
@@ -7718,13 +7766,32 @@ impl<F: BufFactory> Connection<F> {
     /// Revalidates the PMTU for the active path by sending a new probe packet
     /// of PMTU size. If the probe is dropped PMTUD will restart and find a new
     /// valid PMTU.
+    ///
+    /// If revalidation invalidates a previously discovered larger size, a
+    /// [`PathEvent::PmtuUpdated`] event is queued with QUIC's minimum packet
+    /// size. Further events report larger sizes as probes validate them.
     #[inline]
     pub fn revalidate_pmtu(&mut self) {
-        if let Ok(active_path) = self.paths.get_active_mut() {
-            if let Some(pmtud) = active_path.pmtud.as_mut() {
-                pmtud.revalidate_pmtu();
-            }
-        }
+        let Ok(active_path) = self.paths.get_active_mut() else {
+            return;
+        };
+
+        let local = active_path.local_addr();
+        let peer = active_path.peer_addr();
+        let Some(pmtud) = active_path.pmtud.as_mut() else {
+            return;
+        };
+
+        let old_pmtu = pmtud.get_current_mtu();
+        pmtud.revalidate_pmtu();
+
+        let Some(event) =
+            path::pmtu_event(local, peer, old_pmtu, pmtud.get_current_mtu())
+        else {
+            return;
+        };
+
+        self.paths.notify_event(event);
     }
 
     /// Returns true if the connection handshake is complete.

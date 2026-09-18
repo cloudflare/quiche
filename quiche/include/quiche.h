@@ -892,6 +892,7 @@ enum quiche_path_event_type {
     QUICHE_PATH_EVENT_CLOSED,
     QUICHE_PATH_EVENT_REUSED_SOURCE_CONNECTION_ID,
     QUICHE_PATH_EVENT_PEER_MIGRATED,
+    QUICHE_PATH_EVENT_PMTU_UPDATED,
 };
 
 typedef struct quiche_path_event quiche_path_event;
@@ -929,6 +930,13 @@ void quiche_path_event_reused_source_connection_id(const quiche_path_event *ev, 
 void quiche_path_event_peer_migrated(const quiche_path_event *ev,
                            struct sockaddr_storage *local, socklen_t *local_len,
                            struct sockaddr_storage *peer, socklen_t *peer_len);
+
+// Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_PMTU_UPDATED.
+// Sets "pmtu" to the current validated PMTU limit for normal application traffic.
+void quiche_path_event_pmtu_updated(const quiche_path_event *ev,
+                           struct sockaddr_storage *local, socklen_t *local_len,
+                           struct sockaddr_storage *peer, socklen_t *peer_len,
+                           size_t *pmtu);
 
 // Frees the path event object.
 void quiche_path_event_free(quiche_path_event *ev);
