@@ -1,0 +1,21 @@
+quiche/src/lib.rs
+  s_e04a139006be07::t_0785a59a2a12c6 4566-4568,9006-9007
+quiche/src/tests.rs
+  s_e04a139006be07::t_8771d9444ee5b3 7642-7643,9400-9403
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fb0f49d72bdc839d5b5de5906c6a9d3648457977",
+  "prompts": {},
+  "sessions": {
+    "s_e04a139006be07": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b365-9048-74d0-b1d5-10ef8d9dc24a",
+        "model": "unknown"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    }
+  }
+}
