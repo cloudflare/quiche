@@ -162,12 +162,38 @@ pub extern "C" fn quiche_config_load_cert_chain_from_pem_file(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_load_cert_from_der(
+    config: &mut Config, cert: *const u8, cert_len: size_t,
+) -> c_int {
+    let cert = unsafe { slice::from_raw_parts(cert, cert_len) };
+
+    match config.load_cert_from_der(cert) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_load_priv_key_from_pem_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
     let path = unsafe { ffi::CStr::from_ptr(path).to_str().unwrap() };
 
     match config.load_priv_key_from_pem_file(path) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_config_load_priv_key_from_der(
+    config: &mut Config, key: *const u8, key_len: size_t,
+) -> c_int {
+    let key = unsafe { slice::from_raw_parts(key, key_len) };
+
+    match config.load_priv_key_from_der(key) {
         Ok(_) => 0,
 
         Err(e) => e.to_c() as c_int,
