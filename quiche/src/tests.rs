@@ -11923,6 +11923,131 @@ fn path_event_queue_bounded_on_port_rotation(
 }
 
 #[rstest]
+fn repeated_nat_rebinding(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(0, 1)] additional_cids: usize,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(2);
+    config.set_initial_max_data(100000);
+    config.set_initial_max_stream_data_bidi_local(100000);
+    config.set_initial_max_stream_data_bidi_remote(100000);
+    config.set_initial_max_streams_bidi(2);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, additional_cids);
+
+    let client_addr = test_utils::Pipe::client_addr();
+    let server_addr = test_utils::Pipe::server_addr();
+
+    // Like `Pipe::advance()`, but the client's packets reach the server from
+    // `rebound_addr`, and the server's packets to that address still reach the
+    // client, as if a NAT translated them.
+    fn advance_rebound(
+        pipe: &mut test_utils::Pipe, client_addr: SocketAddr,
+        rebound_addr: SocketAddr,
+    ) -> Result<()> {
+        let mut client_done = false;
+        let mut server_done = false;
+
+        while !client_done || !server_done {
+            match test_utils::emit_flight(&mut pipe.client) {
+                Ok(mut flight) => {
+                    flight.iter_mut().for_each(|(_, si)| si.from = rebound_addr);
+                    test_utils::process_flight(&mut pipe.server, flight)?
+                },
+
+                Err(Error::Done) => client_done = true,
+
+                Err(e) => return Err(e),
+            };
+
+            match test_utils::emit_flight(&mut pipe.server) {
+                Ok(mut flight) => {
+                    flight.iter_mut().for_each(|(_, si)| si.to = client_addr);
+                    test_utils::process_flight(&mut pipe.client, flight)?
+                },
+
+                Err(Error::Done) => server_done = true,
+
+                Err(e) => return Err(e),
+            };
+        }
+
+        Ok(())
+    }
+
+    // The server can hold two paths, so every rebinding after the first one
+    // requires the path superseded by the previous migration to be removed.
+    let mut prev_addr = client_addr;
+    let mut superseded_addr = None;
+
+    for port in 1..=4 {
+        let rebound_addr: SocketAddr =
+            format!("127.0.0.1:{}", 20000 + port).parse().unwrap();
+
+        // The client is unaware of the rebinding and keeps sending as usual.
+        assert_eq!(pipe.client.stream_send(0, b"data", false), Ok(4));
+        assert_eq!(
+            advance_rebound(&mut pipe, client_addr, rebound_addr),
+            Ok(())
+        );
+
+        if let Some(superseded_addr) = superseded_addr {
+            assert_eq!(
+                pipe.server.path_event_next(),
+                Some(PathEvent::Closed(server_addr, superseded_addr))
+            );
+        }
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::New(server_addr, rebound_addr))
+        );
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::ReusedSourceConnectionId(
+                0,
+                (server_addr, prev_addr),
+                (server_addr, rebound_addr)
+            ))
+        );
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::Validated(server_addr, rebound_addr))
+        );
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::PeerMigrated(server_addr, rebound_addr))
+        );
+        assert_eq!(pipe.server.path_event_next(), None);
+
+        assert_eq!(pipe.server.paths.len(), 2);
+        assert_eq!(
+            pipe.server.paths.get_active().unwrap().peer_addr(),
+            rebound_addr
+        );
+
+        superseded_addr = Some(prev_addr);
+        prev_addr = rebound_addr;
+    }
+
+    // Data kept flowing throughout.
+    let mut buf = [0; 16];
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((16, false)));
+    assert_eq!(&buf, b"datadatadatadata");
+}
+
+#[rstest]
 fn consecutive_non_ack_eliciting(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
