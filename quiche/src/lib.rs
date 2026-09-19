@@ -4612,6 +4612,11 @@ impl<F: BufFactory> Connection<F> {
 
         let mut challenge_data = None;
 
+        // Whether the packet carries a PATH_CHALLENGE or PATH_RESPONSE frame,
+        // in which case the UDP datagram must be expanded (RFC 9000, Sections
+        // 8.2.1 and 8.2.2).
+        let mut has_path_frame = false;
+
         if pkt_type == Type::Short {
             // Create PMTUD probe.
             //
@@ -4689,6 +4694,8 @@ impl<F: BufFactory> Connection<F> {
                 let frame = frame::Frame::PathResponse { data: challenge };
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
+                    has_path_frame = true;
+
                     ack_eliciting = true;
                     in_flight = true;
                 } else {
@@ -4708,6 +4715,8 @@ impl<F: BufFactory> Connection<F> {
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     // Let's notify the path once we know the packet size.
                     challenge_data = Some(data);
+
+                    has_path_frame = true;
 
                     ack_eliciting = true;
                     in_flight = true;
@@ -5386,14 +5395,26 @@ impl<F: BufFactory> Connection<F> {
         // as Initial always requires padding.
         //
         // 2) this is a probing packet towards an unvalidated peer address.
-        if (has_initial || !path.validated()) &&
-            pkt_type == Type::Short &&
-            left >= 1
-        {
-            let frame = frame::Frame::Padding { len: left };
+        //
+        // 3) the packet carries a PATH_CHALLENGE or PATH_RESPONSE frame, as
+        // datagrams containing those must be expanded to at least 1200 bytes
+        // even on a validated path. There is no need to go beyond that.
+        if pkt_type == Type::Short && left >= 1 {
+            let pad_len = if has_initial || !path.validated() {
+                left
+            } else if has_path_frame {
+                let pkt_len = b.off() + crypto_overhead;
+                cmp::min(left, MIN_CLIENT_INITIAL_LEN.saturating_sub(pkt_len))
+            } else {
+                0
+            };
 
-            if push_frame_to_pkt!(b, frames, frame, left) {
-                in_flight = true;
+            if pad_len > 0 {
+                let frame = frame::Frame::Padding { len: pad_len };
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    in_flight = true;
+                }
             }
         }
 
