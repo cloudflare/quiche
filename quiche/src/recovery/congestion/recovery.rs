@@ -742,7 +742,14 @@ impl RecoveryOps for LegacyRecovery {
 
         self.bytes_in_flight.saturating_subtract(acked_bytes, now);
 
-        self.pto_count = 0;
+        // https://www.rfc-editor.org/rfc/rfc9002.html#section-6.2.1
+        // A client that is not yet certain the server finished validating its
+        // address keeps the PTO backoff, so that a slow server is not flooded
+        // with probes. That is the case until the peer acknowledges a
+        // Handshake packet or the handshake is confirmed.
+        if handshake_status.peer_verified_address {
+            self.pto_count = 0;
+        }
 
         self.set_loss_detection_timer(handshake_status, now);
 
