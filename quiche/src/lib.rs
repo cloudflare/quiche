@@ -895,9 +895,19 @@ impl Config {
 
     /// Sets the anti-amplification limit factor.
     ///
-    /// The default value is `3`.
+    /// The default value is `3`, which is also the maximum: a server is
+    /// forbidden from sending more than three times as many bytes as it has
+    /// received before it has validated the peer's address, so larger values
+    /// are capped.
+    ///
+    /// See [RFC 9000, Section 8.1] and [RFC 9001, Section 9.3].
+    ///
+    /// [RFC 9000, Section 8.1]:
+    ///     https://www.rfc-editor.org/rfc/rfc9000.html#section-8.1
+    /// [RFC 9001, Section 9.3]:
+    ///     https://www.rfc-editor.org/rfc/rfc9001.html#section-9.3
     pub fn set_max_amplification_factor(&mut self, v: usize) {
-        self.max_amplification_factor = v;
+        self.max_amplification_factor = cmp::min(v, MAX_AMPLIFICATION_FACTOR);
     }
 
     /// Sets the send capacity factor.

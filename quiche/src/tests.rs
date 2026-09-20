@@ -989,6 +989,40 @@ fn custom_limit_handshake_data(
     assert_eq!(server_sent, client_sent * CUSTOM_AMPLIFICATION_FACTOR);
 }
 
+/// A server must not send more than three times as many bytes as it has
+/// received before validating the peer's address, so a larger configured
+/// factor is capped instead of being honoured.
+#[test]
+fn max_amplification_factor_is_capped() {
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert-big.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_max_amplification_factor(MAX_AMPLIFICATION_FACTOR + 1);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    let client_sent = flight.iter().fold(0, |out, p| out + p.0.len());
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // `cert-big.crt` makes the server's handshake flight larger than three
+    // times the client's Initial, so the budget is what bounds this flight.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let server_sent = flight.iter().fold(0, |out, p| out + p.0.len());
+
+    assert!(
+        server_sent <= client_sent * MAX_AMPLIFICATION_FACTOR,
+        "server sent {server_sent} bytes for {client_sent} bytes received"
+    );
+}
+
 #[rstest]
 fn amplification_limited_stat() {
     // `cert-big.crt` is sized so the server's handshake flight exceeds the
