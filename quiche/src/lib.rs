@@ -5499,7 +5499,10 @@ impl<F: BufFactory> Connection<F> {
             time_sent: now,
             time_acked: None,
             time_lost: None,
-            size: if ack_eliciting { written } else { 0 },
+            // RFC 9002, Section 2: a packet containing a PADDING frame is
+            // counted toward bytes in flight even though it is not
+            // ack-eliciting, so record the size of every in-flight packet.
+            size: if in_flight { written } else { 0 },
             ack_eliciting,
             in_flight,
             delivered: 0,
