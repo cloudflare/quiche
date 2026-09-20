@@ -268,7 +268,7 @@ impl RecoveryEpoch {
 
     fn detect_and_remove_lost_packets(
         &mut self, loss_delay: Duration, pkt_thresh: Option<u64>, now: Instant,
-        newly_lost: &mut Vec<Lost>,
+        newly_lost: &mut Vec<Lost>, skip_pn: Option<u64>,
     ) -> LossDetectionResult {
         newly_lost.clear();
         let mut lost_bytes = 0;
@@ -286,8 +286,22 @@ impl RecoveryEpoch {
 
             if let SentStatus::Sent { time_sent, .. } = status {
                 let loss_by_time = *time_sent <= lost_send_time;
+                // A packet number the sender deliberately skipped, to detect
+                // optimistic ACKs, was never sent, so it must not count toward
+                // the reordering threshold. RFC 9002 Appendix A.10 notes that
+                // comparing packet numbers assumes there were no
+                // sender-induced gaps.
                 let loss_by_pkt = match pkt_thresh {
-                    Some(pkt_thresh) => largest_acked >= *pkt_num + pkt_thresh,
+                    Some(pkt_thresh) => {
+                        let pkt_thresh = match skip_pn {
+                            Some(skip_pn)
+                                if (*pkt_num..=largest_acked)
+                                    .contains(&skip_pn) =>
+                                pkt_thresh + 1,
+                            _ => pkt_thresh,
+                        };
+                        largest_acked >= *pkt_num + pkt_thresh
+                    },
                     None => false,
                 };
 
@@ -456,6 +470,10 @@ impl LossThreshold {
 }
 
 pub struct GRecovery {
+    // The packet number the sender skipped for optimistic ACK detection, as of
+    // the last ACK processed. Gaps it creates are not reordering.
+    skip_pn: Option<u64>,
+
     epochs: [RecoveryEpoch; packet::Epoch::count()],
 
     loss_timer: LossDetectionTimer,
@@ -562,6 +580,7 @@ impl GRecovery {
 
             newly_acked: Vec::new(),
             lost_reuse: Vec::new(),
+            skip_pn: None,
         })
     }
 
@@ -582,6 +601,7 @@ impl GRecovery {
             self.loss_thresh.pkt_thresh(),
             now,
             lost,
+            self.skip_pn,
         );
 
         self.bytes_in_flight
@@ -813,6 +833,8 @@ impl RecoveryOps for GRecovery {
         epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
         skip_pn: Option<u64>, trace_id: &str,
     ) -> Result<OnAckReceivedOutcome> {
+        self.skip_pn = skip_pn;
+
         let prior_in_flight = self.bytes_in_flight.get();
 
         let AckedDetectionResult {
