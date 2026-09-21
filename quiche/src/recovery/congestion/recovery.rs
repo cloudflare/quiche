@@ -796,10 +796,29 @@ impl RecoveryOps for LegacyRecovery {
 
         self.pto_count += 1;
 
+        let probe_count = cmp::min(self.pto_count as usize, MAX_PTO_PROBES_COUNT);
+
+        // https://www.rfc-editor.org/rfc/rfc9002.html#section-6.2.4
+        // In addition to the space whose timer expired, probe the other spaces
+        // that still have data in flight, so a peer that can only decrypt one
+        // of them still receives something ack-eliciting.
+        for other in [Epoch::Initial, Epoch::Handshake, Epoch::Application] {
+            if other == epoch || self.epochs[other].in_flight_count == 0 {
+                continue;
+            }
+
+            // Application data is off limits until the handshake completes.
+            if other == Epoch::Application && !handshake_status.completed {
+                continue;
+            }
+
+            self.epochs[other].loss_probes =
+                cmp::max(self.epochs[other].loss_probes, probe_count);
+        }
+
         let epoch = &mut self.epochs[epoch];
 
-        epoch.loss_probes =
-            cmp::min(self.pto_count as usize, MAX_PTO_PROBES_COUNT);
+        epoch.loss_probes = probe_count;
 
         let sent_packets_iter_limit = if !epoch.lost_frames_pto.is_empty() {
             // Skip the search for frames to add to PTO probes if frames
