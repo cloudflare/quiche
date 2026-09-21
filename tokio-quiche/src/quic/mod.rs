@@ -117,6 +117,8 @@ use self::router::acceptor::ConnectionAcceptorConfig;
 use self::router::connector::ClientConnector;
 use self::router::InboundPacketRouter;
 
+pub use self::addr_validation_token::AddrValidationTokenManager;
+pub use self::addr_validation_token::RETRY_TOKEN_SECRET_LEN;
 pub use self::connection::ConnectionShutdownBehaviour;
 pub use self::connection::HandshakeError;
 pub use self::connection::HandshakeInfo;
@@ -303,6 +305,11 @@ where
     let socket_tx = Arc::new(socket.socket);
     let socket_rx = Arc::clone(&socket_tx);
 
+    let token_manager = config.retry_token_key.map_or_else(
+        AddrValidationTokenManager::default,
+        AddrValidationTokenManager::new,
+    );
+
     let acceptor = ConnectionAcceptor::new(
         ConnectionAcceptorConfig {
             disable_client_ip_validation: config.disable_client_ip_validation,
@@ -320,7 +327,7 @@ where
             },
         },
         Arc::clone(&socket_tx),
-        Default::default(),
+        token_manager,
         socket.cid_generator,
         metrics.clone(),
     );
