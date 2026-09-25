@@ -9070,11 +9070,38 @@ fn close(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
 #[rstest]
 fn app_close_by_client(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] simulate_pto: bool,
 ) {
     let mut buf = [0; 65535];
 
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
-    assert_eq!(pipe.handshake(), Ok(()));
+
+    if simulate_pto {
+        // Advance the handshake until the client is established, but has not
+        // yet received HANDSHAKE_DONE from the server.
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+        let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+        test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+        assert!(pipe.client.is_established());
+        assert!(!pipe.client.handshake_confirmed);
+
+        // Model a Handshake PTO expiring before the client closes the
+        // connection.
+        pipe.client
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .recovery
+            .inc_loss_probes(packet::Epoch::Handshake);
+    } else {
+        assert_eq!(pipe.handshake(), Ok(()));
+    }
 
     assert_eq!(pipe.client.close(true, 0x1234, b"hello!"), Ok(()));
 
@@ -9092,6 +9119,11 @@ fn app_close_by_client(
             reason: b"hello!".to_vec(),
         })
     );
+    assert!(pipe.client.is_draining());
+
+    // A pending Handshake PTO does not cause ACK-only packets after
+    // the application close is sent.
+    assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
 }
 
 #[rstest]
@@ -9360,6 +9392,76 @@ fn local_error(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
             reason: b"hello!".to_vec()
         })
     );
+}
+
+#[rstest]
+fn skip_ping_ack_while_closing_in_early_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    config.enable_early_data();
+
+    // Establish an initial connection to obtain a resumption ticket.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    let session = pipe.client.session().unwrap();
+
+    // Start a resumed connection and advance the server into early data.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.client.set_session(session), Ok(()));
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    assert!(pipe.server.is_in_early_data());
+    assert!(!pipe.server.is_established());
+
+    // Leave the server's Handshake CRYPTO unacknowledged.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // Send a valid Handshake PING without the client's queued Finished. This
+    // gives the server something to ACK without completing its handshake.
+    let mut out = [0u8; 65535];
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+    let len = test_utils::encode_pkt(
+        &mut pipe.client,
+        Type::Handshake,
+        &frames,
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(pipe.server_recv(&mut out[..len]), Ok(len));
+
+    // Send and discard the resulting ACK so ack_elicited is clear while the
+    // received packet remains in the server's ACK ranges.
+    pipe.server.send(&mut out).unwrap();
+
+    let epoch = packet::Epoch::Handshake;
+    assert!(!pipe.server.pkt_num_spaces[epoch].ack_elicited);
+    assert!(pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0);
+
+    // The server detects the lost client response through the PTO path.
+    let timer = pipe.server.timeout().unwrap();
+    std::thread::sleep(timer + Duration::from_millis(1));
+    pipe.server.on_timeout();
+
+    assert!(
+        pipe.server
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .loss_probes(epoch) >
+            0
+    );
+
+    // An application close is valid during early data
+    assert_eq!(pipe.server.close(true, 0x1234, b"app close"), Ok(()));
+    assert!(pipe.server.is_in_early_data());
+    assert!(!pipe.server.is_established());
+
+    assert_eq!(pipe.server.send(&mut out), Err(Error::Done));
 }
 
 #[rstest]

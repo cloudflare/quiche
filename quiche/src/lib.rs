@@ -4540,7 +4540,8 @@ impl<F: BufFactory> Connection<F> {
 
         // Whether a PING frame must explicitly elicit an ACK when no other
         // frame does so implicitly.
-        let ack_elicit_required = path.recovery.should_elicit_ack(epoch);
+        let ack_elicit_required =
+            !is_closing && path.recovery.should_elicit_ack(epoch);
 
         let header_offset = b.off();
 
@@ -4567,6 +4568,9 @@ impl<F: BufFactory> Connection<F> {
         // generate an ACK (if there's anything to ACK) since we're going to
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
+        //
+        // While closing, PING frames are suppressed, so ACK elicitation must
+        // not generate ACK-only packets.
         if pkt_space.recv_pkt_need_ack.len() > 0 &&
             (pkt_space.ack_elicited || ack_elicit_required) &&
             (!is_closing ||
@@ -8254,6 +8258,17 @@ impl<F: BufFactory> Connection<F> {
             }
 
             return Ok(Type::from_epoch(epoch));
+        }
+
+        // APPLICATION_CLOSE can only be sent in a 1-RTT packet. Prioritize it
+        // over obsolete lower-epoch PTO probes, which cannot be consumed while
+        // closing because PING frames are suppressed.
+        if self.is_established() &&
+            self.local_error
+                .as_ref()
+                .is_some_and(|conn_err| conn_err.is_app)
+        {
+            return Ok(Type::Short);
         }
 
         for &epoch in packet::Epoch::epochs(
