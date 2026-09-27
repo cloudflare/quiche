@@ -132,7 +132,7 @@ pub fn server_process(
                     let path = path.unwrap();
 
                     if method.value() == b"GET" && path.value() == b"/" {
-                        let _resp = vec![
+                        let _resp = [
                             quiche::h3::Header::new(
                                 b":status",
                                 200.to_string().as_bytes(),

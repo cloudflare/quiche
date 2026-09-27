@@ -41,6 +41,7 @@ fn main() {
             headers,
             literal_headers: false,
             frame: Frame::Headers { header_block },
+            expected_result: Default::default(),
         },
         Action::SendFrame {
             stream_id: STREAM_ID,
@@ -51,6 +52,7 @@ fn main() {
                 // server: https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3
                 payload: b"test".to_vec(),
             },
+            expected_result: Default::default(),
         },
         Action::Wait {
             wait_type: WaitType::StreamEvent(StreamEvent {
@@ -67,8 +69,8 @@ fn main() {
         },
     ];
 
-    // This example doesn't use close trigger frames, since we manually close the
-    // connection upon receiving a HEADERS frame on stream 0.
+    // This example needs no close-trigger frames because it closes the
+    // connection after receiving HEADERS on stream 0.
     let close_trigger_frames = None;
 
     let summary = sync_client::connect(config, actions, close_trigger_frames)

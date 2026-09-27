@@ -41,6 +41,27 @@ pub struct Args {
     /// Path for the TLS private key.
     #[arg(long, default_value_t = default_private_key_path())]
     pub tls_private_key_path: String,
+
+    /// Congestion control algorithm to use (e.g. "cubic", "reno", "bbr2").
+    #[arg(long, default_value = "cubic")]
+    pub cc_algorithm: String,
+
+    /// Initial congestion window size in packets.
+    #[arg(long, default_value_t = 10)]
+    pub initial_cwnd_packets: usize,
+
+    /// Disable HyStart++ slow-start algorithm (only affects cubic/reno).
+    #[arg(long, default_value_t = false)]
+    pub disable_hystart: bool,
+
+    /// Enable pacing of outgoing packets.
+    #[arg(long, default_value_t = false)]
+    pub enable_pacing: bool,
+
+    /// Maximum pacing rate in bytes per second (0 = no limit). Only
+    /// meaningful when --enable-pacing is set.
+    #[arg(long, default_value_t = 0)]
+    pub max_pacing_rate: u64,
 }
 
 fn default_cert_path() -> String {

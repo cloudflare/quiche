@@ -27,7 +27,7 @@
 use super::Result;
 
 #[cfg(feature = "qlog")]
-use qlog::events::h3::Http3Frame;
+use qlog::events::http3::Http3Frame;
 
 pub const DATA_FRAME_TYPE_ID: u64 = 0x0;
 pub const HEADERS_FRAME_TYPE_ID: u64 = 0x1;
@@ -47,7 +47,7 @@ pub const SETTINGS_H3_DATAGRAM_00: u64 = 0x276;
 pub const SETTINGS_H3_DATAGRAM: u64 = 0x33;
 
 // Permit between 16 maximally-encoded and 128 minimally-encoded SETTINGS.
-const MAX_SETTINGS_PAYLOAD_SIZE: usize = 256;
+pub(crate) const MAX_SETTINGS_PAYLOAD_SIZE: usize = 256;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Frame {
@@ -344,10 +344,15 @@ impl Frame {
             // Qlog expects the `headers` to be represented as an array of
             // name:value pairs. At this stage, we only have the qpack block, so
             // populate the field with an empty vec.
-            Frame::Headers { .. } => Http3Frame::Headers { headers: vec![] },
+            Frame::Headers { .. } => Http3Frame::Headers {
+                headers: vec![],
+                raw: None,
+            },
 
-            Frame::CancelPush { push_id } =>
-                Http3Frame::CancelPush { push_id: *push_id },
+            Frame::CancelPush { push_id } => Http3Frame::CancelPush {
+                push_id: *push_id,
+                raw: None,
+            },
 
             Frame::Settings {
                 max_field_section_size,
@@ -362,57 +367,69 @@ impl Frame {
                 let mut settings = vec![];
 
                 if let Some(v) = max_field_section_size {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "MAX_FIELD_SECTION_SIZE".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some("MAX_FIELD_SECTION_SIZE".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = qpack_max_table_capacity {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "QPACK_MAX_TABLE_CAPACITY".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some("QPACK_MAX_TABLE_CAPACITY".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = qpack_blocked_streams {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "QPACK_BLOCKED_STREAMS".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some("QPACK_BLOCKED_STREAMS".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = connect_protocol_enabled {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "SETTINGS_ENABLE_CONNECT_PROTOCOL".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some(
+                            "SETTINGS_ENABLE_CONNECT_PROTOCOL".to_string(),
+                        ),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(v) = h3_datagram {
-                    settings.push(qlog::events::h3::Setting {
-                        name: "H3_DATAGRAM".to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some("H3_DATAGRAM".to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some((k, v)) = grease {
-                    settings.push(qlog::events::h3::Setting {
-                        name: k.to_string(),
+                    settings.push(qlog::events::http3::Setting {
+                        name: Some(k.to_string()),
+                        name_bytes: None,
                         value: *v,
                     });
                 }
 
                 if let Some(additional_settings) = additional_settings {
                     for (k, v) in additional_settings {
-                        settings.push(qlog::events::h3::Setting {
-                            name: k.to_string(),
+                        settings.push(qlog::events::http3::Setting {
+                            name: Some(k.to_string()),
+                            name_bytes: None,
                             value: *v,
                         });
                     }
                 }
 
-                Http3Frame::Settings { settings }
+                Http3Frame::Settings {
+                    settings,
+                    raw: None,
+                }
             },
 
             // Qlog expects the `headers` to be represented as an array of
@@ -421,41 +438,44 @@ impl Frame {
             Frame::PushPromise { push_id, .. } => Http3Frame::PushPromise {
                 push_id: *push_id,
                 headers: vec![],
+                raw: None,
             },
 
-            Frame::GoAway { id } => Http3Frame::Goaway { id: *id },
+            Frame::GoAway { id } => Http3Frame::Goaway { id: *id, raw: None },
 
-            Frame::MaxPushId { push_id } =>
-                Http3Frame::MaxPushId { push_id: *push_id },
+            Frame::MaxPushId { push_id } => Http3Frame::MaxPushId {
+                push_id: *push_id,
+                raw: None,
+            },
 
             Frame::PriorityUpdateRequest {
                 prioritized_element_id,
                 priority_field_value,
             } => Http3Frame::PriorityUpdate {
-                target_stream_type:
-                    qlog::events::h3::H3PriorityTargetStreamType::Request,
-                prioritized_element_id: *prioritized_element_id,
+                stream_id: Some(*prioritized_element_id),
+                push_id: None,
                 priority_field_value: String::from_utf8_lossy(
                     priority_field_value,
                 )
                 .into_owned(),
+                raw: None,
             },
 
             Frame::PriorityUpdatePush {
                 prioritized_element_id,
                 priority_field_value,
             } => Http3Frame::PriorityUpdate {
-                target_stream_type:
-                    qlog::events::h3::H3PriorityTargetStreamType::Request,
-                prioritized_element_id: *prioritized_element_id,
+                stream_id: None,
+                push_id: Some(*prioritized_element_id),
                 priority_field_value: String::from_utf8_lossy(
                     priority_field_value,
                 )
                 .into_owned(),
+                raw: None,
             },
 
             Frame::Unknown { raw_type, payload } => Http3Frame::Unknown {
-                frame_type_value: *raw_type,
+                frame_type_bytes: *raw_type,
                 raw: Some(RawInfo {
                     data: None,
                     payload_length: Some(payload.len() as u64),
@@ -626,8 +646,9 @@ fn parse_settings_frame(
 fn parse_push_promise(
     payload_length: u64, b: &mut octets::Octets,
 ) -> Result<Frame> {
+    let before = b.off();
     let push_id = b.get_varint()?;
-    let header_block_length = payload_length - octets::varint_len(push_id) as u64;
+    let header_block_length = payload_length - (b.off() - before) as u64;
     let header_block = b.get_bytes(header_block_length as usize)?.to_vec();
 
     Ok(Frame::PushPromise {
@@ -639,9 +660,9 @@ fn parse_push_promise(
 fn parse_priority_update(
     frame_type: u64, payload_length: u64, b: &mut octets::Octets,
 ) -> Result<Frame> {
+    let before = b.off();
     let prioritized_element_id = b.get_varint()?;
-    let priority_field_value_length =
-        payload_length - octets::varint_len(prioritized_element_id) as u64;
+    let priority_field_value_length = payload_length - (b.off() - before) as u64;
     let priority_field_value =
         b.get_bytes(priority_field_value_length as usize)?.to_vec();
 
@@ -1082,9 +1103,8 @@ mod tests {
 
     #[test]
     fn settings_h2_prohibited() {
-        // We need to test the prohibited values (0x0 | 0x2 | 0x3 | 0x4 | 0x5)
-        // but the quiche API doesn't support that, so use a manually created
-        // frame data buffer where d[frame_header_len] is the SETTING type field.
+        // Test prohibited values manually because the quiche API cannot create
+        // them. `d[frame_header_len]` contains the SETTINGS type.
         let frame_payload_len = 2u64;
         let frame_header_len = 2;
         let mut d = [
@@ -1205,6 +1225,28 @@ mod tests {
     }
 
     #[test]
+    fn push_promise_non_minimal_varint() {
+        // A regression test for a bug handling varints in frame processing.
+
+        // Value 37 minimally encodes as 1 byte [0x25]. Non-minimal
+        // 2-byte encoding: [0x40, 0x25] (2-byte varint prefix 0b01).
+        let header_block = b"\x00\x01\x02";
+        let mut payload = vec![0x40u8, 0x25]; // non-minimal push_id = 37
+        payload.extend_from_slice(header_block);
+        let payload_length = payload.len() as u64;
+        let frame = Frame::from_bytes(
+            PUSH_PROMISE_FRAME_TYPE_ID,
+            payload_length,
+            &payload,
+        )
+        .expect("non-minimal varint was parsed correctly");
+        assert_eq!(frame, Frame::PushPromise {
+            push_id: 37,
+            header_block: header_block.to_vec(),
+        });
+    }
+
+    #[test]
     fn goaway() {
         let mut d = [42; 128];
 
@@ -1320,6 +1362,30 @@ mod tests {
             .unwrap(),
             frame
         );
+    }
+
+    #[test]
+    fn priority_update_non_minimal_varint() {
+        // A regression test for a bug handling varints in frame processing.
+
+        // Value 37 minimally encodes as 1 byte [0x25]. Non-minimal
+        // 2-byte encoding: [0x40, 0x25] (2-byte varint prefix 0b01).
+        let priority_field = b"u=3";
+        let mut payload = vec![0x40u8, 0x25];
+        payload.extend_from_slice(priority_field);
+        let payload_length = payload.len() as u64;
+
+        let frame = Frame::from_bytes(
+            PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID,
+            payload_length,
+            &payload,
+        )
+        .expect("non-minimal varint was parsed correctly");
+
+        assert_eq!(frame, Frame::PriorityUpdateRequest {
+            prioritized_element_id: 37,
+            priority_field_value: priority_field.to_vec(),
+        });
     }
 
     #[test]

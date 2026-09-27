@@ -133,7 +133,6 @@ impl Pacer {
             packet_number,
             bytes,
             is_retransmissible,
-            rtt_stats,
         );
 
         if !self.enabled || !is_retransmissible {
@@ -142,9 +141,8 @@ impl Pacer {
 
         // If in recovery, the connection is not coming out of quiescence.
         if bytes_in_flight == 0 && !self.sender.is_in_recovery() {
-            // Add more burst tokens anytime the connection is leaving quiescence,
-            // but limit it to the equivalent of a single bulk write,
-            // not exceeding the current CWND in packets.
+            // When leaving quiescence, replenish burst tokens up to one bulk
+            // write without exceeding the current CWND in packets.
             self.burst_tokens = self
                 .initial_burst_size
                 .min(self.sender.get_congestion_window_in_packets());
@@ -162,11 +160,11 @@ impl Pacer {
         // packet.
         let delay = self
             .pacing_rate(bytes_in_flight + bytes, rtt_stats)
-            .transfer_time(bytes);
+            .transfer_time(bytes as u64);
 
         if !self.pacing_limited || self.lumpy_tokens == 0 {
-            // Reset lumpy_tokens_ if either application or cwnd throttles sending
-            // or token runs out.
+            // Reset `lumpy_tokens` if the application or congestion window
+            // throttles sending, or if the token runs out.
             self.lumpy_tokens = 1.max(LUMPY_PACING_SIZE.min(
                 (self.sender.get_congestion_window_in_packets() as f64 *
                     LUMPY_PACING_CWND_FRACTION) as usize,
@@ -259,6 +257,20 @@ impl Pacer {
         self.sender.max_bandwidth()
     }
 
+    pub fn rtt_persistent_jump_count(&self) -> u64 {
+        self.sender.rtt_persistent_jump_count()
+    }
+
+    #[cfg(feature = "qlog")]
+    pub fn send_rate(&self) -> Option<Bandwidth> {
+        self.sender.send_rate()
+    }
+
+    #[cfg(feature = "qlog")]
+    pub fn ack_rate(&self) -> Option<Bandwidth> {
+        self.sender.ack_rate()
+    }
+
     pub fn on_app_limited(&mut self, bytes_in_flight: usize) {
         self.pacing_limited = false;
         self.sender.on_app_limited(bytes_in_flight);
@@ -273,12 +285,12 @@ impl Pacer {
         self.sender.ssthresh()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "qlog"))]
     pub fn is_app_limited(&self, bytes_in_flight: usize) -> bool {
         !self.is_cwnd_limited(bytes_in_flight)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "qlog"))]
     fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
         !self.pacing_limited && self.sender.is_cwnd_limited(bytes_in_flight)
     }

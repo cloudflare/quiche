@@ -81,6 +81,7 @@ impl From<octets::BufferTooShortError> for Error {
 
 #[cfg(test)]
 mod tests {
+    use crate::h3::qpack::Error::HeaderListTooLarge;
     use crate::*;
 
     use super::*;
@@ -106,6 +107,47 @@ mod tests {
 
         let mut dec = Decoder::new();
         assert_eq!(dec.decode(&encoded, u64::MAX), Ok(headers));
+    }
+
+    #[test]
+    fn encode_decode_small_max_field_section_size() {
+        let mut encoded = [0u8; 102];
+
+        const NUM_HDRS: usize = 10;
+
+        let headers = vec![h3::Header::new(b"hello", b"world"); NUM_HDRS];
+
+        // The size of a field list is calculated based on the uncompressed size
+        // of fields, including the length of the name and value in bytes plus
+        // an overhead of 32 bytes for each field. See
+        // https://datatracker.ietf.org/doc/html/rfc9114#section-4.2.2
+        let qpack_field_section_size =
+            (b"hello".len() + b"world".len() + 32) * NUM_HDRS;
+
+        let mut enc = Encoder::new();
+        assert_eq!(enc.encode(&headers, &mut encoded), Ok(102));
+
+        let mut dec = Decoder::new();
+
+        // Equal max_size param ok
+        assert_eq!(
+            dec.decode(&encoded, qpack_field_section_size as u64),
+            Ok(headers.clone())
+        );
+
+        // Oversized max_size param ok
+        assert_eq!(
+            dec.decode(&encoded, qpack_field_section_size as u64 + 1),
+            Ok(headers.clone())
+        );
+
+        // Smaller max_size param (forgetting 32 byte overhead) fails
+        let wrong_qpack_field_section_size =
+            (b"hello".len() + b"world".len()) * NUM_HDRS;
+        assert_eq!(
+            dec.decode(&encoded, wrong_qpack_field_section_size as u64),
+            Err(HeaderListTooLarge)
+        );
     }
 
     #[test]

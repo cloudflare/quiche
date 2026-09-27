@@ -37,7 +37,6 @@ use tokio::net::UdpSocket;
 use tokio_quiche::http3::settings::Http3Settings;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
-use tokio_quiche::quic::SimpleConnectionIdGenerator;
 use tokio_quiche::settings::CertificateKind::{
     self,
 };
@@ -51,16 +50,24 @@ use tokio_quiche::ServerH3Driver;
 async fn main() {
     env_logger::builder().format_timestamp_nanos().init();
 
-    // Create listening socket. Note that we use `ConnectionParams::new_server()`
-    // to denote that we're creating a server.
+    // Use `ConnectionParams::new_server()` to create a listening socket.
     let args = Args::parse();
     let socket = UdpSocket::bind(&args.address)
         .await
         .expect("UDP socket should be bindable");
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.qlog_dir = std::env::var("QLOGDIR").ok();
+    quic_settings.cc_algorithm = args.cc_algorithm.clone();
+    quic_settings.initial_congestion_window_packets = args.initial_cwnd_packets;
+    quic_settings.enable_hystart = !args.disable_hystart;
+    quic_settings.enable_pacing = args.enable_pacing;
+    quic_settings.max_pacing_rate =
+        (args.max_pacing_rate > 0).then_some(args.max_pacing_rate);
+
     let mut listeners = listen(
         [socket],
         ConnectionParams::new_server(
-            QuicSettings::default(),
+            quic_settings,
             TlsCertificatePaths {
                 cert: &args.tls_cert_path,
                 private_key: &args.tls_private_key_path,
@@ -68,7 +75,6 @@ async fn main() {
             },
             Hooks::default(),
         ),
-        SimpleConnectionIdGenerator,
         DefaultMetrics,
     )
     .expect("should be able to create a listener from a UDP socket");

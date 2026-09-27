@@ -102,26 +102,24 @@ async fn test_handshake_duration_ioworker() {
     quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
     quic_settings.handshake_timeout = Some(HANDSHAKE_TIMEOUT);
 
-    let url = start_server_with_settings(
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.post_accept_timeout = Some(HANDSHAKE_TIMEOUT);
+
+    let (url, _) = start_server_with_settings(
         quic_settings,
-        Http3Settings {
-            post_accept_timeout: Some(HANDSHAKE_TIMEOUT),
-            ..Default::default()
-        },
+        http3_settings,
         hook.clone(),
         handle_connection,
     );
 
-    // TODO: migrate to h3i client to assert a CONNECTION_CLOSE was received. This
-    // will have to be the sync version so as to isolate the tokio-quiche IO
-    // loop.
+    // TODO: Use the synchronous h3i client to assert that CONNECTION_CLOSE was
+    // received while isolating the tokio-quiche IO loop.
     //
-    // Unfortunately we can't PCAP this test since encryption keys don't seem to
-    // get dumped.
+    // This test cannot use PCAP because its encryption keys are not dumped.
     //
-    // build() spawns the InboundPacketRouter and sends the Initial, which will
-    // kick the handshake off on the server-side. If all goes well, the server
-    // will close the connection and the router will time the connection out.
+    // `build()` spawns `InboundPacketRouter` and sends the Initial, starting
+    // the server handshake. The server then closes the connection, and the
+    // router times it out.
     let url = format!("{url}/1");
     let client_res = h3i_fixtures::request(&url, 1).await;
 
@@ -137,7 +135,7 @@ async fn test_handshake_timeout_with_one_client_flight() {
     let mut quic_settings = QuicSettings::default();
     quic_settings.handshake_timeout = Some(HANDSHAKE_TIMEOUT);
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
         hook.clone(),
@@ -235,12 +233,12 @@ async fn test_post_accept_timeout() {
     // post-accept timeout rather than Quiche's idle timeout.
     quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
 
-    let url = start_server_with_settings(
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.post_accept_timeout = Some(POST_ACCEPT_TIMEOUT);
+
+    let (url, _) = start_server_with_settings(
         quic_settings,
-        Http3Settings {
-            post_accept_timeout: Some(POST_ACCEPT_TIMEOUT),
-            ..Default::default()
-        },
+        http3_settings,
         hook,
         move |mut h3_conn| {
             let counter = Arc::clone(&clone);
@@ -295,12 +293,12 @@ async fn test_post_accept_timeout_is_reset() {
     // post-accept timeout rather than Quiche's idle timeout.
     quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
 
-    let url = start_server_with_settings(
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.post_accept_timeout = Some(POST_ACCEPT_TIMEOUT);
+
+    let (url, _) = start_server_with_settings(
         quic_settings,
-        Http3Settings {
-            post_accept_timeout: Some(POST_ACCEPT_TIMEOUT),
-            ..Default::default()
-        },
+        http3_settings,
         hook,
         move |mut h3_conn| {
             let counter = Arc::clone(&clone);

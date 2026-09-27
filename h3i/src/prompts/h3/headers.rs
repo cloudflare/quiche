@@ -90,6 +90,7 @@ pub fn prompt_headers(
         headers,
         literal_headers: literal,
         frame: Frame::Headers { header_block },
+        expected_result: Default::default(),
     };
 
     Ok(action)
@@ -115,6 +116,7 @@ pub fn prompt_push_promise() -> InquireResult<Action> {
             push_id,
             header_block,
         },
+        expected_result: Default::default(),
     };
 
     Ok(action)

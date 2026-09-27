@@ -1,6 +1,6 @@
 [package]
 name = "datagram-socket"
-version = "0.5.0"
+version = "0.8.0"
 repository = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
@@ -8,8 +8,11 @@ keywords = { workspace = true }
 categories = { workspace = true }
 description = "Utilities for working with datagram sockets"
 
+[lints]
+workspace = true
+
 [dependencies]
-buffer-pool = { workspace = true }
+bytes = { workspace = true }
 futures-util = { workspace = true }
 libc = { workspace = true }
 smallvec = { workspace = true }

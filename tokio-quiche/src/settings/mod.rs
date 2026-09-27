@@ -55,16 +55,31 @@ pub struct ConnectionParams<'a> {
     pub hooks: Hooks,
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
+    /// Custom destination connection ID to use for client connections.
+    ///
+    /// Be aware that [RFC 9000] places requirements for unpredictability and
+    /// length on the client DCID field. Setting this field is dangerous if
+    /// these requirements are not satisfied.
+    ///
+    /// Has no effect on server-side [`ConnectionParams`].
+    ///
+    /// [RFC 9000]: <https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3>
+    #[cfg(feature = "custom-client-dcid")]
+    pub dcid: Option<quiche::ConnectionId<'static>>,
 }
 
 impl core::fmt::Debug for ConnectionParams<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Avoid printing 'session' since it contains connection secrets.
-        f.debug_struct("ConnectionParams")
-            .field("settings", &self.settings)
+        let mut s = f.debug_struct("ConnectionParams");
+        s.field("settings", &self.settings)
             .field("tls_cert", &self.tls_cert)
-            .field("hooks", &self.hooks)
-            .finish()
+            .field("hooks", &self.hooks);
+
+        #[cfg(feature = "custom-client-dcid")]
+        s.field("dcid", &self.dcid);
+
+        s.finish()
     }
 }
 
@@ -80,6 +95,8 @@ impl<'a> ConnectionParams<'a> {
             tls_cert: Some(tls_cert),
             hooks,
             session: None,
+            #[cfg(feature = "custom-client-dcid")]
+            dcid: None,
         }
     }
 
@@ -95,6 +112,8 @@ impl<'a> ConnectionParams<'a> {
             tls_cert,
             hooks,
             session: None,
+            #[cfg(feature = "custom-client-dcid")]
+            dcid: None,
         }
     }
 }

@@ -79,7 +79,7 @@ async fn test_hello_world_async_callbacks() {
     let hook = Arc::new(TestAsyncCallbackConnectionHook {
         was_called: Arc::new(AtomicBool::new(false)),
     });
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         QuicSettings::default(),
         Http3Settings::default(),
         hook.clone(),
@@ -111,14 +111,10 @@ async fn test_async_callbacks_fail_after_initial_send() {
                 SslContextBuilder::new(SslMethod::tls()).ok()?;
             ssl_ctx_builder.set_async_select_certificate_callback(|_| {
                 Ok(Box::pin(async {
-                    // Async callbacks in tokio quiche are driven by calls to
-                    // quiche's `send` and `recv` methods.
-                    // `send` and `recv` will call SSL_do_handshake once
-                    // per invocation. As such, at least 3 successful invocations
-                    // to `send` and `recv` are needed to
-                    // trigger a handshake failure in the `send`
-                    // invocation that stems from the `wait_for_data_or_handshake`
-                    // future in the select branch.
+                    // Calls to `quiche` methods drive tokio-quiche callbacks.
+                    // Each `send` or `recv` calls `SSL_do_handshake` once.
+                    // Three successful calls must complete before
+                    // `wait_for_data_or_handshake` fails from `send`.
                     yield_now().await;
                     yield_now().await;
                     yield_now().await;
@@ -139,7 +135,7 @@ async fn test_async_callbacks_fail_after_initial_send() {
     }
 
     let hook = Arc::new(TestAsyncCallbackConnectionHook {});
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         QuicSettings::default(),
         Http3Settings::default(),
         hook.clone(),

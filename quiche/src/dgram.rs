@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::BufFactory;
 use crate::Error;
 use crate::Result;
 
@@ -31,47 +32,45 @@ use std::collections::VecDeque;
 
 /// Keeps track of DATAGRAM frames.
 #[derive(Default)]
-pub struct DatagramQueue {
-    queue: Option<VecDeque<Vec<u8>>>,
+pub struct DatagramQueue<F: BufFactory> {
+    queue: VecDeque<F::DgramBuf>,
     queue_max_len: usize,
     queue_bytes_size: usize,
 }
 
-impl DatagramQueue {
+impl<F: BufFactory> DatagramQueue<F> {
     pub fn new(queue_max_len: usize) -> Self {
         DatagramQueue {
-            queue: None,
+            queue: VecDeque::new(),
             queue_bytes_size: 0,
             queue_max_len,
         }
     }
 
-    pub fn push(&mut self, data: Vec<u8>) -> Result<()> {
+    pub fn push(&mut self, data: F::DgramBuf) -> Result<()> {
         if self.is_full() {
             return Err(Error::Done);
         }
 
-        self.queue_bytes_size += data.len();
-        self.queue
-            .get_or_insert_with(Default::default)
-            .push_back(data);
+        self.queue_bytes_size += data.as_ref().len();
+        self.queue.push_back(data);
 
         Ok(())
     }
 
     pub fn peek_front_len(&self) -> Option<usize> {
-        self.queue.as_ref().and_then(|q| q.front().map(|d| d.len()))
+        self.queue.front().map(|d| d.as_ref().len())
     }
 
     pub fn peek_front_bytes(&self, buf: &mut [u8], len: usize) -> Result<usize> {
-        match self.queue.as_ref().and_then(|q| q.front()) {
+        match self.queue.front() {
             Some(d) => {
-                let len = std::cmp::min(len, d.len());
+                let len = std::cmp::min(len, d.as_ref().len());
                 if buf.len() < len {
                     return Err(Error::BufferTooShort);
                 }
 
-                buf[..len].copy_from_slice(&d[..len]);
+                buf[..len].copy_from_slice(&d.as_ref()[..len]);
                 Ok(len)
             },
 
@@ -79,9 +78,10 @@ impl DatagramQueue {
         }
     }
 
-    pub fn pop(&mut self) -> Option<Vec<u8>> {
-        if let Some(d) = self.queue.as_mut().and_then(|q| q.pop_front()) {
-            self.queue_bytes_size = self.queue_bytes_size.saturating_sub(d.len());
+    pub fn pop(&mut self) -> Option<F::DgramBuf> {
+        if let Some(d) = self.queue.pop_front() {
+            self.queue_bytes_size =
+                self.queue_bytes_size.saturating_sub(d.as_ref().len());
             return Some(d);
         }
 
@@ -89,14 +89,15 @@ impl DatagramQueue {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.queue.as_ref().map(|q| q.is_empty()).unwrap_or(true)
+        !self.queue.is_empty()
     }
 
-    pub fn purge<F: Fn(&[u8]) -> bool>(&mut self, f: F) {
-        if let Some(q) = self.queue.as_mut() {
-            q.retain(|d| !f(d));
-            self.queue_bytes_size = q.iter().fold(0, |total, d| total + d.len());
-        }
+    pub fn purge<FN: Fn(&[u8]) -> bool>(&mut self, f: FN) {
+        self.queue.retain(|d| !f(d.as_ref()));
+        self.queue_bytes_size = self
+            .queue
+            .iter()
+            .fold(0, |total, d| total + d.as_ref().len());
     }
 
     pub fn is_full(&self) -> bool {
@@ -108,7 +109,7 @@ impl DatagramQueue {
     }
 
     pub fn len(&self) -> usize {
-        self.queue.as_ref().map(|q| q.len()).unwrap_or(0)
+        self.queue.len()
     }
 
     pub fn byte_size(&self) -> usize {

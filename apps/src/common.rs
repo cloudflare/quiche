@@ -677,11 +677,13 @@ impl HttpConn for Http09Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
+        let stream_cap = conn.stream_capacity(stream_id);
+
         debug!(
             "{} response stream {} is writable with capacity {:?}",
             conn.trace_id(),
             stream_id,
-            conn.stream_capacity(stream_id)
+            stream_cap,
         );
 
         if !partial_responses.contains_key(&stream_id) {
@@ -1090,16 +1092,25 @@ impl Http3Conn {
 
         let (status, body) = match decided_method {
             "GET" => {
-                for c in pathbuf.components() {
-                    if let path::Component::Normal(v) = c {
-                        file_path.push(v)
+                const STREAM_BYTES_PREFIX: &str = "/stream-bytes/";
+                const STREAM_BYTES_FILL: u8 = 0x57;
+
+                if let Some(suffix) = url.path().strip_prefix(STREAM_BYTES_PREFIX)
+                {
+                    let n = suffix.parse::<usize>().unwrap_or(0);
+                    (200, vec![STREAM_BYTES_FILL; n])
+                } else {
+                    for c in pathbuf.components() {
+                        if let path::Component::Normal(v) = c {
+                            file_path.push(v)
+                        }
                     }
-                }
 
-                match std::fs::read(file_path.as_path()) {
-                    Ok(data) => (200, data),
+                    match std::fs::read(file_path.as_path()) {
+                        Ok(data) => (200, data),
 
-                    Err(_) => (404, b"Not Found!".to_vec()),
+                        Err(_) => (404, b"Not Found!".to_vec()),
+                    }
                 }
             },
 
@@ -1152,7 +1163,7 @@ impl HttpConn for Http3Conn {
                 },
             };
 
-            debug!("Sent HTTP request {:?}", &req.hdrs);
+            debug!("Sent HTTP request {:?}", req.hdrs);
 
             if let Some(priority) = &req.priority {
                 // If sending the priority fails, don't try again.
@@ -1601,11 +1612,13 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
+        let stream_cap = conn.stream_capacity(stream_id);
+
         debug!(
             "{} response stream {} is writable with capacity {:?}",
             conn.trace_id(),
             stream_id,
-            conn.stream_capacity(stream_id)
+            stream_cap,
         );
 
         if !partial_responses.contains_key(&stream_id) {

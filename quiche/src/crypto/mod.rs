@@ -71,8 +71,8 @@ pub enum Algorithm {
     ChaCha20_Poly1305,
 }
 
-// Note: some vendor-specific methods are implemented by each vendor's submodule
-// (openssl-quictls / boringssl).
+// Note: some vendor-specific methods are implemented in the boringssl
+// submodule.
 impl Algorithm {
     fn get_evp_digest(self) -> *const EVP_MD {
         match self {
@@ -136,8 +136,8 @@ pub struct Open {
 }
 
 impl Open {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
 
     pub const DECRYPT: u32 = 0;
 
@@ -227,8 +227,8 @@ pub struct Seal {
 }
 
 impl Seal {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
 
     pub const ENCRYPT: u32 = 1;
 
@@ -289,7 +289,7 @@ impl Seal {
     }
 
     pub fn seal_with_u64_counter(
-        &self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
+        &mut self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
         extra_in: Option<&[u8]>,
     ) -> Result<usize> {
         if cfg!(feature = "fuzzing") {
@@ -667,12 +667,5 @@ mod tests {
     }
 }
 
-#[cfg(not(feature = "openssl"))]
 mod boringssl;
-#[cfg(not(feature = "openssl"))]
 pub(crate) use boringssl::*;
-
-#[cfg(feature = "openssl")]
-mod openssl_quictls;
-#[cfg(feature = "openssl")]
-pub(crate) use openssl_quictls::*;

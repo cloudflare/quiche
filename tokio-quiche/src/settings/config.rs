@@ -27,8 +27,12 @@
 use foundations::telemetry::log;
 use std::borrow::Cow;
 use std::fs::File;
+use std::sync::Arc;
 use std::time::Duration;
 
+use qlog::writer::QlogCompression;
+
+use crate::quic::ConnectionHook;
 use crate::result::QuicResult;
 use crate::settings::CertificateKind;
 use crate::settings::ConnectionParams;
@@ -45,6 +49,7 @@ pub(crate) struct Config {
     pub quiche_config: quiche::Config,
     pub disable_client_ip_validation: bool,
     pub qlog_dir: Option<String>,
+    pub qlog_compression: QlogCompression,
     pub has_gso: bool,
     pub pacing_offload: bool,
     pub enable_expensive_packet_count_metrics: bool,
@@ -53,6 +58,8 @@ pub(crate) struct Config {
     pub handshake_timeout: Option<Duration>,
     pub has_ippktinfo: bool,
     pub has_ipv6pktinfo: bool,
+    pub pool_send_buffer: bool,
+    pub connection_hook: Option<Arc<dyn ConnectionHook + Send + Sync + 'static>>,
 }
 
 impl AsMut<quiche::Config> for Config {
@@ -72,7 +79,9 @@ impl Config {
         };
         let keylog_file = keylog_path.and_then(|path| if KEYLOGFILE_ENABLED {
                 File::options().create(true).append(true).open(path)
-                    .inspect_err(|e| log::warn!("failed to open SSLKEYLOGFILE"; "error" => e))
+                    .inspect_err(|e| {
+                        log::warn!("failed to open SSLKEYLOGFILE"; "error" => e);
+                    })
                     .ok()
             } else {
                 log::warn!("SSLKEYLOGFILE is set, but `--cfg capture_keylogs` was not enabled. No keys will be logged.");
@@ -95,6 +104,7 @@ impl Config {
             disable_client_ip_validation: quic_settings
                 .disable_client_ip_validation,
             qlog_dir: quic_settings.qlog_dir.clone(),
+            qlog_compression: quic_settings.qlog_compression,
             has_gso,
             pacing_offload,
             enable_expensive_packet_count_metrics: quic_settings
@@ -104,6 +114,8 @@ impl Config {
             handshake_timeout: quic_settings.handshake_timeout,
             has_ippktinfo,
             has_ipv6pktinfo,
+            pool_send_buffer: quic_settings.pool_send_buffer,
+            connection_hook: params.hooks.connection_hook.clone(),
         })
     }
 }
@@ -172,6 +184,7 @@ fn make_quiche_config(
         quic_settings.enable_relaxed_loss_threshold,
     );
     config.discover_pmtu(quic_settings.discover_path_mtu);
+    config.set_pmtud_max_probes(quic_settings.pmtud_max_probes);
     config.enable_hystart(quic_settings.enable_hystart);
 
     config.enable_pacing(quic_settings.enable_pacing);
@@ -185,6 +198,9 @@ fn make_quiche_config(
 
     config.set_max_connection_window(quic_settings.max_connection_window);
     config.set_max_stream_window(quic_settings.max_stream_window);
+    config.set_enable_send_streams_blocked(
+        quic_settings.enable_send_streams_blocked,
+    );
     config.grease(quic_settings.grease);
     config.set_max_amplification_factor(quic_settings.max_amplification_factor);
     config.set_send_capacity_factor(quic_settings.send_capacity_factor);
@@ -202,6 +218,9 @@ fn make_quiche_config(
         config.enable_track_unknown_transport_parameters(
             track_unknown_transport_params,
         );
+    }
+    if params.settings.enable_early_data {
+        config.enable_early_data();
     }
 
     if should_log_keys {
@@ -221,11 +240,14 @@ fn quiche_config_with_tls(
     match tls.kind {
         #[cfg(not(feature = "rpk"))]
         CertificateKind::RawPublicKey => {
-            // TODO: don't compile this enum variant unless rpk feature is enabled
+            // TODO: Gate this variant on the `rpk` feature.
             panic!("Can't use RPK when compiled without rpk feature");
         },
-        #[cfg(feature = "rpk")]
+        #[cfg(all(feature = "rpk", not(boring_v5)))]
         CertificateKind::RawPublicKey => {
+            // boring 4.x (the default) exposes a dedicated
+            // `SslContextBuilder::new_rpk()` constructor plus
+            // `set_rpk_certificate` / `set_null_chain_private_key`.
             let mut ssl_ctx_builder = boring::ssl::SslContextBuilder::new_rpk()?;
             let raw_public_key = read_file(tls.cert)?;
             ssl_ctx_builder.set_rpk_certificate(&raw_public_key)?;
@@ -234,6 +256,33 @@ fn quiche_config_with_tls(
             let pkey =
                 boring::pkey::PKey::private_key_from_pem(&raw_private_key)?;
             ssl_ctx_builder.set_null_chain_private_key(&pkey)?;
+
+            Ok(quiche::Config::with_boring_ssl_ctx_builder(
+                quiche::PROTOCOL_VERSION,
+                ssl_ctx_builder,
+            )?)
+        },
+        #[cfg(all(feature = "rpk", boring_v5))]
+        CertificateKind::RawPublicKey => {
+            // boring 5.x replaced the dedicated `SslContextBuilder::new_rpk()`
+            // entry point with a credential-based API: build an
+            // `SslCredential` configured for raw public keys and add it
+            // to a regular `SslContextBuilder` via `add_credential`.
+            let raw_public_key = read_file(tls.cert)?;
+            let raw_private_key = read_file(tls.private_key)?;
+            let pkey =
+                boring::pkey::PKey::private_key_from_pem(&raw_private_key)?;
+
+            let mut credential_builder =
+                boring::ssl::SslCredential::new_raw_public_key()?;
+            credential_builder.set_spki_bytes(Some(&raw_public_key))?;
+            credential_builder.set_private_key(&pkey)?;
+            let credential = credential_builder.build();
+
+            let mut ssl_ctx_builder = boring::ssl::SslContextBuilder::new(
+                boring::ssl::SslMethod::tls(),
+            )?;
+            ssl_ctx_builder.add_credential(&credential)?;
 
             Ok(quiche::Config::with_boring_ssl_ctx_builder(
                 quiche::PROTOCOL_VERSION,

@@ -86,6 +86,7 @@
 //!            headers,
 //!            frame: Frame::Headers { header_block },
 //!            literal_headers: false,
+//!            expected_result: Default::default(),
 //!        },
 //!        Action::SendFrame {
 //!            stream_id: STREAM_ID,
@@ -96,6 +97,7 @@
 //!                // server: https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3
 //!                payload: b"test".to_vec(),
 //!            },
+//!            expected_result: Default::default(),
 //!        },
 //!        Action::Wait {
 //!            wait_type: WaitType::StreamEvent(StreamEvent {
@@ -161,7 +163,6 @@ use quiche::h3::qpack::encode_int;
 use quiche::h3::qpack::encode_str;
 use quiche::h3::qpack::LITERAL;
 use quiche::h3::NameValue;
-use smallvec::SmallVec;
 
 #[cfg(not(feature = "async"))]
 pub use quiche;
@@ -264,20 +265,12 @@ fn encode_header_block(
 fn fake_packet_header() -> PacketHeader {
     PacketHeader {
         packet_type: PacketType::OneRtt,
-        packet_number: None,
-        flags: None,
-        token: None,
-        length: None,
-        version: None,
-        scil: None,
-        dcil: None,
-        scid: None,
-        dcid: None,
+        ..Default::default()
     }
 }
 
-fn fake_packet_sent(frames: Option<SmallVec<[QuicFrame; 1]>>) -> EventData {
-    EventData::PacketSent(PacketSent {
+fn fake_packet_sent(frames: Option<Vec<QuicFrame>>) -> EventData {
+    EventData::QuicPacketSent(PacketSent {
         header: fake_packet_header(),
         frames,
         ..Default::default()

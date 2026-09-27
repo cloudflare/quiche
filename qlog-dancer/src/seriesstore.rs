@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 
 use crate::datastore::Datastore;
 use crate::push_interp;
-use crate::QlogPointf32;
+use crate::QlogPointRtt;
 use crate::QlogPointu64;
 use netlog::h2::H2_DEFAULT_WINDOW_SIZE;
 
@@ -40,10 +40,13 @@ pub struct SeriesStore {
     pub local_bytes_in_flight: Vec<QlogPointu64>,
     pub local_ssthresh: Vec<QlogPointu64>,
     pub local_pacing_rate: Vec<QlogPointu64>,
+    pub local_delivery_rate: Vec<QlogPointu64>,
+    pub local_send_rate: Vec<QlogPointu64>,
+    pub local_ack_rate: Vec<QlogPointu64>,
 
-    pub local_min_rtt: Vec<QlogPointf32>,
-    pub local_latest_rtt: Vec<QlogPointf32>,
-    pub local_smoothed_rtt: Vec<QlogPointf32>,
+    pub local_min_rtt: Vec<QlogPointRtt>,
+    pub local_latest_rtt: Vec<QlogPointRtt>,
+    pub local_smoothed_rtt: Vec<QlogPointRtt>,
 
     pub onertt_packet_created: Vec<QlogPointu64>,
     pub onertt_packet_sent: Vec<QlogPointu64>,
@@ -54,10 +57,10 @@ pub struct SeriesStore {
 
     pub onertt_packet_received: Vec<QlogPointu64>,
 
-    pub netlog_missing_packets: Vec<f32>,
+    pub netlog_missing_packets: Vec<f64>,
 
     // this one is a little different, delta as a function of packet number
-    pub onertt_packet_created_sent_delta: Vec<(u64, f32)>,
+    pub onertt_packet_created_sent_delta: Vec<(u64, f64)>,
 
     pub sent_max_data: Vec<QlogPointu64>,
     pub sent_stream_max_data: BTreeMap<u64, Vec<QlogPointu64>>,
@@ -83,24 +86,24 @@ pub struct SeriesStore {
     pub sent_data_frames_series: BTreeMap<u64, Vec<QlogPointu64>>,
     pub sent_data_max: BTreeMap<u64, u64>,
 
-    pub h2_send_window_series_balanced: BTreeMap<u32, Vec<(f32, i32)>>,
+    pub h2_send_window_series_balanced: BTreeMap<u32, Vec<(f64, i32)>>,
     pub h2_send_window_balanced_max: BTreeMap<u32, i32>,
-    pub h2_send_window_series_absolute: BTreeMap<u32, Vec<(f32, u64)>>,
+    pub h2_send_window_series_absolute: BTreeMap<u32, Vec<(f64, u64)>>,
     pub h2_send_window_absolute_max: BTreeMap<u32, u64>,
 
     pub netlog_h2_stream_received_connection_cumulative: Vec<QlogPointu64>,
     pub netlog_quic_stream_received_connection_cumulative: Vec<QlogPointu64>,
 
-    pub netlog_quic_client_side_window_updates: BTreeMap<i64, Vec<(f32, u64)>>,
+    pub netlog_quic_client_side_window_updates: BTreeMap<i64, Vec<(f64, u64)>>,
 
     pub sum_received_stream_max_data: Vec<QlogPointu64>,
     pub sum_sent_stream_max_data: Vec<QlogPointu64>,
 
-    pub sent_x_min: f32,
-    pub sent_x_max: f32,
+    pub sent_x_min: f64,
+    pub sent_x_max: f64,
 
-    pub received_x_min: f32,
-    pub received_x_max: f32,
+    pub received_x_min: f64,
+    pub received_x_max: f64,
 
     pub y_max_stream_send_plot: u64,
     pub y_max_stream_recv_plot: u64,
@@ -108,12 +111,15 @@ pub struct SeriesStore {
     pub y_max_rtt_plot: f32,
 
     pub y_max_onertt_pkt_sent_plot: u64,
-    pub y_min_onertt_packet_created_sent_delta: f32,
-    pub y_max_onertt_packet_created_sent_delta: f32,
+    pub y_min_onertt_packet_created_sent_delta: f64,
+    pub y_max_onertt_packet_created_sent_delta: f64,
 
     pub y_max_onertt_pkt_received_plot: u64,
 
     pub max_pacing_rate: u64,
+    pub max_delivery_rate: u64,
+    pub max_send_rate: u64,
+    pub max_ack_rate: u64,
 }
 
 impl SeriesStore {
@@ -125,11 +131,11 @@ impl SeriesStore {
         series_store
     }
 
-    fn update_sent_x_axis_max(&mut self, x: f32) {
+    fn update_sent_x_axis_max(&mut self, x: f64) {
         self.sent_x_max = self.sent_x_max.max(x);
     }
 
-    fn update_received_x_axis_max(&mut self, x: f32) {
+    fn update_received_x_axis_max(&mut self, x: f64) {
         self.received_x_max = self.sent_x_max.max(x);
     }
 
@@ -194,6 +200,33 @@ impl SeriesStore {
         }
     }
 
+    fn delivery_rate(&mut self, data_store: &Datastore) {
+        for point in &data_store.local_delivery_rate {
+            self.update_sent_x_axis_max(point.0);
+            self.max_delivery_rate = self.max_delivery_rate.max(point.1);
+
+            push_interp(&mut self.local_delivery_rate, *point);
+        }
+    }
+
+    fn send_rate(&mut self, data_store: &Datastore) {
+        for point in &data_store.local_send_rate {
+            self.update_sent_x_axis_max(point.0);
+            self.max_send_rate = self.max_send_rate.max(point.1);
+
+            push_interp(&mut self.local_send_rate, *point);
+        }
+    }
+
+    fn ack_rate(&mut self, data_store: &Datastore) {
+        for point in &data_store.local_ack_rate {
+            self.update_sent_x_axis_max(point.0);
+            self.max_ack_rate = self.max_ack_rate.max(point.1);
+
+            push_interp(&mut self.local_ack_rate, *point);
+        }
+    }
+
     fn ssthresh(&mut self, data_store: &Datastore) {
         for point in &data_store.local_ssthresh {
             self.update_sent_x_axis_max(point.0);
@@ -222,7 +255,7 @@ impl SeriesStore {
     }
 
     fn sum_sent_stream_max_data(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_sent_stream_max_data {
+        for point in &data_store.sent_stream_max_data_tracker.sum_series {
             self.update_sent_x_axis_max(point.0);
             self.update_stream_recv_y_axis_max(point.1);
 
@@ -234,8 +267,7 @@ impl SeriesStore {
         if let Some(onertt_pkts) =
             &data_store.packet_sent.get(&crate::PacketType::OneRtt)
         {
-            // TODO: perhaps better to take these counts when processing recovery
-            // metrics
+            // TODO: Gather these counts during recovery-metric processing.
             let mut sent_count = 0;
             let mut delivered_count = 0;
             let mut lost_count = 0;
@@ -251,8 +283,8 @@ impl SeriesStore {
                     (pkt_info.created_time, sent_count),
                 );
 
-                // Hacky way to detect lost packets. We don't have the actual
-                // time the loss happened, so just reuse the packet creation time
+                // The actual loss time is unavailable, so use the packet's
+                // creation time.
                 if pkt_info.acked.is_none() {
                     self.onertt_packet_lost_hacky
                         .push((pkt_info.created_time, *pkt_num));
@@ -333,7 +365,9 @@ impl SeriesStore {
     }
 
     fn sent_stream_max_data(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.sent_stream_max_data {
+        for (stream, points) in
+            &data_store.sent_stream_max_data_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -348,7 +382,9 @@ impl SeriesStore {
     }
 
     fn received_stream_max_data(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.received_stream_max_data {
+        for (stream, points) in
+            &data_store.received_stream_max_data_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -363,7 +399,8 @@ impl SeriesStore {
     }
 
     fn stream_buffer_reads(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.stream_buffer_reads {
+        for (stream, points) in &data_store.stream_buffer_reads_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -380,13 +417,15 @@ impl SeriesStore {
     }
 
     fn sum_stream_buffer_reads(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_stream_buffer_reads {
+        for point in &data_store.stream_buffer_reads_tracker.sum_series {
             push_interp(&mut self.sum_stream_buffer_reads, *point);
         }
     }
 
     fn stream_buffer_writes(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.stream_buffer_writes {
+        for (stream, points) in
+            &data_store.stream_buffer_writes_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -403,17 +442,21 @@ impl SeriesStore {
     }
 
     fn sum_stream_buffer_writes(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_stream_buffer_writes {
+        for point in &data_store.stream_buffer_writes_tracker.sum_series {
             push_interp(&mut self.sum_stream_buffer_writes, *point);
         }
 
-        if let Some((_, y)) = data_store.sum_stream_buffer_writes.last() {
+        if let Some((_, y)) =
+            data_store.stream_buffer_writes_tracker.sum_series.last()
+        {
             self.update_stream_send_y_axis_max(*y);
         }
     }
 
     fn stream_buffer_dropped(&mut self, data_store: &Datastore) {
-        for (stream, points) in &data_store.stream_buffer_dropped {
+        for (stream, points) in
+            &data_store.stream_buffer_dropped_tracker.per_stream
+        {
             let mut series_points = vec![];
 
             for point in points {
@@ -430,11 +473,13 @@ impl SeriesStore {
     }
 
     fn sum_stream_buffer_dropped(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_stream_buffer_dropped {
+        for point in &data_store.stream_buffer_dropped_tracker.sum_series {
             push_interp(&mut self.sum_stream_buffer_dropped, *point);
         }
 
-        if let Some((_, y)) = data_store.sum_stream_buffer_dropped.last() {
+        if let Some((_, y)) =
+            data_store.stream_buffer_dropped_tracker.sum_series.last()
+        {
             self.update_stream_send_y_axis_max(*y);
         }
     }
@@ -444,7 +489,13 @@ impl SeriesStore {
             let mut series_points = vec![];
 
             for point in points {
-                if let (_, QuicFrame::Stream { offset, length, .. }) = point {
+                if let (_, QuicFrame::Stream { offset, raw, .. }) = point {
+                    let offset = offset.unwrap_or_default();
+                    let length = raw
+                        .clone()
+                        .unwrap_or_default()
+                        .payload_length
+                        .unwrap_or_default();
                     let y = offset + length;
 
                     self.update_sent_x_axis_max(point.0);
@@ -667,7 +718,7 @@ impl SeriesStore {
     }
 
     fn sum_received_stream_max_data(&mut self, data_store: &Datastore) {
-        for point in &data_store.sum_received_stream_max_data {
+        for point in &data_store.received_stream_max_data_tracker.sum_series {
             push_interp(&mut self.sum_received_stream_max_data, *point);
         }
     }
@@ -678,6 +729,9 @@ impl SeriesStore {
         self.min_rtt(data_store);
         self.latest_rtt(data_store);
         self.pacing_rate(data_store);
+        self.delivery_rate(data_store);
+        self.send_rate(data_store);
+        self.ack_rate(data_store);
         self.ssthresh(data_store);
         self.smoothed_rtt(data_store);
 

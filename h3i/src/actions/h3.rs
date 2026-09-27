@@ -44,6 +44,18 @@ use serde_with::serde_as;
 use crate::encode_header_block;
 use crate::encode_header_block_literal;
 
+/// Expected result from a stream_send operation.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ExpectedStreamSendResult {
+    /// Expect success with any number of bytes written.
+    #[default]
+    Ok,
+    /// Expect success with exactly the specified number of bytes written.
+    OkExact(usize),
+    /// Expect the operation to fail with the specified error.
+    Error(quiche::Error),
+}
+
 /// An action which the HTTP/3 client should take.
 ///
 /// The client iterates over a vector of said actions, executing each one
@@ -57,6 +69,7 @@ pub enum Action {
         stream_id: u64,
         fin_stream: bool,
         frame: Frame,
+        expected_result: ExpectedStreamSendResult,
     },
 
     /// Send a HEADERS frame over a stream.
@@ -66,6 +79,7 @@ pub enum Action {
         literal_headers: bool,
         headers: Vec<Header>,
         frame: Frame,
+        expected_result: ExpectedStreamSendResult,
     },
 
     /// Send arbitrary bytes over a stream.
@@ -73,6 +87,7 @@ pub enum Action {
         stream_id: u64,
         fin_stream: bool,
         bytes: Vec<u8>,
+        expected_result: ExpectedStreamSendResult,
     },
 
     /// Send a DATAGRAM frame.
@@ -85,6 +100,7 @@ pub enum Action {
         stream_id: u64,
         fin_stream: bool,
         stream_type: u64,
+        expected_result: ExpectedStreamSendResult,
     },
 
     /// Send a RESET_STREAM frame with the given error code.
@@ -127,6 +143,19 @@ pub enum WaitType {
     /// 1. The peer resets the specified stream.
     /// 2. The peer sends a `fin` over the specified stream
     StreamEvent(StreamEvent),
+
+    /// Wait until the peer has updated MAX_STREAMS to allow creation
+    /// of the required additional streams.
+    ///
+    /// Typically requires processing of a MAX_STREAMS frame sent by
+    /// the peer.  The peer may decide to send MAX_STREAMS updates as
+    /// the number of active streams changes due to stream termination
+    /// or stream creation. Typical goals being:
+    /// - Limit the number of active streams to the configured limit.
+    /// - Ensure that available quota is non-zero when number of active streams
+    ///   is below the configured limit.
+    /// - Minimize the number of MAX_STREAM updates sent.
+    CanOpenNumStreams(RequiredStreamsQuota),
 }
 
 impl From<WaitType> for Action {
@@ -147,6 +176,17 @@ pub struct StreamEvent {
     pub event_type: StreamEventType,
 }
 
+/// A check for stream creation quota which will terminate the wait period.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename = "snake_case")]
+pub struct RequiredStreamsQuota {
+    /// Required stream quota
+    pub num: u64,
+
+    /// True for bidirectional streams, false for unidirectional streams
+    pub bidi: bool,
+}
+
 /// Response that can terminate a wait period.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -161,22 +201,56 @@ pub enum StreamEventType {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct WaitingFor(HashMap<u64, Vec<StreamEvent>>);
+pub(crate) struct WaitingFor {
+    stream_events: HashMap<u64, Vec<StreamEvent>>,
+    required_stream_quota: Option<RequiredStreamsQuota>,
+}
 
 impl WaitingFor {
     pub(crate) fn is_empty(&self) -> bool {
-        self.0.values().all(|v| v.is_empty())
+        self.stream_events.values().all(|v| v.is_empty()) &&
+            self.required_stream_quota.is_none()
     }
 
     pub(crate) fn add_wait(&mut self, stream_event: &StreamEvent) {
-        self.0
+        self.stream_events
             .entry(stream_event.stream_id)
             .or_default()
             .push(*stream_event);
     }
 
+    pub(crate) fn set_required_stream_quota(
+        &mut self, required: RequiredStreamsQuota,
+    ) {
+        self.required_stream_quota = Some(required);
+    }
+
+    /// Check and clear the [`WaitType::CanOpenNumStreams`] condition if
+    /// `conn` now reports enough available streams.
+    pub(crate) fn check_can_open_num_streams<F: quiche::BufFactory>(
+        &mut self, conn: &quiche::Connection<F>,
+    ) {
+        if let Some(streams_required) = self.required_stream_quota {
+            let available_streams = if streams_required.bidi {
+                conn.peer_streams_left_bidi()
+            } else {
+                conn.peer_streams_left_uni()
+            };
+            if available_streams >= streams_required.num {
+                log::info!(
+                    "required_stream_quota condition met \
+                     (needed={}, available={}, bidi={})",
+                    streams_required.num,
+                    available_streams,
+                    streams_required.bidi,
+                );
+                self.required_stream_quota = None;
+            }
+        }
+    }
+
     pub(crate) fn remove_wait(&mut self, stream_event: StreamEvent) {
-        if let Some(waits) = self.0.get_mut(&stream_event.stream_id) {
+        if let Some(waits) = self.stream_events.get_mut(&stream_event.stream_id) {
             let old_len = waits.len();
             waits.retain(|wait| wait != &stream_event);
             let new_len = waits.len();
@@ -188,7 +262,7 @@ impl WaitingFor {
     }
 
     pub(crate) fn clear_waits_on_stream(&mut self, stream_id: u64) {
-        if let Some(waits) = self.0.get_mut(&stream_id) {
+        if let Some(waits) = self.stream_events.get_mut(&stream_id) {
             if !waits.is_empty() {
                 log::info!("Clearing all waits for stream {stream_id}");
                 waits.clear();
@@ -210,6 +284,25 @@ pub fn send_headers_frame(
         headers,
         literal_headers: false,
         frame: Frame::Headers { header_block },
+        expected_result: ExpectedStreamSendResult::Ok,
+    }
+}
+
+/// Convenience to convert between header-related data and a
+/// [Action::SendHeadersFrame].
+pub fn send_headers_frame_with_expected_result(
+    stream_id: u64, fin_stream: bool, headers: Vec<Header>,
+    expected_result: ExpectedStreamSendResult,
+) -> Action {
+    let header_block = encode_header_block(&headers).unwrap();
+
+    Action::SendHeadersFrame {
+        stream_id,
+        fin_stream,
+        headers,
+        literal_headers: false,
+        frame: Frame::Headers { header_block },
+        expected_result,
     }
 }
 
@@ -228,5 +321,26 @@ pub fn send_headers_frame_literal(
         headers,
         literal_headers: true,
         frame: Frame::Headers { header_block },
+        expected_result: ExpectedStreamSendResult::Ok,
+    }
+}
+
+/// Convenience to convert between header-related data and a
+/// [Action::SendHeadersFrame]. Unlike [`send_headers_frame`],
+/// this version encodes the headers literally as they are provided,
+/// not converting the header names to lower-case.
+pub fn send_headers_frame_literal_with_expected_result(
+    stream_id: u64, fin_stream: bool, headers: Vec<Header>,
+    expected_result: ExpectedStreamSendResult,
+) -> Action {
+    let header_block = encode_header_block_literal(&headers).unwrap();
+
+    Action::SendHeadersFrame {
+        stream_id,
+        fin_stream,
+        headers,
+        literal_headers: true,
+        frame: Frame::Headers { header_block },
+        expected_result,
     }
 }

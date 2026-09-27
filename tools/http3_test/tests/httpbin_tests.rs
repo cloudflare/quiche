@@ -842,7 +842,8 @@ mod httpbin_tests {
 
         let mut stream_data = Vec::new();
 
-        // A buffer of containing an invalid HEADERS frame encoded in wire format.
+        // A buffer of containing an invalid HEADERS frame encoded in wire
+        // format.
         let d = vec![1, 3, 1, 1, 1];
 
         let data_frame = ArbitraryStreamData {

@@ -28,7 +28,6 @@
 //! A single image file containing various renderings of stream and H3 DATA
 
 use log::warn;
-use plotters::prelude::*;
 
 use crate::datastore::VantagePoint;
 use crate::plots::colors::*;
@@ -423,20 +422,20 @@ pub fn plot_stream_multiplexing(
             1
         };
 
-        let mut bubbles: Vec<Circle<(f32, i32), i32>> = vec![];
-        let mut lines: Vec<PathElement<(f32, i32)>> = vec![];
-        let mut lines2: Vec<PathElement<(f32, u64)>> = vec![];
+        let mut bubbles: Vec<Circle<(f64, i32), i32>> = vec![];
+        let mut lines: Vec<PathElement<(f64, i32)>> = vec![];
+        let mut lines2: Vec<PathElement<(f64, u64)>> = vec![];
 
         let bubble_sizes = [1, 6, 11, 16, 21, 26, 31];
 
         for (time, length) in data_frames {
-            // TODO: replace with div_ceil once stablized- https://github.com/rust-lang/rust/issues/88581
+            // TODO: Replace this calculation with `div_ceil`.
             let i: usize = (length / bucket_size) as usize +
                 usize::from(length % bucket_size != 0);
             let i = i.saturating_sub(1);
 
-            // TODO: there seems to be a bug if the bubble is greater th x_max it
-            // would still apear. So let's just avoid that.
+            // Bubbles beyond `x_max` still appear due to a plotting bug, so
+            // omit them.
             if time > &x_max {
                 continue;
             }

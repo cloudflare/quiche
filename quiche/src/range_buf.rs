@@ -25,10 +25,11 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::cmp;
-use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::sync::Arc;
+
+use crate::buffers::BufFactory;
+use crate::buffers::DefaultBufFactory;
 
 /// Buffer holding data at a specific offset.
 ///
@@ -72,56 +73,6 @@ where
     pub(crate) fin: bool,
 
     _bf: PhantomData<F>,
-}
-
-/// A trait for providing internal storage buffers for `RangeBuf`.
-/// The associated type `Buf` can be any type that dereferences to
-/// a slice, but should be fast to clone, eg. by wrapping it with an
-/// [`Arc`].
-pub trait BufFactory: Clone + Default + Debug {
-    /// The type of the generated buffer.
-    type Buf: Clone + Debug + AsRef<[u8]>;
-
-    /// Generate a new buffer from a given slice, the buffer must contain the
-    /// same data as the original slice.
-    fn buf_from_slice(buf: &[u8]) -> Self::Buf;
-}
-
-/// A trait that enables zero-copy sends to quiche. When buffers produced
-/// by the `BufFactory` implement this trait, quiche and h3 can supply the
-/// raw buffers to be sent, instead of slices that must be copied first.
-pub trait BufSplit {
-    /// Split the buffer at a given point, after the split the old buffer
-    /// must only contain the first `at` bytes, while the newly produced
-    /// buffer must containt the remaining bytes.
-    fn split_at(&mut self, at: usize) -> Self;
-
-    /// Try to prepend a prefix to the buffer, return true if succeeded.
-    fn try_add_prefix(&mut self, _prefix: &[u8]) -> bool {
-        false
-    }
-}
-
-/// The default [`BufFactory`] allocates buffers on the heap on demand.
-#[derive(Debug, Clone, Default)]
-pub struct DefaultBufFactory;
-
-/// The default [`BufFactory::Buf`] is a boxed slice wrapped in an [`Arc`].
-#[derive(Debug, Clone, Default)]
-pub struct DefaultBuf(Arc<Box<[u8]>>);
-
-impl BufFactory for DefaultBufFactory {
-    type Buf = DefaultBuf;
-
-    fn buf_from_slice(buf: &[u8]) -> Self::Buf {
-        DefaultBuf(Arc::new(buf.into()))
-    }
-}
-
-impl AsRef<[u8]> for DefaultBuf {
-    fn as_ref(&self) -> &[u8] {
-        &self.0[..]
-    }
 }
 
 impl<F: BufFactory> RangeBuf<F>

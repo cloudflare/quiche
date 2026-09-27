@@ -13,9 +13,8 @@ A server listens on a UDP socket for QUIC connections and spawns a new tokio
 task to handle each individual connection.
 
 ```rust
+use bytes::Bytes;
 use foundations::telemetry::log;
-use futures::{SinkExt as _, StreamExt as _};
-use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::{H3Event, IncomingH3Headers, OutboundFrame, ServerH3Event};
 use tokio_quiche::http3::settings::Http3Settings;
 use tokio_quiche::listen;
@@ -53,7 +52,7 @@ async fn handle_connection(mut controller: ServerH3Controller) {
             H3Event::IncomingHeaders(IncomingH3Headers {
                 mut send, headers, ..
             }) => {
-                log::info!("incomming headers"; "headers" => ?headers);
+                log::info!("incoming headers"; "headers" => ?headers);
                 send.send(OutboundFrame::Headers(
                     vec![h3::Header::new(b":status", b"200")],
                     None,
@@ -61,8 +60,8 @@ async fn handle_connection(mut controller: ServerH3Controller) {
                 .await
                 .unwrap();
 
-                send.send(OutboundFrame::body(
-                    BufFactory::buf_from_slice(b"hello from TQ!"),
+                send.send(OutboundFrame::Body(
+                    Bytes::copy_from_slice(b"hello from TQ!"),
                     true,
                 ))
                 .await
@@ -80,7 +79,7 @@ async fn handle_connection(mut controller: ServerH3Controller) {
 
 ```rust
 use foundations::telemetry::log;
-use tokio_quiche::http3::driver::{ClientH3Event, H3Event, InboundFrame, IncomingH3Headers};
+use tokio_quiche::http3::driver::{ClientH3Event, H3Event, IncomingH3Headers};
 use tokio_quiche::quiche::h3;
 
 let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
@@ -101,31 +100,20 @@ while let Some(event) = controller.event_receiver_mut().recv().await {
         ClientH3Event::Core(H3Event::IncomingHeaders(IncomingH3Headers {
             stream_id,
             headers,
-            mut recv,
             ..
         })) => {
-            log::info!("incomming headers"; "stream_id" => stream_id, "headers" => ?headers);
-            'body: while let Some(frame) = recv.recv().await {
-                match frame {
-                    InboundFrame::Body(pooled, fin) => {
-                        log::info!("inbound body: {:?}", std::str::from_utf8(&pooled);
-                            "fin" => fin,
-                            "len" => pooled.len()
-                        );
-                        if fin {
-                            log::info!("received full body, exiting");
-                            break 'body;
-                        }
-                    }
-                    InboundFrame::Datagram(pooled) => {
-                        log::info!("inbound datagram"; "len" => pooled.len());
-                    }
-                }
-            }
+            log::info!("incoming headers"; "stream_id" => stream_id, "headers" => ?headers);
         }
-        ClientH3Event::Core(H3Event::BodyBytesReceived { fin: true, .. }) => {
-            log::info!("fin received");
-            break;
+        ClientH3Event::Core(H3Event::BodyBytesReceived { stream_id, data, fin }) => {
+            log::info!("inbound body";
+                "stream_id" => stream_id,
+                "len" => data.len(),
+                "fin" => fin
+            );
+            if fin {
+                log::info!("received full body, exiting");
+                break;
+            }
         }
         ClientH3Event::Core(event) => log::info!("received event: {event:?}"),
         ClientH3Event::NewOutboundRequest {
@@ -140,7 +128,7 @@ while let Some(event) = controller.event_receiver_mut().recv().await {
 }
 ```
 
-**Note**: Omited in these two examples are is the use of `stream_id` to track
+**Note**: Omitted in these two examples is the use of `stream_id` to track
 multiplexed requests within the same connection.
 
 # Feature Flags

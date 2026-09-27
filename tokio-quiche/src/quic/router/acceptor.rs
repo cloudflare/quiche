@@ -32,18 +32,21 @@ use std::time::Instant;
 use datagram_socket::DatagramSocketSend;
 use datagram_socket::DatagramSocketSendExt;
 use datagram_socket::MAX_DATAGRAM_SIZE;
+use qlog::writer::make_qlog_writer_from_path;
+use qlog::writer::qlog_file_name;
+use qlog::writer::QlogCompression;
 use quiche::ConnectionId;
 use quiche::Header;
+use quiche::RetryConnectionIds;
 use quiche::Type as PacketType;
 use task_killswitch::spawn_with_killswitch;
 
 use crate::metrics::labels;
 use crate::metrics::Metrics;
 use crate::quic::addr_validation_token::AddrValidationTokenManager;
-use crate::quic::make_qlog_writer;
+use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::quic::router::NewConnection;
 use crate::quic::Incoming;
-use crate::ConnectionIdGenerator;
 use crate::QuicResultExt;
 
 use super::InitialPacketHandler;
@@ -53,15 +56,15 @@ use super::InitialPacketHandler;
 pub(crate) struct ConnectionAcceptor<S, M> {
     config: ConnectionAcceptorConfig,
     socket: Arc<S>,
-    socket_cookie: u64,
     token_manager: AddrValidationTokenManager,
-    cid_generator: Box<dyn ConnectionIdGenerator<'static>>,
+    cid_generator: SharedConnectionIdGenerator,
     metrics: M,
 }
 
 pub(crate) struct ConnectionAcceptorConfig {
     pub(crate) disable_client_ip_validation: bool,
     pub(crate) qlog_dir: Option<String>,
+    pub(crate) qlog_compression: QlogCompression,
     pub(crate) keylog_file: Option<File>,
     #[cfg(target_os = "linux")]
     pub(crate) with_pktinfo: bool,
@@ -73,14 +76,13 @@ where
     M: Metrics,
 {
     pub(crate) fn new(
-        config: ConnectionAcceptorConfig, socket: Arc<S>, socket_cookie: u64,
+        config: ConnectionAcceptorConfig, socket: Arc<S>,
         token_manager: AddrValidationTokenManager,
-        cid_generator: Box<dyn ConnectionIdGenerator<'static>>, metrics: M,
+        cid_generator: SharedConnectionIdGenerator, metrics: M,
     ) -> Self {
         Self {
             config,
             socket,
-            socket_cookie,
             token_manager,
             cid_generator,
             metrics,
@@ -88,38 +90,40 @@ where
     }
 
     fn accept_conn(
-        &mut self, incoming: Incoming, scid: ConnectionId<'static>,
-        original_dcid: Option<&ConnectionId>,
-        pending_cid: Option<ConnectionId<'static>>,
-        quiche_config: &mut quiche::Config,
+        &mut self, incoming: Incoming, retry_cids: Option<RetryConnectionIds>,
+        pending_cid: ConnectionId<'static>, quiche_config: &mut quiche::Config,
     ) -> io::Result<Option<NewConnection>> {
         let handshake_start_time = Instant::now();
+        let scid = self.cid_generator.new_connection_id();
 
-        #[cfg(feature = "zero-copy")]
-        let mut conn = quiche::accept_with_buf_factory(
-            &scid,
-            original_dcid,
-            incoming.local_addr,
-            incoming.peer_addr,
-            quiche_config,
-        )
-        .into_io()?;
-
-        #[cfg(not(feature = "zero-copy"))]
-        let mut conn = quiche::accept(
-            &scid,
-            original_dcid,
-            incoming.local_addr,
-            incoming.peer_addr,
-            quiche_config,
-        )
+        let mut conn = if let Some(retry_cids) = retry_cids {
+            quiche::accept_with_retry(
+                &scid,
+                retry_cids,
+                incoming.local_addr,
+                incoming.peer_addr,
+                quiche_config,
+            )
+        } else {
+            quiche::accept_with_buf_factory(
+                &scid,
+                None,
+                incoming.local_addr,
+                incoming.peer_addr,
+                quiche_config,
+            )
+        }
         .into_io()?;
 
         if let Some(qlog_dir) = &self.config.qlog_dir {
-            let id = format!("{:?}", &scid);
-            if let Ok(writer) = make_qlog_writer(qlog_dir, &id) {
+            let id = format!("{:?}", scid);
+            let path = std::path::Path::new(qlog_dir)
+                .join(qlog_file_name(&id, self.config.qlog_compression));
+            if let Ok(writer) =
+                make_qlog_writer_from_path(&path, self.config.qlog_compression)
+            {
                 conn.set_qlog(
-                    std::boxed::Box::new(writer),
+                    writer,
                     "tokio-quiche qlog".to_string(),
                     format!("tokio-quiche qlog id={id}"),
                 );
@@ -133,9 +137,10 @@ where
         }
 
         Ok(Some(NewConnection {
-            conn,
+            conn: Box::new(conn),
             handshake_start_time,
-            pending_cid,
+            pending_cid: Some(pending_cid),
+            cid_generator: Some(Arc::clone(&self.cid_generator)),
             initial_pkt: Some(incoming),
         }))
     }
@@ -169,7 +174,7 @@ where
 
             #[cfg(target_os = "linux")]
             {
-                let from = Some(incoming.local_addr).filter(|_| with_pktinfo);
+                let from = with_pktinfo.then_some(incoming.local_addr);
                 let _ = crate::quic::io::gso::send_to(
                     udp,
                     to,
@@ -193,7 +198,7 @@ where
     fn stateless_retry(
         &mut self, incoming: Incoming, hdr: Header,
     ) -> io::Result<Option<NewConnection>> {
-        let scid = self.new_connection_id();
+        let scid = self.cid_generator.new_connection_id();
 
         let token = self.token_manager.gen(&hdr.dcid, incoming.peer_addr);
 
@@ -201,10 +206,6 @@ where
             quiche::retry(&hdr.scid, &hdr.dcid, &scid, &token, hdr.version, buf)
                 .into_io()
         })
-    }
-
-    fn new_connection_id(&self) -> ConnectionId<'static> {
-        self.cid_generator.new_connection_id(self.socket_cookie)
     }
 }
 
@@ -220,10 +221,7 @@ where
         if hdr.ty != PacketType::Initial {
             // Non-initial packets should have a valid CID, but we want to have
             // some telemetry if this isn't the case.
-            if let Err(e) = self
-                .cid_generator
-                .verify_connection_id(self.socket_cookie, &hdr.dcid)
-            {
+            if let Err(e) = self.cid_generator.verify_connection_id(&hdr.dcid) {
                 self.metrics.invalid_cid_packet_count(e).inc();
             }
 
@@ -236,38 +234,28 @@ where
             });
         }
 
-        let (scid, original_dcid, pending_cid) = if self
-            .config
-            .disable_client_ip_validation
-        {
-            (self.new_connection_id(), None, Some(hdr.dcid))
-        } else {
-            // NOTE: token is always present in Initial packets
-            let token = hdr.token.as_ref().unwrap();
+        if self.config.disable_client_ip_validation {
+            return self.accept_conn(incoming, None, hdr.dcid, quiche_config);
+        }
 
-            if token.is_empty() {
-                return self.stateless_retry(incoming, hdr);
-            }
+        // NOTE: token is always present in Initial packets
+        let token = hdr.token.as_ref().unwrap();
+        if token.is_empty() {
+            return self.stateless_retry(incoming, hdr);
+        }
 
-            (
-                hdr.dcid,
-                Some(
-                    self.token_manager
-                        .validate_and_extract_original_dcid(token, incoming.peer_addr)
-                        .or(Err(
-                            labels::QuicInvalidInitialPacketError::TokenValidationFail,
-                        ))?,
-                ),
-                None,
-            )
-        };
+        let original_dcid = self
+            .token_manager
+            .validate_and_extract_original_dcid(token, incoming.peer_addr)
+            .or(Err(
+                labels::QuicInvalidInitialPacketError::TokenValidationFail,
+            ))?;
 
-        self.accept_conn(
-            incoming,
-            scid,
-            original_dcid.as_ref(),
-            pending_cid,
-            quiche_config,
-        )
+        let retry_cids = Some(RetryConnectionIds {
+            original_destination_cid: &original_dcid,
+            retry_source_cid: &hdr.dcid,
+        });
+
+        self.accept_conn(incoming, retry_cids, hdr.dcid.clone(), quiche_config)
     }
 }

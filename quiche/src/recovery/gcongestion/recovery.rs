@@ -105,7 +105,12 @@ struct RecoveryEpoch {
     pkts_in_flight: usize,
 
     acked_frames: VecDeque<frame::Frame>,
-    lost_frames: VecDeque<frame::Frame>,
+
+    // Frames scheduled for retransmission due to PTO are tracked
+    // separately so we can check that frames were drained before
+    // generating more PTO probes.
+    lost_frames_ack: VecDeque<frame::Frame>,
+    lost_frames_pto: VecDeque<frame::Frame>,
 
     /// The largest packet number sent in the packet number space so far.
     #[allow(dead_code)]
@@ -155,6 +160,8 @@ impl RecoveryEpoch {
             .sum();
 
         std::mem::take(&mut self.sent_packets);
+        self.clear_lost_frames();
+        std::mem::take(&mut self.acked_frames);
         self.time_of_last_ack_eliciting_packet = None;
         self.loss_time = None;
         self.loss_probes = 0;
@@ -293,7 +300,7 @@ impl RecoveryEpoch {
                         ..
                     } = status.lose()
                     {
-                        self.lost_frames.extend(frames);
+                        self.lost_frames_ack.extend(frames);
 
                         if in_flight {
                             self.pkts_in_flight -= 1;
@@ -354,6 +361,31 @@ impl RecoveryEpoch {
         }
 
         self.largest_acked_packet.unwrap_or(0) + 1
+    }
+
+    /// Returns the next lost frame, trying ACK-based lost frames first,
+    /// then PTO-based lost frames.
+    fn next_lost_frame(&mut self) -> Option<frame::Frame> {
+        self.lost_frames_ack
+            .pop_front()
+            .or_else(|| self.lost_frames_pto.pop_front())
+    }
+
+    /// Returns true if there are any lost frames (ACK or PTO).
+    fn has_lost_frames(&self) -> bool {
+        !self.lost_frames_ack.is_empty() || !self.lost_frames_pto.is_empty()
+    }
+
+    /// Returns the total count of lost frames (ACK + PTO).
+    #[cfg(test)]
+    fn lost_frames_count(&self) -> usize {
+        self.lost_frames_ack.len() + self.lost_frames_pto.len()
+    }
+
+    /// Clears all lost frames (both ACK and PTO).
+    fn clear_lost_frames(&mut self) {
+        self.lost_frames_ack.clear();
+        self.lost_frames_pto.clear();
     }
 }
 
@@ -447,6 +479,7 @@ pub struct GRecovery {
     pub bytes_lost: u64,
 
     max_datagram_size: usize,
+    time_sent_set_to_now: bool,
 
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
@@ -468,6 +501,16 @@ pub struct GRecovery {
 }
 
 impl GRecovery {
+    #[cfg(feature = "qlog")]
+    fn send_rate(&self) -> Bandwidth {
+        self.pacer.send_rate().unwrap_or(Bandwidth::zero())
+    }
+
+    #[cfg(feature = "qlog")]
+    fn ack_rate(&self) -> Bandwidth {
+        self.pacer.ack_rate().unwrap_or(Bandwidth::zero())
+    }
+
     pub fn new(recovery_config: &RecoveryConfig) -> Option<Self> {
         let cc = match recovery_config.cc_algorithm {
             CongestionControlAlgorithm::Bbr2Gcongestion => BBRv2::new(
@@ -499,6 +542,7 @@ impl GRecovery {
             bytes_lost: 0,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
+            time_sent_set_to_now: cc.time_sent_set_to_now(),
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
@@ -569,7 +613,7 @@ impl GRecovery {
     fn pto_time_and_space(
         &self, handshake_status: HandshakeStatus, now: Instant,
     ) -> (Option<Instant>, packet::Epoch) {
-        let mut duration = self.pto() * (1 << self.pto_count);
+        let mut duration = self.pto() * 2_u32.saturating_pow(self.pto_count);
 
         // Arm PTO from now when there are no inflight packets.
         if self.bytes_in_flight.is_zero() {
@@ -598,8 +642,8 @@ impl GRecovery {
                 }
 
                 // Include max_ack_delay and backoff for Application Data.
-                duration +=
-                    self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
+                duration += self.rtt_stats.max_ack_delay *
+                    2_u32.saturating_pow(self.pto_count);
             }
 
             let new_time = self.epochs[e]
@@ -635,6 +679,8 @@ impl GRecovery {
         if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now)
         {
             self.loss_timer.update(timeout);
+        } else {
+            self.loss_timer.clear();
         }
     }
 }
@@ -659,7 +705,7 @@ impl RecoveryOps for GRecovery {
     }
 
     fn next_lost_frame(&mut self, epoch: packet::Epoch) -> Option<frame::Frame> {
-        self.epochs[epoch].lost_frames.pop_front()
+        self.epochs[epoch].next_lost_frame()
     }
 
     fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64> {
@@ -667,7 +713,7 @@ impl RecoveryOps for GRecovery {
     }
 
     fn has_lost_frames(&self, epoch: packet::Epoch) -> bool {
-        !self.epochs[epoch].lost_frames.is_empty()
+        self.epochs[epoch].has_lost_frames()
     }
 
     fn loss_probes(&self, epoch: packet::Epoch) -> usize {
@@ -679,6 +725,11 @@ impl RecoveryOps for GRecovery {
         self.epochs[epoch].loss_probes += 1;
     }
 
+    #[cfg(test)]
+    fn lost_frames_count(&self, epoch: packet::Epoch) -> usize {
+        self.epochs[epoch].lost_frames_count()
+    }
+
     fn ping_sent(&mut self, epoch: packet::Epoch) {
         self.epochs[epoch].loss_probes =
             self.epochs[epoch].loss_probes.saturating_sub(1);
@@ -688,7 +739,11 @@ impl RecoveryOps for GRecovery {
         &mut self, pkt: Sent, epoch: packet::Epoch,
         handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
     ) {
-        let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
+        let time_sent = if self.time_sent_set_to_now {
+            now
+        } else {
+            self.get_next_release_time().time(now).unwrap_or(now)
+        };
 
         let epoch = &mut self.epochs[epoch];
 
@@ -898,12 +953,21 @@ impl RecoveryOps for GRecovery {
 
         epoch.loss_probes = MAX_PTO_PROBES_COUNT.min(self.pto_count as usize);
 
+        let sent_packets_iter_limit = if !epoch.lost_frames_pto.is_empty() {
+            // Skip the search for frames to add to PTO probes if frames
+            // added in a prior PTO haven't been processed yet.
+            0
+        } else {
+            usize::MAX
+        };
+
         // Skip packets that have already been acked or lost, and packets
         // that don't contain either CRYPTO or STREAM frames and only return as
         // many packets as the number of probe packets that will be sent.
         let unacked_frames = epoch
             .sent_packets
-            .iter_mut()
+            .iter()
+            .take(sent_packets_iter_limit)
             .filter_map(|p| {
                 if let SentStatus::Sent {
                     has_data: true,
@@ -927,10 +991,10 @@ impl RecoveryOps for GRecovery {
         // This will also trigger sending an ACK and retransmitting frames like
         // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
         // to CRYPTO and STREAM, if the original packet carried them.
-        epoch.lost_frames.extend(unacked_frames.cloned());
+        epoch.lost_frames_pto.extend(unacked_frames.cloned());
 
         self.pacer
-            .on_retransmission_timeout(!epoch.lost_frames.is_empty());
+            .on_retransmission_timeout(epoch.has_lost_frames());
 
         self.set_loss_detection_timer(handshake_status, now);
 
@@ -1007,6 +1071,10 @@ impl RecoveryOps for GRecovery {
         Some(self.pacer.max_bandwidth())
     }
 
+    fn rtt_persistent_jump_count(&self) -> u64 {
+        self.pacer.rtt_persistent_jump_count()
+    }
+
     /// Statistics from when a CCA first exited the startup phase.
     fn startup_exit(&self) -> Option<StartupExit> {
         self.recovery_stats.startup_exit
@@ -1042,7 +1110,6 @@ impl RecoveryOps for GRecovery {
         self.epochs[epoch].pkts_in_flight
     }
 
-    #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
         self.bytes_in_flight.get()
     }
@@ -1092,7 +1159,7 @@ impl RecoveryOps for GRecovery {
         self.epochs[epoch].test_largest_sent_pkt_num_on_path
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "qlog"))]
     fn app_limited(&self) -> bool {
         self.pacer.is_app_limited(self.bytes_in_flight.get())
     }
@@ -1134,7 +1201,19 @@ impl RecoveryOps for GRecovery {
             cwnd: self.cwnd() as u64,
             bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: self.pacer.ssthresh(),
-            pacing_rate: self.delivery_rate().to_bytes_per_second(),
+
+            pacing_rate: Some(
+                self.pacer
+                    .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats)
+                    .to_bytes_per_second(),
+            ),
+            delivery_rate: Some(self.delivery_rate().to_bytes_per_second()),
+            send_rate: Some(self.send_rate().to_bytes_per_second()),
+            ack_rate: Some(self.ack_rate().to_bytes_per_second()),
+            lost_packets: Some(self.lost_count as u64),
+            lost_bytes: Some(self.bytes_lost),
+            pto_count: Some(self.pto_count),
+            app_limited: Some(self.app_limited()),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
@@ -1269,8 +1348,8 @@ mod tests {
         for subsequent_loss_count in 1..100 {
             // Double the overhead until it caps at `2.0`.
             //
-            // It takes `3` rounds of doubling for INITIAL_TIME_THRESHOLD_OVERHEAD
-            // to equal `1.0`.
+            // The initial time-threshold overhead reaches `1.0` after three
+            // rounds of doubling.
             let new_time_threshold = if subsequent_loss_count <= 3 {
                 1.0 + INITIAL_TIME_THRESHOLD_OVERHEAD *
                     2_f64.powi(subsequent_loss_count as i32)
@@ -1285,5 +1364,24 @@ mod tests {
         // Time threshold is capped at 2.0.
         assert_eq!(loss_thresh.pkt_thresh(), None);
         assert_eq!(loss_thresh.time_thresh(), MAX_TIME_THRESHOLD);
+    }
+
+    #[test]
+    fn test_high_pto_count_no_panic() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Bbr2Gcongestion);
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut r = GRecovery::new(&recovery_config).unwrap();
+
+        r.pto_count = 99999;
+
+        let handshake_status = HandshakeStatus {
+            completed: true,
+            has_handshake_keys: true,
+            peer_verified_address: true,
+        };
+        let now = Instant::now();
+
+        let _ = r.pto_time_and_space(handshake_status, now);
     }
 }

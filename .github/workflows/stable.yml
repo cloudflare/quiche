@@ -7,7 +7,8 @@ permissions:
   pull-requests: write
 
 env:
-  DEFAULT_OPTIONS: "--features=async,ffi,qlog --workspace"
+  DEFAULT_OPTIONS: "--features=async,ffi,qlog,rpk --workspace"
+  # Used by `quiche_multiarch`, which can't link `boring` for foreign targets.
   NO_BORING_OPTIONS: "--features=ffi,qlog --workspace --exclude h3i --exclude tokio-quiche"
   RUSTFLAGS: "-D warnings"
   RUSTTOOLCHAIN: "stable"
@@ -20,19 +21,15 @@ jobs:
   quiche:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        tls-feature:
-          - "" # default, boringssl-vendored
-          - "boringssl-boring-crate"
-          - "openssl"
+        boring_version: ["latest", "4"]
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -41,47 +38,34 @@ jobs:
           components: clippy
 
       - name: Install qlog-dancer dependencies
-        run: sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
+
+      - name: Maybe pin boring to MSRV (4.19.0)
+        if: matrix.boring_version == '4'
+        run: |
+          # Pin boring to the minimum supported 4.x. cargo's resolver
+          # normally picks the highest match (5.x); generate the
+          # lockfile first, then downgrade to the floor of the
+          # workspace dep range (`>= 4.19, < 6`) via `--precise`.
+          # Pinning to the floor (rather than the latest 4.x) catches
+          # accidental use of APIs added in later 4.x point releases.
+          # `quiche/src/build.rs` and `tokio-quiche/build.rs` then read
+          # the lockfile and leave `cfg(boring_v5)` off (the default).
+          cargo generate-lockfile
+          cargo update -p boring --precise 4.19.0
 
       - name: Unused dependency check
-        if: ${{ matrix.tls-feature == '' }}
         uses: bnjbvr/cargo-machete@main
 
-      - name: Build OpenSSL
-        if: ${{ matrix.tls-feature == 'openssl' }}
-        run: |
-          git clone https://github.com/quictls/openssl
-          cd openssl
-          ./Configure --prefix="$PWD/install"
-          make -j"$(nproc)"
-          make install -j"$(nproc)"
-          echo "PKG_CONFIG_PATH=$PWD" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$PWD" >> "$GITHUB_ENV"
-
       - name: Run cargo test
-        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
-        run: cargo test --verbose --all-targets --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }}
-
-      # tokio-quiche requires the `boring` crate, so don't run its tests when
-      # building without it.
-      - name: Run cargo test
-        if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
-        run: cargo test --verbose --all-targets --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
+        run: cargo test --verbose --all-targets ${{ env.DEFAULT_OPTIONS }}
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
-        if: ${{ matrix.tls-feature == 'boringssl-boring-crate' }}
-        run: cargo test --verbose --doc --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }}
-
-      # Need to run doc tests separately.
-      # (https://github.com/rust-lang/cargo/issues/6669)
-      #
-      # tokio-quiche requires the `boring` crate, so don't run its tests when
-      # building without it.
-      - name: Run cargo doc test
-        if: ${{ matrix.tls-feature != 'boringssl-boring-crate' }}
-        run: cargo test --verbose --doc --features=${{ matrix.tls-feature }} ${{ env.NO_BORING_OPTIONS }}
+        run: cargo test --verbose --doc ${{ env.DEFAULT_OPTIONS }}
 
       # NOTE: this is disabled as it fails when building changes that bump
       # version of local crates (e.g. when doing a `qlog` release) that have not
@@ -91,10 +75,10 @@ jobs:
       #   run: cargo package --verbose --workspace --exclude=quiche_apps --allow-dirty
 
       - name: Run cargo clippy
-        run: cargo clippy --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }} -- -D warnings
+        run: cargo clippy ${{ env.DEFAULT_OPTIONS }} -- -D warnings
 
       - name: Run cargo clippy on examples
-        run: cargo clippy --examples --features=${{ matrix.tls-feature }} ${{ env.DEFAULT_OPTIONS }} -- -D warnings
+        run: cargo clippy --examples ${{ env.DEFAULT_OPTIONS }} -- -D warnings
 
       - name: Run cargo doc
         run: cargo doc --no-deps --all-features --document-private-items
@@ -108,7 +92,7 @@ jobs:
     strategy:
       matrix:
         target:
-          - "macos-13"     # Intel (x86_64)
+          - "macos-15-intel"     # Intel (x86_64)
           - "macos-latest" # Apple Silicon (M1)
     runs-on: ${{ matrix.target }}
     # Only run on "pull_request" event for external PRs. This is to avoid
@@ -117,8 +101,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -146,8 +128,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -167,14 +147,29 @@ jobs:
     strategy:
       matrix:
         target: ["x86_64-pc-windows-msvc", "i686-pc-windows-msvc", "x86_64-pc-windows-gnu", "i686-pc-windows-gnu"]
+        include:
+          # i686 (32-bit) BoringSSL builds require SSE2 explicitly. The
+          # toolchain file in BoringSSL sets `-msse2`, but cmake-rs
+          # passes `-DCMAKE_C_FLAGS=...` on the command line which
+          # overrides that, so we re-add it here.
+          - target: "i686-pc-windows-msvc"
+            cxxflags: "-msse2"
+          - target: "i686-pc-windows-gnu"
+            # `-mlong-double-64`: bindgen detects that Rust doesn't
+            # support 80-bit long double.
+            # `-msse2`: same reason as i686-pc-windows-msvc above.
+            cflags: "-mlong-double-64 -msse2"
+            cxxflags: "-mlong-double-64 -msse2"
+    env:
+      CFLAGS: ${{ matrix.cflags }}
+      CXXFLAGS: ${{ matrix.cxxflags }}
+      BINDGEN_EXTRA_CLANG_ARGS: ${{ matrix.cflags }}
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -182,18 +177,55 @@ jobs:
           toolchain: ${{ env.RUSTTOOLCHAIN }}
           targets: ${{ matrix.target }}
 
+      # The windows-2022 image preinstalls MSYS2 (gcc 14.2.0) at
+      # `C:\msys64` but doesn't put it on PATH. For x86_64-pc-windows-gnu
+      # we rely on these preinstalled tools and just point the C/C++
+      # toolchain at them, matching `boring`'s own CI workflow.
       - name: Set up MinGW for 64 bit
         if: matrix.target == 'x86_64-pc-windows-gnu'
-        uses: bwoodsend/setup-winlibs-action@v1.10
-        with:
-          tag: 12.2.0-16.0.0-10.0.0-msvcrt-r5
+        shell: bash
+        run: |
+          echo >> "$GITHUB_ENV" CC=gcc
+          echo >> "$GITHUB_ENV" CXX=g++
+          echo >> "$GITHUB_ENV" 'C_INCLUDE_PATH=C:\msys64\usr\include'
+          echo >> "$GITHUB_ENV" 'CPLUS_INCLUDE_PATH=C:\msys64\usr\include'
+          echo >> "$GITHUB_ENV" 'LIBRARY_PATH=C:\msys64\usr\lib'
 
+      # For i686 we install a fresh 32-bit MSYS2 toolchain (and a
+      # 32-bit cmake from MSYS2, since the system cmake is 64-bit and
+      # picks up the wrong `gcc`). Mirrors `boring`'s CI workflow.
       - name: Set up MinGW for 32 bit
         if: matrix.target == 'i686-pc-windows-gnu'
-        uses: bwoodsend/setup-winlibs-action@v1.10
+        uses: msys2/setup-msys2@v2
+        id: msys2
         with:
-          architecture: i686
-          tag: 12.2.0-16.0.0-10.0.0-msvcrt-r5
+          msystem: MINGW32
+          path-type: inherit
+          install: >-
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+
+      - name: Set up 32-bit MSYS2 env vars
+        if: matrix.target == 'i686-pc-windows-gnu'
+        shell: bash
+        run: |
+          MSYS_ROOT='${{ steps.msys2.outputs.msys2-location }}'
+          test -d "$MSYS_ROOT\\mingw32\\bin"
+          echo >> $GITHUB_PATH "$MSYS_ROOT\\mingw32\\bin"
+          echo >> $GITHUB_PATH "$MSYS_ROOT\\usr\\bin"
+          echo >> $GITHUB_ENV CC="$MSYS_ROOT\\mingw32\\bin\\gcc"
+          echo >> $GITHUB_ENV CXX="$MSYS_ROOT\\mingw32\\bin\\g++"
+          echo >> $GITHUB_ENV AR="$MSYS_ROOT\\mingw32\\bin\\ar"
+          echo >> $GITHUB_ENV CFLAGS="$CFLAGS -I$MSYS_ROOT\\mingw32\\include"
+          echo >> $GITHUB_ENV CXXFLAGS="$CXXFLAGS -I$MSYS_ROOT\\mingw32\\include"
+          echo >> $GITHUB_ENV BINDGEN_EXTRA_CLANG_ARGS="$BINDGEN_EXTRA_CLANG_ARGS -I$MSYS_ROOT\\mingw32\\include"
+          echo >> $GITHUB_ENV LIBRARY_PATH="$MSYS_ROOT\\mingw32\\lib"
+          echo >> $GITHUB_ENV LDFLAGS="-L$MSYS_ROOT\\mingw32\\lib"
+          # Force cmake-rs to use the MinGW Makefiles generator instead
+          # of MSYS Makefiles; cmake-rs's default for windows-gnu picks
+          # the latter, which then can't find `cl.exe` (cmake's default
+          # Windows compiler) and fails configuration.
+          echo >> $GITHUB_ENV "CMAKE_GENERATOR=MinGW Makefiles"
 
       - name: Install dependencies
         uses: crazy-max/ghaction-chocolatey@v3
@@ -202,11 +234,11 @@ jobs:
 
       - name: Run cargo build
         if: endsWith(matrix.target, '-gnu')
-        run: cargo build --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --exclude qlog-dancer --features=boringssl-boring-crate
+        run: cargo build --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --exclude qlog-dancer
 
       - name: Run cargo test
         if: endsWith(matrix.target, '-msvc')
-        run: cargo test --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --exclude qlog-dancer --features=boringssl-boring-crate
+        run: cargo test --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --exclude qlog-dancer
 
   quiche_multiarch:
     runs-on: ubuntu-latest
@@ -219,8 +251,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -244,8 +274,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@master
@@ -267,8 +295,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Build Docker images
         run: make docker-build
@@ -295,8 +321,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain for the target
         uses: dtolnay/rust-toolchain@master

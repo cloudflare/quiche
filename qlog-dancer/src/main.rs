@@ -75,17 +75,17 @@ fn run() -> i32 {
     let mut log_file = match parse_log_file(&config) {
         Ok(v) => v,
 
-        Err(_) => {
+        Err(e) => {
             // Failed, so try a fallback once
             match config.log_format {
                 SerializationFormat::QlogJson => {
-                    warn!("Failed to parse as qlog, trying sqlog");
+                    warn!("Failed to parse as qlog: {}, trying sqlog", e);
                     config.log_format = SerializationFormat::QlogJsonSeq;
                     parse_log_file(&config).unwrap()
                 },
 
                 SerializationFormat::QlogJsonSeq => {
-                    warn!("Failed to parse as sqlog, trying qlog");
+                    warn!("Failed to parse as sqlog: {}, trying qlog", e);
                     config.log_format = SerializationFormat::QlogJson;
                     parse_log_file(&config).unwrap()
                 },
@@ -100,8 +100,8 @@ fn run() -> i32 {
 
     println!();
     println!("== Log details ==");
-    println!("  Format: {}", log_file.details.log_format);
-    println!("  Version: {}", log_file.details.log_version);
+    println!("  Format: {}", log_file.details.serialization_format);
+    println!("  Version: {}", log_file.details.file_schema);
     println!(
         "  Vantage point type: {}",
         log_file.details.qlog_vantage_point_type

@@ -43,6 +43,8 @@ pub struct Config {
     pub verify_peer: bool,
     /// The QUIC idle timeout value in milliseconds.
     pub idle_timeout: u64,
+    /// Multiplier applied to the connection's send capacity.
+    pub send_capacity_factor: f64,
     /// Flow control limit for the connection in bytes
     pub max_data: u64,
     /// Flow control limit for locally-initiated bidirectional streams in bytes.
@@ -63,6 +65,8 @@ pub struct Config {
     pub max_stream_window: u64,
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
+    /// Enables sending or receiving early data.
+    pub enable_early_data: bool,
     /// Whether to enable datagram sending.
     pub enable_dgram: bool,
     /// Datagram receive queue length.
@@ -104,6 +108,11 @@ impl Config {
 
     pub fn with_idle_timeout(mut self, idle_timeout: u64) -> Self {
         self.idle_timeout = idle_timeout;
+        self
+    }
+
+    pub fn with_send_capacity_factor(mut self, factor: f64) -> Self {
+        self.send_capacity_factor = factor;
         self
     }
 
@@ -185,6 +194,7 @@ impl Config {
             source_port: self.source_port,
             verify_peer: self.verify_peer,
             idle_timeout: self.idle_timeout,
+            send_capacity_factor: self.send_capacity_factor,
             max_data: self.max_data,
             max_stream_data_bidi_local: self.max_stream_data_bidi_local,
             max_stream_data_bidi_remote: self.max_stream_data_bidi_remote,
@@ -194,6 +204,7 @@ impl Config {
             max_window: self.max_window,
             max_stream_window: self.max_stream_window,
             session: None,
+            enable_early_data: self.enable_early_data,
             enable_dgram: self.enable_dgram,
             dgram_recv_queue_len: self.dgram_recv_queue_len,
             dgram_send_queue_len: self.dgram_send_queue_len,
@@ -211,6 +222,7 @@ impl Default for Config {
             source_port: 0,
             verify_peer: true,
             idle_timeout: 5000,
+            send_capacity_factor: 1.0,
             max_data: 10000000,
             max_stream_data_bidi_local: 10000000,
             max_stream_data_bidi_remote: 10000000,
@@ -220,6 +232,7 @@ impl Default for Config {
             max_window: 25165824,
             max_stream_window: 16777216,
             session: None,
+            enable_early_data: false,
             enable_dgram: true,
             dgram_recv_queue_len: 65536,
             dgram_send_queue_len: 65536,

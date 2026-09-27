@@ -147,6 +147,7 @@ where
             ServerH3Event::Headers {
                 incoming_headers,
                 priority,
+                is_in_early_data: _,
             } => {
                 // Received headers for a new stream from the H3Driver.
                 self.handle_incoming_headers(incoming_headers, priority)
@@ -165,7 +166,7 @@ where
         &mut self, headers: IncomingH3Headers,
         _priority: Option<RawPriorityValue>,
     ) {
-        log::info!("received headers: {:?}", &headers);
+        log::info!("received headers: {:?}", headers);
 
         let IncomingH3Headers {
             headers: list,

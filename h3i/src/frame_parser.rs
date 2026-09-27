@@ -30,7 +30,6 @@ use crate::quiche;
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error as H3Error;
 use quiche::h3::Result;
-use quiche::Connection;
 
 use crate::frame::H3iFrame;
 
@@ -116,8 +115,8 @@ impl FrameParser {
     /// If the stream is terminated, either by FIN or reset,
     /// [FrameParseResult::Interrupted] is returned. The caller should cease
     /// calling methods on the stream since the stream is closed.
-    pub(crate) fn try_parse_frame(
-        &mut self, qconn: &mut Connection,
+    pub(crate) fn try_parse_frame<F: quiche::BufFactory>(
+        &mut self, qconn: &mut quiche::Connection<F>,
     ) -> Result<FrameParseResult> {
         loop {
             let (len, fin) = match self.try_fill_buffer(qconn, self.stream_id) {
@@ -142,8 +141,8 @@ impl FrameParser {
             match self.curr_state {
                 FrameState::Type => {
                     let Ok(varint) = self.try_consume_varint() else {
-                        // Map Error::Done's to Retry's because state_buf must be
-                        // resized to fit a larger varint
+                        // Map `Error::Done` to `Retry` because `state_buf` must
+                        // be resized before it can hold a larger varint.
                         return Ok(FrameParseResult::Retry);
                     };
 
@@ -152,8 +151,8 @@ impl FrameParser {
                 },
                 FrameState::Len => {
                     let Ok(varint) = self.try_consume_varint() else {
-                        // Map Error::Done's to Retry's because state_buf must be
-                        // resized to fit a larger varint
+                        // Map `Error::Done` to `Retry` because `state_buf` must
+                        // be resized before it can hold a larger varint.
                         return Ok(FrameParseResult::Retry);
                     };
 
@@ -206,8 +205,8 @@ impl FrameParser {
         !self.state_buf.is_empty() && !self.state_buffer_complete()
     }
 
-    fn try_fill_buffer(
-        &mut self, qconn: &mut Connection, stream_id: u64,
+    fn try_fill_buffer<F: quiche::BufFactory>(
+        &mut self, qconn: &mut quiche::Connection<F>, stream_id: u64,
     ) -> Result<(usize, bool)> {
         if self.state_buffer_complete() {
             return Ok((0, qconn.stream_finished(stream_id)));

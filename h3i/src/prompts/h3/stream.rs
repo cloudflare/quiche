@@ -97,6 +97,7 @@ pub fn prompt_open_uni_stream(
         stream_id,
         fin_stream,
         stream_type: ty,
+        expected_result: Default::default(),
     })
 }
 

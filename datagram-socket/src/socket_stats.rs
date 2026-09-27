@@ -66,15 +66,7 @@ pub struct SocketStats {
     pub delivery_rate: u64,
     pub max_bandwidth: Option<u64>,
     pub startup_exit: Option<StartupExit>,
-    pub data_blocked_sent_count: u64,
-    pub stream_data_blocked_sent_count: u64,
-    pub data_blocked_recv_count: u64,
-    pub stream_data_blocked_recv_count: u64,
     pub bytes_in_flight_duration_us: u64,
-    pub reset_stream_count_local: u64,
-    pub stopped_stream_count_local: u64,
-    pub reset_stream_count_remote: u64,
-    pub stopped_stream_count_remote: u64,
 }
 
 /// Statistics from when a CCA first exited the startup phase.
@@ -88,14 +80,17 @@ pub struct StartupExit {
 /// The reason a CCA exited the startup phase.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StartupExitReason {
-    /// Exit startup due to excessive loss
+    /// Exit slow start or BBR startup due to excessive loss
     Loss,
 
-    /// Exit startup due to bandwidth plateau.
+    /// Exit BBR startup due to bandwidth plateau.
     BandwidthPlateau,
 
-    /// Exit startup due to persistent queue.
+    /// Exit BBR startup due to persistent queue.
     PersistentQueue,
+
+    /// Exit HyStart++ conservative slow start after the max rounds allowed.
+    ConservativeSlowStartRounds,
 }
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;

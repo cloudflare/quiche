@@ -116,11 +116,9 @@ pub fn send_to(
     while left > 0 {
         let pkt_len = cmp::min(left, segment_size);
 
-        match socket.send_to(&buf[off..off + pkt_len], send_info.to) {
-            Ok(v) => {
-                written += v;
-            },
-            Err(e) => return Err(e),
+        {
+            let v = socket.send_to(&buf[off..off + pkt_len], send_info.to)?;
+            written += v;
         }
 
         off += pkt_len;

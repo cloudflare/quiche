@@ -78,7 +78,6 @@ pub(super) trait CongestionControl: Debug {
     fn on_packet_sent(
         &mut self, sent_time: Instant, bytes_in_flight: usize,
         packet_number: u64, bytes: usize, is_retransmissible: bool,
-        rtt_stats: &RttStats,
     );
 
     /// Inform that `packet_number` has been neutered.
@@ -222,12 +221,63 @@ pub struct BbrParams {
     /// initial cwnd by the first RTT estimate.
     pub initial_pacing_rate_bytes_per_second: Option<u64>,
 
+    /// Lower bound on the congestion window in packets.  If not set,
+    /// the initial congestion window is used as the lower bound.
+    pub min_cwnd_packets: Option<usize>,
+
     /// If true, scale the pacing rate when updating mss when doing pmtud.
     pub scale_pacing_rate_by_mss: Option<bool>,
 
     /// Disable `has_stayed_long_enough_in_probe_down` which can cause ProbeDown
     /// to exit early.
     pub disable_probe_down_early_exit: Option<bool>,
+
+    /// Set the expected send time for packets when using BBR to `now`
+    /// instead of `get_next_release_time()`.  Setting the time based
+    /// on `get_next_release_time()` can result in artificially low
+    /// minRTT measurements which will make BBR misbehave.
+    pub time_sent_set_to_now: Option<bool>,
+
+    /// Selects the RTT jump detector implementation.
+    #[cfg(feature = "internal")]
+    pub rtt_jump_detector: Option<BbrRttJumpDetector>,
+}
+
+/// Selects which RTT jump detector BBR uses.
+///
+/// This functionality is experimental and will be removed in the future.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
+#[doc(hidden)]
+pub enum BbrRttJumpDetector {
+    /// Disables RTT jump detection.
+    #[default]
+    Disabled  = 0,
+
+    /// Connection-lifetime minimum baseline with a strict multiplicative jump
+    /// test and a sample/duration confirmation gate.
+    GlobalMin = 1,
+
+    /// 3-state Hidden Markov Model (HMM) decoded with a scaled forward filter.
+    Hmm       = 2,
+}
+
+#[doc(hidden)]
+impl FromStr for BbrRttJumpDetector {
+    type Err = crate::Error;
+
+    /// Converts a string to `BbrRttJumpDetector`.
+    ///
+    /// If `name` is not valid, `Error::CongestionControl` is returned.
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "none" => Ok(BbrRttJumpDetector::Disabled),
+            "global_min" => Ok(BbrRttJumpDetector::GlobalMin),
+            "hmm" => Ok(BbrRttJumpDetector::Hmm),
+
+            _ => Err(crate::Error::CongestionControl),
+        }
+    }
 }
 
 /// Controls BBR's bandwidth reduction strategy on congestion event.

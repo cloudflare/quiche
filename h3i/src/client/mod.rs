@@ -36,13 +36,16 @@ pub mod connection_summary;
 pub mod sync_client;
 
 use connection_summary::*;
-use qlog::events::h3::HttpHeader;
+use qlog::events::http3::FrameParsed;
+use qlog::events::http3::HttpHeader;
+use quiche::ConnectionError;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Instant;
 
 use crate::actions::h3::Action;
+use crate::actions::h3::ExpectedStreamSendResult;
 use crate::actions::h3::StreamEvent;
 use crate::actions::h3::StreamEventType;
 use crate::config::Config;
@@ -53,8 +56,7 @@ use crate::frame_parser::FrameParser;
 use crate::frame_parser::InterruptCause;
 use crate::recordreplay::qlog::QlogEvent;
 use crate::recordreplay::qlog::*;
-use qlog::events::h3::H3FrameParsed;
-use qlog::events::h3::Http3Frame;
+use qlog::events::http3::Http3Frame;
 use qlog::events::EventData;
 use qlog::streamer::QlogStreamer;
 use serde::Serialize;
@@ -63,7 +65,6 @@ use crate::quiche;
 use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
 use quiche::h3::NameValue;
-use quiche::ConnectionError;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 const QUIC_VERSION: u32 = 1;
@@ -73,7 +74,7 @@ fn handle_qlog(
     stream_id: u64,
 ) {
     if let Some(s) = qlog_streamer {
-        let ev_data = EventData::H3FrameParsed(H3FrameParsed {
+        let ev_data = EventData::Http3FrameParsed(FrameParsed {
             stream_id,
             frame: qlog_frame,
             ..Default::default()
@@ -105,8 +106,50 @@ pub(crate) trait Client {
 
 pub(crate) type StreamParserMap = HashMap<u64, FrameParser>;
 
-pub(crate) fn execute_action(
-    action: &Action, conn: &mut quiche::Connection,
+fn validate_stream_send_result(
+    result: quiche::Result<usize>, expected: &ExpectedStreamSendResult,
+    stream_id: u64,
+) {
+    match expected {
+        ExpectedStreamSendResult::Ok => {
+            result.unwrap_or_else(|err| {
+                panic!(
+                    "Expected stream_send on stream {} to succeed, but got: {:?}",
+                    stream_id, err
+                )
+            });
+        },
+        ExpectedStreamSendResult::OkExact(expected_bytes) => {
+            match result {
+                Ok(actual_bytes) if actual_bytes == *expected_bytes => {},
+                Ok(actual_bytes) => panic!(
+                    "Expected stream_send on stream {} to write {} bytes, got {}",
+                    stream_id, expected_bytes, actual_bytes
+                ),
+                Err(err) => panic!(
+                    "Expected stream_send on stream {} to write {} bytes, got error: {:?}",
+                    stream_id, expected_bytes, err
+                ),
+            }
+        },
+        ExpectedStreamSendResult::Error(expected_err) => {
+            match result {
+                Ok(written) => panic!(
+                    "Expected stream_send on stream {} to fail with {:?}, but wrote {} bytes",
+                    stream_id, expected_err, written
+                ),
+                Err(actual_err) if &actual_err == expected_err => {},
+                Err(actual_err) => panic!(
+                    "Expected stream_send on stream {} to fail with {:?}, got {:?}",
+                    stream_id, expected_err, actual_err
+                ),
+            }
+        },
+    }
+}
+
+pub(crate) fn execute_action<F: quiche::BufFactory>(
+    action: &Action, conn: &mut quiche::Connection<F>,
     stream_parsers: &mut StreamParserMap,
 ) {
     match action {
@@ -114,6 +157,7 @@ pub(crate) fn execute_action(
             stream_id,
             fin_stream,
             frame,
+            expected_result,
         } => {
             log::info!("frame tx id={stream_id} frame={frame:?}");
 
@@ -127,8 +171,10 @@ pub(crate) fn execute_action(
                     match event {
                         QlogEvent::Event { data, ex_data } => {
                             // skip dummy packet
-                            if matches!(data.as_ref(), EventData::PacketSent(..))
-                            {
+                            if matches!(
+                                data.as_ref(),
+                                EventData::QuicPacketSent(..)
+                            ) {
                                 continue;
                             }
 
@@ -139,7 +185,7 @@ pub(crate) fn execute_action(
                             // need to rewrite the event time
                             ev.time = Instant::now()
                                 .duration_since(s.start_time())
-                                .as_secs_f32() *
+                                .as_secs_f64() *
                                 1000.0;
                             s.add_event(ev).ok();
                         },
@@ -148,11 +194,9 @@ pub(crate) fn execute_action(
             }
             let len = frame.to_bytes(&mut b).unwrap();
 
-            // TODO - pass errors here to the connectionsummary, which means we
-            // can't initialize it when the connection's been shut
-            // down
-            conn.stream_send(*stream_id, &d[..len], *fin_stream)
-                .unwrap();
+            // TODO - consider storying result in ConnectionSummary too.
+            let result = conn.stream_send(*stream_id, &d[..len], *fin_stream);
+            validate_stream_send_result(result, expected_result, *stream_id);
 
             stream_parsers
                 .entry(*stream_id)
@@ -164,6 +208,7 @@ pub(crate) fn execute_action(
             fin_stream,
             headers,
             frame,
+            expected_result,
             ..
         } => {
             log::info!("headers frame tx stream={stream_id} hdrs={headers:?}");
@@ -178,8 +223,10 @@ pub(crate) fn execute_action(
                     match event {
                         QlogEvent::Event { data, ex_data } => {
                             // skip dummy packet
-                            if matches!(data.as_ref(), EventData::PacketSent(..))
-                            {
+                            if matches!(
+                                data.as_ref(),
+                                EventData::QuicPacketSent(..)
+                            ) {
                                 continue;
                             }
 
@@ -190,7 +237,7 @@ pub(crate) fn execute_action(
                             // need to rewrite the event time
                             ev.time = Instant::now()
                                 .duration_since(s.start_time())
-                                .as_secs_f32() *
+                                .as_secs_f64() *
                                 1000.0;
                             s.add_event(ev).ok();
                         },
@@ -198,8 +245,8 @@ pub(crate) fn execute_action(
                 }
             }
             let len = frame.to_bytes(&mut b).unwrap();
-            conn.stream_send(*stream_id, &d[..len], *fin_stream)
-                .unwrap();
+            let result = conn.stream_send(*stream_id, &d[..len], *fin_stream);
+            validate_stream_send_result(result, expected_result, *stream_id);
 
             stream_parsers
                 .entry(*stream_id)
@@ -210,6 +257,7 @@ pub(crate) fn execute_action(
             stream_id,
             fin_stream,
             stream_type,
+            expected_result,
         } => {
             log::info!(
                 "open uni stream_id={stream_id} ty={stream_type} fin={fin_stream}"
@@ -220,8 +268,8 @@ pub(crate) fn execute_action(
             b.put_varint(*stream_type).unwrap();
             let off = b.off();
 
-            conn.stream_send(*stream_id, &d[..off], *fin_stream)
-                .unwrap();
+            let result = conn.stream_send(*stream_id, &d[..off], *fin_stream);
+            validate_stream_send_result(result, expected_result, *stream_id);
 
             stream_parsers
                 .entry(*stream_id)
@@ -232,6 +280,7 @@ pub(crate) fn execute_action(
             stream_id,
             bytes,
             fin_stream,
+            expected_result,
         } => {
             log::info!(
                 "stream bytes tx id={} len={} fin={}",
@@ -239,7 +288,8 @@ pub(crate) fn execute_action(
                 bytes.len(),
                 fin_stream
             );
-            conn.stream_send(*stream_id, bytes, *fin_stream).unwrap();
+            let result = conn.stream_send(*stream_id, bytes, *fin_stream);
+            validate_stream_send_result(result, expected_result, *stream_id);
 
             stream_parsers
                 .entry(*stream_id)
@@ -266,9 +316,8 @@ pub(crate) fn execute_action(
                 *error_code,
             ) {
                 log::error!("can't send reset_stream: {e}");
-                // Clients can't reset streams they don't own. If we attempt to do
-                // this, stream_shutdown would fail, and we
-                // shouldn't create a parser.
+                // Clients cannot reset streams they do not own. If attempted,
+                // `stream_shutdown()` fails and no parser should be created.
                 return;
             }
 
@@ -293,8 +342,8 @@ pub(crate) fn execute_action(
                 log::error!("can't send stop_sending: {e}");
             }
 
-            // A `STOP_SENDING` should elicit a `RESET_STREAM` in response, which
-            // the frame parser can automatically handle.
+            // A `STOP_SENDING` should elicit a `RESET_STREAM` in response,
+            // which the frame parser can automatically handle.
             stream_parsers
                 .entry(*stream_id)
                 .or_insert_with(|| FrameParser::new(*stream_id));
@@ -316,8 +365,8 @@ pub(crate) fn execute_action(
     }
 }
 
-pub(crate) fn parse_streams<C: Client>(
-    conn: &mut quiche::Connection, client: &mut C,
+pub(crate) fn parse_streams<F: quiche::BufFactory, C: Client>(
+    conn: &mut quiche::Connection<F>, client: &mut C,
 ) -> Vec<StreamEvent> {
     let mut responded_streams: Vec<StreamEvent> =
         Vec::with_capacity(conn.readable().len());
@@ -456,14 +505,17 @@ fn handle_response_frame<C: Client>(
             let qlog_headers: Vec<HttpHeader> = enriched_headers
                 .headers()
                 .iter()
-                .map(|h| qlog::events::h3::HttpHeader {
-                    name: String::from_utf8_lossy(h.name()).into_owned(),
-                    value: String::from_utf8_lossy(h.value()).into_owned(),
+                .map(|h| qlog::events::http3::HttpHeader {
+                    name: Some(String::from_utf8_lossy(h.name()).into_owned()),
+                    name_bytes: None,
+                    value: Some(String::from_utf8_lossy(h.value()).into_owned()),
+                    value_bytes: None,
                 })
                 .collect();
 
             to_qlog = Some(Http3Frame::Headers {
                 headers: qlog_headers,
+                raw: None,
             });
         },
         H3iFrame::QuicheH3(quiche_frame) => {

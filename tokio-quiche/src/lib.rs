@@ -24,6 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#![allow(clippy::collapsible_match)]
+
 //! Bridging the gap between [quiche] and [tokio].
 //!
 //! tokio-quiche connects [quiche::Connection]s and [quiche::h3::Connection]s to
@@ -47,12 +49,8 @@
 //!
 //! # async fn example() -> tokio_quiche::QuicResult<()> {
 //! let socket = tokio::net::UdpSocket::bind("0.0.0.0:443").await?;
-//! let mut listeners = listen(
-//!     [socket],
-//!     ConnectionParams::default(),
-//!     SimpleConnectionIdGenerator,
-//!     DefaultMetrics,
-//! )?;
+//! let mut listeners =
+//!     listen([socket], ConnectionParams::default(), DefaultMetrics)?;
 //! let mut accept_stream = &mut listeners[0];
 //!
 //! while let Some(conn) = accept_stream.next().await {
@@ -76,14 +74,32 @@
 //! # Feature Flags
 //!
 //! tokio-quiche supports a number of feature flags to enable experimental
-//! features, performance enhancements, and additional telemetry. By default, no
-//! feature flags are enabled.
+//! features, performance enhancements, and additional telemetry.
+//!
+//! Enabled by default:
+//!
+//! - `qlog-gzip`: Forwards to the `qlog` crate's `gzip` feature so QLOG output
+//!   can be emitted as `.sqlog.gz` via `flate2`.
+//! - `qlog-zstd`: Forwards to the `qlog` crate's `zstd` feature so QLOG output
+//!   can be emitted as `.sqlog.zst`. Pulls in the `zstd` crate (C dependency
+//!   via `zstd-sys`).
+//!
+//! Both compression features may be enabled together; the algorithm
+//! is selected per connection at runtime via
+//! [`settings::QuicSettings::qlog_compression`]. Disable both with
+//! `default-features = false` to opt out of the extra dependencies;
+//! the default `QlogCompression::None` keeps writing raw `.sqlog`
+//! files in that configuration.
+//!
+//! Off by default:
 //!
 //! - `rpk`: Support for raw public keys (RPK) in QUIC handshakes (via
 //!   [boring]).
 //! - `gcongestion`: Replace quiche's original congestion control implementation
 //!   with one adapted from google/quiche.
-//! - `zero-copy`: Use zero-copy sends with quiche (implies `gcongestion`).
+//! - `zero-copy`: Deprecated. Zero-copy sends are now always enabled. This
+//!   feature is kept for backwards compatibility and only enables
+//!   `gcongestion`.
 //! - `perf-quic-listener-metrics`: Extra telemetry for QUIC handshake
 //!   durations, including protocol overhead and network delays.
 //! - `tokio-task-metrics`: Scheduling & poll duration histograms for tokio
@@ -105,7 +121,6 @@ mod result;
 pub mod settings;
 pub mod socket;
 
-pub use buffer_pool;
 pub use datagram_socket;
 
 use foundations::telemetry::settings::LogVerbosity;
@@ -154,7 +169,7 @@ pub type QuicConnectionStream<M> =
 /// previously-yielded connections are closed.
 pub fn listen_with_capabilities<M>(
     sockets: impl IntoIterator<Item = QuicListener>, params: ConnectionParams,
-    cid_generator: impl ConnectionIdGenerator<'static> + Clone, metrics: M,
+    metrics: M,
 ) -> io::Result<Vec<QuicConnectionStream<M>>>
 where
     M: Metrics,
@@ -165,14 +180,7 @@ where
 
     sockets
         .into_iter()
-        .map(|s| {
-            crate::quic::start_listener(
-                s,
-                &params,
-                cid_generator.clone(),
-                metrics.clone(),
-            )
-        })
+        .map(|s| crate::quic::start_listener(s, &params, metrics.clone()))
         .collect()
 }
 
@@ -181,8 +189,7 @@ where
 /// Each socket is converted into a [`QuicListener`] with defaulted socket
 /// parameters. The listeners are then passed to [`listen_with_capabilities`].
 pub fn listen<S, M>(
-    sockets: impl IntoIterator<Item = S>, params: ConnectionParams,
-    cid_generator: impl ConnectionIdGenerator<'static> + Clone, metrics: M,
+    sockets: impl IntoIterator<Item = S>, params: ConnectionParams, metrics: M,
 ) -> io::Result<Vec<QuicConnectionStream<M>>>
 where
     S: TryInto<QuicListener, Error = io::Error>,
@@ -199,7 +206,7 @@ where
         })
         .collect::<io::Result<_>>()?;
 
-    listen_with_capabilities(quic_sockets, params, cid_generator, metrics)
+    listen_with_capabilities(quic_sockets, params, metrics)
 }
 
 static GLOBAL_LOGGER_ONCE: Once = Once::new();
@@ -239,11 +246,9 @@ pub(crate) fn capture_quiche_logs() {
 
         slog_stdlog::init_with_level(normalized_level).unwrap();
 
-        // The slog Drain becomes `slog::Discard` when the scope_guard is dropped,
-        // and you can't set the global logger again because of a mandate
-        // in the `log` crate. We have to manually `forget` the scope
-        // guard so that the logger remains registered for the duration of the
-        // process.
-        std::mem::forget(scope_guard)
+        // Dropping the scope guard replaces the slog Drain with
+        // `slog::Discard`. The `log` crate cannot reset the global
+        // logger, so retain the guard for the process lifetime.
+        let _scope_guard = std::mem::ManuallyDrop::new(scope_guard);
     });
 }

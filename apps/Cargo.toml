@@ -9,15 +9,15 @@ keywords = { workspace = true }
 categories = { workspace = true }
 publish = false
 
+[lints]
+workspace = true
+
 [features]
 # Enable quiche's fuzzing mode.
 fuzzing = ["quiche/fuzzing"]
 
 # Enable qlog support.
 qlog = ["quiche/qlog"]
-
-# Use BoringSSL provided by the boring crate.
-boringssl-boring-crate = ["quiche/boringssl-boring-crate"]
 
 # Enable sfv support.
 sfv = ["quiche/sfv"]

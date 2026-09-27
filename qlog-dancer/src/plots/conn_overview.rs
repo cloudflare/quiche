@@ -26,10 +26,9 @@
 
 use full_palette::PURPLE_500;
 use minmax::XMinMax;
-use plotters::coord::types::RangedCoordf32;
+use plotters::coord::types::RangedCoordf64;
 use plotters::coord::types::RangedCoordu64;
 use plotters::coord::Shift;
-use plotters::prelude::*;
 
 use crate::plots::colors::*;
 use crate::plots::*;
@@ -110,7 +109,7 @@ fn draw_sent_max_data<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     draw_line(
@@ -125,7 +124,7 @@ fn draw_cumulative_sent_max_data<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     draw_line(
@@ -140,7 +139,7 @@ fn draw_sent_max_stream_data<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     let mut label = Some("Sent MAX_STREAM_DATA");
@@ -156,7 +155,7 @@ fn draw_buffer_reads<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     let mut label = Some("Stream buffer read");
@@ -172,7 +171,7 @@ fn draw_cumulative_buffer_reads<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     draw_line(
@@ -187,7 +186,7 @@ fn draw_buffer_writes<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     let mut label = Some("Stream buffer write");
@@ -203,7 +202,7 @@ fn draw_cumulative_buffer_writes<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     let data = &ss.sum_stream_buffer_writes;
@@ -216,7 +215,7 @@ fn draw_buffer_dropped<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     let mut label = Some("Stream buffer dropped");
@@ -232,7 +231,7 @@ fn draw_cumulative_buffer_dropped<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     let data = &ss.sum_stream_buffer_dropped;
@@ -245,7 +244,7 @@ fn draw_sent_stream_data<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     let mut label = Some("Sent stream data");
@@ -261,7 +260,7 @@ fn draw_received_max_data<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     draw_line(
@@ -276,7 +275,7 @@ fn draw_cumulative_received_stream_max_data<DB: DrawingBackend>(
     ss: &SeriesStore,
     stream_chart: &mut ChartContext<
         DB,
-        Cartesian2d<RangedCoordf32, RangedCoordu64>,
+        Cartesian2d<RangedCoordf64, RangedCoordu64>,
     >,
 ) {
     draw_line(
@@ -291,7 +290,7 @@ fn draw_cumulative_received_stream_max_data<DB: DrawingBackend>(
 fn draw_main_plot<'a, DB: DrawingBackend + 'a>(
     filename: &str, params: &PlotParameters, axis: XYMinMax, ss: &SeriesStore,
     plot: &plotters::drawing::DrawingArea<DB, Shift>,
-) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>> {
+) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>> {
     let mut builder = ChartBuilder::on(plot);
     builder
         .x_label_area_size(params.area_margin.x)
@@ -325,10 +324,7 @@ fn draw_main_plot<'a, DB: DrawingBackend + 'a>(
     draw_cumulative_buffer_dropped(ss, &mut chart);
     draw_sent_stream_data(ss, &mut chart);
     draw_received_max_data(ss, &mut chart);
-    draw_cumulative_received_stream_max_data(
-        &ss.sum_received_stream_max_data,
-        &mut chart,
-    );
+    draw_cumulative_received_stream_max_data(ss, &mut chart);
 
     if params.display_legend {
         chart
@@ -347,7 +343,7 @@ fn draw_main_plot<'a, DB: DrawingBackend + 'a>(
 fn draw_stream_send_plot<'a, DB: DrawingBackend + 'a>(
     params: &PlotParameters, axis: XYMinMax, ss: &SeriesStore,
     plot: &plotters::drawing::DrawingArea<DB, Shift>,
-) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>> {
+) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>> {
     let mut builder = ChartBuilder::on(plot);
     builder
         .x_label_area_size(params.area_margin.x)
@@ -397,7 +393,7 @@ fn draw_stream_send_plot<'a, DB: DrawingBackend + 'a>(
 fn draw_stream_recv_plot<'a, DB: DrawingBackend + 'a>(
     params: &PlotParameters, axis: XYMinMax, ss: &SeriesStore,
     plot: &plotters::drawing::DrawingArea<DB, Shift>,
-) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf32, RangedCoordu64>> {
+) -> ChartContext<'a, DB, Cartesian2d<RangedCoordf64, RangedCoordu64>> {
     let mut builder = ChartBuilder::on(plot);
     builder
         .x_label_area_size(params.area_margin.x)
@@ -520,7 +516,7 @@ pub fn plot_connection_overview(
 #[cfg(target_arch = "wasm32")]
 pub fn plot_main_plot<'a>(
     params: &PlotParameters, filename: &str, ss: &SeriesStore, canvas_id: &str,
-) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf32, RangedCoordu64>>
+) -> ChartContext<'a, CanvasBackend, Cartesian2d<RangedCoordf64, RangedCoordu64>>
 {
     let root =
         make_chart_canvas_area(&canvas_id, params.colors, params.chart_margin);
@@ -528,7 +524,7 @@ pub fn plot_main_plot<'a>(
     let stream_y_max = if let Some(y_max) = params.clamp.stream_y_max {
         y_max
     } else {
-        ss.y_max_stream_plot
+        ss.y_max_stream_send_plot.max(ss.y_max_stream_recv_plot)
     };
 
     let stream_axis = XYMinMax::init(params, ss, stream_y_max);

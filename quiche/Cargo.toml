@@ -1,6 +1,6 @@
 [package]
 name = "quiche"
-version = "0.24.6"
+version = "0.30.0"
 description = "🥧 Savoury implementation of the QUIC transport protocol and HTTP/3"
 repository = { workspace = true }
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
@@ -14,30 +14,43 @@ include = [
   "/*.md",
   "/*.toml",
   "/COPYING",
-  "/deps/boringssl/**/*.[chS]",
-  "/deps/boringssl/**/*.asm",
-  "/deps/boringssl/src/**/*.cc",
-  "/deps/boringssl/**/CMakeLists.txt",
-  "/deps/boringssl/**/sources.cmake",
-  "/deps/boringssl/LICENSE",
   "/examples",
   "/include",
   "/quiche.svg",
   "/src",
 ]
-rust-version = "1.85"
+rust-version = "1.88"
+
+[lints]
+workspace = true
 
 [features]
-default = ["boringssl-vendored"]
-
-# Build the vendored BoringSSL library.
-boringssl-vendored = []
+default = ["boringssl-boring-crate"]
 
 # Use the BoringSSL library provided by the boring crate.
-boringssl-boring-crate = ["boring", "foreign-types-shared"]
+#
+# Both `boring` 4.x (>= 4.19) and 5.x are supported. Cargo's resolver
+# picks the version based on the lockfile and downstream constraints;
+# `build.rs` detects which major version was selected at compile time
+# (via `DEP_BORINGSSL_VERSION_MAJOR` from `boring-sys` >= 5.2) and
+# emits a `cfg(boring_v5)` flag for the 5.x case. 4.x is the assumed
+# default. The two majors differ in their default TLS curve list (5.x
+# advertises post-quantum key shares) and in their Rust API for raw
+# public keys; see `tokio-quiche/src/settings/config.rs` for the
+# per-version code.
+#
+# Downstream code that depends on `boring` directly (e.g. to construct
+# an `SslContextBuilder` for `Config::with_boring_ssl_ctx_builder`)
+# will resolve to the same `boring` version as quiche, since
+# `boring-sys` uses `links = "boringssl"` and cargo allows only one
+# copy in the dep graph.
+boringssl-boring-crate = ["boring", "boring-sys", "foreign-types-shared"]
 
-# Build quiche against OpenSSL instead of BoringSSL.
-openssl = ["pkg-config"]
+# Allow client connections to provide a custom DCID when initiating a
+# connection. Be aware that RFC 9000 places requirements for unpredictability and
+# length on the client DCID field. Enabling this feature can be dangerous if these
+# requirements are not satisfied.
+custom-client-dcid = []
 
 # Generate pkg-config metadata file for libquiche.
 pkg-config-meta = []
@@ -55,30 +68,42 @@ ffi = ["dep:cdylib-link-lines"]
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
 
+# Enable qlog support with serde_json for extension data
+qlog = ["dep:qlog", "dep:serde", "dep:serde_json", "dep:serde_with"]
+
+[package.metadata.cargo-machete]
+# boring-sys is a dependency solely for its `DEP_BORINGSSL_VERSION_MAJOR`
+# env var, which build.rs reads to detect boring 5.x. It is never
+# imported in source code.
+ignored = ["boring-sys"]
+
 [package.metadata.release]
 tag-prefix = ""
 
 [package.metadata.docs.rs]
 no-default-features = true
-features = ["boringssl-boring-crate", "qlog"]
+features = ["boringssl-boring-crate", "qlog", "custom-client-dcid"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [build-dependencies]
-cmake = "0.1"
-pkg-config = { version = "0.3", optional = true }
 cdylib-link-lines = { version = "0.1", optional = true }
 
 [dependencies]
+bytes = { workspace = true }
 boring = { workspace = true, optional = true }
-debug_panic = { version = "0.2.1" }
+boring-sys = { workspace = true, optional = true }
+debug_panic = { workspace = true }
 either = { version = "1.8", default-features = false }
 foreign-types-shared = { version = "0.3.0", optional = true }
-intrusive-collections = "0.9.5"
+intrusive-collections = "0.10.3"
 libc = { workspace = true }
 libm = "0.2"
 log = { workspace = true, features = ["std"] }
 octets = { workspace = true, features = ["huffman_hpack"] }
 qlog = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { version = "1.0", optional = true }
+serde_with = { workspace = true, features = ["macros"], optional = true }
 sfv = { version = "0.9", optional = true }
 slab = "0.4"
 smallvec = { workspace = true, features = ["union"] }

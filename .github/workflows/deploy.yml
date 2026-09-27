@@ -14,14 +14,14 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@nightly
 
       - name: Install qlog-dancer dependencies
-        run: sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install libexpat1-dev libfreetype6-dev libfontconfig1-dev
 
       - name: Run cargo doc
         run: cargo doc --no-deps --all-features
@@ -40,8 +40,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Build Docker images
         run: make docker-build

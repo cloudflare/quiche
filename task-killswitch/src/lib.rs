@@ -97,6 +97,7 @@ impl TaskKillswitch {
         self.activated.load(Ordering::Relaxed)
     }
 
+    #[track_caller]
     fn spawn_task(
         &self, fut: impl Future<Output = ()> + Send + 'static,
     ) -> Option<Id> {
@@ -116,7 +117,7 @@ impl TaskKillswitch {
 
         let res = self.storage.add_task_if(handle, || !self.was_activated());
         if let Err(handle) = res {
-            // Killswitch was activated by the time we got a lock on the map shard
+            // The killswitch was activated before the map shard was locked.
             handle.abort();
             return None;
         }
@@ -220,6 +221,7 @@ static TASK_KILLSWITCH: LazyLock<TaskKillswitch> =
 ///
 /// Under the hood, [`tokio::spawn`] schedules the actual execution.
 #[inline]
+#[track_caller]
 pub fn spawn_with_killswitch(
     fut: impl Future<Output = ()> + Send + 'static,
 ) -> Option<Id> {

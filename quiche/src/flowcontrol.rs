@@ -59,7 +59,7 @@ impl FlowControl {
         Self {
             max_data,
 
-            window,
+            window: std::cmp::min(window, max_window),
 
             max_window,
 
@@ -115,19 +115,21 @@ impl FlowControl {
     pub fn autotune_window(&mut self, now: Instant, rtt: Duration) {
         if let Some(last_update) = self.last_update {
             if now - last_update < rtt * WINDOW_TRIGGER_FACTOR {
-                self.window = std::cmp::min(
-                    self.window * WINDOW_INCREASE_FACTOR,
-                    self.max_window,
-                );
+                self.set_window(self.window * WINDOW_INCREASE_FACTOR);
             }
         }
+    }
+
+    fn set_window(&mut self, window: u64) {
+        self.window = std::cmp::min(window, self.max_window);
     }
 
     /// Make sure the lower bound of the window is same to
     /// the current window.
     pub fn ensure_window_lower_bound(&mut self, min_window: u64) {
         if min_window > self.window {
-            self.window = min_window;
+            // ... we still need to clamp to `max_window`
+            self.set_window(min_window);
         }
     }
 }
@@ -135,6 +137,13 @@ impl FlowControl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn max_window_in_new() {
+        let fc = FlowControl::new(100, 100, 50);
+        assert_eq!(fc.max_data(), 100);
+        assert_eq!(fc.window, 50);
+    }
 
     #[test]
     fn max_data() {
@@ -222,5 +231,9 @@ mod tests {
         // Window changed to the new value.
         fc.ensure_window_lower_bound(w * 2);
         assert_eq!(fc.window(), 40);
+
+        // Window clamped to max_window
+        fc.ensure_window_lower_bound(101);
+        assert_eq!(fc.window(), 100);
     }
 }

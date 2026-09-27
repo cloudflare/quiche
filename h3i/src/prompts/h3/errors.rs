@@ -84,12 +84,12 @@ pub const APPLICATION: &str = "application";
 pub fn prompt_transport_or_app_error() -> InquireResult<(ErrorSpace, u64)> {
     let trans_or_app = prompt_transport_or_app()?;
     let space = if trans_or_app == TRANSPORT {
-        ErrorSpace::TransportError
+        ErrorSpace::Transport
     } else {
-        ErrorSpace::ApplicationError
+        ErrorSpace::Application
     };
 
-    let error_code = if matches!(space, ErrorSpace::TransportError) {
+    let error_code = if matches!(space, ErrorSpace::Transport) {
         let error_code = Text::new("error code:")
             .with_validator(validate_transport_error_code)
             .with_autocomplete(&transport_error_code_suggestor)

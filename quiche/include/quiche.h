@@ -134,6 +134,9 @@ enum quiche_error {
     // The peer send an ACK frame for a skipped packet used for Optimistic ACK
     // mitigation.
     QUICHE_ERR_OPTIMISTIC_ACK_DETECTED = -22,
+
+    /// An invalid DCID was used when connecting to a remote peer.
+    QUICHE_ERR_INVALID_DCID_INITIALIZATION = -23,
 };
 
 // Returns a human readable string with the quiche version number.
@@ -164,6 +167,9 @@ int quiche_config_load_verify_locations_from_file(quiche_config *config,
 // Specifies a directory where trusted CA certificates are stored for the purposes of certificate verification.
 int quiche_config_load_verify_locations_from_directory(quiche_config *config,
                                                        const char *path);
+
+// Configures the TLS curve preference list (colon-separated, e.g. "X25519MLKEM768:X25519:P-256:P-384").
+int quiche_config_set_curves_list(quiche_config *config, const char *curves);
 
 // Configures whether to verify the peer's certificate.
 void quiche_config_verify_peer(quiche_config *config, bool v);
@@ -234,8 +240,7 @@ void quiche_config_set_initial_congestion_window_packets(quiche_config *config, 
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
     QUICHE_CC_CUBIC = 1,
-    QUICHE_CC_BBR = 2,
-    QUICHE_CC_BBR2 = 3,
+    QUICHE_CC_BBR2_GCONGESTION = 4,
 };
 
 // Sets the congestion control algorithm used.
@@ -246,6 +251,14 @@ void quiche_config_enable_hystart(quiche_config *config, bool v);
 
 // Configures whether to enable pacing (enabled by default).
 void quiche_config_enable_pacing(quiche_config *config, bool v);
+
+// Configures whether to enable the CUBIC idle restart fix (enabled by default).
+void quiche_config_set_enable_cubic_idle_restart_fix(quiche_config *config,
+                                                     bool v);
+
+// Deprecated: this is now always enabled and this function is a no-op.
+void quiche_config_set_use_initial_max_data_as_flow_control_win(
+    quiche_config *config, bool v);
 
 // Configures max pacing rate to be used.
 void quiche_config_set_max_pacing_rate(quiche_config *config, uint64_t v);
@@ -322,6 +335,13 @@ quiche_conn *quiche_conn_new_with_tls(const uint8_t *scid, size_t scid_len,
                                       const struct sockaddr *peer, socklen_t peer_len,
                                       const quiche_config *config, void *ssl,
                                       bool is_server);
+
+// Needs to have custom-client-dcid feature enabled on compile time. Otherwise will always return NULL.
+quiche_conn *quiche_conn_new_with_tls_and_client_dcid(const uint8_t *scid, size_t scid_len,
+                                      const uint8_t *dcid, size_t dcid_len,
+                                      const struct sockaddr *local, socklen_t local_len,
+                                      const struct sockaddr *peer, socklen_t peer_len,
+                                      const quiche_config *config, void *ssl);
 
 // Enables keylog to the specified file path. Returns true on success.
 bool quiche_conn_set_keylog_path(quiche_conn *conn, const char *path);
@@ -420,7 +440,7 @@ int quiche_conn_stream_shutdown(quiche_conn *conn, uint64_t stream_id,
                                 enum quiche_shutdown direction, uint64_t err);
 
 // Returns the stream's send capacity in bytes.
-ssize_t quiche_conn_stream_capacity(const quiche_conn *conn, uint64_t stream_id);
+ssize_t quiche_conn_stream_capacity(quiche_conn *conn, uint64_t stream_id);
 
 // Returns true if the stream has data that can be read.
 bool quiche_conn_stream_readable(const quiche_conn *conn, uint64_t stream_id);
@@ -562,6 +582,9 @@ typedef struct {
     // The number of QUIC packets that were lost.
     size_t lost;
 
+    // The number of QUIC packets that were marked as lost but later acked.
+    size_t spurious_lost;
+
     // The number of sent QUIC packets with retransmitted data.
     size_t retrans;
 
@@ -580,6 +603,12 @@ typedef struct {
     // The number of stream bytes retransmitted.
     uint64_t stream_retrans_bytes;
 
+    // The number of DATAGRAM frames received.
+    size_t dgram_recv;
+
+    // The number of DATAGRAM frames sent.
+    size_t dgram_sent;
+
     // The number of known paths for the connection.
     size_t paths_count;
 
@@ -594,6 +623,41 @@ typedef struct {
 
     // The number of streams stopped by remote.
     uint64_t stopped_stream_count_remote;
+
+    // The number of DATA_BLOCKED frames sent due to hitting the connection
+    // flow control limit.
+    uint64_t data_blocked_sent_count;
+
+    // The number of STREAM_DATA_BLOCKED frames sent due to a stream hitting
+    // the stream flow control limit.
+    uint64_t stream_data_blocked_sent_count;
+
+    // The number of DATA_BLOCKED frames received from the remote.
+    uint64_t data_blocked_recv_count;
+
+    // The number of STREAM_DATA_BLOCKED frames received from the remote.
+    uint64_t stream_data_blocked_recv_count;
+
+    // The number of STREAMS_BLOCKED frames for bidirectional streams received
+    // from the remote, indicating the peer is blocked on opening new
+    // bidirectional streams.
+    uint64_t streams_blocked_bidi_recv_count;
+
+    // The number of STREAMS_BLOCKED frames for unidirectional streams received
+    // from the remote, indicating the peer is blocked on opening new
+    // unidirectional streams.
+    uint64_t streams_blocked_uni_recv_count;
+
+    // The total number of PATH_CHALLENGE frames that were received.
+    uint64_t path_challenge_rx_count;
+
+    // Total duration during which this side of the connection was
+    // actively sending bytes or waiting for those bytes to be acked.
+    uint64_t bytes_in_flight_duration_msec;
+
+    // True if the send buffer is in an inconsistent state, which could lead to
+    // connection stalls  or excess buffering.
+    bool tx_buffered_inconsistent;
 } quiche_stats;
 
 // Collects and returns statistics about the connection.
@@ -671,11 +735,28 @@ typedef struct {
     // The number of sent QUIC packets with retransmitted data on this path.
     size_t retrans;
 
+    // The number of times PTO (probe timeout) fired.
+    //
+    // Loss usually happens in a burst so the number of packets lost will
+    // depend on the volume of inflight packets at the time of loss (which
+    // can be arbitrary). PTO count measures the number of loss events and
+    // provides a normalized loss metric.
+    size_t total_pto_count;
+
+    /// The number of DATAGRAM frames received.
+    size_t dgram_recv;
+
+    /// The number of DATAGRAM frames sent.
+    size_t dgram_sent;
+
     // The estimated round-trip time of the path (in nanoseconds).
     uint64_t rtt;
 
     // The minimum round-trip time observed (in nanoseconds).
     uint64_t min_rtt;
+
+    // The maximum round-trip time observed (in nanoseconds).
+    uint64_t max_rtt;
 
     // The estimated round-trip time variation (in nanoseconds).
     uint64_t rttvar;
@@ -700,6 +781,13 @@ typedef struct {
 
     // The most recent data delivery rate estimate in bytes/s.
     uint64_t delivery_rate;
+
+    /// The maximum bandwidth estimate for the connection in bytes/s.
+    uint64_t max_bandwidth;
+
+    // The congestion window in bytes at the end of the startup or slow start,
+    // or 0 if the connection is still in startup.
+    uint64_t startup_exit_cwnd;
 } quiche_path_stats;
 
 
@@ -756,8 +844,10 @@ ssize_t quiche_conn_send_ack_eliciting_on_path(quiche_conn *conn,
                            const struct sockaddr *local, socklen_t local_len,
                            const struct sockaddr *peer, socklen_t peer_len);
 
-// Returns true if there are retired source connection ids and fill the parameters
-bool quiche_conn_retired_scid_next(const quiche_conn *conn, const uint8_t **out, size_t *out_len);
+// Drains and collects all currently retired source connection IDs into an
+// iterator. The caller must use quiche_connection_id_iter_next() to iterate and
+// quiche_connection_id_iter_free() to free the iterator.
+quiche_connection_id_iter *quiche_conn_retired_scid_iter(quiche_conn *conn);
 
 // Returns the number of source Connection IDs that are retired.
 size_t quiche_conn_retired_scids(const quiche_conn *conn);
@@ -802,6 +892,7 @@ enum quiche_path_event_type {
     QUICHE_PATH_EVENT_CLOSED,
     QUICHE_PATH_EVENT_REUSED_SOURCE_CONNECTION_ID,
     QUICHE_PATH_EVENT_PEER_MIGRATED,
+    QUICHE_PATH_EVENT_PMTU_UPDATED,
 };
 
 typedef struct quiche_path_event quiche_path_event;
@@ -839,6 +930,13 @@ void quiche_path_event_reused_source_connection_id(const quiche_path_event *ev, 
 void quiche_path_event_peer_migrated(const quiche_path_event *ev,
                            struct sockaddr_storage *local, socklen_t *local_len,
                            struct sockaddr_storage *peer, socklen_t *peer_len);
+
+// Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_PMTU_UPDATED.
+// Sets "pmtu" to the current validated PMTU limit for normal application traffic.
+void quiche_path_event_pmtu_updated(const quiche_path_event *ev,
+                           struct sockaddr_storage *local, socklen_t *local_len,
+                           struct sockaddr_storage *peer, socklen_t *peer_len,
+                           size_t *pmtu);
 
 // Frees the path event object.
 void quiche_path_event_free(quiche_path_event *ev);
@@ -1038,6 +1136,9 @@ void quiche_h3_config_set_qpack_blocked_streams(quiche_h3_config *config, uint64
 
 // Sets the `SETTINGS_ENABLE_CONNECT_PROTOCOL` setting.
 void quiche_h3_config_enable_extended_connect(quiche_h3_config *config, bool enabled);
+
+// Sets the maximum size for the payload of PRIORITY_UPDATE frames.
+void quiche_h3_config_set_max_priority_update_size(quiche_h3_config *config, uint64_t v);
 
 // Frees the HTTP/3 config object.
 void quiche_h3_config_free(quiche_h3_config *config);

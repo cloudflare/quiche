@@ -27,8 +27,6 @@
 //! Responsible for creating a [tokio_quiche::quic::QuicheConnection] and
 //! yielding I/O to tokio-quiche.
 
-use buffer_pool::ConsumeBuffer;
-use buffer_pool::Pooled;
 use log;
 use quiche::PathStats;
 use quiche::Stats;
@@ -43,7 +41,6 @@ use tokio::sync::oneshot;
 use tokio::time::sleep;
 use tokio::time::sleep_until;
 use tokio::time::Instant;
-use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::metrics::Metrics;
 use tokio_quiche::quic::HandshakeInfo;
 use tokio_quiche::quic::QuicheConnection;
@@ -121,6 +118,7 @@ fn create_config(args: &H3iConfig) -> QuicSettings {
     quic_settings.verify_peer = args.verify_peer;
     quic_settings.max_idle_timeout =
         Some(Duration::from_millis(args.idle_timeout));
+    quic_settings.send_capacity_factor = args.send_capacity_factor;
     quic_settings.max_recv_udp_payload_size = MAX_DATAGRAM_SIZE;
     quic_settings.max_send_udp_payload_size = MAX_DATAGRAM_SIZE;
     quic_settings.initial_max_data = 10_000_000;
@@ -135,6 +133,7 @@ fn create_config(args: &H3iConfig) -> QuicSettings {
     quic_settings.active_connection_id_limit = 0;
     quic_settings.max_connection_window = args.max_window;
     quic_settings.max_stream_window = args.max_stream_window;
+    quic_settings.enable_send_streams_blocked = true;
     quic_settings.grease = false;
 
     quic_settings.capture_quiche_logs = true;
@@ -187,8 +186,8 @@ impl Future for BuildingConnectionSummary {
         mut self: Pin<&mut Self>, cx: &mut Context<'_>,
     ) -> Poll<Self::Output> {
         while let Poll::Ready(Some(record)) = self.rx.poll_recv(cx) {
-            // Grab all records received from the current event loop iteration and
-            // insert them into the in-progress summary
+            // Add all records from the current event loop iteration to the
+            // in-progress summary.
             let summary = self.summary.as_mut().expect("summary already taken");
 
             match record {
@@ -223,7 +222,6 @@ impl Future for BuildingConnectionSummary {
 }
 
 pub struct H3iDriver {
-    buffer: Pooled<ConsumeBuffer>,
     actions: Vec<Action>,
     actions_executed: usize,
     next_fire_time: Instant,
@@ -247,7 +245,6 @@ impl H3iDriver {
 
         (
             Self {
-                buffer: BufFactory::get_max_buf(),
                 actions,
                 actions_executed: 0,
                 next_fire_time: Instant::now(),
@@ -285,6 +282,13 @@ impl H3iDriver {
                     WaitType::StreamEvent(event) => {
                         self.waiting_for_responses.add_wait(event);
                     },
+                    WaitType::CanOpenNumStreams(required_streams) => {
+                        log::info!(
+                            "h3i: waiting for peer_streams_left_bidi >= {required_streams:?}"
+                        );
+                        self.waiting_for_responses
+                            .set_required_stream_quota(*required_streams);
+                    },
                 }
             } else {
                 break;
@@ -316,23 +320,24 @@ impl ApplicationOverQuic for H3iDriver {
     }
 
     fn should_act(&self) -> bool {
-        // Even if the connection wasn't established, we should still send
-        // terminal records to the summary
+        // Send terminal records even without an established connection.
         true
     }
 
     fn process_reads(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()> {
         log::trace!("h3i: process_reads");
 
-        // This is executed in process_reads so that work_loop can clear any waits
-        // on the current event loop iteration - if it was in process_writes, we
-        // could potentially miss waits and hang the client.
+        // Register waits during `process_reads()` so `work_loop()` can clear
+        // them during the current event loop iteration. Registering them during
+        // `process_writes()` could miss waits and hang the client.
         self.register_waits();
 
         let stream_events = parse_streams(qconn, self);
         for event in stream_events {
             self.waiting_for_responses.remove_wait(event);
         }
+
+        self.waiting_for_responses.check_can_open_num_streams(qconn);
 
         Ok(())
     }
@@ -374,10 +379,9 @@ impl ApplicationOverQuic for H3iDriver {
                     }
                 },
                 Action::Wait { .. } => {
-                    // Break out of the write phase if we see a wait, since waits
-                    // have to be registered in the read
-                    // phase. The actions_executed pointer will be
-                    // incremented there as well
+                    // Waits are registered during the read phase. Stop here so
+                    // that phase can register this wait and increment
+                    // `actions_executed`.
                     break;
                 },
                 Action::FlushPackets => {
@@ -398,8 +402,8 @@ impl ApplicationOverQuic for H3iDriver {
         let sleep_fut = if !self.should_fire() {
             sleep_until(self.next_fire_time)
         } else {
-            // If we have nothing to send, allow the IOW to resolve wait_for_data
-            // on its own (whether via Quiche timer or incoming data).
+            // If there is nothing to send, let the IOW resolve `wait_for_data`
+            // through a QUIC timer or incoming data.
             sleep(Duration::MAX)
         };
 
@@ -417,10 +421,6 @@ impl ApplicationOverQuic for H3iDriver {
         }
 
         Ok(())
-    }
-
-    fn buffer(&mut self) -> &mut [u8] {
-        &mut self.buffer
     }
 
     fn on_conn_close<M: Metrics>(

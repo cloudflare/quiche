@@ -28,7 +28,6 @@ use crate::fixtures::*;
 
 use futures::SinkExt;
 
-use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::http3::driver::OutboundFrame;
@@ -39,7 +38,7 @@ use tokio_quiche::quiche::h3::Header;
 async fn test_additional_headers() {
     let hook = TestConnectionHook::new();
 
-    let url = start_server_with_settings(
+    let (url, _) = start_server_with_settings(
         QuicSettings::default(),
         Http3Settings::default(),
         hook,
@@ -48,11 +47,10 @@ async fn test_additional_headers() {
 
             while let Some(event) = event_rx.recv().await {
                 match event {
-                    ServerH3Event::Core(event) => match event {
-                        H3Event::ConnectionShutdown(_) => break,
-
-                        _ => (),
-                    },
+                    ServerH3Event::Core(event) =>
+                        if let H3Event::ConnectionShutdown(_) = event {
+                            break;
+                        },
 
                     ServerH3Event::Headers {
                         incoming_headers, ..
@@ -81,12 +79,9 @@ async fn test_additional_headers() {
                         .unwrap();
 
                         // Send fin
-                        send.send(OutboundFrame::Body(
-                            BufFactory::get_empty_buf(),
-                            true,
-                        ))
-                        .await
-                        .unwrap();
+                        send.send(OutboundFrame::Body(Default::default(), true))
+                            .await
+                            .unwrap();
                     },
                 }
             }

@@ -26,6 +26,7 @@
 
 use std::fmt::Debug;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::sync::mpsc;
@@ -35,6 +36,7 @@ use crate::quic::connection::HandshakeError;
 use crate::quic::connection::HandshakeInfo;
 use crate::quic::connection::Incoming;
 use crate::quic::connection::QuicConnectionStatsShared;
+use crate::quic::hooks::ConnectionHook;
 use crate::quic::QuicheConnection;
 use crate::QuicResult;
 
@@ -82,17 +84,7 @@ pub struct ConnectionStageContext<A> {
     pub application: A,
     pub incoming_pkt_receiver: mpsc::Receiver<Incoming>,
     pub stats: QuicConnectionStatsShared,
-}
-
-impl<A> ConnectionStageContext<A>
-where
-    A: ApplicationOverQuic,
-{
-    // TODO: remove when AOQ::buffer() situation is sorted - that method shouldn't
-    // exist
-    pub fn buffer(&mut self) -> &mut [u8] {
-        self.application.buffer()
-    }
+    pub connection_hook: Option<Arc<dyn ConnectionHook + Send + Sync + 'static>>,
 }
 
 #[derive(Debug)]
@@ -122,7 +114,9 @@ impl ConnectionStage for Handshake {
         &mut self, qconn: &mut QuicheConnection,
         _ctx: &mut ConnectionStageContext<A>,
     ) -> ControlFlow<QuicResult<()>> {
-        if qconn.is_established() {
+        // Transition to RunningApplication if we have 1-RTT keys (handshake is
+        // complete) or if we have 0-RTT keys (in early data).
+        if qconn.is_established() || qconn.is_in_early_data() {
             ControlFlow::Break(Ok(()))
         } else {
             ControlFlow::Continue(())
