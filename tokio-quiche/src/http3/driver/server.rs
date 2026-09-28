@@ -240,6 +240,13 @@ impl ServerHooks {
             .push(stream_ctx.wait_for_recv(stream_id));
         driver.insert_stream(stream_id, stream_ctx);
 
+        // A STOP_SENDING received before HEADERS had no stream context for
+        // the writable pass to update. Handle it now that the context exists,
+        // before the Headers event gives the application a response sender.
+        //
+        // This ensures the sender is already closed if the peer canceled.
+        driver.process_writable_stream(qconn, stream_id)?;
+
         driver
             .h3_event_sender
             .send(ServerH3Event::Headers {
