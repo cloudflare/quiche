@@ -887,11 +887,6 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn cwnd_available(&self) -> usize {
-        // Ignore cwnd when sending probe packets.
-        if self.epochs.iter().any(|e| e.loss_probes > 0) {
-            return usize::MAX;
-        }
-
         // Open more space (snd_cnt) for PRR when allowed.
         self.cwnd().saturating_sub(self.bytes_in_flight.get()) +
             self.congestion.prr.snd_cnt
