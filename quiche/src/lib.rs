@@ -4505,8 +4505,14 @@ impl<F: BufFactory> Connection<F> {
 
         let payload_offset = b.off();
 
-        let cwnd_available =
-            path.recovery.cwnd_available().saturating_sub(overhead);
+        // `usize::MAX` bypasses cwnd for PTO probes; `left` still bounds the
+        // packet. Keep this local so other cwnd users see the actual window.
+        let send_limit_from_cwnd = if path.recovery.loss_probes(epoch) > 0 {
+            usize::MAX
+        } else {
+            path.recovery.cwnd_available()
+        }
+        .saturating_sub(overhead);
 
         let left_before_packing_ack_frame = left;
 
@@ -4550,7 +4556,7 @@ impl<F: BufFactory> Connection<F> {
             // there is not enough cwnd available for both (note that PING
             // frames are always 1 byte, so we just need to check that the
             // ACK's length is lower than cwnd).
-            if pkt_space.ack_elicited || frame.wire_len() < cwnd_available {
+            if pkt_space.ack_elicited || frame.wire_len() < send_limit_from_cwnd {
                 // ACK-only packets are not congestion controlled so ACKs must
                 // be bundled considering the buffer capacity only, and not the
                 // available cwnd.
@@ -4564,7 +4570,8 @@ impl<F: BufFactory> Connection<F> {
         left = cmp::min(
             left,
             // Bytes consumed by ACK frames.
-            cwnd_available.saturating_sub(left_before_packing_ack_frame - left),
+            send_limit_from_cwnd
+                .saturating_sub(left_before_packing_ack_frame - left),
         );
 
         let mut challenge_data = None;
@@ -5323,7 +5330,7 @@ impl<F: BufFactory> Connection<F> {
         if !has_data &&
             !stream_data_skipped &&
             !dgram_emitted &&
-            cwnd_available > frame::MAX_STREAM_OVERHEAD
+            send_limit_from_cwnd > frame::MAX_STREAM_OVERHEAD
         {
             path.recovery.on_app_limited();
         }
@@ -8211,6 +8218,22 @@ impl<F: BufFactory> Connection<F> {
             return Ok(Type::Short);
         }
 
+        let send_path = self.paths.get(send_pid)?;
+
+        // When cwnd is exhausted, prioritize a pending PTO probe so an earlier
+        // epoch with non-probe data cannot prevent the probe from being sent.
+        if send_path.recovery.cwnd_available() == 0 {
+            for &epoch in packet::Epoch::epochs(
+                packet::Epoch::Initial..=packet::Epoch::Application,
+            ) {
+                if self.crypto_ctx[epoch].crypto_seal.is_some() &&
+                    send_path.recovery.loss_probes(epoch) > 0
+                {
+                    return Ok(Type::from_epoch(epoch));
+                }
+            }
+        }
+
         for &epoch in packet::Epoch::epochs(
             packet::Epoch::Initial..=packet::Epoch::Application,
         ) {
@@ -8242,7 +8265,6 @@ impl<F: BufFactory> Connection<F> {
 
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
-        let send_path = self.paths.get(send_pid)?;
         if (self.is_established() || self.is_in_early_data()) &&
             (self.should_send_handshake_done() ||
                 self.flow_control.should_update_max_data() ||
