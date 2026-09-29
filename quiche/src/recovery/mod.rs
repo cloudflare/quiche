@@ -848,6 +848,281 @@ mod tests {
     use smallvec::smallvec;
     use std::str::FromStr;
 
+    #[rstest]
+    fn legacy_burst_after_window_growth(
+        #[values("reno", "cubic")] cc_algorithm_name: &str,
+        #[values(true, false)] pacing_enabled: bool,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+        cfg.enable_pacing(pacing_enabled);
+        let mut r = Recovery::new(&cfg);
+        let mut now = Instant::now();
+        let initial_window = r.cwnd();
+        let size = 1200;
+        let initial_packets = initial_window / size;
+
+        let make_packet = |pkt_num, time_sent| Sent {
+            pkt_num,
+            frames: smallvec![],
+            time_sent,
+            time_acked: None,
+            time_lost: None,
+            size,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: time_sent,
+            first_sent_time: time_sent,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: true,
+            is_pmtud_probe: false,
+        };
+
+        for n in 0..initial_packets {
+            r.on_packet_sent(
+                make_packet(n as u64, now),
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        now += Duration::from_millis(50);
+        let mut acked = RangeSet::default();
+        acked.insert(0..initial_packets as u64);
+        r.on_ack_received(
+            &acked,
+            0,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            None,
+            "",
+        )
+        .unwrap();
+        assert!(r.cwnd() > initial_window);
+
+        let grown_window = r.cwnd();
+        let mut immediate_bytes = 0;
+        let mut packet_number = initial_packets as u64;
+
+        while r.cwnd_available() >= size {
+            if r.get_next_release_time().time(now).is_some() {
+                break;
+            }
+
+            r.on_packet_sent(
+                make_packet(packet_number, now),
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+            immediate_bytes += size;
+            packet_number += 1;
+        }
+
+        eprintln!(
+            "{cc_algorithm_name}: pacing={pacing_enabled}, initial={initial_window}, \
+             grown={grown_window}, immediate_burst={immediate_bytes}"
+        );
+        assert!(immediate_bytes > 0, "sender made no progress");
+
+        if pacing_enabled {
+            assert!(
+                immediate_bytes <= initial_window,
+                "unpaced burst exceeded the initial congestion window"
+            );
+            assert!(
+                r.get_next_release_time().time(now).is_some(),
+                "sender exhausted its burst without scheduling a delay"
+            );
+        } else {
+            assert_eq!(immediate_bytes, grown_window);
+            assert!(r.get_next_release_time().time(now).is_none());
+        }
+    }
+
+    fn legacy_pacing_test_packet(
+        pkt_num: u64, size: usize, now: Instant,
+    ) -> Sent {
+        Sent {
+            pkt_num,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: true,
+            is_pmtud_probe: false,
+        }
+    }
+
+    #[rstest]
+    fn legacy_pacing_partial_credit(
+        #[values("reno", "cubic")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+        cfg.enable_pacing(true);
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+
+        // Consume 11,400 bytes of the 12,000-byte initial burst.
+        for n in 0..10 {
+            let size = if n == 9 { 600 } else { 1200 };
+            r.on_packet_sent(
+                legacy_pacing_test_packet(n, size, now),
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+            assert_eq!(r.get_packet_send_time(now), now);
+        }
+
+        // The sender must finish the current batch before generating
+        // the packet that exceeds the remaining immediate credit.
+        let decision = r.get_next_release_time();
+        assert!(!decision.can_burst());
+        let advertised_release = decision.time(now).unwrap();
+
+        // A 1,200-byte packet cannot fit in the remaining 600 bytes.
+        r.on_packet_sent(
+            legacy_pacing_test_packet(10, 1200, now),
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+        assert!(
+            r.get_packet_send_time(now) > now,
+            "packet exceeded the remaining immediate burst credit"
+        );
+        assert_eq!(
+            r.get_packet_send_time(now),
+            advertised_release,
+            "packet timestamp differed from the advertised release"
+        );
+    }
+
+    #[rstest]
+    fn legacy_pacing_rate_cap_and_queued_sends(
+        #[values("reno", "cubic")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+        cfg.enable_pacing(true);
+        cfg.set_max_pacing_rate(12_000);
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+
+        for n in 0..10 {
+            r.on_packet_sent(
+                legacy_pacing_test_packet(n, 1200, now),
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        let mut previous_send = now;
+
+        // Queue packets without advancing wall time. A 12,000-byte/s cap
+        // requires at least 100 ms between these 1,200-byte packets.
+        for n in 10..13 {
+            let release = r.get_next_release_time().time(now).unwrap();
+            r.on_packet_sent(
+                legacy_pacing_test_packet(n, 1200, now),
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+
+            let scheduled = r.get_packet_send_time(now);
+            assert_eq!(scheduled, release);
+            assert!(
+                scheduled.duration_since(previous_send) >=
+                    Duration::from_millis(100),
+                "queued packet exceeded the configured pacing rate"
+            );
+            previous_send = scheduled;
+        }
+    }
+
+    #[rstest]
+    fn legacy_pacing_ack_only_preserves_data_schedule(
+        #[values("reno", "cubic")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+        cfg.enable_pacing(true);
+        cfg.set_max_pacing_rate(12_000);
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+
+        for n in 0..12 {
+            r.on_packet_sent(
+                legacy_pacing_test_packet(n, 1200, now),
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+        assert!(r.get_packet_send_time(now) > now);
+
+        let data_release = r.get_next_release_time();
+        let bytes_in_flight = r.bytes_in_flight();
+
+        let mut ack = legacy_pacing_test_packet(12, 64, now);
+        ack.ack_eliciting = false;
+        ack.in_flight = false;
+        ack.has_data = false;
+        r.on_packet_sent(
+            ack,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        assert_eq!(r.bytes_in_flight(), bytes_in_flight);
+        assert_eq!(r.get_next_release_time(), data_release);
+        assert_eq!(
+            r.get_packet_send_time(now),
+            now,
+            "ACK-only packet inherited a future data release"
+        );
+
+        r.on_packet_sent(
+            legacy_pacing_test_packet(13, 1200, now),
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+        assert_eq!(
+            r.get_packet_send_time(now),
+            data_release.time(now).unwrap(),
+            "ACK-only packet changed the queued data schedule"
+        );
+    }
+
     fn recovery_for_alg(algo: CongestionControlAlgorithm) -> Recovery {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(algo);
@@ -1931,6 +2206,8 @@ mod tests {
 
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        // Select the mode explicitly: legacy recovery also supports pacing.
+        cfg.enable_pacing(pacing_enabled);
 
         #[cfg(feature = "internal")]
         cfg.set_custom_bbr_params(BbrParams {

@@ -4010,6 +4010,7 @@ impl<F: BufFactory> Connection<F> {
         let mut has_initial = false;
 
         let mut done = 0;
+        let mut send_at = now;
 
         // Limit output packet size to respect the sender and receiver's
         // maximum UDP payload size limit.
@@ -4064,6 +4065,12 @@ impl<F: BufFactory> Connection<F> {
                 Err(e) => return Err(e),
             };
 
+            // A coalesced datagram must respect every packet's
+            // release time, including data preceding an ACK-only packet.
+            send_at = send_at.max(
+                self.paths.get(send_pid)?.recovery.get_packet_send_time(now),
+            );
+
             done += written;
             left -= written;
 
@@ -4114,7 +4121,7 @@ impl<F: BufFactory> Connection<F> {
             from: send_path.local_addr(),
             to: send_path.peer_addr(),
 
-            at: send_path.recovery.get_packet_send_time(now),
+            at: send_at,
         };
 
         Ok((done, info))
