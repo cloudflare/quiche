@@ -3993,6 +3993,121 @@ fn stop_sending_writable_with_no_connection_capacity(
 }
 
 #[rstest]
+/// A peer can stop a local stream opened implicitly by a higher stream ID.
+fn stop_sending_implicitly_opened_local_stream(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(0, 2)] stream_id: u64,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(
+        pipe.client.stream_send(stream_id + 4, b"data", false),
+        Ok(4)
+    );
+    assert!(pipe.client.streams.get(stream_id).is_none());
+
+    let stop = [frame::Frame::StopSending {
+        stream_id,
+        error_code: 42,
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.server, Type::Short, &stop, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.client_recv(&mut buf[..written]), Ok(written));
+    assert_eq!(
+        pipe.client.stream_capacity(stream_id),
+        Err(Error::StreamStopped(42))
+    );
+
+    if stream_id == 2 {
+        assert!(pipe.client.streams.is_collected(stream_id));
+        let written = test_utils::encode_pkt(
+            &mut pipe.server,
+            Type::Short,
+            &stop,
+            &mut buf,
+        )
+        .unwrap();
+        assert_eq!(pipe.client_recv(&mut buf[..written]), Ok(written));
+        assert!(pipe.client.streams.is_collected(stream_id));
+    } else {
+        assert!(pipe.client.streams.get(stream_id).is_some());
+    }
+}
+
+#[rstest]
+/// Peer frames may reference local streams without an existing Stream object.
+fn peer_frames_on_implicitly_opened_local_streams(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(6, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!([0, 2, 4]
+        .iter()
+        .all(|&id| pipe.client.streams.get(id).is_none()));
+
+    let frames = [
+        frame::Frame::Stream {
+            stream_id: 0,
+            data: RangeBuf::from(b"response", 0, false),
+        },
+        frame::Frame::ResetStream {
+            stream_id: 4,
+            error_code: 77,
+            final_size: 0,
+        },
+        frame::Frame::MaxStreamData {
+            stream_id: 2,
+            max: 1024,
+        },
+    ];
+    let written =
+        test_utils::encode_pkt(&mut pipe.server, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.client_recv(&mut buf[..written]), Ok(written));
+
+    assert_eq!(pipe.client.stream_recv(0, &mut buf), Ok((8, false)));
+    assert_eq!(
+        pipe.client.stream_recv(4, &mut buf),
+        Err(Error::StreamReset(77))
+    );
+    assert_eq!(pipe.client.streams.get(2).unwrap().send.cap(), Ok(1024));
+}
+
+#[rstest]
+/// Peer frames cannot open a local stream beyond those opened by the app.
+fn stop_sending_unopened_local_stream_rejected(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(2, 8)] stream_id: u64,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"data", false), Ok(4));
+
+    let stop = [frame::Frame::StopSending {
+        stream_id,
+        error_code: 42,
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.server, Type::Short, &stop, &mut buf)
+            .unwrap();
+    assert_eq!(
+        pipe.client_recv(&mut buf[..written]),
+        Err(Error::InvalidStreamState(stream_id))
+    );
+    assert!(pipe.client.streams.get(stream_id).is_none());
+}
+
+#[rstest]
 /// Tests that resetting a stream restores flow control for unsent data.
 fn stop_sending_unsent_tx_cap(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
