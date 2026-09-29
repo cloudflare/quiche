@@ -1476,6 +1476,40 @@ mod legacy_pacing_worker_tests {
     use crate::metrics::DefaultMetrics;
     use quiche::test_utils::Pipe;
 
+    struct PacingTestApplication {
+        stop: mpsc::Receiver<()>,
+        progress: mpsc::Sender<usize>,
+    }
+
+    impl ApplicationOverQuic for PacingTestApplication {
+        fn on_conn_established(
+            &mut self, _: &mut QuicheConnection,
+            _: &crate::quic::connection::HandshakeInfo,
+        ) -> QuicResult<()> {
+            Ok(())
+        }
+
+        fn should_act(&self) -> bool {
+            true
+        }
+
+        async fn wait_for_data(
+            &mut self, qconn: &mut QuicheConnection,
+        ) -> QuicResult<()> {
+            let _ = self.progress.try_send(qconn.stats().recv);
+            self.stop.recv().await;
+            Err(std::io::Error::other("pacing test finished").into())
+        }
+
+        fn process_reads(&mut self, _: &mut QuicheConnection) -> QuicResult<()> {
+            Ok(())
+        }
+
+        fn process_writes(&mut self, _: &mut QuicheConnection) -> QuicResult<()> {
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn legacy_pacing_defers_before_generating_packets() {
         for (algorithm, pacing_offload) in [
@@ -1671,6 +1705,89 @@ mod legacy_pacing_worker_tests {
                 worker.flush_buffer_to_socket(&buffer).await;
                 let err = receiver.try_recv_from(&mut received).unwrap_err();
                 assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock);
+
+                // Exercise the actual worker select loop while retaining
+                // a batch. Incoming traffic must be processed before release.
+                pipe.server.send_ack_eliciting().unwrap();
+                let mut incoming_buf = vec![0; 1200];
+                let (len, _) = pipe.server.send(&mut incoming_buf).unwrap();
+                incoming_buf.truncate(len);
+                let incoming = Incoming {
+                    peer_addr: Pipe::server_addr(),
+                    local_addr: Pipe::client_addr(),
+                    rx_time: None,
+                    buf: incoming_buf,
+                    gro: None,
+                    #[cfg(target_os = "linux")]
+                    so_mark_data: None,
+                };
+                let received_before = pipe.client.stats().recv;
+
+                worker.write_state.pending_send =
+                    Some(expected.to_vec().into_boxed_slice());
+                worker.write_state.bytes_written = expected.len();
+                worker.write_state.segment_size = expected.len();
+                worker.write_state.num_pkts = 1;
+                worker.write_state.selected_path = None;
+                let timer_release = Instant::now() + Duration::from_secs(1);
+                worker.write_state.tx_time = Some(timer_release);
+                worker.write_state.next_release_time = Some(timer_release);
+
+                let (incoming_tx, incoming_rx) = mpsc::channel(1);
+                let (stop_tx, stop_rx) = mpsc::channel(1);
+                let (progress_tx, mut progress_rx) = mpsc::channel(8);
+                let mut ctx = ConnectionStageContext {
+                    in_pkt: None,
+                    application: PacingTestApplication {
+                        stop: stop_rx,
+                        progress: progress_tx,
+                    },
+                    incoming_pkt_receiver: incoming_rx,
+                    stats: Arc::new(std::sync::Mutex::new(
+                        QuicConnectionStats::from_conn(&pipe.client),
+                    )),
+                    connection_hook: None,
+                };
+
+                let drive = async {
+                    progress_rx.recv().await.unwrap();
+                    incoming_tx.send(incoming).await.unwrap();
+                    tokio::time::timeout(Duration::from_millis(500), async {
+                        loop {
+                            if progress_rx.recv().await.unwrap() > received_before
+                            {
+                                break;
+                            }
+                        }
+                    })
+                    .await
+                    .expect("incoming traffic stalled during pacing");
+
+                    let err = receiver.try_recv_from(&mut received).unwrap_err();
+                    assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock);
+
+                    let (len, _) = tokio::time::timeout(
+                        Duration::from_secs(2),
+                        receiver.recv_from(&mut received),
+                    )
+                    .await
+                    .expect("pacing timer did not release bytes")
+                    .unwrap();
+                    assert!(Instant::now() >= timer_release);
+                    assert_eq!(&received[..len], expected);
+                    stop_tx.send(()).await.unwrap();
+                };
+
+                let (result, ()) =
+                    tokio::time::timeout(Duration::from_secs(4), async {
+                        tokio::join!(
+                            worker.work_loop(&mut pipe.client, &mut ctx),
+                            drive,
+                        )
+                    })
+                    .await
+                    .expect("worker timer regression hung");
+                assert!(result.is_err());
 
                 // Closing must supersede retained application bytes.
                 worker.write_state.pending_send =
