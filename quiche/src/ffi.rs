@@ -1674,6 +1674,11 @@ pub extern "C" fn quiche_conn_peer_streams_left_uni(conn: &Connection) -> u64 {
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_conn_peer_opened_streams_bidi(conn: &Connection) -> u64 {
+    conn.peer_opened_streams_bidi()
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
     conn.send_quantum() as size_t
 }

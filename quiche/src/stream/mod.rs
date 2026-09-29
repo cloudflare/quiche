@@ -607,6 +607,12 @@ impl<F: BufFactory> StreamMap<F> {
         self.peer_max_streams_uni - self.local_opened_streams_uni
     }
 
+    /// Returns the number of bidirectional streams opened by the peer,
+    /// including the ones opened implicitly by using a higher stream ID.
+    pub fn peer_opened_streams_bidi(&self) -> u64 {
+        self.peer_opened_streams_bidi
+    }
+
     /// Drops completed stream.
     ///
     /// This should only be called when Stream::is_complete() returns true for

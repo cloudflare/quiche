@@ -1473,6 +1473,36 @@ fn max_stream_data_receive_uni(
 }
 
 #[rstest]
+/// Tests that the number of bidirectional streams opened by the peer includes
+/// the implicitly opened ones, and not the unidirectional or local ones.
+fn peer_opened_streams_bidi(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.server.peer_opened_streams_bidi(), 0);
+
+    assert_eq!(pipe.client.stream_send(0, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.peer_opened_streams_bidi(), 1);
+
+    // Using stream 8 implicitly opens stream 4 as well.
+    assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.peer_opened_streams_bidi(), 3);
+    assert!(pipe.server.streams.get(4).is_none());
+
+    // Unidirectional streams are not counted.
+    assert_eq!(pipe.client.stream_send(2, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.peer_opened_streams_bidi(), 3);
+
+    // Locally opened streams are not counted.
+    assert_eq!(pipe.client.peer_opened_streams_bidi(), 0);
+}
+
+#[rstest]
 fn empty_payload(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 

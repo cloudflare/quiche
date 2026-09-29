@@ -6647,6 +6647,51 @@ impl<F: BufFactory> Connection<F> {
         self.streams.peer_streams_left_uni()
     }
 
+    /// Returns the number of bidirectional streams opened by the peer so far.
+    ///
+    /// This also counts streams that the peer opened implicitly, by using a
+    /// higher stream ID of the same type, even if no data was received on them
+    /// yet (see [RFC 9000 Section 3.2]).
+    ///
+    /// The returned value never decreases, and streams are opened in order, so
+    /// the streams opened since a previous call can be derived from the
+    /// difference between the two values. For example, on a server the `n`-th
+    /// stream opened by the client (starting from zero) has ID `n * 4`.
+    ///
+    /// Note that the value also counts streams that were already closed, and
+    /// that implicitly opened streams don't have any state until data is
+    /// received on them, so other methods treat them as nonexistent (e.g.
+    /// [`stream_finished()`] returns `true`).
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    /// # let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
+    /// # let scid = quiche::ConnectionId::from_ref(&[0xba; 16]);
+    /// # let peer = "127.0.0.1:1234".parse().unwrap();
+    /// # let local = socket.local_addr().unwrap();
+    /// # let conn = quiche::accept(&scid, None, local, peer, &mut config)?;
+    /// # let mut seen = 0;
+    /// // Find the request streams opened by the client since the last check,
+    /// // e.g. to start a timeout for receiving their headers.
+    /// let opened = conn.peer_opened_streams_bidi();
+    ///
+    /// for n in seen..opened {
+    ///     println!("Client opened stream {}", n * 4);
+    /// }
+    ///
+    /// seen = opened;
+    /// # Ok::<(), quiche::Error>(())
+    /// ```
+    ///
+    /// [RFC 9000 Section 3.2]: https://www.rfc-editor.org/rfc/rfc9000.html#section-3.2
+    /// [`stream_finished()`]: struct.Connection.html#method.stream_finished
+    #[inline]
+    pub fn peer_opened_streams_bidi(&self) -> u64 {
+        self.streams.peer_opened_streams_bidi()
+    }
+
     /// Returns an iterator over streams that have outstanding data to read.
     ///
     /// Note that the iterator will only include streams that were readable at

@@ -543,6 +543,10 @@ uint64_t quiche_conn_peer_streams_left_bidi(const quiche_conn *conn);
 // before the peer's stream count limit is reached.
 uint64_t quiche_conn_peer_streams_left_uni(const quiche_conn *conn);
 
+// Returns the number of bidirectional streams opened by the peer so far,
+// including the ones opened implicitly by using a higher stream ID.
+uint64_t quiche_conn_peer_opened_streams_bidi(const quiche_conn *conn);
+
 // Returns true if the connection is closed.
 bool quiche_conn_is_closed(const quiche_conn *conn);
 

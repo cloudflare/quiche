@@ -8534,6 +8534,10 @@ mod tests {
         // We will need to figure out a way to do this automatically to avoid
         // requiring applications to do this manually. For now just keep this
         // for testing purposes.
+        //
+        // Until then, the HTTP/3 state of a stream that the application shut
+        // down in both directions through the transport API is kept until the
+        // connection closes, even after the peer acknowledges the reset.
         let _ = s.send_body_server(stream, true);
 
         assert_eq!(s.poll_server(), Err(Error::Done));
