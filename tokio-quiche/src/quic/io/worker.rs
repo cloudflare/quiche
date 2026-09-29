@@ -581,6 +581,14 @@ where
         &mut self, qconn: &mut QuicheConnection, send_buf: &mut [u8],
         single_packet: bool,
     ) -> QuicResult<usize> {
+        // A local close supersedes queued application data.
+        let closing = qconn.local_error().is_some();
+        if closing {
+            self.write_state.pending_send = None;
+            self.write_state.next_release_time = None;
+            self.write_state.tx_time = None;
+        }
+
         // Preserve the buffered batch and its metadata until it is flushed.
         if self.write_state.pending_send.is_some() {
             return Ok(0);
@@ -609,7 +617,8 @@ where
 
         // Software pacing waits through the worker's release timer.
         #[cfg(not(feature = "gcongestion"))]
-        if !gcongestion_enabled &&
+        if !closing &&
+            !gcongestion_enabled &&
             !self.cfg.pacing_offload &&
             qconn.pacing_enabled()
         {
@@ -624,7 +633,7 @@ where
             }
         }
 
-        let initial_release_decision = if self.pacing_enabled(qconn) {
+        let initial_release_decision = if !closing && self.pacing_enabled(qconn) {
             let initial_release_decision = qconn
                 .get_next_release_time()
                 .filter(|_| self.pacing_enabled(qconn));
@@ -741,7 +750,9 @@ where
                 // Return the time from the release decision if release_decision.time > now, else None.
                 .and_then(|v| v.time(now))
         } else {
-            send_info.filter(|_| qconn.pacing_enabled()).map(|v| v.at)
+            send_info
+                .filter(|_| !closing && qconn.pacing_enabled())
+                .map(|v| v.at)
         };
 
         self.write_state.conn_established = qconn.is_established();
@@ -1660,6 +1671,32 @@ mod legacy_pacing_worker_tests {
                 worker.flush_buffer_to_socket(&buffer).await;
                 let err = receiver.try_recv_from(&mut received).unwrap_err();
                 assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock);
+
+                // Closing must supersede retained application bytes.
+                worker.write_state.pending_send =
+                    Some(expected.to_vec().into_boxed_slice());
+                worker.write_state.bytes_written = expected.len();
+                worker.write_state.tx_time = Some(release);
+                worker.write_state.next_release_time = Some(release);
+                let mut closing_pipe =
+                    Pipe::<crate::buf_factory::BufFactory>::with_config_and_buf(
+                        &mut config,
+                    )
+                    .unwrap();
+                closing_pipe.handshake().unwrap();
+                closing_pipe.client.close(false, 0, b"").unwrap();
+
+                worker
+                    .gather_data_from_quiche_conn(
+                        &mut closing_pipe.client,
+                        &mut buffer,
+                        true,
+                    )
+                    .unwrap();
+                assert!(worker.write_state.pending_send.is_none());
+                assert!(worker.write_state.bytes_written > 0);
+                assert!(worker.write_state.tx_time.is_none());
+                assert!(worker.write_state.next_release_time.is_none());
             }
         }
     }
