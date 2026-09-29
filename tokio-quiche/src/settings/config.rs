@@ -143,7 +143,7 @@ fn make_quiche_config(
 
     let alpns: Vec<&[u8]> =
         quic_settings.alpn.iter().map(Vec::as_slice).collect();
-    config.set_application_protos(&alpns).unwrap();
+    config.set_application_protos(&alpns)?;
 
     if let Some(timeout) = quic_settings.max_idle_timeout {
         let ms = timeout
@@ -234,15 +234,16 @@ fn quiche_config_with_tls(
     tls_cert: Option<TlsCertificatePaths>,
 ) -> QuicResult<quiche::Config> {
     let Some(tls) = tls_cert else {
-        return Ok(quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap());
+        return Ok(quiche::Config::new(quiche::PROTOCOL_VERSION)?);
     };
 
     match tls.kind {
         #[cfg(not(feature = "rpk"))]
-        CertificateKind::RawPublicKey => {
-            // TODO: Gate this variant on the `rpk` feature.
-            panic!("Can't use RPK when compiled without rpk feature");
-        },
+        CertificateKind::RawPublicKey => Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "raw public key certificates require the `rpk` feature",
+        )
+        .into()),
         #[cfg(all(feature = "rpk", not(boring_v5)))]
         CertificateKind::RawPublicKey => {
             // boring 4.x (the default) exposes a dedicated
@@ -290,8 +291,7 @@ fn quiche_config_with_tls(
             )?)
         },
         CertificateKind::X509 => {
-            let mut config =
-                quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+            let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION)?;
             config.load_cert_chain_from_pem_file(tls.cert)?;
             config.load_priv_key_from_pem_file(tls.private_key)?;
             Ok(config)
@@ -305,4 +305,40 @@ fn read_file(path: &str) -> QuicResult<Vec<u8>> {
     std::fs::read(path)
         .with_context(|| format!("read {path}"))
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::Hooks;
+    use crate::settings::QuicSettings;
+
+    #[test]
+    fn invalid_alpn_is_reported_as_configuration_error() {
+        let mut settings = QuicSettings::default();
+        settings.alpn = vec![vec![b'x'; 256]];
+        let params =
+            ConnectionParams::new_client(settings, None, Hooks::default());
+
+        assert!(make_quiche_config(&params, false).is_err());
+    }
+
+    #[cfg(not(feature = "rpk"))]
+    #[test]
+    fn raw_public_key_without_feature_is_unsupported() {
+        let tls = TlsCertificatePaths {
+            cert: "unused-rpk-cert",
+            private_key: "unused-rpk-key",
+            kind: CertificateKind::RawPublicKey,
+        };
+
+        let Err(err) = quiche_config_with_tls(Some(tls)) else {
+            panic!("RPK without the rpk feature must return an error");
+        };
+
+        let io_err = err
+            .downcast_ref::<std::io::Error>()
+            .expect("unsupported RPK error should be an io::Error");
+        assert_eq!(io_err.kind(), std::io::ErrorKind::Unsupported);
+    }
 }
