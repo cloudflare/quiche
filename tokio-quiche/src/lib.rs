@@ -167,6 +167,10 @@ pub type QuicConnectionStream<M> =
 ///
 /// The task shuts down when the returned stream is closed (or dropped) and all
 /// previously-yielded connections are closed.
+///
+/// If `capture_quiche_logs` is enabled, this returns
+/// [`io::ErrorKind::AlreadyExists`] when another global `log` logger has
+/// already been installed.
 pub fn listen_with_capabilities<M>(
     sockets: impl IntoIterator<Item = QuicListener>, params: ConnectionParams,
     metrics: M,
