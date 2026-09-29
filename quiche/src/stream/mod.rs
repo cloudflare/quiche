@@ -260,11 +260,9 @@ impl<F: BufFactory> StreamMap<F> {
     /// Returns the mutable stream with the given ID if it exists, or creates
     /// a new one otherwise.
     ///
-    /// The `local` parameter indicates whether the stream's creation was
-    /// requested by the local application rather than the peer, and is
-    /// used to validate the requested stream ID, and to select the initial
-    /// flow control values from the local and remote transport parameters
-    /// (also passed as arguments).
+    /// The `local` parameter indicates whether the stream is locally
+    /// initiated. It validates the stream ID and selects the initial flow
+    /// control values from the local and remote transport parameters.
     ///
     /// This also takes care of enforcing both local and the peer's stream
     /// count limits. If one of these limits is violated, the `StreamLimit`
@@ -705,6 +703,20 @@ impl<F: BufFactory> StreamMap<F> {
         let priority_key = self.stopped_writable.front().clone_pointer()?;
         self.remove_writable(&priority_key);
         Some(priority_key.id)
+    }
+
+    /// Returns true if the given local stream has been opened.
+    ///
+    /// Opening a local stream implicitly opens all lower-numbered local streams
+    /// of the same type, even if they do not have `Stream` objects yet.
+    pub fn local_stream_opened(&self, stream_id: u64) -> bool {
+        let opened = if is_bidi(stream_id) {
+            self.local_opened_streams_bidi
+        } else {
+            self.local_opened_streams_uni
+        };
+
+        stream_id >> 2 < opened
     }
 
     /// Creates an iterator over streams that need to send MAX_STREAM_DATA.
