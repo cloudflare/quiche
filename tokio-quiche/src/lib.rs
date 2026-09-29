@@ -126,7 +126,7 @@ pub use datagram_socket;
 use foundations::telemetry::settings::LogVerbosity;
 use std::io;
 use std::sync::Arc;
-use std::sync::Once;
+use std::sync::OnceLock;
 use tokio::net::UdpSocket;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -175,7 +175,7 @@ where
     M: Metrics,
 {
     if params.settings.capture_quiche_logs {
-        capture_quiche_logs();
+        capture_quiche_logs()?;
     }
 
     sockets
@@ -209,7 +209,7 @@ where
     listen_with_capabilities(quic_sockets, params, metrics)
 }
 
-static GLOBAL_LOGGER_ONCE: Once = Once::new();
+static GLOBAL_LOGGER_INITIALIZED: OnceLock<bool> = OnceLock::new();
 
 /// Forward Quiche logs into the slog::Drain currently used by Foundations
 ///
@@ -226,8 +226,8 @@ static GLOBAL_LOGGER_ONCE: Once = Once::new();
 /// requires that you only set the global logger once. That means that we have
 /// to register the logger at `listen()` time for servers - for clients, we
 /// should register loggers when the `quiche::Connection` is established.
-pub(crate) fn capture_quiche_logs() {
-    GLOBAL_LOGGER_ONCE.call_once(|| {
+pub(crate) fn capture_quiche_logs() -> io::Result<()> {
+    let initialized = *GLOBAL_LOGGER_INITIALIZED.get_or_init(|| {
         use foundations::telemetry::log as foundations_log;
         use log::Level as std_level;
 
@@ -244,11 +244,23 @@ pub(crate) fn capture_quiche_logs() {
             LogVerbosity::Trace => std_level::Trace,
         };
 
-        slog_stdlog::init_with_level(normalized_level).unwrap();
+        if slog_stdlog::init_with_level(normalized_level).is_err() {
+            return false;
+        }
 
         // Dropping the scope guard replaces the slog Drain with
         // `slog::Discard`. The `log` crate cannot reset the global
         // logger, so retain the guard for the process lifetime.
         let _scope_guard = std::mem::ManuallyDrop::new(scope_guard);
+        true
     });
+
+    if initialized {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "global log logger is already initialized",
+        ))
+    }
 }
