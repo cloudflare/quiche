@@ -3728,6 +3728,268 @@ fn stop_sending_fin(
 
     // No more frames are sent by the server.
     assert_eq!(iter.next(), None);
+
+    let max_streams = pipe.server.streams.max_streams_bidi_next();
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.server.streams.is_collected(4));
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams + 1);
+}
+
+#[rstest]
+/// A completed receive side must not discard an unreported STOP error.
+fn stop_sending_recv_completion_preserves_unreported_error(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] discard: bool,
+    #[values(true, false)] stop_first: bool,
+    #[values("data_fin", "empty_fin", "reset")] receive_end: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let stop = frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    };
+    let receive = match receive_end {
+        "data_fin" => frame::Frame::Stream {
+            stream_id: 0,
+            data: RangeBuf::from(b"req", 0, true),
+        },
+
+        "empty_fin" => frame::Frame::Stream {
+            stream_id: 0,
+            data: RangeBuf::from(b"", 0, true),
+        },
+
+        "reset" => frame::Frame::ResetStream {
+            stream_id: 0,
+            error_code: 77,
+            final_size: 0,
+        },
+
+        _ => unreachable!(),
+    };
+    let frames = if stop_first {
+        [stop, receive]
+    } else {
+        [receive, stop]
+    };
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+    let expected = match receive_end {
+        "data_fin" => Ok((3, true)),
+        "empty_fin" => Ok((0, true)),
+        "reset" => Err(Error::StreamReset(77)),
+        _ => unreachable!(),
+    };
+    assert_eq!(stream_recv_discard(&mut pipe.server, discard, 0), expected);
+    assert_eq!(pipe.server.streams.len(), 1);
+    let max_streams = pipe.server.streams.max_streams_bidi_next();
+
+    assert_eq!(
+        pipe.server.stream_capacity(0),
+        Err(Error::StreamStopped(42))
+    );
+    assert_eq!(pipe.server.streams.len(), 0);
+    assert!(pipe.server.streams.is_collected(0));
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams + 1);
+}
+
+/// A duplicate FIN collects a stopped stream without another application read.
+#[rstest]
+fn stop_sending_duplicate_fin_collects_stream(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.client.stream_send(0, b"req", false), Ok(3));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((3, false)));
+
+    assert_eq!(pipe.client.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    assert_eq!(
+        pipe.server.stream_capacity(0),
+        Err(Error::StreamStopped(42))
+    );
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(!pipe.server.stream_readable(0));
+    assert_eq!(pipe.server.writable().next(), None);
+    let max_streams = pipe.server.streams.max_streams_bidi_next();
+
+    // The consumed data is discarded, but its FIN completes the receive side.
+    let frames = [frame::Frame::Stream {
+        stream_id: 0,
+        data: RangeBuf::from(b"req", 0, true),
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+    assert!(pipe.server.stream_finished(0));
+    assert!(!pipe.server.stream_readable(0));
+    assert_eq!(pipe.server.writable().next(), None);
+    assert!(pipe.server.streams.is_collected(0));
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams + 1);
+}
+
+/// Read-side completion collects completed streams without dropping queued
+/// FINs.
+#[rstest]
+fn stream_shutdown_read_collects_completed_streams(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(
+        "fin_before_shutdown",
+        "fin_after_shutdown",
+        "reset_after_shutdown"
+    )]
+    receive_end: &str,
+    #[values("stopped", "fin_acked", "fin_queued")] send_end: &str,
+) {
+    let fin_before_shutdown = receive_end == "fin_before_shutdown";
+    let collected = send_end != "fin_queued";
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(
+        pipe.client.stream_send(0, b"req", fin_before_shutdown),
+        Ok(3)
+    );
+    assert_eq!(pipe.advance(), Ok(()));
+
+    if send_end == "stopped" {
+        assert_eq!(pipe.client.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+        assert_eq!(
+            pipe.server.stream_capacity(0),
+            Err(Error::StreamStopped(42))
+        );
+
+        // ACK the reset while the request remains unread.
+        assert_eq!(pipe.advance(), Ok(()));
+    } else {
+        let fin_acked = send_end == "fin_acked";
+        assert_eq!(pipe.server.stream_send(0, b"rsp", fin_acked), Ok(3));
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(pipe.client.stream_recv(0, &mut [0; 3]), Ok((3, fin_acked)));
+
+        if !fin_acked {
+            // Queue FIN after its preceding data was ACKed, but do not send it
+            // yet.
+            assert_eq!(pipe.server.stream_send(0, b"", true), Ok(0));
+        }
+    }
+
+    assert!(pipe.server.stream_readable(0));
+    let max_streams = pipe.server.streams.max_streams_bidi_next();
+
+    assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 77), Ok(()));
+    match receive_end {
+        "fin_before_shutdown" => (),
+
+        "fin_after_shutdown" => {
+            assert_eq!(pipe.client.stream_send(0, b"", true), Ok(0));
+        },
+
+        "reset_after_shutdown" => {
+            assert_eq!(
+                pipe.client.stream_shutdown(0, Shutdown::Write, 77),
+                Ok(())
+            );
+        },
+
+        _ => unreachable!(),
+    }
+
+    if !fin_before_shutdown {
+        assert!(!pipe.server.streams.is_collected(0));
+        assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams);
+
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    }
+
+    assert_eq!(pipe.server.streams.is_collected(0), collected);
+    assert_eq!(
+        pipe.server.streams.max_streams_bidi_next(),
+        max_streams + u64::from(collected)
+    );
+
+    if !collected {
+        let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+        test_utils::process_flight(&mut pipe.client, flight).unwrap();
+        assert_eq!(pipe.client.stream_recv(0, &mut []), Ok((0, true)));
+        assert_eq!(pipe.advance(), Ok(()));
+        assert!(pipe.server.streams.is_collected(0));
+        assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams + 1);
+    }
+}
+
+#[rstest]
+/// A stopped stream remains writable when the peer grants no send credit.
+fn stop_sending_writable_with_no_connection_capacity(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut client_config =
+        test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    client_config.set_initial_max_data(0);
+    let mut server_config =
+        test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    let mut pipe = test_utils::Pipe::with_client_and_server_config(
+        &mut client_config,
+        &mut server_config,
+    )
+    .unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"req", false), Ok(3));
+    assert_eq!(pipe.client.stream_send(4, b"req", false), Ok(3));
+    assert_eq!(pipe.client.stream_send(8, b"req", false), Ok(3));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let stop = [
+        frame::Frame::StopSending {
+            stream_id: 0,
+            error_code: 42,
+        },
+        frame::Frame::StopSending {
+            stream_id: 8,
+            error_code: 43,
+        },
+    ];
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &stop, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+    assert_eq!(pipe.server.stream_priority(0, 42, false), Ok(()));
+    assert_eq!(pipe.server.stream_priority(8, 10, false), Ok(()));
+
+    assert_eq!(pipe.server.stream_capacity(4), Ok(0));
+
+    assert_eq!(pipe.server.writable().collect::<Vec<_>>(), vec![8, 0]);
+    assert_eq!(pipe.server.stream_writable_next(), Some(8));
+    assert_eq!(pipe.server.writable().collect::<Vec<_>>(), vec![0]);
+    assert_eq!(pipe.server.stream_writable_next(), Some(0));
+    assert_eq!(pipe.server.stream_writable_next(), None);
+    assert_eq!(pipe.server.writable().next(), None);
+    assert_eq!(
+        pipe.server.stream_capacity(0),
+        Err(Error::StreamStopped(42))
+    );
+    assert_eq!(
+        pipe.server.stream_capacity(8),
+        Err(Error::StreamStopped(43))
+    );
 }
 
 #[rstest]
@@ -4109,6 +4371,18 @@ fn stream_shutdown_read(
         pipe.client.stream_send(4, b"bye", false),
         Err(Error::StreamStopped(42))
     );
+    assert_eq!(pipe.client.streams.len(), 1);
+    assert!(!pipe.client.writable().any(|id| id == 4));
+
+    // A duplicate STOP must not replace the reported code or rearm readiness.
+    pipe.server.streams.insert_stopped(4, 99);
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    assert_eq!(
+        pipe.client.stream_capacity(4),
+        Err(Error::StreamStopped(42))
+    );
+    assert!(!pipe.client.writable().any(|id| id == 4));
 
     // Server sends some data, without reading the incoming data, and closes
     // the stream.
@@ -5721,7 +5995,15 @@ fn stream_zero_length_fin_deferred_collection(
     assert_eq!(r.next(), Some(0));
     assert!(r.next().is_none());
 
-    stream_recv_discard(&mut pipe.server, discard, 0).unwrap();
+    // Use zero capacity to exercise FIN consumption. stream_recv_discard()
+    // always uses a capacity of 65535.
+    let fin = if discard {
+        pipe.server.stream_discard(0, 0)
+    } else {
+        pipe.server.stream_recv(0, &mut [])
+    };
+    assert_eq!(fin, Ok((0, true)));
+    assert!(pipe.server.streams.is_collected(0));
     assert_eq!(pipe.advance(), Ok(()));
 
     // Client sends zero-length frame (again).
@@ -12317,6 +12599,78 @@ fn stop_sending_stream_send_after_reset_stream_ack(
     let mut w = pipe.server.writable();
     assert_eq!(w.len(), 9);
     assert!(!w.any(|s| s == 0));
+}
+
+/// Verify that a stream stopped by the peer still surfaces `StreamStopped`
+/// to the application when it was unlinked from the writable queue before
+/// the RESET_STREAM ack arrived.
+///
+/// Poll `stream_writable_next()` to unlink the stopped stream, then deliver
+/// the RESET_STREAM ack. The stream stays uncollected and the next
+/// `stream_send()` returns `StreamStopped`.
+#[test]
+fn stop_sending_signal_survives_writable_unlink_before_ack() {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(999999999);
+    config.set_initial_max_stream_data_bidi_local(30);
+    config.set_initial_max_stream_data_bidi_remote(30);
+    config.set_initial_max_streams_bidi(10);
+    config.set_initial_max_streams_uni(0);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens a bidi stream with fin; the server reads the whole
+    // request so the stream's receive side is complete.
+    assert_eq!(pipe.client.stream_send(0, b"req", true), Ok(3));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((3, true)));
+    // Ordinary readiness can be consumed before STOP arrives.
+    assert_eq!(pipe.server.stream_writable_next(), Some(0));
+    assert_eq!(pipe.server.stream_writable_next(), None);
+
+    // Client no longer wants the response and sends STOP_SENDING. Deliver
+    // only that packet to the server, without letting the server's
+    // RESET_STREAM reply or its ack go anywhere yet.
+    assert_eq!(pipe.client.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // STOP restores the queue entry even though the stream was writable.
+    assert_eq!(pipe.server.writable().collect::<Vec<_>>(), vec![0]);
+
+    // Polling the stopped entry unlinks it without consuming the error.
+    assert_eq!(pipe.server.stream_writable_next(), Some(0));
+
+    // Let the RESET_STREAM reach the client and its ack come back to the
+    // server, which processes the ack with the stream already unlinked.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // The stream must not have been collected yet: the application has not
+    // observed the STOP_SENDING.
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // The application finally writes its response and must see
+    // StreamStopped, not Done.
+    assert_eq!(
+        pipe.server.stream_send(0, b"resp", true),
+        Err(Error::StreamStopped(42))
+    );
 }
 
 #[rstest]
