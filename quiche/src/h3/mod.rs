@@ -4990,6 +4990,23 @@ mod tests {
     }
 
     #[test]
+    /// Send a GOAWAY frame from the server with extra bytes after the ID.
+    fn goaway_from_server_trailing_bytes() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // GOAWAY (type 0x7) with a 3-byte payload: ID 0, then 2 extra bytes.
+        s.send_arbitrary_stream_data_server(
+            &[0x07, 0x03, 0x00, 0xaa, 0xbb],
+            s.server.control_stream_id.unwrap(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(s.poll_client(), Err(Error::FrameError));
+    }
+
+    #[test]
     /// Send multiple GOAWAY frames from the server, that increase the goaway
     /// ID.
     fn goaway_from_server_increase_id() {
