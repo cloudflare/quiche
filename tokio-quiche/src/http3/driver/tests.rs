@@ -2587,3 +2587,210 @@ mod server_side_driver {
         );
     }
 }
+
+/// Tests for [`Http3Settings::client_header_timeout`] and
+/// [`Http3Settings::max_client_header_timeouts`].
+mod client_header_timeout {
+    use std::time::Duration;
+
+    use crate::ApplicationOverQuic as _;
+
+    use super::*;
+
+    const TIMEOUT: Duration = Duration::from_secs(1);
+
+    /// A HEADERS frame declaring a 100 bytes payload, of which only 3 bytes are
+    /// sent.
+    const PARTIAL_HEADERS: [u8; 6] = [0x01, 0x40, 0x64, 0, 0, 0];
+
+    fn server_helper(max_timeouts: Option<u64>) -> DriverTestHelper<ServerHooks> {
+        let settings = Http3Settings {
+            client_header_timeout: Some(TIMEOUT),
+            max_client_header_timeouts: max_timeouts,
+            ..Default::default()
+        };
+
+        let pipe = quiche::test_utils::Pipe::with_config_and_buf(
+            &mut default_quiche_config(),
+        )
+        .unwrap();
+
+        let mut helper =
+            DriverTestHelper::<ServerHooks>::with_pipe_and_http3_settings(
+                pipe, settings,
+            )
+            .unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+        helper
+    }
+
+    /// Lets all pending client header timeouts expire and processes them,
+    /// without delivering the resulting packets to the client.
+    async fn expire_timeouts(helper: &mut DriverTestHelper<ServerHooks>) {
+        tokio::time::advance(TIMEOUT * 2).await;
+        helper.work_loop_iter().unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_request_is_rejected() {
+        let mut helper = server_helper(None);
+
+        helper
+            .pipe
+            .client
+            .stream_send(0, &PARTIAL_HEADERS, false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(helper.driver.hooks.pending_client_header_timeouts(), 1);
+
+        expire_timeouts(&mut helper).await;
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(helper.driver.hooks.pending_client_header_timeouts(), 0);
+        assert_eq!(helper.driver.hooks.client_header_timeout_count(), 1);
+
+        // The client learns that the request was rejected, and the connection
+        // stays open.
+        assert_eq!(
+            helper.peer_client_poll(),
+            Ok((
+                0,
+                h3::Event::Reset(h3::WireErrorCode::RequestRejected as u64)
+            ))
+        );
+        assert!(helper.pipe.server.local_error().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn headers_received_in_time() {
+        let mut helper = server_helper(Some(1));
+
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let _req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { incoming_headers, .. } => { incoming_headers }
+        );
+
+        // The timeout was cancelled, not just forgotten.
+        assert_eq!(helper.driver.hooks.pending_client_header_timeouts(), 0);
+        assert!(!ServerHooks::has_wait_action(&mut helper.driver));
+
+        expire_timeouts(&mut helper).await;
+        helper.advance_and_run_loop().unwrap();
+
+        // The request is still being processed.
+        assert_eq!(helper.driver.hooks.client_header_timeout_count(), 0);
+        assert!(helper.driver.stream_map.contains_key(&stream_id));
+        assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+        assert!(helper.pipe.server.local_error().is_none());
+
+        let metrics = TestMetrics::default();
+        helper
+            .driver
+            .on_conn_close(&mut helper.pipe.server, &metrics, &Ok(()));
+
+        assert_eq!(metrics.client_header_timeouts.get(), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn implicitly_opened_streams_time_out() {
+        let mut helper = server_helper(None);
+
+        // Using stream 8 implicitly opens streams 0 and 4, which never
+        // receive any data.
+        helper
+            .pipe
+            .client
+            .stream_send(8, &PARTIAL_HEADERS, false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(helper.driver.hooks.pending_client_header_timeouts(), 3);
+
+        expire_timeouts(&mut helper).await;
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(helper.driver.hooks.pending_client_header_timeouts(), 0);
+        assert_eq!(helper.driver.hooks.client_header_timeout_count(), 3);
+
+        // Only stream 8 has state in quiche, so it's the only one reset.
+        // Nothing is sent for streams 0 and 4, and the connection stays open.
+        assert_eq!(
+            helper.peer_client_poll(),
+            Ok((
+                8,
+                h3::Event::Reset(h3::WireErrorCode::RequestRejected as u64)
+            ))
+        );
+        assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+        assert!(helper.pipe.client.local_error().is_none());
+        assert!(helper.pipe.server.local_error().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn too_many_timeouts_close_connection() {
+        let mut helper = server_helper(Some(2));
+
+        // Using stream 4 implicitly opens stream 0 as well.
+        helper
+            .pipe
+            .client
+            .stream_send(4, &PARTIAL_HEADERS, false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        expire_timeouts(&mut helper).await;
+
+        assert_eq!(helper.driver.hooks.client_header_timeout_count(), 2);
+
+        let err = helper.pipe.server.local_error().unwrap();
+        assert!(err.is_app);
+        assert_eq!(err.error_code, h3::WireErrorCode::ExcessiveLoad as u64);
+
+        // Both the timeouts and the connection close are recorded.
+        let metrics = TestMetrics::default();
+        helper
+            .driver
+            .on_conn_close(&mut helper.pipe.server, &metrics, &Ok(()));
+
+        assert_eq!(metrics.client_header_timeouts.get(), 2);
+        assert_eq!(metrics.local_h3.get(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stream_reset_by_client_is_not_counted() {
+        let mut helper = server_helper(Some(1));
+
+        helper
+            .pipe
+            .client
+            .stream_send(0, &PARTIAL_HEADERS, false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // The client cancels the request before sending all the headers.
+        helper
+            .pipe
+            .client
+            .stream_shutdown(
+                0,
+                quiche::Shutdown::Write,
+                h3::WireErrorCode::RequestCancelled as u64,
+            )
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        expire_timeouts(&mut helper).await;
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(helper.driver.hooks.pending_client_header_timeouts(), 0);
+        assert_eq!(helper.driver.hooks.client_header_timeout_count(), 0);
+        assert!(helper.pipe.server.local_error().is_none());
+    }
+}

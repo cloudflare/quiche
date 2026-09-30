@@ -24,9 +24,11 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use foundations::telemetry::log;
 use tokio::sync::mpsc;
 
 use super::datagram;
@@ -40,11 +42,13 @@ use super::H3Event;
 use super::InboundHeaders;
 use super::IncomingH3Headers;
 use super::StreamCtx;
+use super::StreamShutdown;
 use super::STREAM_CAPACITY;
 use crate::http3::settings::Http3Settings;
 use crate::http3::settings::Http3SettingsEnforcer;
 use crate::http3::settings::Http3TimeoutType;
 use crate::http3::settings::TimeoutKey;
+use crate::metrics::Metrics;
 use crate::quic::HandshakeInfo;
 use crate::quic::QuicCommand;
 use crate::quic::QuicheConnection;
@@ -164,12 +168,105 @@ pub struct ServerHooks {
     /// Handle to the post-accept timeout entry. If present, the server must
     /// receive a HEADERS frame before this timeout.
     post_accept_timeout: Option<TimeoutKey>,
+    /// Handles to the client header timeout entries of the request streams
+    /// whose headers haven't been received yet, keyed by stream ID.
+    client_header_timeouts: HashMap<u64, TimeoutKey>,
+    /// Value of `peer_opened_streams_bidi()` when client header timeouts were
+    /// last started, i.e. the number of request streams that already have one.
+    peer_opened_streams_seen: u64,
+    /// Number of request streams abandoned due to the client header timeout.
+    client_header_timeout_count: u64,
     /// Whether the extended CONNECT protocol is enabled. When disabled,
     /// skip DATAGRAM flow creation for `:protocol` requests.
     extended_connect_enabled: bool,
 }
 
+#[cfg(test)]
 impl ServerHooks {
+    /// Returns the number of client header timeouts still pending.
+    pub(super) fn pending_client_header_timeouts(&self) -> usize {
+        self.client_header_timeouts.len()
+    }
+
+    /// Returns the number of request streams abandoned due to the client
+    /// header timeout.
+    pub(super) fn client_header_timeout_count(&self) -> u64 {
+        self.client_header_timeout_count
+    }
+}
+
+impl ServerHooks {
+    /// Starts the client header timeout for the request streams that the
+    /// client opened since the last call, including the implicitly opened
+    /// ones.
+    fn start_client_header_timeouts(&mut self, qconn: &QuicheConnection) {
+        let Some(timeout) = self.settings_enforcer.client_header_timeout() else {
+            return;
+        };
+
+        let opened = qconn.peer_opened_streams_bidi();
+
+        while self.peer_opened_streams_seen < opened {
+            // Client-initiated bidirectional streams are opened in order, so
+            // the n-th one has ID n * 4.
+            let stream_id = self.peer_opened_streams_seen << 2;
+
+            let key = self
+                .settings_enforcer
+                .add_timeout(Http3TimeoutType::ClientHeader(stream_id), timeout);
+            self.client_header_timeouts.insert(stream_id, key);
+
+            self.peer_opened_streams_seen += 1;
+        }
+    }
+
+    /// Abandons a request stream whose headers weren't received in time,
+    /// and closes the connection if it caused too many of these timeouts.
+    fn client_header_timed_out(
+        &mut self, qconn: &mut QuicheConnection, stream_id: u64,
+    ) {
+        // The entry expired, so there's nothing left to cancel.
+        self.client_header_timeouts.remove(&stream_id);
+
+        // This is also true for streams that were only opened implicitly,
+        // since quiche has no state for them yet.
+        let finished = qconn.stream_finished(stream_id);
+
+        let err = quiche::h3::WireErrorCode::RequestRejected as u64;
+
+        let shut_down = H3Driver::<Self>::shutdown_quiche_stream(
+            qconn,
+            stream_id,
+            StreamShutdown::Both {
+                read_error_code: err,
+                write_error_code: err,
+            },
+        );
+
+        // Don't count streams that the client already finished or reset.
+        // Streams that quiche has no state for were only opened implicitly and
+        // never received any data, so they're counted.
+        if shut_down && finished {
+            return;
+        }
+
+        log::debug!("request headers not received in time"; "scid" => ?qconn.source_id(), "stream_id" => stream_id);
+
+        self.client_header_timeout_count += 1;
+
+        if self.settings_enforcer.enforce_client_header_timeouts_limit(
+            self.client_header_timeout_count,
+        ) {
+            log::debug!("closing connection due to too many client header timeouts"; "scid" => ?qconn.source_id());
+
+            let _ = qconn.close(
+                true,
+                quiche::h3::WireErrorCode::ExcessiveLoad as u64,
+                b"too many client header timeouts",
+            );
+        }
+    }
+
     /// Handles a new request, creating a stream context, checking for a
     /// potential DATAGRAM flow (CONNECT-{UDP,IP}) and sending a relevant
     /// [`H3Event`] to the [ServerH3Controller] for application-level
@@ -264,6 +361,9 @@ impl DriverHooks for ServerHooks {
             settings_enforcer: settings.into(),
             requests: 0,
             post_accept_timeout: None,
+            client_header_timeouts: HashMap::new(),
+            peer_opened_streams_seen: 0,
+            client_header_timeout_count: 0,
             extended_connect_enabled: settings.enable_extended_connect,
         }
     }
@@ -302,6 +402,15 @@ impl DriverHooks for ServerHooks {
         driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         headers: InboundHeaders,
     ) -> H3ConnectionResult<()> {
+        if let Some(timeout) = driver
+            .hooks
+            .client_header_timeouts
+            .remove(&headers.stream_id)
+        {
+            // The request headers were received in time.
+            driver.hooks.settings_enforcer.cancel_timeout(timeout);
+        }
+
         if driver
             .hooks
             .settings_enforcer
@@ -336,7 +445,32 @@ impl DriverHooks for ServerHooks {
     async fn wait_for_action(
         &mut self, qconn: &mut QuicheConnection,
     ) -> H3ConnectionResult<()> {
-        self.settings_enforcer.enforce_timeouts(qconn).await?;
-        Err(H3ConnectionError::PostAcceptTimeout)
+        let expired = self.settings_enforcer.enforce_timeouts(qconn).await?;
+
+        for stream_id in expired {
+            // The connection might have been closed by a previous timeout.
+            if qconn.local_error().is_some() {
+                break;
+            }
+
+            self.client_header_timed_out(qconn, stream_id);
+        }
+
+        Ok(())
+    }
+
+    fn before_process_reads(
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
+    ) -> H3ConnectionResult<()> {
+        driver.hooks.start_client_header_timeouts(qconn);
+        Ok(())
+    }
+
+    fn conn_closed<M: Metrics>(driver: &H3Driver<Self>, metrics: &M) {
+        let count = driver.hooks.client_header_timeout_count;
+
+        if count > 0 {
+            metrics.client_header_timeouts().inc_by(count);
+        }
     }
 }

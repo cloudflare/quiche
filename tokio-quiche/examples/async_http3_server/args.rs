@@ -62,6 +62,16 @@ pub struct Args {
     /// meaningful when --enable-pacing is set.
     #[arg(long, default_value_t = 0)]
     pub max_pacing_rate: u64,
+
+    /// Time in milliseconds a client may take to send the headers of a
+    /// request before the request is rejected (0 = no limit).
+    #[arg(long, default_value_t = 0)]
+    pub client_header_timeout_ms: u64,
+
+    /// Number of client header timeouts after which a connection is closed
+    /// (0 = no limit). Only meaningful when --client-header-timeout-ms is set.
+    #[arg(long, default_value_t = 0)]
+    pub max_client_header_timeouts: u64,
 }
 
 fn default_cert_path() -> String {

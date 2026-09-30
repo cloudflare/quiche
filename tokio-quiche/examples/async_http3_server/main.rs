@@ -33,6 +33,7 @@ use crate::server::service_fn;
 use crate::server::Server;
 use clap::Parser;
 use futures::stream::StreamExt;
+use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio_quiche::http3::settings::Http3Settings;
 use tokio_quiche::listen;
@@ -64,6 +65,13 @@ async fn main() {
     quic_settings.max_pacing_rate =
         (args.max_pacing_rate > 0).then_some(args.max_pacing_rate);
 
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.client_header_timeout = (args.client_header_timeout_ms > 0)
+        .then(|| Duration::from_millis(args.client_header_timeout_ms));
+    http3_settings.max_client_header_timeouts =
+        (args.max_client_header_timeouts > 0)
+            .then_some(args.max_client_header_timeouts);
+
     let mut listeners = listen(
         [socket],
         ConnectionParams::new_server(
@@ -88,7 +96,7 @@ async fn main() {
 
                 // Create an `H3Driver` to serve the connection.
                 let (driver, mut controller) =
-                    ServerH3Driver::new(Http3Settings::default());
+                    ServerH3Driver::new(http3_settings.clone());
 
                 // Start the driver. This will execute the handshake under the
                 // hood, which lets us start receiving

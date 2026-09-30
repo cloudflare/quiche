@@ -423,13 +423,14 @@ impl DriverTestHelper<ServerHooks> {
 }
 
 /// Minimal [`Metrics`] impl for unit tests. Tracks connection close error
-/// counters; all other metrics are discarded.
+/// and client header timeout counters; all other metrics are discarded.
 #[derive(Clone, Default)]
 pub struct TestMetrics {
     pub local_h3: Counter,
     pub local_quic: Counter,
     pub peer_h3: Counter,
     pub peer_quic: Counter,
+    pub client_header_timeouts: Counter,
 }
 
 impl Metrics for TestMetrics {
@@ -455,6 +456,10 @@ impl Metrics for TestMetrics {
         &self, _reason: labels::QuicError,
     ) -> Counter {
         self.peer_quic.clone()
+    }
+
+    fn client_header_timeouts(&self) -> Counter {
+        self.client_header_timeouts.clone()
     }
 
     // -- everything below is unused by the code under test --

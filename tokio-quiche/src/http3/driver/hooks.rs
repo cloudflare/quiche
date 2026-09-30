@@ -32,6 +32,7 @@ use super::H3ConnectionResult;
 use super::H3Driver;
 use super::H3Event;
 use crate::http3::settings::Http3Settings;
+use crate::metrics::Metrics;
 use crate::quic::HandshakeInfo;
 use crate::quic::QuicheConnection;
 
@@ -105,4 +106,17 @@ pub trait DriverHooks: Sized + Send + 'static {
     ) -> impl Future<Output = H3ConnectionResult<()>> + Send {
         std::future::pending()
     }
+
+    /// Called at the start of `ApplicationOverQuic::process_reads`, after
+    /// quiche processed the received packets but before any HTTP/3 events
+    /// are polled. Used to track newly opened streams.
+    fn before_process_reads(
+        driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
+    ) -> H3ConnectionResult<()> {
+        Ok(())
+    }
+
+    /// Called in `ApplicationOverQuic::on_conn_close` to record
+    /// endpoint-specific metrics.
+    fn conn_closed<M: Metrics>(driver: &H3Driver<Self>, metrics: &M) {}
 }
