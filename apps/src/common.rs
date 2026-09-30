@@ -519,6 +519,12 @@ impl HttpConn for Http09Conn {
                 // we got the full response. If all responses are received
                 // then close the connection.
                 if &s % 4 == 0 && fin {
+                    // Flush and close the response file now, rather than
+                    // keeping it open until the client exits.
+                    if let Some(mut rw) = req.response_writer.take() {
+                        rw.flush().ok();
+                    }
+
                     self.reqs_complete += 1;
                     let reqs_count = self.reqs.len();
 
@@ -1291,7 +1297,19 @@ impl HttpConn for Http3Conn {
                     }
                 },
 
-                Ok((_stream_id, quiche::h3::Event::Finished)) => {
+                Ok((stream_id, quiche::h3::Event::Finished)) => {
+                    // Flush and close the response file now, rather than
+                    // keeping it open until the client exits.
+                    if let Some(req) = self
+                        .reqs
+                        .iter_mut()
+                        .find(|r| r.stream_id == Some(stream_id))
+                    {
+                        if let Some(mut rw) = req.response_writer.take() {
+                            rw.flush().ok();
+                        }
+                    }
+
                     self.reqs_complete += 1;
                     let reqs_count = self.reqs.len();
 
@@ -1667,5 +1685,150 @@ impl HttpConn for Http3Conn {
         if resp.written == resp.body.len() {
             partial_responses.remove(&stream_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use quiche::test_utils::Pipe;
+
+    fn test_config(alpn: &[&[u8]]) -> quiche::Config {
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("src/bin/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("src/bin/cert.key")
+            .unwrap();
+        config.set_application_protos(alpn).unwrap();
+        config.set_initial_max_data(10_000);
+        config.set_initial_max_stream_data_bidi_local(10_000);
+        config.set_initial_max_stream_data_bidi_remote(10_000);
+        config.set_initial_max_stream_data_uni(10_000);
+        config.set_initial_max_streams_bidi(10);
+        config.set_initial_max_streams_uni(10);
+        config.verify_peer(false);
+        config
+    }
+
+    fn test_dump_dir(name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!(
+            "quiche-apps-{}-{}",
+            name,
+            std::process::id()
+        ));
+
+        std::fs::create_dir_all(&dir).unwrap();
+
+        dir.to_str().unwrap().to_string()
+    }
+
+    fn null_sink() -> Rc<RefCell<dyn FnMut(String)>> {
+        Rc::new(RefCell::new(|_: String| {}))
+    }
+
+    #[test]
+    fn http09_response_file_complete_on_fin() {
+        let mut config = test_config(&[b"hq-interop"]);
+        let mut pipe = Pipe::with_config(&mut config).unwrap();
+        pipe.handshake().unwrap();
+
+        let dir = test_dump_dir("http09");
+        let url = url::Url::parse("https://quic.tech/resp09").unwrap();
+
+        let mut h_conn = Http09Conn::with_urls(&[url], 1, null_sink());
+        h_conn.send_requests(&mut pipe.client, &Some(dir.clone()));
+        pipe.advance().unwrap();
+
+        let mut buf = [0; 1500];
+        let (_, fin) = pipe.server.stream_recv(0, &mut buf).unwrap();
+        assert!(fin);
+
+        pipe.server.stream_send(0, b"hello", true).unwrap();
+        pipe.advance().unwrap();
+
+        h_conn.handle_responses(
+            &mut pipe.client,
+            &mut buf,
+            &std::time::Instant::now(),
+        );
+
+        // The response file must be complete on disk as soon as the stream
+        // is finished, not only when the client exits.
+        let path = format!("{dir}/resp09");
+        assert_eq!(std::fs::read(&path).unwrap(), b"hello");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn http3_response_file_complete_on_finished() {
+        let mut config = test_config(quiche::h3::APPLICATION_PROTOCOL);
+        let mut pipe = Pipe::with_config(&mut config).unwrap();
+        pipe.handshake().unwrap();
+
+        let dir = test_dump_dir("http3");
+        let url = url::Url::parse("https://quic.tech/resp3").unwrap();
+
+        let mut h_conn = Http3Conn::with_urls(
+            &mut pipe.client,
+            &[url],
+            1,
+            &[],
+            &None,
+            "GET",
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            null_sink(),
+        );
+
+        let mut server_h3 = quiche::h3::Connection::with_transport(
+            &mut pipe.server,
+            &quiche::h3::Config::new().unwrap(),
+        )
+        .unwrap();
+
+        h_conn.send_requests(&mut pipe.client, &Some(dir.clone()));
+        pipe.advance().unwrap();
+
+        let stream_id = loop {
+            match server_h3.poll(&mut pipe.server) {
+                Ok((stream_id, quiche::h3::Event::Headers { .. })) =>
+                    break stream_id,
+
+                Ok(_) => (),
+
+                Err(e) => panic!("no request received: {e:?}"),
+            }
+        };
+
+        let resp = [quiche::h3::Header::new(b":status", b"200")];
+        server_h3
+            .send_response(&mut pipe.server, stream_id, &resp, false)
+            .unwrap();
+        server_h3
+            .send_body(&mut pipe.server, stream_id, b"hello", true)
+            .unwrap();
+        pipe.advance().unwrap();
+
+        let mut buf = [0; 1500];
+        h_conn.handle_responses(
+            &mut pipe.client,
+            &mut buf,
+            &std::time::Instant::now(),
+        );
+
+        // The response file must be complete on disk as soon as the stream
+        // is finished, not only when the client exits.
+        let path = format!("{dir}/resp3");
+        assert_eq!(std::fs::read(&path).unwrap(), b"hello");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
