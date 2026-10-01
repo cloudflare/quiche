@@ -256,13 +256,17 @@ impl RecvBuf {
             return Err(Error::StreamReset(e));
         }
 
-        while cap > 0 && self.ready() {
+        while self.ready() {
             let mut entry = match self.data.first_entry() {
                 Some(entry) => entry,
                 None => break,
             };
 
             let buf = entry.get_mut();
+
+            if cap == 0 && !buf.is_empty() {
+                break;
+            }
 
             let buf_len = cmp::min(buf.len(), cap);
 
