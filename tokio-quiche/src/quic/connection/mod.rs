@@ -330,9 +330,7 @@ where
             stats: Arc::clone(&self.stats),
             connection_hook: self.params.connection_hook,
         };
-        let conn_stage = Handshake {
-            handshake_info: self.params.handshake_info,
-        };
+        let conn_stage = Handshake;
         let params = IoWorkerParams {
             socket: MaybeConnectedSocket::new(self.params.socket),
             shutdown_tx: self.params.shutdown_tx,
@@ -344,6 +342,7 @@ where
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: self.params.init_rx_time,
             metrics: self.params.metrics.clone(),
+            handshake_info: self.params.handshake_info,
         };
 
         let handshake_fut = async move {
