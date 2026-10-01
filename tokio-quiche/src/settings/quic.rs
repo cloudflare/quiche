@@ -164,6 +164,26 @@ pub struct QuicSettings {
     #[serde(default)]
     pub qlog_compression: QlogCompression,
 
+    /// Specifies a file where trusted CA certificates are stored for the
+    /// purposes of certificate verification.
+    ///
+    /// The content of `file` is parsed as a PEM-encoded certificate chain.
+    ///
+    /// See [`load_verify_locations_from_file()`]
+    /// 
+    /// [`load_verify_locations_from_file()`]: https://docs.quic.tech/quiche/struct.Config.html#method.load_verify_locations_from_file
+    pub verify_file: Option<String>,
+
+    /// Specifies a directory where trusted CA certificates are stored for the
+    /// purposes of certificate verification.
+    ///
+    /// The content of `dir` a set of PEM-encoded certificate chains.
+    /// 
+    /// See [`load_verify_locations_from_directory()`]
+    /// 
+    /// [`load_verify_locations_from_directory()`]: https://docs.quic.tech/quiche/struct.Config.html#method.load_verify_locations_from_directory
+    pub verify_directory: Option<String>,
+
     /// Congestion control algorithm to use.
     ///
     /// For available values, see
