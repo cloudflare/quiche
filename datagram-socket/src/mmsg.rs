@@ -118,6 +118,7 @@ pub fn sendmmsg(fd: BorrowedFd, bufs: &[ReadBuf<'_>]) -> io::Result<usize> {
 }
 
 /// Sends multiple datagrams, appending the same suffix to every datagram.
+///
 /// This is useful for situations where the datagrams carry UDP payloads, which
 /// can create an ambiguous situation: an empty UDP payload is valid in a UDP IP
 /// packet, but reading 0 bytes from a datagram socket is also a signal of a
