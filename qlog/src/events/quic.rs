@@ -331,6 +331,7 @@ pub enum QuicEventType {
     PacketLost,
     MarkedForRetransmit,
     EcnStateUpdated,
+    CarefulResumePhaseUpdated,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
