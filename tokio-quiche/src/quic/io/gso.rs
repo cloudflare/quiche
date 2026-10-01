@@ -126,6 +126,8 @@ pub async fn send_to(
     const INSTANT_ZERO: Instant = unsafe { std::mem::transmute(0u128) };
 
     let mut sendmsg_retry_timer = None;
+    // Only log recurring WouldBlock errors.
+    let mut recurring_would_block = false;
     loop {
         let iov = [std::io::IoSlice::new(send_buf)];
         let segment_size_u16 = segment_size as u16;
@@ -167,7 +169,20 @@ pub async fn send_to(
                     sendmsg_retry_timer =
                         Some(send_to_wouldblock_duration_s.start_timer());
                 }
-                would_block_metric.inc();
+                // Only log if we see recurring would block errors in the same
+                // loop.
+                //
+                // A WouldBlock error suggests that the library should try again
+                // later since it is expected that a socket will block
+                // occasionally.
+                //
+                // We would like to measure WouldBlock errors that result because
+                // of the hot `loop`ing calls to `sendmsg`.
+                if recurring_would_block {
+                    would_block_metric.inc();
+                }
+                recurring_would_block = true;
+
                 socket.writable().await?
             },
             res => return res,
