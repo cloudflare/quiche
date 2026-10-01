@@ -38,28 +38,33 @@ const MAX_MMSG: usize = 16;
 
 pub fn recvmmsg(fd: BorrowedFd, bufs: &mut [ReadBuf<'_>]) -> io::Result<usize> {
     let mut msgvec: SmallVec<[libc::mmsghdr; MAX_MMSG]> = SmallVec::new();
-    let mut slices: SmallVec<[IoSlice; MAX_MMSG]> = SmallVec::new();
+    let mut iovecs: SmallVec<[libc::iovec; MAX_MMSG]> = SmallVec::new();
 
     let mut ret = 0;
 
     for bufs in bufs.chunks_mut(MAX_MMSG) {
         msgvec.clear();
-        slices.clear();
+        iovecs.clear();
 
         for buf in bufs.iter_mut() {
-            // Safety: will not read the maybe uninitialized bytes.
-            let b = unsafe {
-                &mut *(buf.unfilled_mut() as *mut [std::mem::MaybeUninit<u8>]
-                    as *mut [u8])
-            };
+            // Safety: the kernel only writes to, and never de-initializes,
+            // the unfilled region.
+            let unfilled = unsafe { buf.unfilled_mut() };
 
-            slices.push(IoSlice::new(b));
+            iovecs.push(libc::iovec {
+                iov_base: unfilled.as_mut_ptr().cast(),
+                iov_len: unfilled.len(),
+            });
+        }
 
+        // Only take pointers into `iovecs` once it is fully populated, as
+        // pushing to it would invalidate them.
+        for (buf, iov) in bufs.iter().zip(iovecs.iter_mut()) {
             msgvec.push(libc::mmsghdr {
                 msg_hdr: libc::msghdr {
                     msg_name: std::ptr::null_mut(),
                     msg_namelen: 0,
-                    msg_iov: slices.last_mut().unwrap() as *mut _ as *mut _,
+                    msg_iov: iov,
                     msg_iovlen: 1,
                     msg_control: std::ptr::null_mut(),
                     msg_controllen: 0,
