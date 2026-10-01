@@ -18,6 +18,9 @@ The default TLS certificate covers `test.com`. Certificates can be passed via
 the `--tls-cert-path` CLI argument, while private keys can be passed via the
 `--tls-private-key-path` argument.
 
+Run with `--help` to see all options, such as `--client-header-timeout-ms` to
+reject requests whose headers aren't received in time.
+
 Once the server is up and running, you can hit it with your favorite client:
 
 ```shell

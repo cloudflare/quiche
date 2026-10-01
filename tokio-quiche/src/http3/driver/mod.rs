@@ -1105,45 +1105,48 @@ impl<H: DriverHooks> H3Driver<H> {
 
         let audit_stats = &stream_ctx.audit_stats;
 
-        match shutdown {
-            StreamShutdown::Read { error_code } => {
-                audit_stats.set_sent_stop_sending_error_code(error_code as _);
-                let _ = qconn.stream_shutdown(
-                    stream_id,
-                    quiche::Shutdown::Read,
-                    error_code,
-                );
-            },
-            StreamShutdown::Write { error_code } => {
-                audit_stats.set_sent_reset_stream_error_code(error_code as _);
-                let _ = qconn.stream_shutdown(
-                    stream_id,
-                    quiche::Shutdown::Write,
-                    error_code,
-                );
-            },
-            StreamShutdown::Both {
-                read_error_code,
-                write_error_code,
-            } => {
-                audit_stats
-                    .set_sent_stop_sending_error_code(read_error_code as _);
-                let _ = qconn.stream_shutdown(
-                    stream_id,
-                    quiche::Shutdown::Read,
-                    read_error_code,
-                );
-                audit_stats
-                    .set_sent_reset_stream_error_code(write_error_code as _);
-                let _ = qconn.stream_shutdown(
-                    stream_id,
-                    quiche::Shutdown::Write,
-                    write_error_code,
-                );
-            },
+        if let Some(error_code) = shutdown.read_error_code() {
+            audit_stats.set_sent_stop_sending_error_code(error_code as _);
         }
 
+        if let Some(error_code) = shutdown.write_error_code() {
+            audit_stats.set_sent_reset_stream_error_code(error_code as _);
+        }
+
+        Self::shutdown_quiche_stream(qconn, stream_id, shutdown);
+
         self.cleanup_stream(qconn, stream_id)
+    }
+
+    /// Shuts down the indicated directions of a stream in quiche, sending
+    /// `STOP_SENDING` and `RESET_STREAM` frames, whether or not the driver
+    /// has any state for the stream.
+    ///
+    /// Returns whether any direction was shut down, which is `false` if quiche
+    /// has no state for the stream, e.g. because the peer only opened it
+    /// implicitly.
+    ///
+    /// Only the transport stream is shut down: quiche's HTTP/3 layer keeps its
+    /// state for the stream until the connection closes (see the TODO in
+    /// quiche's `collect_reset_streams` test).
+    fn shutdown_quiche_stream(
+        qconn: &mut QuicheConnection, stream_id: u64, shutdown: StreamShutdown,
+    ) -> bool {
+        let mut shut_down = false;
+
+        if let Some(error_code) = shutdown.read_error_code() {
+            shut_down |= qconn
+                .stream_shutdown(stream_id, quiche::Shutdown::Read, error_code)
+                .is_ok();
+        }
+
+        if let Some(error_code) = shutdown.write_error_code() {
+            shut_down |= qconn
+                .stream_shutdown(stream_id, quiche::Shutdown::Write, error_code)
+                .is_ok();
+        }
+
+        shut_down
     }
 
     /// Handles a regular [`H3Command`]. May be called internally by
@@ -1335,6 +1338,8 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
     ///
     /// If a DATAGRAM is found, it is sent to the receiver on its channel.
     fn process_reads(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()> {
+        H::before_process_reads(self, qconn)?;
+
         loop {
             match self.conn_mut()?.poll(qconn) {
                 Ok((stream_id, event)) =>
@@ -1382,6 +1387,8 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
             .observe(max_stream_seen as f64);
 
         Self::record_quiche_error(quiche_conn, metrics);
+
+        H::conn_closed(self, metrics);
 
         let Err(work_loop_error) = work_loop_result else {
             return;
@@ -1495,6 +1502,30 @@ pub enum StreamShutdown {
         read_error_code: u64,
         write_error_code: u64,
     },
+}
+
+impl StreamShutdown {
+    /// Returns the error code for the read direction, if it's shut down.
+    fn read_error_code(&self) -> Option<u64> {
+        match *self {
+            Self::Read { error_code } => Some(error_code),
+            Self::Write { .. } => None,
+            Self::Both {
+                read_error_code, ..
+            } => Some(read_error_code),
+        }
+    }
+
+    /// Returns the error code for the write direction, if it's shut down.
+    fn write_error_code(&self) -> Option<u64> {
+        match *self {
+            Self::Read { .. } => None,
+            Self::Write { error_code } => Some(error_code),
+            Self::Both {
+                write_error_code, ..
+            } => Some(write_error_code),
+        }
+    }
 }
 
 /// Sends [`H3Command`]s to an [H3Driver]. The sender is typed and internally

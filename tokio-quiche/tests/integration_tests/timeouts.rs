@@ -338,3 +338,63 @@ async fn test_post_accept_timeout_is_reset() {
 
     assert_eq!(request_counter.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test]
+async fn test_client_header_timeout() {
+    use h3i::actions::h3::ExpectedStreamSendResult;
+    use h3i::actions::h3::StreamEvent;
+    use h3i::actions::h3::StreamEventType;
+    use h3i::frame::H3iFrame;
+    use h3i::frame::ResetStream;
+
+    const CLIENT_HEADER_TIMEOUT: Duration = Duration::from_millis(500);
+
+    let hook = TestConnectionHook::new();
+
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.client_header_timeout = Some(CLIENT_HEADER_TIMEOUT);
+
+    let (url, _) = start_server_with_settings(
+        QuicSettings::default(),
+        http3_settings,
+        hook,
+        handle_connection,
+    );
+
+    let actions = vec![
+        // A HEADERS frame declaring a 100 bytes payload, of which only 3 bytes
+        // are sent.
+        Action::StreamBytes {
+            stream_id: 0,
+            fin_stream: false,
+            bytes: vec![0x01, 0x40, 0x64, 0, 0, 0],
+            expected_result: ExpectedStreamSendResult::Ok,
+        },
+        Action::FlushPackets,
+        Action::Wait {
+            wait_type: WaitType::StreamEvent(StreamEvent {
+                stream_id: 0,
+                event_type: StreamEventType::Finished,
+            }),
+        },
+        // Other requests on the same connection are not affected.
+        send_headers_frame(4, true, default_headers()),
+        Action::FlushPackets,
+        Action::Wait {
+            wait_type: WaitType::StreamEvent(StreamEvent {
+                stream_id: 4,
+                event_type: StreamEventType::Headers,
+            }),
+        },
+    ];
+
+    let summary = summarize_connection(h3i_config(&url), actions).await;
+
+    let reset = H3iFrame::ResetStream(ResetStream {
+        stream_id: 0,
+        error_code: quiche::h3::WireErrorCode::RequestRejected as u64,
+    });
+    assert!(summary.stream_map.stream(0).contains(&reset));
+    assert!(received_status_code_on_stream(&summary, 4, 200));
+    assert!(summary.conn_close_details.no_err());
+}

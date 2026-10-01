@@ -59,6 +59,33 @@ pub struct Http3Settings {
     /// request on a connection. Only applicable to
     /// [ServerH3Driver](crate::http3::driver::ServerH3Driver).
     pub post_accept_timeout: Option<Duration>,
+    /// Timeout between a client opening a request stream and the server
+    /// receiving the complete request headers on it, similar to nginx's
+    /// `client_header_timeout`. Only applicable to
+    /// [ServerH3Driver](crate::http3::driver::ServerH3Driver).
+    ///
+    /// The timeout starts when the stream is opened, including when the client
+    /// opens it implicitly by using a higher stream ID, and it isn't extended
+    /// by receiving parts of the headers or other frames. When it expires, the
+    /// stream is shut down in both directions with `H3_REQUEST_REJECTED`, which
+    /// tells the client it may retry the request, and other requests on the
+    /// connection continue. Timeouts are counted by
+    /// [`Metrics::client_header_timeouts`].
+    ///
+    /// quiche keeps some HTTP/3 state for each stream shut down this way until
+    /// the connection closes, so setting
+    /// [`max_client_header_timeouts`](Self::max_client_header_timeouts) as
+    /// well is recommended to bound it.
+    ///
+    /// [`Metrics::client_header_timeouts`]: crate::metrics::Metrics::client_header_timeouts
+    pub client_header_timeout: Option<Duration>,
+    /// Maximum number of [client header timeouts](Self::client_header_timeout)
+    /// allowed during the lifetime of a connection. When it's reached, the
+    /// connection is closed with `H3_EXCESSIVE_LOAD`. Streams that the client
+    /// finished or reset before the timeout expired aren't counted, while
+    /// streams it only opened implicitly are. Only applicable to
+    /// [ServerH3Driver](crate::http3::driver::ServerH3Driver).
+    pub max_client_header_timeouts: Option<u64>,
     /// Set the `SETTINGS_ENABLE_CONNECT_PROTOCOL` HTTP/3 setting.
     /// See <https://www.rfc-editor.org/rfc/rfc9220#section-3-2>
     pub enable_extended_connect: bool,
@@ -113,9 +140,11 @@ impl From<&Http3Settings> for Http3SettingsEnforcer {
         Self {
             limits: Http3Limits {
                 max_requests_per_connection: value.max_requests_per_connection,
+                max_client_header_timeouts: value.max_client_header_timeouts,
             },
             timeouts: Http3Timeouts {
                 post_accept_timeout: value.post_accept_timeout,
+                client_header_timeout: value.client_header_timeout,
                 delay_queue: DelayQueue::new(),
             },
         }
@@ -133,9 +162,26 @@ impl Http3SettingsEnforcer {
         false
     }
 
+    /// Returns a boolean indicating whether or not the connection should be
+    /// closed due to a violation of the client header timeout count limit.
+    pub fn enforce_client_header_timeouts_limit(
+        &self, timeout_count: u64,
+    ) -> bool {
+        if let Some(limit) = self.limits.max_client_header_timeouts {
+            return timeout_count >= limit;
+        }
+
+        false
+    }
+
     /// Returns the configured post-accept timeout.
     pub fn post_accept_timeout(&self) -> Option<Duration> {
         self.timeouts.post_accept_timeout
+    }
+
+    /// Returns the configured client header timeout.
+    pub fn client_header_timeout(&self) -> Option<Duration> {
+        self.timeouts.client_header_timeout
     }
 
     /// Registers a timeout of `typ` in this [Http3SettingsEnforcer].
@@ -171,19 +217,22 @@ impl Http3SettingsEnforcer {
 
     /// Waits for at least one registered timeout to expire.
     ///
-    /// This function will automatically call `close()` on the underlying
-    /// [quiche::Connection].
+    /// If the post-accept timeout expired, this function will automatically
+    /// call `close()` on the underlying [quiche::Connection] and return
+    /// [`H3ConnectionError::PostAcceptTimeout`]. Otherwise it returns the IDs
+    /// of the streams whose client header timeout expired.
     pub async fn enforce_timeouts(
         &mut self, qconn: &mut QuicheConnection,
-    ) -> Result<(), H3ConnectionError> {
+    ) -> Result<Vec<u64>, H3ConnectionError> {
         let result = poll_fn(|cx| self.poll_timeouts(cx)).await;
 
         if result.connection_timed_out {
             log::debug!("connection timed out due to post-accept-timeout"; "scid" => ?qconn.source_id());
             qconn.close(true, quiche::h3::WireErrorCode::NoError as u64, &[])?;
+            return Err(H3ConnectionError::PostAcceptTimeout);
         }
 
-        Ok(())
+        Ok(result.client_header_timeouts)
     }
 
     /// Cancels a timeout that was previously registered with `add_timeout`.
@@ -196,31 +245,37 @@ impl Http3SettingsEnforcer {
 // should enforce sane defaults
 struct Http3Limits {
     max_requests_per_connection: Option<u64>,
+    max_client_header_timeouts: Option<u64>,
 }
 
 struct Http3Timeouts {
     post_accept_timeout: Option<Duration>,
+    client_header_timeout: Option<Duration>,
     delay_queue: DelayQueue<Http3TimeoutType>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Http3TimeoutType {
     PostAccept,
+    /// The client header timeout of the request stream with the given ID.
+    ClientHeader(u64),
 }
 
 #[derive(Default, Eq, PartialEq)]
 struct TimeoutCheckResult {
     connection_timed_out: bool,
+    client_header_timeouts: Vec<u64>,
 }
 
 impl TimeoutCheckResult {
     fn set_expired(&mut self, typ: Http3TimeoutType) -> bool {
         use Http3TimeoutType::*;
-        let field = match typ {
-            PostAccept => &mut self.connection_timed_out,
+        match typ {
+            PostAccept => self.connection_timed_out = true,
+            ClientHeader(stream_id) =>
+                self.client_header_timeouts.push(stream_id),
         };
 
-        *field = true;
         true
     }
 }
