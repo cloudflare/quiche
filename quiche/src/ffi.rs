@@ -268,6 +268,13 @@ pub extern "C" fn quiche_config_set_max_amplification_factor(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_max_recv_packets_before_handshake(
+    config: &mut Config, v: usize,
+) {
+    config.set_max_recv_packets_before_handshake(v);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_set_max_idle_timeout(
     config: &mut Config, v: u64,
 ) {

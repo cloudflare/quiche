@@ -14041,3 +14041,250 @@ fn server_qlog() {
         panic!("expected Qlog event");
     }
 }
+
+#[rstest]
+fn zero_rtt_client_never_completes_handshake(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const MAX_RECV_PACKETS: usize = 100;
+
+    let mut buf = [0; 65535];
+
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    config.enable_early_data();
+    config.set_max_recv_packets_before_handshake(MAX_RECV_PACKETS);
+
+    // Establish an initial connection to obtain a resumption ticket.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    let session = pipe.client.session().unwrap();
+
+    // Start a resumed connection and advance the server into early data.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.client.set_session(session), Ok(()));
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    assert!(pipe.server.is_in_early_data());
+
+    // The server's handshake flight never reaches the client, so the client
+    // can't complete the handshake or acknowledge anything the server sends.
+    test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    let epoch = packet::Epoch::Application;
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+
+    // The client keeps sending ack-eliciting 0-RTT packets. Each one gets
+    // acknowledged by the server, adding to the server's tracked sent packets.
+    for _ in pipe.server.recv_count..MAX_RECV_PACKETS {
+        let sent_packets = pipe
+            .server
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .sent_packets_len(epoch);
+
+        let len = pipe
+            .send_pkt_to_server(Type::ZeroRTT, &frames, &mut buf)
+            .unwrap();
+        assert!(len > 0);
+
+        assert_eq!(
+            pipe.server
+                .paths
+                .get_active()
+                .unwrap()
+                .recovery
+                .sent_packets_len(epoch),
+            sent_packets + 1
+        );
+        assert!(pipe.server.is_in_early_data());
+        assert!(!pipe.server.is_established());
+        assert_eq!(pipe.server.local_error, None);
+    }
+
+    // The next packet exceeds the limit and the server closes the connection.
+    assert!(pipe
+        .send_pkt_to_server(Type::ZeroRTT, &frames, &mut buf)
+        .is_ok());
+
+    assert_eq!(
+        pipe.server.local_error,
+        Some(ConnectionError {
+            is_app: false,
+            error_code: WireErrorCode::ConnectionRefused as u64,
+            reason: b"too many packets before handshake completion".to_vec(),
+        })
+    );
+    assert!(pipe.server.is_draining());
+
+    // Further packets are ignored and no longer tracked.
+    let sent_packets = pipe
+        .server
+        .paths
+        .get_active()
+        .unwrap()
+        .recovery
+        .sent_packets_len(epoch);
+
+    for _ in 0..10 {
+        assert_eq!(
+            pipe.send_pkt_to_server(Type::ZeroRTT, &frames, &mut buf),
+            Ok(0)
+        );
+    }
+
+    assert_eq!(
+        pipe.server
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .sent_packets_len(epoch),
+        sent_packets
+    );
+}
+
+#[rstest]
+fn initial_client_never_completes_handshake(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const MAX_RECV_PACKETS: usize = 100;
+
+    let mut buf = [0; 65535];
+
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    config.set_max_recv_packets_before_handshake(MAX_RECV_PACKETS);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // The server's handshake flight never reaches the client.
+    test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+
+    // The client keeps sending ack-eliciting Initial packets.
+    for _ in pipe.server.recv_count..MAX_RECV_PACKETS {
+        assert!(pipe
+            .send_pkt_to_server(Type::Initial, &frames, &mut buf)
+            .is_ok());
+        assert!(!pipe.server.is_established());
+        assert_eq!(pipe.server.local_error, None);
+    }
+
+    // The next packet exceeds the limit and the server closes the connection.
+    assert!(pipe
+        .send_pkt_to_server(Type::Initial, &frames, &mut buf)
+        .is_ok());
+
+    assert_eq!(
+        pipe.server.local_error,
+        Some(ConnectionError {
+            is_app: false,
+            error_code: WireErrorCode::ConnectionRefused as u64,
+            reason: b"too many packets before handshake completion".to_vec(),
+        })
+    );
+    assert!(pipe.server.is_draining());
+}
+
+#[rstest]
+fn max_recv_packets_before_handshake_clamped(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+
+    for v in [1, MIN_RECV_PACKETS_BEFORE_HANDSHAKE - 1, 0] {
+        config.set_max_recv_packets_before_handshake(v);
+        assert_eq!(
+            config.max_recv_packets_before_handshake,
+            MIN_RECV_PACKETS_BEFORE_HANDSHAKE
+        );
+    }
+
+    // A zero limit doesn't refuse every connection.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.server.local_error, None);
+
+    config.set_max_recv_packets_before_handshake(
+        MIN_RECV_PACKETS_BEFORE_HANDSHAKE + 1,
+    );
+    assert_eq!(
+        config.max_recv_packets_before_handshake,
+        MIN_RECV_PACKETS_BEFORE_HANDSHAKE + 1
+    );
+}
+
+#[rstest]
+fn max_recv_packets_before_handshake_ignored_by_client(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const MAX_RECV_PACKETS: usize = MIN_RECV_PACKETS_BEFORE_HANDSHAKE;
+
+    let mut buf = [0; 65535];
+
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    config.set_max_recv_packets_before_handshake(MAX_RECV_PACKETS);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // The server's handshake flight never reaches the client.
+    test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+
+    // The server keeps sending ack-eliciting Initial packets, which the client
+    // processes without the limit being enforced.
+    for _ in 0..MAX_RECV_PACKETS * 2 {
+        let len = test_utils::encode_pkt(
+            &mut pipe.server,
+            Type::Initial,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
+        assert!(!pipe.client.is_established());
+        assert_eq!(pipe.client.local_error, None);
+    }
+
+    assert!(pipe.client.recv_count > MAX_RECV_PACKETS);
+}
+
+#[rstest]
+fn max_recv_packets_before_handshake_ignored_after_handshake(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const MAX_RECV_PACKETS: usize = MIN_RECV_PACKETS_BEFORE_HANDSHAKE;
+
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_max_recv_packets_before_handshake(MAX_RECV_PACKETS);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+
+    for _ in 0..MAX_RECV_PACKETS * 2 {
+        assert!(pipe
+            .send_pkt_to_server(Type::Short, &frames, &mut buf)
+            .is_ok());
+        assert_eq!(pipe.server.local_error, None);
+    }
+
+    assert!(pipe.server.recv_count > MAX_RECV_PACKETS);
+}

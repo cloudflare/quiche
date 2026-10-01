@@ -479,6 +479,18 @@ const PAYLOAD_LENGTH_LEN: usize = 2;
 // The number of undecryptable that can be buffered.
 const MAX_UNDECRYPTABLE_PACKETS: usize = 10;
 
+// The default maximum number of packets a server processes before the
+// handshake completes. A well-behaved client only sends a handful of handshake
+// packets and at most a congestion window worth of 0-RTT packets, as it can't
+// process the ACKs for those until it has processed the handshake.
+const DEFAULT_MAX_RECV_PACKETS_BEFORE_HANDSHAKE: usize = 1000;
+
+// The minimum value for the maximum number of packets a server processes
+// before the handshake completes. Lower values risk refusing legitimate
+// clients, e.g. those sending a large initial window of 0-RTT packets or
+// retransmitting handshake packets on lossy paths.
+const MIN_RECV_PACKETS_BEFORE_HANDSHAKE: usize = 100;
+
 const RESERVED_VERSION_MASK: u32 = 0xfafafafa;
 
 // The maximum size of the receiver connection flow control window.
@@ -600,6 +612,8 @@ pub struct Config {
 
     max_amplification_factor: usize,
 
+    max_recv_packets_before_handshake: usize,
+
     disable_dcid_reuse: bool,
 
     track_unknown_transport_params: Option<usize>,
@@ -678,6 +692,9 @@ impl Config {
             max_stream_window: stream::MAX_STREAM_WINDOW,
 
             max_amplification_factor: MAX_AMPLIFICATION_FACTOR,
+
+            max_recv_packets_before_handshake:
+                DEFAULT_MAX_RECV_PACKETS_BEFORE_HANDSHAKE,
 
             disable_dcid_reuse: false,
 
@@ -898,6 +915,24 @@ impl Config {
     /// The default value is `3`.
     pub fn set_max_amplification_factor(&mut self, v: usize) {
         self.max_amplification_factor = v;
+    }
+
+    /// Sets the maximum number of packets a server processes before the
+    /// handshake completes.
+    ///
+    /// A client that keeps sending packets without completing the handshake
+    /// (for example by continuously sending 0-RTT packets) gets the connection
+    /// closed with a `CONNECTION_REFUSED` error once this limit is exceeded.
+    ///
+    /// This only applies to server connections.
+    ///
+    /// Values below `100` are clamped to `100`, so that legitimate clients
+    /// aren't refused.
+    ///
+    /// The default value is `1000`.
+    pub fn set_max_recv_packets_before_handshake(&mut self, v: usize) {
+        self.max_recv_packets_before_handshake =
+            cmp::max(v, MIN_RECV_PACKETS_BEFORE_HANDSHAKE);
     }
 
     /// Sets the send capacity factor.
@@ -1602,6 +1637,10 @@ where
 
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
+
+    /// The maximum number of packets a server processes before the handshake
+    /// completes.
+    max_recv_packets_before_handshake: usize,
 }
 
 /// Creates a new server-side connection.
@@ -2226,6 +2265,9 @@ impl<F: BufFactory> Connection<F> {
             streams_blocked_uni_state: Default::default(),
 
             max_amplification_factor: config.max_amplification_factor,
+
+            max_recv_packets_before_handshake: config
+                .max_recv_packets_before_handshake,
         };
         if let Some(retry_cids) = retry_cids {
             conn.local_transport_params
@@ -3340,6 +3382,31 @@ impl<F: BufFactory> Connection<F> {
         // Packets with no frames are invalid.
         if payload.cap() == 0 {
             return Err(Error::InvalidPacket);
+        }
+
+        // Before the handshake completes, `recv_count` is the number of
+        // packets processed so far. A client that keeps sending packets
+        // without completing the handshake would otherwise keep the connection
+        // alive indefinitely, with the ACKs we send in response never
+        // acknowledged.
+        if self.is_server &&
+            !self.handshake_completed &&
+            self.recv_count >= self.max_recv_packets_before_handshake
+        {
+            trace!(
+                "{} too many packets received before handshake completion: {}",
+                self.trace_id,
+                self.recv_count
+            );
+
+            self.close(
+                false,
+                WireErrorCode::ConnectionRefused as u64,
+                b"too many packets before handshake completion",
+            )
+            .ok();
+
+            return Err(Error::Done);
         }
 
         // Now that we decrypted the packet, let's see if we can map it to an
