@@ -702,6 +702,22 @@ impl Config {
         self.tls_ctx.use_certificate_chain_file(file)
     }
 
+    /// Configures the given certificate.
+    ///
+    /// The content of `cert` is parsed as a single DER-encoded certificate.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// # let cert = std::fs::read("/path/to/cert.der")?;
+    /// config.load_cert_from_der(&cert)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn load_cert_from_der(&mut self, cert: &[u8]) -> Result<()> {
+        self.tls_ctx.use_certificate_der(cert)
+    }
+
     /// Configures the given private key.
     ///
     /// The content of `file` is parsed as a PEM-encoded private key.
@@ -715,6 +731,22 @@ impl Config {
     /// ```
     pub fn load_priv_key_from_pem_file(&mut self, file: &str) -> Result<()> {
         self.tls_ctx.use_privkey_file(file)
+    }
+
+    /// Configures the given private key.
+    ///
+    /// The content of `key` is parsed as a DER-encoded PKCS#8 private key.
+    ///
+    /// ## Examples:
+    ///
+    /// ```no_run
+    /// # let mut config = quiche::Config::new(0xbabababa)?;
+    /// # let key = std::fs::read("/path/to/key.der")?;
+    /// config.load_priv_key_from_der(&key)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn load_priv_key_from_der(&mut self, key: &[u8]) -> Result<()> {
+        self.tls_ctx.use_privkey_der(key)
     }
 
     /// Specifies a file where trusted CA certificates are stored for the
