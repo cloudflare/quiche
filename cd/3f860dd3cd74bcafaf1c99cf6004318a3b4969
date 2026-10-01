@@ -1,0 +1,25 @@
+quiche/src/tests.rs
+  s_036b50709599ae::t_f409fe8a43c203 14044-14262
+quiche/include/quiche.h
+  s_036b50709599ae::t_a17b32f391dbad 197-201
+quiche/src/ffi.rs
+  s_036b50709599ae::t_6a263246a2e31f 270-276
+quiche/src/lib.rs
+  s_036b50709599ae::t_04c50f0eaa7c4b 482-487,609-610,690-692,914-927,1630-1633,2258-2260,3377-3401
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cd3f860dd3cd74bcafaf1c99cf6004318a3b4969",
+  "prompts": {},
+  "sessions": {
+    "s_036b50709599ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "080cae2b-5efe-4ece-ad52-9e87c53fc133",
+        "model": "unknown"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    }
+  }
+}
