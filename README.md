@@ -217,7 +217,8 @@ the network.
 Applications can use these hints by artificially delaying the sending of
 packets through platform-specific mechanisms (such as the [`SO_TXTIME`]
 socket option on Linux), or custom methods (for example by using user-space
-timers).
+timers). Pacing is required for [BBR](quiche/src/recovery) (e.g., on Linux
+use `fq` instead of `fq_codel`).
 
 [pace]: https://datatracker.ietf.org/doc/html/rfc9002#section-7.7
 [`SO_TXTIME`]: https://man7.org/linux/man-pages/man8/tc-etf.8.html
