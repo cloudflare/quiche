@@ -360,6 +360,12 @@ void quiche_conn_set_qlog_fd(quiche_conn *conn, int fd, const char *log_title,
 // Configures the given session for resumption.
 int quiche_conn_set_session(quiche_conn *conn, const uint8_t *buf, size_t buf_len);
 
+// Requires the server's certificate to be valid for the IP address in |addr|
+// (the port is ignored). Use on a client created by quiche_connect() with a
+// NULL server_name, before any packet is sent or received.
+int quiche_conn_set_host_ip_addr(quiche_conn *conn, const struct sockaddr *addr,
+                                 socklen_t addr_len);
+
 // Sets the `max_idle_timeout` transport parameter, in milliseconds, default is
 // no timeout.
 int quiche_conn_set_max_idle_timeout(quiche_conn *conn, uint64_t v);
