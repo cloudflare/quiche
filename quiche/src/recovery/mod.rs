@@ -371,7 +371,6 @@ impl Recovery {
 /// algorithms.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
-#[non_exhaustive]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
     Reno            = 0,
@@ -970,81 +969,24 @@ mod tests {
     }
 
     #[cfg(feature = "congestion_window_unchecked_available")]
-    fn congestion_window_unchecked_recovery() -> Recovery {
-        let mut config = Config::new(crate::PROTOCOL_VERSION)
-            .expect("configuration should be valid");
-        config
-            .set_cc_algorithm_name("congestion_window_unchecked")
-            .expect("congestion_window_unchecked should be available");
-        Recovery::new(&config)
-    }
-
-    #[cfg(feature = "congestion_window_unchecked_available")]
     #[test]
-    fn congestion_window_unchecked_keeps_the_send_window_open() {
-        let mut recovery = congestion_window_unchecked_recovery();
+    fn congestion_window_unchecked_discards_packet_space() {
+        let mut recovery = recovery_for_alg(
+            CongestionControlAlgorithm::CongestionWindowUnchecked,
+        );
         let now = Instant::now();
         recovery.on_packet_sent(
             test_utils::helper_packet_sent(0, now, 1_200),
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-            now,
-            "",
-        );
-
-        assert_eq!(recovery.cwnd(), usize::MAX);
-        assert_eq!(recovery.bytes_in_flight(), 1_200);
-        assert_eq!(recovery.cwnd_available(), usize::MAX - 1_200);
-    }
-
-    #[cfg(feature = "congestion_window_unchecked_available")]
-    #[test]
-    fn congestion_window_unchecked_retains_recovery_accounting() {
-        let mut recovery = congestion_window_unchecked_recovery();
-        let now = Instant::now();
-        recovery.on_packet_sent(
-            test_utils::helper_packet_sent(0, now, 1_200),
-            packet::Epoch::Application,
-            HandshakeStatus::default(),
-            now,
-            "",
-        );
-
-        let mut acked = RangeSet::default();
-        acked.insert(0..1);
-        let outcome = recovery
-            .on_ack_received(
-                &acked,
-                0,
-                packet::Epoch::Application,
-                HandshakeStatus::default(),
-                now + Duration::from_millis(10),
-                None,
-                "",
-            )
-            .expect("ACK should be valid");
-        assert_eq!(outcome.acked_bytes, 1_200);
-        assert_eq!(recovery.cwnd(), usize::MAX);
-        assert_eq!(recovery.bytes_in_flight(), 0);
-        assert_eq!(recovery.rtt(), Duration::from_millis(10));
-        assert_eq!(recovery.min_rtt(), Some(Duration::from_millis(10)));
-
-        let mut recovery = congestion_window_unchecked_recovery();
-        recovery.on_packet_sent(
-            test_utils::helper_packet_sent(
-                0,
-                now + Duration::from_secs(2),
-                1_200,
-            ),
             packet::Epoch::Initial,
             HandshakeStatus::default(),
-            now + Duration::from_secs(2),
+            now,
             "",
         );
+        assert_eq!(recovery.bytes_in_flight(), 1_200);
         recovery.on_pkt_num_space_discarded(
             packet::Epoch::Initial,
             HandshakeStatus::default(),
-            now + Duration::from_secs(3),
+            now + Duration::from_secs(1),
         );
         assert_eq!(recovery.bytes_in_flight(), 0);
     }
@@ -1577,6 +1519,10 @@ mod tests {
             assert_eq!(r.sent_packets_len(packet::Epoch::Application), pkt_count);
             assert_eq!(r.bytes_in_flight(), pkt_count * 1000);
             assert_eq!(r.bytes_in_flight_duration(), Duration::ZERO);
+            if cc_algorithm_name == "congestion_window_unchecked" {
+                assert_eq!(r.cwnd(), usize::MAX);
+                assert_eq!(r.cwnd_available(), usize::MAX - r.bytes_in_flight());
+            }
         }
 
         // Wait for 10ms after sending.
@@ -1605,6 +1551,8 @@ mod tests {
         );
         if cc_algorithm_name == "congestion_window_unchecked" {
             assert_eq!(r.cwnd(), initial_cwnd);
+            assert_eq!(r.rtt(), Duration::from_millis(10));
+            assert_eq!(r.min_rtt(), Some(Duration::from_millis(10)));
         }
         // Since we only remove packets from the back to avoid compaction, the
         // send length remains the same after receiving reordered ACKs
@@ -2809,9 +2757,14 @@ mod tests {
     }
 
     #[rstest]
-    fn acks_with_no_retransmittable_data(
-        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
-    ) {
+    #[case::reno("reno")]
+    #[case::cubic("cubic")]
+    #[case::bbr2_gcongestion("bbr2_gcongestion")]
+    #[cfg_attr(
+        feature = "congestion_window_unchecked_available",
+        case::congestion_window_unchecked("congestion_window_unchecked")
+    )]
+    fn acks_with_no_retransmittable_data(#[case] cc_algorithm_name: &str) {
         let rtt = Duration::from_millis(100);
 
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -2850,8 +2803,13 @@ mod tests {
             },
         );
         assert_eq!(r.get_packet_send_time(now), now);
-        assert_eq!(r.cwnd(), 12000);
-        assert_eq!(r.cwnd_available(), 8400);
+        let initial_cwnd = if cc_algorithm_name == "congestion_window_unchecked" {
+            usize::MAX
+        } else {
+            12000
+        };
+        assert_eq!(r.cwnd(), initial_cwnd);
+        assert_eq!(r.cwnd_available(), initial_cwnd - r.bytes_in_flight());
 
         // Wait 1 rtt for ACK.
         now += rtt;
@@ -2882,6 +2840,10 @@ mod tests {
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.bytes_in_flight_duration(), rtt);
         assert_eq!(r.rtt(), rtt);
+        if cc_algorithm_name == "congestion_window_unchecked" {
+            assert_eq!(r.cwnd(), usize::MAX);
+            assert_eq!(r.min_rtt(), Some(rtt));
+        }
 
         // Pacing rate is recalculated based on initial cwnd when the
         // first RTT estimate is available.
