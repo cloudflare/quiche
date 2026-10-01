@@ -283,6 +283,19 @@ pub(crate) struct CongestionControlOps {
     ) -> std::fmt::Result,
 }
 
+#[cfg(feature = "congestion_window_unchecked_available")]
+static CONGESTION_WINDOW_UNCHECKED: CongestionControlOps = CongestionControlOps {
+    on_init: |recovery| recovery.congestion_window = usize::MAX,
+    on_packet_sent: |_, _, _, _| {},
+    on_packets_acked: |_, _, _, _, _| {},
+    congestion_event: |_, _, _, _, _| {},
+    checkpoint: |_| {},
+    rollback: |_| true,
+    #[cfg(feature = "qlog")]
+    state_str: |_, _| "congestion_window_unchecked",
+    debug_fmt: |_, _| Ok(()),
+};
+
 impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
     fn from(algo: CongestionControlAlgorithm) -> Self {
         match algo {
@@ -293,6 +306,9 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
             // LegacyRecovery never gets a RecoveryConfig with the
             // Bbr2Gcongestion algorithm.
             CongestionControlAlgorithm::Bbr2Gcongestion => unreachable!(),
+            #[cfg(feature = "congestion_window_unchecked_available")]
+            CongestionControlAlgorithm::CongestionWindowUnchecked =>
+                &CONGESTION_WINDOW_UNCHECKED,
         }
     }
 }
