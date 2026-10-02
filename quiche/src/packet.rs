@@ -357,6 +357,14 @@ impl<'a> Header<'a> {
     ) -> Result<Header<'a>> {
         let first = b.get_u8()?;
 
+        // RFC 9000 requires the fixed bit to be set in every QUIC packet
+        // except Version Negotiation packets. Header protection does not
+        // cover this bit, so it can be validated before decoding the rest of
+        // the header.
+        if !Header::is_long(first) && first & 0x40 == 0 {
+            return Err(Error::InvalidPacket);
+        }
+
         if !Header::is_long(first) {
             // Decode short header.
             let dcid = b.get_bytes(dcid_len)?;
@@ -376,6 +384,10 @@ impl<'a> Header<'a> {
 
         // Decode long header.
         let version = b.get_u32()?;
+
+        if version != 0 && first & 0x40 == 0 {
+            return Err(Error::InvalidPacket);
+        }
 
         let ty = if version == 0 {
             Type::VersionNegotiation
@@ -1197,6 +1209,21 @@ mod tests {
 
         let mut b = octets::OctetsMut::with_slice(&mut d);
         assert_eq!(Header::from_bytes(&mut b, 9).unwrap(), hdr);
+    }
+
+    #[test]
+    fn fixed_bit_must_be_set() {
+        let mut invalid = [0x00, 0, 0, 0, 0];
+        assert_eq!(
+            Header::from_slice(&mut invalid, 4),
+            Err(Error::InvalidPacket)
+        );
+
+        let mut valid = [0x40, 0, 0, 0, 0];
+        assert!(Header::from_slice(&mut valid, 4).is_ok());
+
+        let mut valid_version_negotiation = [0x80, 0, 0, 0, 0, 0, 0];
+        assert!(Header::from_slice(&mut valid_version_negotiation, 4).is_ok());
     }
 
     #[test]
