@@ -1683,6 +1683,8 @@ fn flow_control_empty_stream_frame_after_shutdown(
 fn zero_length_stream_frame_not_sent(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
+    const STREAM_ID: u64 = 1 << 14;
+
     let mut buf = [0; 65535];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
@@ -1699,25 +1701,25 @@ fn zero_length_stream_frame_not_sent(
     config.set_initial_max_data(4_000_000_000);
     config.set_initial_max_stream_data_bidi_local(2_000_000_000);
     config.set_initial_max_stream_data_bidi_remote(2_000_000_000);
-    config.set_initial_max_streams_bidi(20);
+    config.set_initial_max_streams_bidi((STREAM_ID >> 2) + 1);
     config.verify_peer(false);
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
-    // Only a STREAM header longer than MAX_STREAM_OVERHEAD can leave room for
-    // the header but not the payload, which needs an eight-byte offset varint.
-    // Seed the offset rather than transferring a gigabyte.
-    assert_eq!(pipe.client.stream_send(64, b"", false), Ok(0));
+    // Use four-byte stream ID and eight-byte offset varints, producing a
+    // 15-byte STREAM header. Seed the offset rather than transferring a
+    // gigabyte.
+    assert_eq!(pipe.client.stream_send(STREAM_ID, b"", false), Ok(0));
     pipe.client
         .streams
-        .get_mut(64)
+        .get_mut(STREAM_ID)
         .unwrap()
         .send
         .seed_offsets_for_test(1 << 30);
 
     let data = [0xa; 4096];
-    assert_eq!(pipe.client.stream_send(64, &data, false), Ok(4096));
+    assert_eq!(pipe.client.stream_send(STREAM_ID, &data, false), Ok(4096));
 
     // Sweep output buffer sizes across the range where the packet has room
     // for the STREAM frame header but not for any payload.
@@ -1748,7 +1750,7 @@ fn zero_length_stream_frame_not_sent(
     assert_eq!(pipe.advance(), Ok(()));
 
     assert_eq!(
-        pipe.server.streams.get(64).unwrap().recv.max_off(),
+        pipe.server.streams.get(STREAM_ID).unwrap().recv.max_off(),
         (1 << 30) + 4096
     );
 }
