@@ -24,10 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::io::IoSlice;
-use std::io::{
-    self,
-};
+use std::io;
 use std::os::fd::AsRawFd;
 use std::os::fd::BorrowedFd;
 
