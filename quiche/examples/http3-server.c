@@ -286,6 +286,14 @@ static void recv_cb(EV_P_ ev_io *w, int revents) {
         HASH_FIND(hh, conns->h, dcid, dcid_len, conn_io);
 
         if (conn_io == NULL) {
+            // Clients must expand Initial datagrams to at least 1200 bytes
+            // (RFC 9000 Section 14.1), so anything shorter is dropped before
+            // a Version Negotiation or Retry is sent.
+            if (read < QUICHE_MIN_CLIENT_INITIAL_LEN) {
+                fprintf(stderr, "initial datagram too short: %zd\n", read);
+                continue;
+            }
+
             if (!quiche_version_is_supported(version)) {
                 fprintf(stderr, "version negotiation\n");
 
