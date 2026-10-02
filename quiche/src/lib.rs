@@ -3652,13 +3652,7 @@ impl<F: BufFactory> Connection<F> {
                             stream.send.ack_fin();
                         }
 
-                        // A stopped stream remains until its error has been
-                        // returned by a write or capacity query. Writable
-                        // polling alone does not report the error.
-                        if stream.is_collectable() {
-                            let local = stream.local;
-                            self.streams.collect(stream_id, local);
-                        }
+                        self.streams.try_collect(stream_id);
 
                         // Update `tx_buffered` for data dropped from stream
                         // buffers, such as retransmission data acknowledged
@@ -3677,17 +3671,7 @@ impl<F: BufFactory> Connection<F> {
                     },
 
                     frame::Frame::ResetStream { stream_id, .. } => {
-                        let stream = match self.streams.get_mut(stream_id) {
-                            Some(v) => v,
-
-                            None => continue,
-                        };
-
-                        // Writable polling alone does not report a stop.
-                        if stream.is_collectable() {
-                            let local = stream.local;
-                            self.streams.collect(stream_id, local);
-                        }
+                        self.streams.try_collect(stream_id);
                     },
 
                     _ => (),

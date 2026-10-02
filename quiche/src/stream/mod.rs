@@ -670,6 +670,20 @@ impl<F: BufFactory> StreamMap<F> {
         self.collected.insert(stream_id);
     }
 
+    /// Collects a completed stream when no application notification remains.
+    pub(crate) fn try_collect(&mut self, stream_id: u64) {
+        let Some(stream) = self.get(stream_id) else {
+            return;
+        };
+
+        let collect = stream.is_collectable();
+        let local = stream.local;
+
+        if collect {
+            self.collect(stream_id, local);
+        }
+    }
+
     /// Creates an iterator over streams that have outstanding data to read.
     pub fn readable(&self) -> StreamIter {
         StreamIter {
