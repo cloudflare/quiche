@@ -848,6 +848,71 @@ mod tests {
     use smallvec::smallvec;
     use std::str::FromStr;
 
+    /// quiche skips a packet number now and then to detect optimistic ACKs.
+    /// That gap is not reordering, so it must not bring a packet closer to the
+    /// packet reordering threshold. RFC 9002 Appendix A.10 notes that the
+    /// packet-number comparison assumes no sender-induced gaps.
+    #[rstest]
+    fn skipped_pkt_num_does_not_count_toward_pkt_thresh(
+        #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let now = Instant::now();
+        let mut r = Recovery::new(&cfg);
+
+        // Packet number 2 is skipped, so only two packets follow packet 0.
+        for pkt_num in [0, 1, 3] {
+            r.on_packet_sent(
+                test_utils::helper_packet_sent(pkt_num, now, 1000),
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        let mut acked = RangeSet::default();
+        acked.insert(3..4);
+        let outcome = r
+            .on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                Some(2),
+                "",
+            )
+            .unwrap();
+        assert_eq!(outcome.lost_packets, 0);
+
+        // A third packet after packet 0 does reach the threshold.
+        r.on_packet_sent(
+            test_utils::helper_packet_sent(4, now, 1000),
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        let mut acked = RangeSet::default();
+        acked.insert(3..5);
+        let outcome = r
+            .on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                Some(2),
+                "",
+            )
+            .unwrap();
+        assert_eq!(outcome.lost_packets, 1);
+    }
+
     fn recovery_for_alg(algo: CongestionControlAlgorithm) -> Recovery {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(algo);

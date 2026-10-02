@@ -222,7 +222,7 @@ impl RecoveryEpoch {
 
     fn detect_lost_packets(
         &mut self, loss_delay: Duration, pkt_thresh: u64, now: Instant,
-        trace_id: &str, epoch: Epoch,
+        trace_id: &str, epoch: Epoch, skip_pn: Option<u64>,
     ) -> LossDetectionResult {
         self.loss_time = None;
 
@@ -247,6 +247,17 @@ impl RecoveryEpoch {
         .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
 
         for unacked in unacked_iter {
+            // A packet number the sender deliberately skipped, to detect
+            // optimistic ACKs, was never sent, so it must not count toward the
+            // reordering threshold. RFC 9002 Appendix A.10 notes that comparing
+            // packet numbers assumes there were no sender-induced gaps.
+            let pkt_thresh = match skip_pn {
+                Some(skip_pn)
+                    if (unacked.pkt_num..=largest_acked).contains(&skip_pn) =>
+                    pkt_thresh + 1,
+                _ => pkt_thresh,
+            };
+
             // Mark packet as lost, or set time when it should be marked.
             if unacked.time_sent <= lost_send_time ||
                 largest_acked >= unacked.pkt_num + pkt_thresh
@@ -365,6 +376,10 @@ pub struct LegacyRecovery {
 
     pkt_thresh: u64,
 
+    // The packet number the sender skipped for optimistic ACK detection, as of
+    // the last ACK processed. Gaps it creates are not reordering.
+    skip_pn: Option<u64>,
+
     time_thresh: f64,
 
     bytes_in_flight: BytesInFlight,
@@ -407,6 +422,8 @@ impl LegacyRecovery {
             lost_spurious_count: 0,
 
             pkt_thresh: INITIAL_PACKET_THRESHOLD,
+
+            skip_pn: None,
 
             time_thresh: INITIAL_TIME_THRESHOLD,
 
@@ -540,6 +557,7 @@ impl LegacyRecovery {
             now,
             trace_id,
             epoch,
+            self.skip_pn,
         );
 
         if let Some(pkt) = loss.largest_lost_pkt {
@@ -674,6 +692,8 @@ impl RecoveryOps for LegacyRecovery {
         handshake_status: HandshakeStatus, now: Instant, skip_pn: Option<u64>,
         trace_id: &str,
     ) -> Result<OnAckReceivedOutcome> {
+        self.skip_pn = skip_pn;
+
         let AckedDetectionResult {
             acked_bytes,
             spurious_losses,
