@@ -75,6 +75,15 @@ pub trait DriverHooks: Sized + Send + 'static {
         headers: InboundHeaders,
     ) -> H3ConnectionResult<()>;
 
+    /// Performs endpoint-specific cleanup when a peer reset is observed. The
+    /// stream can remain in the driver's stream map until its write direction
+    /// is also finished.
+    fn stream_reset(driver: &mut H3Driver<Self>, stream_id: u64);
+
+    /// Performs endpoint-specific cleanup after a stream is removed from the
+    /// driver's stream map.
+    fn stream_closed(driver: &mut H3Driver<Self>, stream_id: u64);
+
     /// Processes any command received from the
     /// [`H3Controller`](super::H3Controller). May use
     /// `H3Driver::handle_core_command` to handle regular [`H3Command`]s.

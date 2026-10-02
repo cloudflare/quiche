@@ -197,6 +197,37 @@ mod client_side_driver {
     use super::*;
 
     #[test]
+    fn reset_before_response_with_open_body_removes_pending_request() {
+        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .driver_send_request(make_request_headers("GET"), false)
+            .unwrap();
+        assert_eq!(helper.driver.hooks.pending_request_count(), 1);
+
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_server_poll().unwrap(),
+            (id, h3::Event::Headers { .. }) if id == stream_id
+        );
+        helper
+            .pipe
+            .server
+            .stream_shutdown(stream_id, quiche::Shutdown::Write, 4242)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        assert_matches!(
+            helper.driver_recv_core_event(),
+            Ok(H3Event::ResetStream { stream_id: id }) if id == stream_id
+        );
+        assert_eq!(helper.driver.hooks.pending_request_count(), 0);
+        assert!(!helper.driver.stream_map.contains_key(&stream_id));
+    }
+
+    #[test]
     fn client_fin_before_server_body() {
         let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
         helper.complete_handshake().unwrap();

@@ -328,6 +328,14 @@ impl DriverHooks for ServerHooks {
         Self::handle_request(driver, qconn, headers)
     }
 
+    fn stream_reset(_driver: &mut H3Driver<Self>, _stream_id: u64) {}
+
+    fn stream_closed(driver: &mut H3Driver<Self>, stream_id: u64) {
+        let _ = driver
+            .h3_event_sender
+            .send(H3Event::StreamClosed { stream_id }.into());
+    }
+
     fn conn_command(
         driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         cmd: Self::Command,
