@@ -498,6 +498,11 @@ const DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 10;
 // The maximum data offset that can be stored in a crypto stream.
 const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
 
+// TODO: Remove once https://github.com/cloudflare/quiche/pull/2453 is done.
+// Preserve the previous app-limited threshold independently of STREAM frame
+// header sizing.
+const LEGACY_APP_LIMITED_BYTE_THRESHOLD: usize = 12;
+
 // The send capacity factor.
 const TX_CAP_FACTOR: f64 = 1.0;
 
@@ -5163,7 +5168,6 @@ impl<F: BufFactory> Connection<F> {
 
         // Create a single STREAM frame for the first stream that is flushable.
         if (pkt_type == Type::Short || pkt_type == Type::ZeroRTT) &&
-            left > frame::MAX_STREAM_OVERHEAD &&
             !is_closing &&
             path.active() &&
             !dgram_emitted
@@ -5203,13 +5207,21 @@ impl<F: BufFactory> Connection<F> {
                     octets::varint_len(stream_off) + // offset
                     2; // length, always encode as 2-byte varint
 
+                // A non-FIN STREAM frame must carry at least one byte. If the
+                // header and payload don't fit, leave the stream flushable for
+                // a later packet. Empty FIN frames only need the header.
                 let max_len = match left.checked_sub(hdr_len) {
-                    Some(v) => v,
-                    None => {
-                        let priority_key = Arc::clone(&stream.priority_key);
-                        self.streams.remove_flushable(&priority_key);
+                    Some(v) if v > 0 || stream.send.empty_fin_next() => v,
+                    _ => {
+                        stream_data_skipped = true;
 
-                        continue;
+                        if stream.incremental {
+                            let priority_key = Arc::clone(&stream.priority_key);
+                            self.streams.remove_flushable(&priority_key);
+                            self.streams.insert_flushable(&priority_key);
+                        }
+
+                        break;
                     },
                 };
 
@@ -5220,22 +5232,9 @@ impl<F: BufFactory> Connection<F> {
                 let (len, fin) =
                     stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
 
-                // Don't emit an empty non-fin STREAM frame when only its
-                // header fits: it would carry no data but still advance the
-                // peer's largest received offset.
-                if len == 0 && !fin {
-                    stream_data_skipped = true;
-
-                    // Rotate incremental streams so a stream whose header
-                    // doesn't leave room for data doesn't block the others.
-                    if stream.incremental {
-                        let priority_key = Arc::clone(&stream.priority_key);
-                        self.streams.remove_flushable(&priority_key);
-                        self.streams.insert_flushable(&priority_key);
-                    }
-
-                    break;
-                }
+                // The `max_len` check above only allows an empty frame when it
+                // carries FIN.
+                debug_assert!(len > 0 || fin);
 
                 // Encode the frame's header.
                 //
@@ -5285,10 +5284,9 @@ impl<F: BufFactory> Connection<F> {
 
                 #[cfg(feature = "fuzzing")]
                 // Coalesce STREAM frames when fuzzing.
-                if left > frame::MAX_STREAM_OVERHEAD {
-                    continue;
-                }
+                continue;
 
+                #[cfg(not(feature = "fuzzing"))]
                 break;
             }
         }
@@ -5323,7 +5321,7 @@ impl<F: BufFactory> Connection<F> {
         if !has_data &&
             !stream_data_skipped &&
             !dgram_emitted &&
-            cwnd_available > frame::MAX_STREAM_OVERHEAD
+            cwnd_available > LEGACY_APP_LIMITED_BYTE_THRESHOLD
         {
             path.recovery.on_app_limited();
         }
