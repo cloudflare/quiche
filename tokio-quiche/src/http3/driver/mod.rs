@@ -654,10 +654,12 @@ impl<H: DriverHooks> H3Driver<H> {
             StreamStatus::Reset { wire_err_code } => {
                 debug_assert!(ctx.send.is_some());
                 ctx.handle_recvd_reset(wire_err_code);
+                let cleanup = ctx.both_directions_done();
+                H::stream_recv_closed(self, stream_id);
                 self.h3_event_sender
                     .send(H3Event::ResetStream { stream_id }.into())
                     .map_err(|_| H3ConnectionError::ControllerWentAway)?;
-                if ctx.both_directions_done() {
+                if cleanup {
                     return self.cleanup_stream(qconn, stream_id);
                 }
             },
@@ -689,6 +691,7 @@ impl<H: DriverHooks> H3Driver<H> {
         ctx.fin_or_reset_recv = true;
         ctx.audit_stats
             .set_recvd_stream_fin(StreamClosureKind::Explicit);
+        H::stream_recv_closed(self, stream_id);
 
         // It's important to send this H3Event before process_h3_data so that
         // a server can (potentially) generate the control response before the
@@ -744,10 +747,12 @@ impl<H: DriverHooks> H3Driver<H> {
                         }
                     }
 
+                    let cleanup = ctx.both_directions_done();
+                    H::stream_recv_closed(self, stream_id);
                     self.h3_event_sender
                         .send(H3Event::ResetStream { stream_id }.into())
                         .map_err(|_| H3ConnectionError::ControllerWentAway)?;
-                    if ctx.both_directions_done() {
+                    if cleanup {
                         return self.cleanup_stream(qconn, stream_id);
                     }
                 } else {
@@ -1102,12 +1107,7 @@ impl<H: DriverHooks> H3Driver<H> {
             self.flow_map.remove(&mapped_flow_id);
         }
 
-        if qconn.is_server() {
-            // Signal the server to remove the stream from its map.
-            let _ = self
-                .h3_event_sender
-                .send(H3Event::StreamClosed { stream_id }.into());
-        }
+        H::stream_closed(self, stream_id);
 
         self.close_if_idle(qconn);
 
