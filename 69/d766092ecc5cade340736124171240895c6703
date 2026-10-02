@@ -1,0 +1,23 @@
+quiche/src/recovery/congestion/recovery.rs
+  s_57fcf00bef0bd6::t_e38a3a0e0e434a 685-687,748-751,753
+quiche/src/recovery/gcongestion/recovery.rs
+  s_57fcf00bef0bd6::t_8fec7c7163f4ee 787-789,889-892,894
+quiche/src/recovery/mod.rs
+  s_57fcf00bef0bd6::t_c817b82ed3522c 2852-2871,2946-3031
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "69d766092ecc5cade340736124171240895c6703",
+  "prompts": {},
+  "sessions": {
+    "s_57fcf00bef0bd6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff765cfd-f39c-4347-bb96-ab861d8fed3a",
+        "model": "unknown"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    }
+  }
+}
