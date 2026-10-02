@@ -245,6 +245,11 @@ pub trait RecoveryOps {
 
     fn pto(&self) -> Duration;
 
+    /// Returns the timeout used for connection draining and key-update expiry.
+    fn pto_timeout(&self) -> Duration {
+        self.pto() * 3
+    }
+
     /// The most recent data delivery rate estimate.
     fn delivery_rate(&self) -> Bandwidth;
 
