@@ -7084,6 +7084,107 @@ fn tx_cap_factor(#[values(true, false)] discard: bool) {
 }
 
 #[rstest]
+fn send_capacity_cwnd_limit_buffers_uni_stream(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] cwnd_limit: bool,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_initial_max_data(1_000_000);
+    config.set_initial_max_stream_data_bidi_local(1_000_000);
+    config.set_initial_max_stream_data_bidi_remote(1_000_000);
+    config.set_initial_max_stream_data_uni(64);
+
+    if !cwnd_limit {
+        config.set_send_capacity_cwnd_limit(false);
+    }
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    pipe.handshake().unwrap();
+    pipe.advance().unwrap();
+
+    let data = vec![42; 32_768];
+    let buffered = pipe.client.stream_send(0, &data, false).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .cwnd_available(),
+        0
+    );
+
+    assert_eq!(
+        pipe.client.stream_send(2, b"hello", false),
+        if cwnd_limit { Err(Error::Done) } else { Ok(5) }
+    );
+    assert_eq!(
+        pipe.client.tx_data,
+        buffered as u64 + if cwnd_limit { 0 } else { 5 }
+    );
+    assert_eq!(
+        pipe.client.stream_capacity(2),
+        Ok(if cwnd_limit { 0 } else { 59 })
+    );
+    assert_eq!(pipe.client.stream_writable(2, 1), Ok(!cwnd_limit));
+    assert_eq!(pipe.client.writable().any(|id| id == 2), !cwnd_limit);
+
+    let mut writable = Vec::new();
+    while let Some(id) = pipe.client.stream_writable_next() {
+        writable.push(id);
+    }
+    assert_eq!(writable.contains(&2), !cwnd_limit);
+
+    let mut out = [0; 65_535];
+    assert_eq!(pipe.client.send(&mut out), Err(Error::Done));
+
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    pipe.advance().unwrap();
+    if !cwnd_limit {
+        assert_eq!(pipe.server.stream_recv(2, &mut out), Ok((5, false)));
+        assert_eq!(&out[..5], b"hello");
+    }
+}
+
+#[rstest]
+fn send_capacity_cwnd_limit_preserves_flow_control(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(1.0, 2.0)] capacity_factor: f64,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_send_capacity_cwnd_limit(false);
+    config.set_send_capacity_factor(capacity_factor);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    pipe.handshake().unwrap();
+    pipe.advance().unwrap();
+
+    assert_eq!(pipe.client.stream_send(2, &[42; 11], true), Ok(10));
+    assert_eq!(pipe.client.stream_capacity(2), Ok(0));
+    assert_eq!(pipe.client.stream_send(2, b"x", false), Err(Error::Done));
+    assert_eq!(pipe.client.stream_send(6, &[42; 10], false), Ok(10));
+    assert_eq!(pipe.client.stream_send(10, &[42; 10], false), Ok(10));
+    assert_eq!(pipe.client.tx_data, 30);
+    assert_eq!(pipe.client.stream_send(0, b"x", true), Err(Error::Done));
+    assert_eq!(pipe.client.stream_capacity(0), Ok(0));
+    assert_eq!(pipe.client.writable().next(), None);
+    assert_eq!(pipe.client.stream_writable_next(), None);
+
+    pipe.client.stream_shutdown(6, Shutdown::Write, 0).unwrap();
+    assert_eq!(pipe.client.tx_data, 20);
+    assert_eq!(pipe.client.stream_capacity(0), Ok(10));
+    assert_eq!(pipe.client.stream_send(0, b"x", true), Ok(1));
+    assert_eq!(pipe.client.tx_data, 21);
+    pipe.advance().unwrap();
+
+    let mut out = [0; 32];
+    assert_eq!(pipe.server.stream_recv(2, &mut out), Ok((10, false)));
+    assert_eq!(pipe.server.stream_recv(10, &mut out), Ok((10, false)));
+    assert_eq!(pipe.server.stream_recv(0, &mut out), Ok((1, true)));
+    assert_eq!(out[0], b'x');
+}
+
+#[rstest]
 fn client_rst_stream_while_bytes_in_flight(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(false, true)] use_stop_sending: bool,
