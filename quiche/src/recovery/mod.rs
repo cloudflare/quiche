@@ -452,6 +452,15 @@ impl std::fmt::Debug for Sent {
     }
 }
 
+impl Sent {
+    /// Returns true if the packet carries an ACK frame.
+    fn has_ack_frame(&self) -> bool {
+        self.frames
+            .iter()
+            .any(|f| matches!(f, frame::Frame::ACK { .. }))
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct HandshakeStatus {
     pub has_handshake_keys: bool,
@@ -2839,6 +2848,187 @@ mod tests {
             );
         }
     }
+
+    fn ack_frame(largest: u64) -> frame::Frame {
+        let mut ranges = RangeSet::default();
+        ranges.insert(0..largest + 1);
+
+        frame::Frame::ACK {
+            ack_delay: 0,
+            ranges,
+            ecn_counts: None,
+        }
+    }
+
+    fn ack_only_packet(pkt_num: u64, now: Instant) -> Sent {
+        let mut p = test_utils::helper_packet_sent(pkt_num, now, 0);
+        p.frames = smallvec![ack_frame(pkt_num)];
+        p.ack_eliciting = false;
+        p.in_flight = false;
+        p.has_data = false;
+        p
+    }
+
+    #[rstest]
+    fn superseded_ack_only_packets_before_handshake_completion(
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let mut r = Recovery::new(&cfg);
+
+        let mut now = Instant::now();
+        let epoch = packet::Epoch::Application;
+
+        let handshake_status = HandshakeStatus {
+            completed: false,
+            ..Default::default()
+        };
+
+        let p = test_utils::helper_packet_sent(0, now, 1200);
+        r.on_packet_sent(p, epoch, handshake_status, now, "");
+        assert_eq!(r.sent_packets_len(epoch), 1);
+
+        // Only the most recent ACK-only packet is tracked.
+        for pkt_num in 1..10 {
+            let p = ack_only_packet(pkt_num, now);
+            r.on_packet_sent(p, epoch, handshake_status, now, "");
+            assert_eq!(r.sent_packets_len(epoch), 2);
+        }
+
+        // An ack-eliciting packet carrying an ACK frame also supersedes the
+        // previous ACK-only packet.
+        let mut p = test_utils::helper_packet_sent(10, now, 1200);
+        p.frames =
+            smallvec![ack_frame(10), frame::Frame::Ping { mtu_probe: None }];
+        r.on_packet_sent(p, epoch, handshake_status, now, "");
+        assert_eq!(r.sent_packets_len(epoch), 2);
+
+        // Ack-eliciting packets are never superseded.
+        let p = ack_only_packet(11, now);
+        r.on_packet_sent(p, epoch, handshake_status, now, "");
+        assert_eq!(r.sent_packets_len(epoch), 3);
+
+        // Packets that don't carry an ACK frame don't supersede ACK-only ones.
+        let p = test_utils::helper_packet_sent(12, now, 1200);
+        r.on_packet_sent(p, epoch, handshake_status, now, "");
+        assert_eq!(r.sent_packets_len(epoch), 4);
+
+        now += Duration::from_millis(100);
+
+        // Acknowledging superseded packets is not an error.
+        let mut acked = RangeSet::default();
+        acked.insert(0..12);
+
+        assert_eq!(
+            r.on_ack_received(&acked, 0, epoch, handshake_status, now, None, "",)
+                .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 2400,
+                spurious_losses: 0,
+            }
+        );
+
+        assert_eq!(r.sent_packets_len(epoch), 1);
+        assert_eq!(r.bytes_in_flight(), 1200);
+
+        // Once the handshake is complete, all ACK-only packets are tracked.
+        for pkt_num in 13..23 {
+            let p = ack_only_packet(pkt_num, now);
+            r.on_packet_sent(p, epoch, HandshakeStatus::default(), now, "");
+        }
+
+        assert_eq!(r.sent_packets_len(epoch), 11);
+    }
+
+    #[rstest]
+    fn no_rtt_sample_when_largest_acked_is_superseded(
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let mut r = Recovery::new(&cfg);
+
+        let start = Instant::now();
+        let epoch = packet::Epoch::Application;
+
+        let handshake_status = HandshakeStatus {
+            completed: false,
+            ..Default::default()
+        };
+
+        let p = test_utils::helper_packet_sent(0, start, 1200);
+        r.on_packet_sent(p, epoch, handshake_status, start, "");
+
+        let now = start + Duration::from_millis(50);
+        r.on_packet_sent(
+            ack_only_packet(1, now),
+            epoch,
+            handshake_status,
+            now,
+            "",
+        );
+
+        // Supersedes packet 1.
+        let now = start + Duration::from_millis(80);
+        r.on_packet_sent(
+            ack_only_packet(2, now),
+            epoch,
+            handshake_status,
+            now,
+            "",
+        );
+
+        assert_eq!(r.sent_packets_len(epoch), 2);
+
+        // The largest acknowledged packet isn't tracked anymore, so no RTT
+        // sample is taken from the older packet 0, which would be inflated.
+        let now = start + Duration::from_millis(100);
+
+        let mut acked = RangeSet::default();
+        acked.insert(0..2);
+
+        assert_eq!(
+            r.on_ack_received(&acked, 0, epoch, handshake_status, now, None, "")
+                .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 1200,
+                spurious_losses: 0,
+            }
+        );
+
+        assert_eq!(r.rtt(), DEFAULT_INITIAL_RTT);
+
+        // RTT samples are taken again once the largest acknowledged packet is
+        // tracked.
+        let p = test_utils::helper_packet_sent(3, now, 1200);
+        r.on_packet_sent(p, epoch, handshake_status, now, "");
+
+        let now = start + Duration::from_millis(130);
+
+        let mut acked = RangeSet::default();
+        acked.insert(0..4);
+
+        assert_eq!(
+            r.on_ack_received(&acked, 0, epoch, handshake_status, now, None, "")
+                .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 0,
+                lost_bytes: 0,
+                acked_bytes: 1200,
+                spurious_losses: 0,
+            }
+        );
+
+        assert_eq!(r.rtt(), Duration::from_millis(30));
+    }
+
     #[rstest]
     fn pto_overflow_reproduction(
         #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,

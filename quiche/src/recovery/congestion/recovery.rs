@@ -326,6 +326,22 @@ impl RecoveryEpoch {
         }
     }
 
+    /// Stops tracking the most recently sent packet if it is an ACK-only
+    /// packet that wasn't acked or declared lost yet.
+    ///
+    /// This must only be called when sending a packet that carries an ACK
+    /// frame, which supersedes the one in the removed packet.
+    fn remove_superseded_ack_only_packet(&mut self) {
+        if self.sent_packets.back().is_some_and(|pkt| {
+            !pkt.ack_eliciting &&
+                !pkt.in_flight &&
+                pkt.time_acked.is_none() &&
+                pkt.time_lost.is_none()
+        }) {
+            self.sent_packets.pop_back();
+        }
+    }
+
     /// Returns the next lost frame, trying ACK-based lost frames first,
     /// then PTO-based lost frames.
     fn next_lost_frame(&mut self) -> Option<frame::Frame> {
@@ -659,6 +675,20 @@ impl RecoveryOps for LegacyRecovery {
                 .max(Some(pkt.pkt_num));
         }
 
+        // Before the handshake completes, a peer could keep sending
+        // ack-eliciting packets without ever acknowledging ours (e.g. a client
+        // sending 0-RTT packets without completing the handshake), so the
+        // ACK-only packets sent in response would be tracked indefinitely.
+        // Only keep track of the most recent one, as the ACK frame of a newer
+        // packet supersedes the ones previously sent.
+        //
+        // This is not done once the handshake is complete, as no RTT sample can
+        // be taken from an ACK whose largest acknowledged packet isn't tracked
+        // anymore.
+        if !handshake_status.completed && pkt.has_ack_frame() {
+            self.epochs[epoch].remove_superseded_ack_only_packet();
+        }
+
         self.epochs[epoch].sent_packets.push_back(pkt);
 
         trace!("{trace_id} {self:?}");
@@ -715,8 +745,12 @@ impl RecoveryOps for LegacyRecovery {
             .max(largest_newly_acked.pkt_num);
         self.epochs[epoch].largest_acked_packet = Some(largest_acked_pkt_num);
 
-        // Check if largest packet is newly acked.
+        // Check if largest packet is newly acked. The largest packet
+        // acknowledged by the peer might not be tracked anymore (e.g. a
+        // superseded ACK-only packet), in which case `largest_newly_acked` is
+        // an older packet that can't be used to compute an RTT sample.
         if largest_newly_acked.pkt_num == largest_acked_pkt_num &&
+            peer_sent_ack_ranges.last() == Some(largest_newly_acked.pkt_num) &&
             has_ack_eliciting
         {
             let latest_rtt = now - largest_newly_acked.time_sent;

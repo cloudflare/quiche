@@ -14041,3 +14041,121 @@ fn server_qlog() {
         panic!("expected Qlog event");
     }
 }
+
+// Has the client keep sending ack-eliciting packets of the given type to the
+// server without ever acknowledging the server's packets, and checks that the
+// server keeps track of at most one ACK-only packet.
+fn assert_ack_only_packets_superseded(
+    pipe: &mut test_utils::Pipe, pkt_type: Type, epoch: packet::Epoch,
+) {
+    let mut buf = [0; 65535];
+
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+
+    for _ in 0..1000 {
+        let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+        let largest_sent = recovery.largest_sent_pkt_num_on_path(epoch);
+
+        let len = pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+        assert!(len > 0);
+
+        // The server acknowledged the client's packet, but only keeps track of
+        // the packets in flight and the most recent ACK-only packet.
+        let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+        assert!(recovery.largest_sent_pkt_num_on_path(epoch) > largest_sent);
+        assert!(
+            recovery.sent_packets_len(epoch) <=
+                recovery.in_flight_count(epoch) + 1
+        );
+
+        assert!(!pipe.server.is_established());
+        assert_eq!(pipe.server.local_error, None);
+    }
+}
+
+#[rstest]
+fn ack_only_packets_superseded_zero_rtt_handshake_never_completed(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    config.enable_early_data();
+
+    // Establish an initial connection to obtain a resumption ticket.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    let session = pipe.client.session().unwrap();
+
+    // Start a resumed connection and advance the server into early data.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.client.set_session(session), Ok(()));
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    assert!(pipe.server.is_in_early_data());
+
+    // The server's handshake flight never reaches the client, so the client
+    // can't complete the handshake or acknowledge anything the server sends.
+    test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    assert_ack_only_packets_superseded(
+        &mut pipe,
+        Type::ZeroRTT,
+        packet::Epoch::Application,
+    );
+}
+
+#[rstest]
+fn ack_only_packets_superseded_initial_handshake_never_completed(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // The server's handshake flight never reaches the client.
+    test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    assert_ack_only_packets_superseded(
+        &mut pipe,
+        Type::Initial,
+        packet::Epoch::Initial,
+    );
+}
+
+#[rstest]
+fn ack_only_packets_tracked_after_handshake(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let epoch = packet::Epoch::Application;
+
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+
+    // Every ACK-only packet sent by the server is tracked, as the peer could
+    // acknowledge any of them as the largest one.
+    for _ in 0..10 {
+        let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+        let sent_packets = recovery.sent_packets_len(epoch);
+
+        let len = pipe
+            .send_pkt_to_server(Type::Short, &frames, &mut buf)
+            .unwrap();
+        assert!(len > 0);
+
+        let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+        assert_eq!(recovery.sent_packets_len(epoch), sent_packets + 1);
+    }
+}
