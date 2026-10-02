@@ -118,6 +118,7 @@ http = "1"
 http-body = "1"
 http-body-util = "0.1"
 regex = { workspace = true }
+rstest = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true, features = ["time", "test-util", "rt-multi-thread"] }

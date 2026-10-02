@@ -294,6 +294,11 @@ impl ClientHooks {
             .send(H3Event::IncomingHeaders(headers).into())
             .map_err(|_| H3ConnectionError::ControllerWentAway)
     }
+
+    #[cfg(test)]
+    pub(crate) fn pending_request_count(&self) -> usize {
+        self.pending_requests.len()
+    }
 }
 
 #[allow(private_interfaces)]
@@ -333,6 +338,14 @@ impl DriverHooks for ClientHooks {
             return Ok(());
         };
         Self::handle_response(driver, headers, pending_request)
+    }
+
+    fn stream_recv_closed(driver: &mut H3Driver<Self>, stream_id: u64) {
+        driver.hooks.pending_requests.remove(&stream_id);
+    }
+
+    fn stream_closed(driver: &mut H3Driver<Self>, stream_id: u64) {
+        driver.hooks.pending_requests.remove(&stream_id);
     }
 
     fn conn_command(

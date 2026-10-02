@@ -1,4 +1,5 @@
 use assert_matches::assert_matches;
+use rstest::rstest;
 
 use crate::buf_factory::BufFactory;
 use crate::http3::driver::client::ClientHooks;
@@ -195,6 +196,84 @@ mod conn_close_metrics {
 /// the server side.
 mod client_side_driver {
     use super::*;
+
+    #[derive(Clone, Copy)]
+    enum PeerTermination {
+        Fin,
+        Reset,
+    }
+
+    #[rstest]
+    #[case::fin(PeerTermination::Fin)]
+    #[case::reset(PeerTermination::Reset)]
+    fn termination_before_response_with_open_body_removes_pending_request(
+        #[case] termination: PeerTermination,
+    ) {
+        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let (body_writer_tx, mut body_writer_rx) =
+            tokio::sync::oneshot::channel();
+        helper.driver_enqueue_request(
+            1,
+            make_request_headers("GET"),
+            Some(body_writer_tx),
+        );
+        assert_eq!(helper.process_commands().unwrap(), 1);
+        let stream_id = assert_matches!(
+            helper.driver_recv_client_event().unwrap(),
+            ClientH3Event::NewOutboundRequest {
+                stream_id,
+                request_id: 1,
+            } => stream_id
+        );
+        let body_writer = body_writer_rx.try_recv().unwrap();
+        assert_eq!(helper.driver.hooks.pending_request_count(), 1);
+
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_server_poll().unwrap(),
+            (id, h3::Event::Headers { .. }) if id == stream_id
+        );
+        match termination {
+            PeerTermination::Fin => {
+                helper
+                    .pipe
+                    .server
+                    .stream_send(stream_id, &[], true)
+                    .unwrap();
+                helper.advance_and_run_loop().unwrap();
+                assert_matches!(
+                    helper.driver_recv_core_event(),
+                    Ok(H3Event::BodyBytesReceived {
+                        stream_id: id,
+                        num_bytes: 0,
+                        fin: true,
+                    }) if id == stream_id
+                );
+            },
+            PeerTermination::Reset => {
+                helper
+                    .pipe
+                    .server
+                    .stream_shutdown(stream_id, quiche::Shutdown::Write, 4242)
+                    .unwrap();
+                helper.advance_and_run_loop().unwrap();
+                assert_matches!(
+                    helper.driver_recv_core_event(),
+                    Ok(H3Event::ResetStream { stream_id: id })
+                        if id == stream_id
+                );
+            },
+        }
+        assert_eq!(helper.driver.hooks.pending_request_count(), 0);
+        assert!(helper.driver.stream_map.contains_key(&stream_id));
+
+        drop(body_writer);
+        helper.advance_and_run_loop().unwrap();
+        assert!(!helper.driver.stream_map.contains_key(&stream_id));
+    }
 
     #[test]
     fn client_fin_before_server_body() {
