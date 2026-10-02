@@ -386,6 +386,12 @@ pub struct LegacyRecovery {
 
     pub congestion: Congestion,
 
+    pacing_enabled: bool,
+    max_pacing_rate: Option<u64>,
+    pacing_burst_remaining: usize,
+    next_paced_send: Option<Instant>,
+    last_paced_send: Option<Instant>,
+
     /// A resusable list of acks.
     newly_acked: Vec<Acked>,
 }
@@ -428,6 +434,16 @@ impl LegacyRecovery {
 
             congestion: Congestion::from_config(recovery_config),
 
+            pacing_enabled: recovery_config.pacing,
+            max_pacing_rate: recovery_config.max_pacing_rate,
+            pacing_burst_remaining: recovery_config
+                .max_send_udp_payload_size
+                .saturating_mul(
+                    recovery_config.initial_congestion_window_packets,
+                ),
+            next_paced_send: None,
+            last_paced_send: None,
+
             newly_acked: Vec::new(),
         }
     }
@@ -435,6 +451,84 @@ impl LegacyRecovery {
     #[cfg(test)]
     pub fn new(config: &crate::Config) -> Self {
         Self::new_with_config(&RecoveryConfig::from_config(config))
+    }
+
+    // Use a pacing rate of 1.25 times the congestion window per RTT.
+    fn legacy_pacing_rate(&self) -> u64 {
+        let nanos = self.rtt().as_nanos().max(1);
+        let rate = (self.cwnd() as u128)
+            .saturating_mul(1_000_000_000)
+            .saturating_mul(5) /
+            nanos.saturating_mul(4);
+        let rate = rate.min(u64::MAX as u128) as u64;
+
+        self.max_pacing_rate.unwrap_or(u64::MAX).min(rate).max(1)
+    }
+
+    fn schedule_packet(
+        &mut self, now: Instant, size: usize, paced: bool,
+    ) -> Instant {
+        if !self.pacing_enabled {
+            return now;
+        }
+
+        if !paced {
+            // ACK-only packets do not consume burst credit or advance
+            // the queued data schedule.
+            self.last_paced_send = Some(now);
+            return now;
+        }
+
+        if self.bytes_in_flight.is_zero() &&
+            self.next_paced_send.is_none_or(|time| time <= now) &&
+            !self.congestion.in_congestion_recovery(now)
+        {
+            self.pacing_burst_remaining =
+                self.congestion.send_quantum().min(self.cwnd());
+            self.next_paced_send = None;
+        }
+
+        let rate = self.legacy_pacing_rate() as u128;
+        let pacing_delay = |bytes: usize| {
+            let nanos = (bytes as u128)
+                .saturating_mul(1_000_000_000)
+                .div_ceil(rate)
+                .max(1)
+                .min(u64::MAX as u128) as u64;
+            Duration::from_nanos(nanos)
+        };
+
+        let mut send_time = self.next_paced_send.unwrap_or(now).max(now);
+
+        if self.pacing_burst_remaining >= size {
+            self.pacing_burst_remaining -= size;
+
+            if self.pacing_burst_remaining >= self.max_datagram_size {
+                self.next_paced_send = Some(send_time);
+                self.last_paced_send = Some(send_time);
+                return send_time;
+            }
+        } else {
+            // Partial credit cannot authorize the entire packet immediately.
+            // Wait for the excess bytes before releasing the packet.
+            if self.pacing_burst_remaining > 0 &&
+                self.next_paced_send.is_none_or(|time| time <= now)
+            {
+                let deficit = size - self.pacing_burst_remaining;
+                send_time = send_time
+                    .checked_add(pacing_delay(deficit))
+                    .expect("QUIC packet pacing delay exceeds Instant range");
+            }
+            self.pacing_burst_remaining = 0;
+        }
+
+        self.next_paced_send = Some(
+            send_time
+                .checked_add(pacing_delay(size))
+                .expect("QUIC packet pacing delay exceeds Instant range"),
+        );
+        self.last_paced_send = Some(send_time);
+        send_time
     }
 
     fn loss_time_and_space(&self) -> (Option<Instant>, Epoch) {
@@ -622,6 +716,8 @@ impl RecoveryOps for LegacyRecovery {
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
         let sent_bytes = pkt.size;
+        let send_time =
+            self.schedule_packet(now, sent_bytes, in_flight && ack_eliciting);
 
         if ack_eliciting {
             self.outstanding_non_ack_eliciting = 0;
@@ -630,13 +726,14 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         if in_flight && ack_eliciting {
-            self.epochs[epoch].time_of_last_ack_eliciting_packet = Some(now);
+            self.epochs[epoch].time_of_last_ack_eliciting_packet =
+                Some(send_time);
         }
 
         self.congestion.on_packet_sent(
             self.bytes_in_flight.get(),
             sent_bytes,
-            now,
+            send_time,
             &mut pkt,
             self.bytes_lost,
             in_flight,
@@ -665,7 +762,7 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn get_packet_send_time(&self, now: Instant) -> Instant {
-        now
+        self.last_paced_send.unwrap_or(now).max(now)
     }
 
     // `peer_sent_ack_ranges` should not be used without validation.
@@ -1086,8 +1183,15 @@ impl RecoveryOps for LegacyRecovery {
 
     fn get_next_release_time(&self) -> ReleaseDecision {
         ReleaseDecision {
-            time: ReleaseTime::Immediate,
-            allow_burst: false,
+            time: if self.pacing_enabled {
+                self.next_paced_send
+                    .map(ReleaseTime::At)
+                    .unwrap_or(ReleaseTime::Immediate)
+            } else {
+                ReleaseTime::Immediate
+            },
+            allow_burst: self.pacing_enabled &&
+                self.pacing_burst_remaining >= self.max_datagram_size,
         }
     }
 

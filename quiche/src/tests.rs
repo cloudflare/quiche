@@ -14041,3 +14041,93 @@ fn server_qlog() {
         panic!("expected Qlog event");
     }
 }
+
+#[rstest]
+fn legacy_coalesced_ack_preserves_release(
+    #[values("reno", "cubic")] algorithm: &str,
+) {
+    let mut config = test_utils::Pipe::default_config_no_pq(algorithm).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    let mut buf = [0; 65535];
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    pipe.server_recv(&mut buf[..len]).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    assert!(pipe.client.is_established());
+
+    // Establish a future pacing deadline with available congestion credit.
+    let mut pacing_config = Config::new(PROTOCOL_VERSION).unwrap();
+    pacing_config.set_cc_algorithm_name(algorithm).unwrap();
+    pacing_config.set_max_send_udp_payload_size(1200);
+    pacing_config.set_initial_congestion_window_packets(1);
+    pacing_config.enable_pacing(true);
+    pacing_config.set_max_pacing_rate(1200);
+    let mut r = recovery::Recovery::new(&pacing_config);
+    let now = Instant::now();
+    r.on_packet_sent(
+        recovery::Sent {
+            pkt_num: 0,
+            frames: smallvec::smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 1200,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: true,
+            is_pmtud_probe: false,
+        },
+        packet::Epoch::Initial,
+        recovery::HandshakeStatus::default(),
+        now,
+        "",
+    );
+    let mut ranges = ranges::RangeSet::default();
+    ranges.insert(0..1);
+    r.on_ack_received(
+        &ranges,
+        0,
+        packet::Epoch::Initial,
+        recovery::HandshakeStatus::default(),
+        now + Duration::from_millis(50),
+        None,
+        "",
+    )
+    .unwrap();
+    assert!(r.get_next_release_time().time(now).is_some());
+    pipe.client.paths.get_active_mut().unwrap().recovery = r;
+
+    // Queue an ACK after the pending Handshake crypto packet.
+    let space = &mut pipe.client.pkt_num_spaces[packet::Epoch::Application];
+    space.recv_pkt_need_ack.insert(0..1);
+    space.ack_elicited = true;
+
+    let sent_before = pipe.client.stats().sent;
+    let (_, info) = pipe.client.send(&mut buf).unwrap();
+    assert!(
+        pipe.client.stats().sent - sent_before >= 2,
+        "fixture did not generate coalesced packets"
+    );
+    let after = Instant::now();
+    assert!(
+        info.at > after,
+        "trailing ACK erased the datagram's paced release"
+    );
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .get_packet_send_time(after),
+        after,
+        "fixture did not finish with an immediate ACK"
+    );
+}
