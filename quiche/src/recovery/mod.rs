@@ -2839,6 +2839,48 @@ mod tests {
             );
         }
     }
+    /// RFC 9002, Section 6.2.4: on PTO the sender should also probe the other
+    /// packet number spaces that still have data in flight.
+    #[rstest]
+    fn pto_probes_every_in_flight_packet_number_space(
+        #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let mut r = Recovery::new(&cfg);
+        let now = Instant::now();
+        let handshake_status = HandshakeStatus {
+            has_handshake_keys: true,
+            peer_verified_address: true,
+            completed: false,
+        };
+
+        for (pkt_num, epoch) in
+            [(0, packet::Epoch::Initial), (1, packet::Epoch::Handshake)]
+        {
+            r.on_packet_sent(
+                test_utils::helper_packet_sent(pkt_num, now, 1000),
+                epoch,
+                handshake_status,
+                now,
+                "",
+            );
+        }
+
+        let timeout = r.loss_detection_timer().unwrap();
+        r.on_loss_detection_timeout(handshake_status, timeout, "");
+
+        assert!(
+            r.loss_probes(packet::Epoch::Initial) > 0,
+            "the Initial space has data in flight and was not probed"
+        );
+        assert!(
+            r.loss_probes(packet::Epoch::Handshake) > 0,
+            "the Handshake space has data in flight and was not probed"
+        );
+    }
+
     #[rstest]
     fn pto_overflow_reproduction(
         #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
