@@ -3379,7 +3379,7 @@ impl<F: BufFactory> Connection<F> {
                 crypto_open: open_prev,
                 pn_on_update: pn,
                 update_acked: false,
-                timer: now + (recv_path.recovery.pto() * 3),
+                timer: now + Self::pto_duration(recv_path.recovery.pto()),
             });
 
             self.key_phase = !self.key_phase;
@@ -4972,7 +4972,7 @@ impl<F: BufFactory> Connection<F> {
 
                         if push_frame_to_pkt!(b, frames, frame, left) {
                             let pto = path.recovery.pto();
-                            self.draining_timer = Some(now + (pto * 3));
+                            self.draining_timer = Some(now + Self::pto_duration(pto));
 
                             ack_eliciting = true;
                             in_flight = true;
@@ -4988,7 +4988,7 @@ impl<F: BufFactory> Connection<F> {
 
                     if push_frame_to_pkt!(b, frames, frame, left) {
                         let pto = path.recovery.pto();
-                        self.draining_timer = Some(now + (pto * 3));
+                        self.draining_timer = Some(now + Self::pto_duration(pto));
 
                         ack_eliciting = true;
                         in_flight = true;
@@ -8848,7 +8848,7 @@ impl<F: BufFactory> Connection<F> {
                 });
 
                 let path = self.paths.get_active()?;
-                self.draining_timer = Some(now + (path.recovery.pto() * 3));
+                self.draining_timer = Some(now + (Self::pto_duration(path.recovery.pto())));
             },
 
             frame::Frame::ApplicationClose { error_code, reason } => {
@@ -8859,7 +8859,7 @@ impl<F: BufFactory> Connection<F> {
                 });
 
                 let path = self.paths.get_active()?;
-                self.draining_timer = Some(now + (path.recovery.pto() * 3));
+                self.draining_timer = Some(now + Self::pto_duration(path.recovery.pto()));
             },
 
             frame::Frame::HandshakeDone => {
@@ -8921,6 +8921,11 @@ impl<F: BufFactory> Connection<F> {
         trace!("{} dropped epoch {} state", self.trace_id, epoch);
     }
 
+    /// Returns the duration used for PTO-based connection timers.
+    fn pto_duration(pto: Duration) -> Duration {
+        pto * 3
+    }
+
     /// Returns the connection level flow control limit.
     fn max_rx_data(&self) -> u64 {
         self.flow_control.max_data()
@@ -8963,7 +8968,7 @@ impl<F: BufFactory> Connection<F> {
         };
 
         let idle_timeout = Duration::from_millis(idle_timeout);
-        let idle_timeout = cmp::max(idle_timeout, 3 * path_pto);
+        let idle_timeout = cmp::max(idle_timeout, Self::pto_duration(path_pto));
 
         Some(idle_timeout)
     }
