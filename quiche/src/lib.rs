@@ -6009,6 +6009,10 @@ impl<F: BufFactory> Connection<F> {
                 return Err(Error::StreamLimit);
             },
 
+            // Stream already collected; mirror stream_recv() and return
+            // InvalidStreamState.
+            Err(Error::Done) => return Err(Error::InvalidStreamState(stream_id)),
+
             Err(e) => return Err(e),
         };
 
