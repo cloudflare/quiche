@@ -596,10 +596,17 @@ impl ProbeBW {
             return;
         } else {
             // TODO(vlad): probe_up_simplify_inflight_hi?
-            if congestion_event.prior_bytes_in_flight <
-                congestion_event.prior_cwnd
+            // A full DATAGRAM cannot be split to fill the last bytes of cwnd.
+            // Treat a sub-packet remainder as congestion-window limited, using
+            // the current path MSS so this remains valid after PMTU changes.
+            // Requiring exact utilization can prevent inflight_hi from growing
+            // even when the application has queued datagrams.
+            if congestion_event
+                .prior_cwnd
+                .saturating_sub(congestion_event.prior_bytes_in_flight) >=
+                congestion_event.max_datagram_size
             {
-                // Not fully utilizing cwnd, so can't safely grow.
+                // At least one full packet still fits: do not grow the bound.
                 return;
             }
 
@@ -655,6 +662,7 @@ mod tests {
         let test_event =
             |probe_bw: &ProbeBW, bytes_acked: usize, end_of_round_trip: bool| {
                 BBRv2CongestionEvent {
+                    max_datagram_size: DEFAULT_MSS,
                     event_time: probe_bw.cycle.start_time,
                     prior_cwnd: probe_bw.model.inflight_hi(),
                     prior_bytes_in_flight: probe_bw.model.inflight_hi(),
@@ -723,5 +731,83 @@ mod tests {
         do_probe_up(&mut probe_bw, params, 1_000_000);
         // End inflight_hi should be independent of step size.
         assert_eq!(probe_bw.model.inflight_hi(), 174_100);
+    }
+}
+
+#[cfg(test)]
+mod datagram_cwnd_tests {
+    use super::super::DEFAULT_PARAMS;
+    use super::*;
+
+    // Model ACKs for full-sized DATAGRAM packets that leave less than one
+    // packet of unused cwnd. A DATAGRAM cannot be split to use this remainder.
+    fn probe_after_acks(
+        mss: usize, unused: usize, hi_above_cwnd: bool,
+    ) -> (usize, usize) {
+        let cwnd = 10 * mss;
+        let initial_hi = if hi_above_cwnd {
+            cwnd + mss
+        } else {
+            cwnd - unused
+        };
+        let mut probe = ProbeBW {
+            model: BBRv2NetworkModel::new(
+                &DEFAULT_PARAMS,
+                Duration::from_millis(60),
+            ),
+            cycle: Cycle {
+                phase: CyclePhase::Up,
+                probe_up_bytes: Some(cwnd),
+                ..Cycle::default()
+            },
+        };
+        probe.model.set_inflight_hi(initial_hi);
+        let mut event = BBRv2CongestionEvent::new(
+            Instant::now(),
+            cwnd,
+            cwnd - unused,
+            true,
+            mss,
+        );
+        event.bytes_acked = mss - 5;
+        for _ in 0..20 {
+            probe.probe_inflight_high_upward(&event, &DEFAULT_PARAMS);
+        }
+        (initial_hi, probe.model.inflight_hi())
+    }
+
+    #[test]
+    fn queued_datagrams_grow_probe_up_with_sub_packet_cwnd_remainder() {
+        for mss in [1400, 1200, 1450, 9000] {
+            // Includes the observed cwnd=14000 / inflight=13950 failure.
+            let (before, after) = probe_after_acks(mss, 50, false);
+            eprintln!(
+                "mss={mss} cwnd={} inflight={} inflight_hi: {before} -> {after}",
+                10 * mss,
+                10 * mss - 50
+            );
+            assert!(after > before, "ProbeUp wedged with packet size {mss}");
+        }
+    }
+
+    #[test]
+    fn probe_up_does_not_grow_when_a_full_packet_still_fits() {
+        for mss in [1400, 1200, 1450, 9000] {
+            for unused in [mss, 2 * mss] {
+                let (before, after) = probe_after_acks(mss, unused, false);
+                assert_eq!(
+                    after, before,
+                    "underfilled window grew with {unused} free bytes"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn probe_up_preserves_full_window_growth_and_inflight_hi_guard() {
+        let (before, after) = probe_after_acks(1400, 0, false);
+        assert!(after > before);
+        let (before, after) = probe_after_acks(1400, 50, true);
+        assert_eq!(after, before);
     }
 }
