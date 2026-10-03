@@ -875,6 +875,7 @@ mod tests {
             prior_cwnd,
             prior_in_flight,
             false,
+            DEFAULT_MSS,
         );
         model.on_congestion_event_start(&acked, &[], &mut event, params);
         event
