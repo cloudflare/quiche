@@ -143,6 +143,7 @@ pub use crate::quic::connection::ApplicationOverQuic;
 pub use crate::quic::connection::ConnectionIdGenerator;
 pub use crate::quic::connection::InitialQuicConnection;
 pub use crate::quic::connection::QuicConnection;
+pub use crate::quic::AddrValidationTokenManager;
 pub use crate::result::BoxError;
 pub use crate::result::QuicResult;
 pub use crate::settings::ConnectionParams;
