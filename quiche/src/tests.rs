@@ -3448,7 +3448,7 @@ fn path_challenge(
         .send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
 
-    assert!(len > 0);
+    assert_eq!(len, MIN_CLIENT_INITIAL_LEN);
 
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
@@ -3461,6 +3461,7 @@ fn path_challenge(
         iter.next(),
         Some(&frame::Frame::PathResponse { data: [0xba; 8] })
     );
+    assert!(matches!(iter.next(), Some(&frame::Frame::Padding { .. })));
 }
 
 #[rstest]
