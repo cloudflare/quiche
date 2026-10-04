@@ -99,6 +99,62 @@ use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN6_0;
 
 use crate::*;
 
+const FFI_ERR_INVALID_ARGUMENT: ssize_t = -24;
+
+fn validate_ssize_len(len: size_t) -> std::result::Result<(), ssize_t> {
+    if len > ssize_t::MAX as usize {
+        Err(FFI_ERR_INVALID_ARGUMENT)
+    } else {
+        Ok(())
+    }
+}
+
+fn ffi_slice_layout_valid<T>(ptr: *const T, len: usize) -> bool {
+    if len == 0 {
+        return true;
+    }
+
+    if ptr.is_null() || !(ptr as usize).is_multiple_of(align_of::<T>()) {
+        return false;
+    }
+
+    size_of::<T>()
+        .checked_mul(len)
+        .is_some_and(|bytes| bytes <= isize::MAX as usize)
+}
+
+unsafe fn ffi_slice_from_raw_parts<'a, T>(
+    ptr: *const T, len: usize,
+) -> Option<&'a [T]> {
+    if len == 0 {
+        return Some(unsafe {
+            slice::from_raw_parts(ptr::NonNull::<T>::dangling().as_ptr(), 0)
+        });
+    }
+
+    if !ffi_slice_layout_valid(ptr, len) {
+        return None;
+    }
+
+    Some(unsafe { slice::from_raw_parts(ptr, len) })
+}
+
+unsafe fn ffi_slice_from_raw_parts_mut<'a, T>(
+    ptr: *mut T, len: usize,
+) -> Option<&'a mut [T]> {
+    if len == 0 {
+        return Some(unsafe {
+            slice::from_raw_parts_mut(ptr::NonNull::<T>::dangling().as_ptr(), 0)
+        });
+    }
+
+    if !ffi_slice_layout_valid(ptr.cast_const(), len) {
+        return None;
+    }
+
+    Some(unsafe { slice::from_raw_parts_mut(ptr, len) })
+}
+
 #[no_mangle]
 pub extern "C" fn quiche_version() -> *const u8 {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
@@ -251,7 +307,10 @@ pub extern "C" fn quiche_config_enable_early_data(config: &mut Config) {
 pub extern "C" fn quiche_config_set_application_protos(
     config: &mut Config, protos: *const u8, protos_len: size_t,
 ) -> c_int {
-    let protos = unsafe { slice::from_raw_parts(protos, protos_len) };
+    let Some(protos) = (unsafe { ffi_slice_from_raw_parts(protos, protos_len) })
+    else {
+        return FFI_ERR_INVALID_ARGUMENT as c_int;
+    };
 
     match config.set_application_protos_wire_format(protos) {
         Ok(_) => 0,
@@ -437,7 +496,9 @@ pub extern "C" fn quiche_config_set_active_connection_id_limit(
 pub extern "C" fn quiche_config_set_stateless_reset_token(
     config: &mut Config, v: *const u8,
 ) {
-    let reset_token = unsafe { slice::from_raw_parts(v, 16) };
+    let Some(reset_token) = (unsafe { ffi_slice_from_raw_parts(v, 16) }) else {
+        return;
+    };
     let reset_token = match reset_token.try_into() {
         Ok(rt) => rt,
         Err(_) => unreachable!(),
@@ -457,7 +518,9 @@ pub extern "C" fn quiche_config_set_disable_dcid_reuse(
 pub extern "C" fn quiche_config_set_ticket_key(
     config: &mut Config, key: *const u8, key_len: size_t,
 ) -> c_int {
-    let key = unsafe { slice::from_raw_parts(key, key_len) };
+    let Some(key) = (unsafe { ffi_slice_from_raw_parts(key, key_len) }) else {
+        return FFI_ERR_INVALID_ARGUMENT as c_int;
+    };
 
     match config.set_ticket_key(key) {
         Ok(_) => 0,
@@ -823,7 +886,9 @@ pub extern "C" fn quiche_conn_set_qlog_fd(
 pub extern "C" fn quiche_conn_set_session(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> c_int {
-    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+    let Some(buf) = (unsafe { ffi_slice_from_raw_parts(buf, buf_len) }) else {
+        return FFI_ERR_INVALID_ARGUMENT as c_int;
+    };
 
     match conn.set_session(buf) {
         Ok(_) => 0,
@@ -864,11 +929,14 @@ impl From<&RecvInfo<'_>> for crate::RecvInfo {
 pub extern "C" fn quiche_conn_recv(
     conn: &mut Connection, buf: *mut u8, buf_len: size_t, info: &RecvInfo,
 ) -> ssize_t {
-    if buf_len > <ssize_t>::MAX as usize {
-        panic!("The provided buffer is too large");
+    if let Err(e) = validate_ssize_len(buf_len) {
+        return e;
     }
 
-    let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
+    let Some(buf) = (unsafe { ffi_slice_from_raw_parts_mut(buf, buf_len) })
+    else {
+        return FFI_ERR_INVALID_ARGUMENT;
+    };
 
     match conn.recv(buf, info.into()) {
         Ok(v) => v as ssize_t,
@@ -891,11 +959,14 @@ pub struct SendInfo {
 pub extern "C" fn quiche_conn_send(
     conn: &mut Connection, out: *mut u8, out_len: size_t, out_info: &mut SendInfo,
 ) -> ssize_t {
-    if out_len > <ssize_t>::MAX as usize {
-        panic!("The provided buffer is too large");
+    if let Err(e) = validate_ssize_len(out_len) {
+        return e;
     }
 
-    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+    let Some(out) = (unsafe { ffi_slice_from_raw_parts_mut(out, out_len) })
+    else {
+        return FFI_ERR_INVALID_ARGUMENT;
+    };
 
     match conn.send(out) {
         Ok((v, info)) => {
@@ -917,13 +988,16 @@ pub extern "C" fn quiche_conn_send_on_path(
     from_len: socklen_t, to: *const sockaddr, to_len: socklen_t,
     out_info: &mut SendInfo,
 ) -> ssize_t {
-    if out_len > <ssize_t>::MAX as usize {
-        panic!("The provided buffer is too large");
+    if let Err(e) = validate_ssize_len(out_len) {
+        return e;
     }
 
     let from = optional_std_addr_from_c(from, from_len);
     let to = optional_std_addr_from_c(to, to_len);
-    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+    let Some(out) = (unsafe { ffi_slice_from_raw_parts_mut(out, out_len) })
+    else {
+        return FFI_ERR_INVALID_ARGUMENT;
+    };
 
     match conn.send_on_path(out, from, to) {
         Ok((v, info)) => {
@@ -944,11 +1018,14 @@ pub extern "C" fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
     fin: &mut bool, out_error_code: &mut u64,
 ) -> ssize_t {
-    if out_len > <ssize_t>::MAX as usize {
-        panic!("The provided buffer is too large");
+    if let Err(e) = validate_ssize_len(out_len) {
+        return e;
     }
 
-    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+    let Some(out) = (unsafe { ffi_slice_from_raw_parts_mut(out, out_len) })
+    else {
+        return FFI_ERR_INVALID_ARGUMENT;
+    };
 
     let (out_len, out_fin) = match conn.stream_recv(stream_id, out) {
         Ok(v) => v,
@@ -973,15 +1050,12 @@ pub extern "C" fn quiche_conn_stream_send(
     conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: size_t,
     fin: bool, out_error_code: &mut u64,
 ) -> ssize_t {
-    if buf_len > <ssize_t>::MAX as usize {
-        panic!("The provided buffer is too large");
+    if let Err(e) = validate_ssize_len(buf_len) {
+        return e;
     }
 
-    let buf = if buf.is_null() {
-        assert_eq!(buf_len, 0);
-        &[]
-    } else {
-        unsafe { slice::from_raw_parts(buf, buf_len) }
+    let Some(buf) = (unsafe { ffi_slice_from_raw_parts(buf, buf_len) }) else {
+        return FFI_ERR_INVALID_ARGUMENT;
     };
 
     match conn.stream_send(stream_id, buf, fin) {
@@ -1575,11 +1649,13 @@ pub extern "C" fn quiche_conn_dgram_send_queue_byte_size(
 pub extern "C" fn quiche_conn_dgram_send(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> ssize_t {
-    if buf_len > <ssize_t>::MAX as usize {
-        panic!("The provided buffer is too large");
+    if let Err(e) = validate_ssize_len(buf_len) {
+        return e;
     }
 
-    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+    let Some(buf) = (unsafe { ffi_slice_from_raw_parts(buf, buf_len) }) else {
+        return FFI_ERR_INVALID_ARGUMENT;
+    };
 
     match conn.dgram_send(buf) {
         Ok(_) => buf_len as ssize_t,
@@ -1592,11 +1668,14 @@ pub extern "C" fn quiche_conn_dgram_send(
 pub extern "C" fn quiche_conn_dgram_recv(
     conn: &mut Connection, out: *mut u8, out_len: size_t,
 ) -> ssize_t {
-    if out_len > <ssize_t>::MAX as usize {
-        panic!("The provided buffer is too large");
+    if let Err(e) = validate_ssize_len(out_len) {
+        return e;
     }
 
-    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+    let Some(out) = (unsafe { ffi_slice_from_raw_parts_mut(out, out_len) })
+    else {
+        return FFI_ERR_INVALID_ARGUMENT;
+    };
 
     let out_len = match conn.dgram_recv(out) {
         Ok(v) => v,
@@ -2005,7 +2084,10 @@ pub extern "C" fn quiche_path_event_free(ev: *mut PathEvent) {
 pub extern "C" fn quiche_put_varint(
     buf: *mut u8, buf_len: size_t, val: u64,
 ) -> c_int {
-    let buf = unsafe { slice::from_raw_parts_mut(buf, buf_len) };
+    let Some(buf) = (unsafe { ffi_slice_from_raw_parts_mut(buf, buf_len) })
+    else {
+        return FFI_ERR_INVALID_ARGUMENT as c_int;
+    };
 
     let mut b = octets::OctetsMut::with_slice(buf);
     match b.put_varint(val) {
@@ -2022,7 +2104,9 @@ pub extern "C" fn quiche_put_varint(
 pub extern "C" fn quiche_get_varint(
     buf: *const u8, buf_len: size_t, val: *mut u64,
 ) -> ssize_t {
-    let buf = unsafe { slice::from_raw_parts(buf, buf_len) };
+    let Some(buf) = (unsafe { ffi_slice_from_raw_parts(buf, buf_len) }) else {
+        return FFI_ERR_INVALID_ARGUMENT;
+    };
 
     let mut b = octets::Octets::with_slice(buf);
     match b.get_varint() {
@@ -2220,6 +2304,43 @@ mod tests {
     use libc::c_void;
     #[cfg(windows)]
     use windows_sys::Win32::Networking::WinSock::inet_ntop;
+
+    #[test]
+    fn ffi_slice_metadata_validation() {
+        // Null is valid for an empty C buffer, but never for a non-empty one.
+        assert!(
+            unsafe { ffi_slice_from_raw_parts::<u8>(ptr::null(), 0) }.is_some()
+        );
+        assert!(unsafe {
+            ffi_slice_from_raw_parts_mut::<u8>(ptr::null_mut(), 0)
+        }
+        .is_some());
+        assert!(
+            unsafe { ffi_slice_from_raw_parts::<u8>(ptr::null(), 1) }.is_none()
+        );
+        assert!(unsafe {
+            ffi_slice_from_raw_parts_mut::<u8>(ptr::null_mut(), 1)
+        }
+        .is_none());
+
+        // Misaligned pointers and slices whose byte length exceeds isize::MAX
+        // are invalid metadata for slice::from_raw_parts().
+        let aligned = ptr::NonNull::<u16>::dangling().as_ptr();
+        let misaligned = (aligned as *const u8).wrapping_add(1).cast::<u16>();
+        assert!(unsafe { ffi_slice_from_raw_parts(misaligned, 1) }.is_none());
+
+        let too_long = (isize::MAX as usize / size_of::<u16>()) + 1;
+        assert!(unsafe { ffi_slice_from_raw_parts(aligned, too_long) }.is_none());
+    }
+
+    #[test]
+    fn ffi_ssize_length_validation() {
+        assert_eq!(validate_ssize_len(ssize_t::MAX as usize), Ok(()));
+        assert_eq!(
+            validate_ssize_len(ssize_t::MAX as usize + 1),
+            Err(FFI_ERR_INVALID_ARGUMENT)
+        );
+    }
 
     #[test]
     fn pmtu_updated_path_event() {
