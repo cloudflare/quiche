@@ -93,6 +93,8 @@
 //!
 //! Off by default:
 //!
+//! - `congestion_window_unchecked`: Expose quiche's congestion control
+//!   algorithm that provides no congestion-window protection.
 //! - `rpk`: Support for raw public keys (RPK) in QUIC handshakes (via
 //!   [boring]).
 //! - `gcongestion`: Replace quiche's original congestion control implementation
