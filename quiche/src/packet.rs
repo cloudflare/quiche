@@ -533,6 +533,26 @@ impl<'a> Header<'a> {
     }
 }
 
+/// Returns the length of a long header packet if its boundary is known.
+///
+/// A short header, Retry, or Version Negotiation packet occupies the rest of
+/// the datagram. Malformed lengths must also consume the remaining bytes.
+pub(crate) fn long_header_packet_len(
+    buf: &mut [u8], dcid_len: usize,
+) -> Option<usize> {
+    let mut b = octets::OctetsMut::with_slice(buf);
+    let hdr = Header::from_bytes(&mut b, dcid_len).ok()?;
+
+    if matches!(hdr.ty, Type::Short | Type::Retry | Type::VersionNegotiation) {
+        return None;
+    }
+
+    let payload_len = usize::try_from(b.get_varint().ok()?).ok()?;
+    let pkt_len = b.off().checked_add(payload_len)?;
+
+    (pkt_len <= buf.len()).then_some(pkt_len)
+}
+
 impl std::fmt::Debug for Header<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self.ty)?;
