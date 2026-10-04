@@ -373,7 +373,7 @@
 //!   unpredictability and length requirements.
 //!
 //! * `congestion_window_unchecked_available`: Expose a congestion control
-//!   algorithm that provides no congestion-window protection.
+//!   algorithm with a fixed, configurable window that defaults to `usize::MAX`.
 //!
 //! [feature flags]: https://doc.rust-lang.org/cargo/reference/manifest.html#the-features-section
 //! [boring]: https://crates.io/crates/boring
@@ -576,6 +576,7 @@ pub struct Config {
     cc_algorithm: CongestionControlAlgorithm,
     custom_bbr_params: Option<BbrParams>,
     initial_congestion_window_packets: usize,
+    unchecked_congestion_window: usize,
     enable_relaxed_loss_threshold: bool,
     enable_cubic_idle_restart_fix: bool,
     enable_send_streams_blocked: bool,
@@ -658,6 +659,7 @@ impl Config {
             custom_bbr_params: None,
             initial_congestion_window_packets:
                 DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
+            unchecked_congestion_window: usize::MAX,
             enable_relaxed_loss_threshold: false,
             enable_cubic_idle_restart_fix: true,
             enable_send_streams_blocked: false,
@@ -1135,6 +1137,19 @@ impl Config {
     /// The default value is 10.
     pub fn set_initial_congestion_window_packets(&mut self, packets: usize) {
         self.initial_congestion_window_packets = packets;
+    }
+
+    /// Sets the fixed congestion window in bytes for the
+    /// `congestion_window_unchecked` algorithm.
+    ///
+    /// The default is `usize::MAX`. Other congestion control algorithms ignore
+    /// this setting. Recovery probes can temporarily bypass this window.
+    ///
+    /// This API is available even when the
+    /// `congestion_window_unchecked_available` feature is disabled, in which
+    /// case the setting has no effect.
+    pub fn set_unchecked_congestion_window(&mut self, window: usize) {
+        self.unchecked_congestion_window = window;
     }
 
     /// Configure whether to enable relaxed loss detection on spurious loss.

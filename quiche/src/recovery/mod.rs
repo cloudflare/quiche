@@ -139,6 +139,8 @@ pub struct RecoveryConfig {
     pub pacing: bool,
     pub max_pacing_rate: Option<u64>,
     pub initial_congestion_window_packets: usize,
+    /// Fixed congestion window in bytes for the unchecked controller.
+    pub unchecked_congestion_window: usize,
     pub enable_relaxed_loss_threshold: bool,
     pub enable_cubic_idle_restart_fix: bool,
 }
@@ -156,6 +158,7 @@ impl RecoveryConfig {
             max_pacing_rate: config.max_pacing_rate,
             initial_congestion_window_packets: config
                 .initial_congestion_window_packets,
+            unchecked_congestion_window: config.unchecked_congestion_window,
             enable_relaxed_loss_threshold: config.enable_relaxed_loss_threshold,
             enable_cubic_idle_restart_fix: config.enable_cubic_idle_restart_fix,
         }
@@ -379,11 +382,12 @@ pub enum CongestionControlAlgorithm {
     /// BBRv2 congestion control algorithm implementation from gcongestion
     /// branch. `bbr2_gcongestion` in a string form.
     Bbr2Gcongestion = 4,
-    /// Keeps the congestion window at `usize::MAX` instead of reducing send
-    /// capacity in response to congestion. ACK processing, RTT estimation,
-    /// loss detection, and recovery remain enabled. This provides no
-    /// congestion-window protection and makes optimistic-ACK probes extremely
-    /// infrequent.
+    /// Uses a fixed congestion window instead of responding to congestion.
+    /// The window defaults to `usize::MAX` and can be set through
+    /// [`Config::set_unchecked_congestion_window()`]. ACK processing, RTT
+    /// estimation, loss detection, and recovery remain enabled. The default
+    /// window provides no congestion-window protection and makes optimistic-ACK
+    /// probes extremely infrequent.
     /// `congestion_window_unchecked` in string form.
     #[cfg(feature = "congestion_window_unchecked_available")]
     #[cfg_attr(
@@ -858,7 +862,11 @@ mod tests {
     use crate::range_buf::RangeBuf;
     use crate::test_utils;
     use crate::CongestionControlAlgorithm;
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    use crate::DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS;
     use crate::DEFAULT_INITIAL_RTT;
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    use crate::MAX_SEND_UDP_PAYLOAD_SIZE;
     use rstest::rstest;
     use smallvec::smallvec;
     use std::str::FromStr;
@@ -989,6 +997,101 @@ mod tests {
             now + Duration::from_secs(1),
         );
         assert_eq!(recovery.bytes_in_flight(), 0);
+    }
+
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    #[test]
+    fn congestion_window_unchecked_uses_configured_capacity() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION)
+            .expect("create transport configuration");
+        config.set_cc_algorithm(
+            CongestionControlAlgorithm::CongestionWindowUnchecked,
+        );
+        let window = config.max_send_udp_payload_size * 2;
+        config.set_unchecked_congestion_window(window);
+        let mut recovery = Recovery::new(&config);
+        let now = Instant::now();
+
+        assert_eq!(recovery.cwnd(), window);
+        assert_eq!(recovery.cwnd_available(), window);
+        for packet_number in 0..2 {
+            recovery.on_packet_sent(
+                test_utils::helper_packet_sent(
+                    packet_number,
+                    now,
+                    config.max_send_udp_payload_size,
+                ),
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+        assert_eq!(recovery.cwnd(), window);
+        assert_eq!(recovery.cwnd_available(), 0);
+        let mut acked = RangeSet::default();
+        acked.insert(0..2);
+        recovery
+            .on_ack_received(
+                &acked,
+                0,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now + Duration::from_millis(100),
+                None,
+                "",
+            )
+            .expect("acknowledge outstanding packets");
+        assert_eq!(recovery.cwnd(), window);
+        assert_eq!(recovery.cwnd_available(), window);
+    }
+
+    #[rstest]
+    fn unchecked_window_configuration_does_not_change_other_algorithms(
+        #[values("reno", "cubic", "bbr2_gcongestion")] algorithm: &str,
+    ) {
+        let mut config = Config::new(crate::PROTOCOL_VERSION)
+            .expect("create transport configuration");
+        config
+            .set_cc_algorithm_name(algorithm)
+            .expect("select congestion control algorithm");
+        config.set_unchecked_congestion_window(40 * 1024 * 1024);
+        let recovery = Recovery::new(&config);
+        assert_eq!(
+            recovery.cwnd(),
+            config.max_send_udp_payload_size *
+                config.initial_congestion_window_packets,
+        );
+    }
+
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    #[rstest]
+    fn unchecked_window_is_fixed_across_mtu_updates(
+        #[values(
+            usize::MAX,
+            MAX_SEND_UDP_PAYLOAD_SIZE * DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS,
+            MAX_SEND_UDP_PAYLOAD_SIZE * DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS + 1
+        )]
+        window: usize,
+    ) {
+        let mut config = Config::new(crate::PROTOCOL_VERSION)
+            .expect("create transport configuration");
+        config.set_cc_algorithm(
+            CongestionControlAlgorithm::CongestionWindowUnchecked,
+        );
+        config.set_max_send_udp_payload_size(MAX_SEND_UDP_PAYLOAD_SIZE);
+        config.set_unchecked_congestion_window(window);
+        let mut recovery = Recovery::new(&config);
+
+        recovery.pmtud_update_max_datagram_size(MAX_SEND_UDP_PAYLOAD_SIZE + 200);
+        assert_eq!(recovery.cwnd(), window);
+        assert_eq!(
+            recovery.max_datagram_size(),
+            MAX_SEND_UDP_PAYLOAD_SIZE + 200
+        );
+        recovery.update_max_datagram_size(MAX_SEND_UDP_PAYLOAD_SIZE);
+        assert_eq!(recovery.cwnd(), window);
+        assert_eq!(recovery.max_datagram_size(), MAX_SEND_UDP_PAYLOAD_SIZE);
     }
 
     #[rstest]

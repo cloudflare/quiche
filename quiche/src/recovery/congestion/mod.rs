@@ -113,6 +113,10 @@ pub struct Congestion {
     /// Initial congestion window size in terms of packet count.
     pub(crate) initial_congestion_window_packets: usize,
 
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    /// Fixed congestion window in bytes for the unchecked controller.
+    pub(crate) unchecked_congestion_window: usize,
+
     max_datagram_size: usize,
 
     pub(crate) lost_count: usize,
@@ -146,6 +150,9 @@ impl Congestion {
 
             initial_congestion_window_packets: recovery_config
                 .initial_congestion_window_packets,
+            #[cfg(feature = "congestion_window_unchecked_available")]
+            unchecked_congestion_window: recovery_config
+                .unchecked_congestion_window,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
 
@@ -247,6 +254,9 @@ impl Congestion {
 pub(crate) struct CongestionControlOps {
     pub on_init: fn(r: &mut Congestion),
 
+    /// Updates controller state after the packet-size limit changes.
+    pub on_mtu_update: fn(congestion: &mut Congestion),
+
     pub on_packet_sent: fn(
         r: &mut Congestion,
         sent_bytes: usize,
@@ -286,6 +296,7 @@ pub(crate) struct CongestionControlOps {
 #[cfg(feature = "congestion_window_unchecked_available")]
 static CONGESTION_WINDOW_UNCHECKED: CongestionControlOps = CongestionControlOps {
     on_init: reset_unchecked_congestion_window,
+    on_mtu_update: reset_unchecked_congestion_window,
     on_packet_sent: |congestion, _, _, _| {
         reset_unchecked_congestion_window(congestion)
     },
@@ -307,7 +318,7 @@ static CONGESTION_WINDOW_UNCHECKED: CongestionControlOps = CongestionControlOps 
 
 #[cfg(feature = "congestion_window_unchecked_available")]
 fn reset_unchecked_congestion_window(congestion: &mut Congestion) {
-    congestion.congestion_window = usize::MAX;
+    congestion.congestion_window = congestion.unchecked_congestion_window;
 }
 
 impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
@@ -335,19 +346,24 @@ mod tests {
     #[cfg(feature = "congestion_window_unchecked_available")]
     use crate::Config;
     #[cfg(feature = "congestion_window_unchecked_available")]
+    use rstest::rstest;
+    #[cfg(feature = "congestion_window_unchecked_available")]
     use std::time::Duration;
 
     #[cfg(feature = "congestion_window_unchecked_available")]
-    #[test]
-    fn unchecked_window_is_restored_by_callbacks() {
+    #[rstest]
+    fn unchecked_window_is_restored_by_callbacks(
+        #[values(usize::MAX, 40 * 1024 * 1024)] window: usize,
+    ) {
         let mut config = Config::new(crate::PROTOCOL_VERSION)
             .expect("create transport configuration");
         config.set_cc_algorithm(
             CongestionControlAlgorithm::CongestionWindowUnchecked,
         );
+        config.set_unchecked_congestion_window(window);
         let mut congestion =
             Congestion::from_config(&RecoveryConfig::from_config(&config));
-        assert_eq!(congestion.congestion_window(), usize::MAX);
+        assert_eq!(congestion.congestion_window(), window);
 
         let callbacks: [fn(&mut Congestion); 5] = [
             |congestion| {
@@ -386,7 +402,7 @@ mod tests {
         for callback in callbacks {
             congestion.congestion_window = 0;
             callback(&mut congestion);
-            assert_eq!(congestion.congestion_window(), usize::MAX);
+            assert_eq!(congestion.congestion_window(), window);
         }
     }
 
