@@ -1049,6 +1049,9 @@ enum quiche_h3_error {
     // over HTTP/1.1.
     QUICHE_H3_ERR_VERSION_FALLBACK = -20,
 
+    // An argument passed through the HTTP/3 C API is invalid.
+    QUICHE_H3_ERR_INVALID_ARGUMENT = -21,
+
     // The following QUICHE_H3_TRANSPORT_ERR_* errors are propagated
     // from the QUIC transport layer.
 
