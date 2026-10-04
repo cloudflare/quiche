@@ -162,6 +162,7 @@ where
     /// should be 0 outside of `poll_conn_map_commands`.
     conn_map_cmd_buf: Vec<ConnectionMapCommand>,
     accept_sink: mpsc::Sender<io::Result<InitialQuicConnection<Tx, M>>>,
+    accept_sink_closed: Pin<Box<dyn Future<Output = ()> + Send>>,
     metrics: M,
     #[cfg(target_os = "linux")]
     udp_drop_count: u32,
@@ -192,6 +193,10 @@ where
     ) -> (Self, ConnStream<Tx, M>) {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let (accept_sink, accept_stream) = mpsc::channel(config.listen_backlog);
+        let accept_sink_closed = accept_sink.clone();
+        let accept_sink_closed = Box::pin(async move {
+            accept_sink_closed.closed().await;
+        });
         let (conn_map_cmd_tx, conn_map_cmd_rx) = mpsc::unbounded_channel();
 
         (
@@ -207,6 +212,7 @@ where
                 conn_map_cmd_rx,
                 conn_map_cmd_buf: Vec::with_capacity(4),
                 accept_sink,
+                accept_sink_closed,
                 #[cfg(target_os = "linux")]
                 udp_drop_count: 0,
                 #[cfg(target_os = "linux")]
@@ -785,7 +791,9 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
         loop {
             // First, check whether the app stopped accepting connections.
-            if self.shutdown_tx.is_some() && self.accept_sink.is_closed() {
+            if self.shutdown_tx.is_some() &&
+                self.accept_sink_closed.as_mut().poll(cx).is_ready()
+            {
                 self.shutdown_tx = None;
             }
 
@@ -1004,6 +1012,33 @@ mod tests {
         // This is a smoke test. A failure leaves `notified()` unresolved and
         // hangs the test.
         drop_check.closed().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn idle_listener_releases_socket_after_stream_drop() {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        let streams =
+            crate::listen([socket], ConnectionParams::default(), DefaultMetrics)
+                .unwrap();
+
+        time::sleep(Duration::from_millis(20)).await;
+        drop(streams);
+
+        time::timeout(Duration::from_secs(1), async {
+            loop {
+                match UdpSocket::bind(addr).await {
+                    Ok(_) => break,
+                    Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
+                        time::sleep(Duration::from_millis(5)).await;
+                    },
+                    Err(error) =>
+                        panic!("failed to rebind listener socket: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("idle listener retained its socket after stream drop");
     }
 
     struct NoopDatagramSender;
