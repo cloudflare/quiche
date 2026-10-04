@@ -105,9 +105,9 @@ pub fn connect(
             .map_err(|e| {
                 ClientError::Other(format!("error loading origin CA file : {e}"))
             })?;
-    } else {
-        config.verify_peer(!args.no_verify);
     }
+
+    config.verify_peer(!args.no_verify);
 
     config.set_application_protos(&conn_args.alpns).unwrap();
 
