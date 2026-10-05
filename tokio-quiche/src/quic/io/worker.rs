@@ -45,6 +45,7 @@ use crate::metrics::labels;
 use crate::metrics::Metrics;
 use crate::quic::connection::ApplicationOverQuic;
 use crate::quic::connection::HandshakeError;
+use crate::quic::connection::HandshakeInfo;
 use crate::quic::connection::Incoming;
 use crate::quic::connection::QuicConnectionStats;
 use crate::quic::connection::SharedConnectionIdGenerator;
@@ -277,6 +278,7 @@ pub(crate) struct IoWorkerParams<Tx, M> {
     #[cfg(feature = "perf-quic-listener-metrics")]
     pub(crate) init_rx_time: Option<SystemTime>,
     pub(crate) metrics: M,
+    pub(crate) handshake_info: HandshakeInfo,
 }
 
 fn notify_path_events(
@@ -304,6 +306,12 @@ pub(crate) struct IoWorker<Tx, M, S> {
     #[cfg(feature = "perf-quic-listener-metrics")]
     init_rx_time: Option<SystemTime>,
     metrics: M,
+    /// The handshake deadline is enforced by the worker until the handshake
+    /// completes, regardless of the connection stage. With 0-RTT early data,
+    /// the application is started before the handshake completes, and a peer
+    /// that never completes it could otherwise keep the connection in early
+    /// data indefinitely.
+    handshake_info: HandshakeInfo,
     conn_stage: S,
     bw_estimator: BandwidthReporter,
 }
@@ -331,6 +339,7 @@ where
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: params.init_rx_time,
             metrics: params.metrics,
+            handshake_info: params.handshake_info,
             conn_stage,
             bw_estimator,
         }
@@ -509,7 +518,7 @@ where
                 self.write_state.next_release_time,
             );
             let new_deadline =
-                min_of_some(new_deadline, self.conn_stage.wait_deadline());
+                min_of_some(new_deadline, self.handshake_deadline(qconn));
 
             if new_deadline != current_deadline {
                 current_deadline = new_deadline;
@@ -552,9 +561,7 @@ where
                 },
             };
 
-            if let ControlFlow::Break(reason) = self.conn_stage.post_wait(qconn) {
-                return reason;
-            }
+            self.enforce_handshake_deadline(qconn)?;
         }
     }
 
@@ -895,10 +902,38 @@ where
         }
     }
 
+    /// The deadline before which the handshake must complete, if it hasn't
+    /// completed yet.
+    fn handshake_deadline(&self, qconn: &QuicheConnection) -> Option<Instant> {
+        if qconn.is_established() {
+            return None;
+        }
+
+        self.handshake_info.deadline()
+    }
+
+    /// Closes the connection if the handshake didn't complete before its
+    /// deadline.
+    fn enforce_handshake_deadline(
+        &self, qconn: &mut QuicheConnection,
+    ) -> QuicResult<()> {
+        if !qconn.is_established() && self.handshake_info.is_expired() {
+            let err = quiche::WireErrorCode::ApplicationError as u64;
+            let _ = qconn.close(false, err, &[]);
+            return Err(HandshakeError::Timeout.into());
+        }
+
+        Ok(())
+    }
+
     /// Process the incoming packet
     fn process_incoming(
         &mut self, qconn: &mut QuicheConnection, mut pkt: Incoming,
     ) -> QuicResult<()> {
+        // Checked for every packet, so that a peer flooding packets can't keep
+        // the worker busy past the handshake deadline.
+        self.enforce_handshake_deadline(qconn)?;
+
         let recv_info = quiche::RecvInfo {
             from: pkt.peer_addr,
             to: pkt.local_addr,
@@ -1125,8 +1160,8 @@ where
         // on_conn_established hook if this is the first time
         // is_established == true.
         if self.audit_log_stats.transport_handshake_duration_us() == -1 {
-            self.conn_stage.handshake_info.set_elapsed();
-            let handshake_info = &self.conn_stage.handshake_info;
+            self.handshake_info.set_elapsed();
+            let handshake_info = &self.handshake_info;
 
             self.audit_log_stats
                 .set_transport_handshake_duration(handshake_info.elapsed());
@@ -1155,6 +1190,7 @@ impl<Tx, M, S> From<IoWorker<Tx, M, S>> for IoWorkerParams<Tx, M> {
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: value.init_rx_time,
             metrics: value.metrics,
+            handshake_info: value.handshake_info,
         }
     }
 }
@@ -1168,23 +1204,36 @@ where
         mut self, mut qconn: Box<QuicheConnection>,
         mut ctx: ConnectionStageContext<A>,
     ) -> Closing<Tx, M, A> {
-        // Perform a single call to process_reads()/process_writes(),
-        // unconditionally, to ensure that any application data (e.g.
-        // STREAM frames or datagrams) processed by the Handshake
-        // stage are properly passed to the application.
-        let on_read_result = self.conn_stage.on_read(true, &mut qconn, &mut ctx);
-        notify_path_events(ctx.connection_hook.as_deref(), &mut qconn);
-        if let Err(e) = on_read_result {
-            return Closing {
-                params: self.into(),
-                context: ctx,
-                work_loop_result: Err(e),
-                qconn,
-            };
-        };
+        // With 0-RTT early data, the application may be resumed after the
+        // handshake deadline, in which case no data must be passed to it.
+        let mut work_loop_result = self.enforce_handshake_deadline(&mut qconn);
 
-        let work_loop_result = self.work_loop(&mut qconn, &mut ctx).await;
-        notify_path_events(ctx.connection_hook.as_deref(), &mut qconn);
+        if work_loop_result.is_ok() {
+            // Perform a single call to process_reads()/process_writes(),
+            // unconditionally, to ensure that any application data (e.g.
+            // STREAM frames or datagrams) processed by the Handshake
+            // stage are properly passed to the application.
+            work_loop_result =
+                self.conn_stage.on_read(true, &mut qconn, &mut ctx);
+            notify_path_events(ctx.connection_hook.as_deref(), &mut qconn);
+        }
+
+        if work_loop_result.is_ok() {
+            work_loop_result = self.work_loop(&mut qconn, &mut ctx).await;
+            notify_path_events(ctx.connection_hook.as_deref(), &mut qconn);
+        }
+
+        // Only connections started with 0-RTT early data can get here before
+        // the handshake completes, in which case this is a failed handshake,
+        // as in the Handshake stage.
+        if !qconn.is_established() {
+            let reason = match &work_loop_result {
+                Err(err) => err.into(),
+                Ok(()) => labels::HandshakeError::Disconnect,
+            };
+
+            self.metrics.failed_handshakes(reason).inc();
+        }
 
         Closing {
             params: self.into(),
