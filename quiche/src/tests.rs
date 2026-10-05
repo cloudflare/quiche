@@ -7190,7 +7190,7 @@ fn validate_peer_sent_ack_range_for_multi_path(
     );
     assert_eq!(
         p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
-        by_boring!(b4: 5, b5: 6)
+        by_boring!(b4: 6, b5: 7)
     );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
@@ -7238,7 +7238,7 @@ fn validate_peer_sent_ack_range_for_multi_path(
     );
     assert_eq!(
         p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
-        by_boring!(b4: 5, b5: 6)
+        global_max_sent
     );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
@@ -7264,6 +7264,111 @@ fn validate_peer_sent_ack_range_for_multi_path(
         pipe.server.local_error.unwrap().error_code,
         WireErrorCode::ProtocolViolation as u64
     );
+}
+
+// The optimistic-ACK marker belongs to the connection, so all paths must
+// remember its gap before it is cleared by the first validating ACK.
+#[rstest]
+fn skipped_packet_number_survives_cross_path_acks(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] invalid_ack_first: bool,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_active_connection_id_limit(2);
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    let conn = &mut pipe.server;
+    let recovery_config = recovery::RecoveryConfig::from_config(&config);
+    let second_path = path::Path::new(
+        test_utils::Pipe::server_addr(),
+        "127.0.0.1:5678".parse().unwrap(),
+        &recovery_config,
+        3,
+        false,
+        Some(&config),
+    );
+    let second_pid = conn.paths.insert_path(second_path, true).unwrap();
+    let epoch = packet::Epoch::Application;
+    let now = Instant::now();
+    let handshake_status = conn.handshake_status();
+    let hdr = Header {
+        ty: Type::Short,
+        version: PROTOCOL_VERSION,
+        dcid: ConnectionId::from_ref(&[]),
+        scid: ConnectionId::from_ref(&[]),
+        pkt_num: 0,
+        pkt_num_len: 1,
+        token: None,
+        versions: None,
+        key_phase: false,
+    };
+
+    // The second path has only older control packets. ACKs for packets sent
+    // on the first path must still make these frames retransmittable.
+    for pkt_num in [0, 1] {
+        let mut sent = test_utils::helper_packet_sent(pkt_num, now, 1000);
+        sent.frames
+            .push(frame::Frame::MaxData { max: pkt_num + 100 });
+        conn.paths
+            .get_mut(second_pid)
+            .unwrap()
+            .recovery
+            .on_packet_sent(sent, epoch, handshake_status, now, "");
+    }
+    conn.pkt_num_manager.skip_pn_counter = Some(0);
+    conn.pkt_num_manager.set_skip_pn(Some(2));
+
+    for pkt_num in [3, 4, 5] {
+        conn.paths.get_mut(0).unwrap().recovery.on_packet_sent(
+            test_utils::helper_packet_sent(pkt_num, now, 1000),
+            epoch,
+            handshake_status,
+            now,
+            "",
+        );
+        conn.pkt_num_spaces[epoch].largest_tx_pkt_num = Some(pkt_num);
+
+        if invalid_ack_first && pkt_num == 3 {
+            let mut ranges = ranges::RangeSet::default();
+            ranges.insert(2..4);
+            let ack = frame::Frame::ACK {
+                ack_delay: 0,
+                ranges,
+                ecn_counts: None,
+            };
+            assert_eq!(
+                conn.process_frame(ack, &hdr, 0, epoch, now),
+                Err(Error::OptimisticAckDetected)
+            );
+            assert_eq!(conn.pkt_num_manager.skip_pn(), Some(2));
+            for (_, p) in conn.paths.iter() {
+                assert_eq!(p.recovery.get_largest_acked_on_epoch(epoch), None);
+                assert_eq!(p.recovery.lost_count(), 0);
+            }
+        }
+
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(pkt_num..pkt_num + 1);
+        let ack = frame::Frame::ACK {
+            ack_delay: 0,
+            ranges,
+            ecn_counts: None,
+        };
+        conn.process_frame(ack, &hdr, 0, epoch, now).unwrap();
+        assert_eq!(conn.pkt_num_manager.skip_pn(), None);
+
+        // PN 3 is only two transmitted packets after PN 0. PN 4 crosses the
+        // threshold for PN 0 but not PN 1, even after the marker was cleared.
+        assert_eq!(conn.lost_count, (pkt_num - 3) as usize);
+        let recovery = &mut conn.paths.get_mut(second_pid).unwrap().recovery;
+        assert_eq!(recovery.get_largest_acked_on_epoch(epoch), Some(pkt_num));
+        if pkt_num > 3 {
+            assert!(matches!(
+                recovery.next_lost_frame(epoch),
+                Some(frame::Frame::MaxData { max }) if max == pkt_num + 96
+            ));
+        }
+        assert!(recovery.next_lost_frame(epoch).is_none());
+    }
 }
 
 // Both Client and Server should skip pn to prevent an optimistic ack attack

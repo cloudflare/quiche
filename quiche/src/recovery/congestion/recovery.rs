@@ -76,6 +76,10 @@ struct RecoveryEpoch {
     /// far.
     largest_acked_packet: Option<u64>,
 
+    /// Sender-created gaps that can still affect retained packets. These
+    /// outlive the connection's optimistic-ACK validation marker.
+    skipped_packet_numbers: Vec<u64>,
+
     /// The time at which the next packet in that packet number space can be
     /// considered lost based on exceeding the reordering window in time.
     loss_time: Option<Instant>,
@@ -138,15 +142,13 @@ impl RecoveryEpoch {
             .unwrap_or(0)
             .max(largest_ack_received);
 
-        for peer_sent_range in peer_sent_ack_ranges.iter() {
-            if skip_pn.is_some_and(|skip_pn| peer_sent_range.contains(&skip_pn)) {
-                // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
-                // An endpoint SHOULD treat receipt of an acknowledgment
-                // for a packet it did not send as
-                // a connection error of type PROTOCOL_VIOLATION
-                return Err(Error::OptimisticAckDetected);
-            }
+        if skip_pn.is_some_and(|pn| peer_sent_ack_ranges.contains(pn)) {
+            // RFC 9000 Section 13.1: reject ACKs for deliberately unsent
+            // packets before changing any recovery state.
+            return Err(Error::OptimisticAckDetected);
+        }
 
+        for peer_sent_range in peer_sent_ack_ranges.iter() {
             // Because packets always have incrementing numbers, they are always
             // in sorted order.
             let start = if self
@@ -222,7 +224,7 @@ impl RecoveryEpoch {
 
     fn detect_lost_packets(
         &mut self, loss_delay: Duration, pkt_thresh: u64, now: Instant,
-        trace_id: &str, epoch: Epoch, skip_pn: Option<u64>,
+        trace_id: &str, epoch: Epoch,
     ) -> LossDetectionResult {
         self.loss_time = None;
 
@@ -251,16 +253,16 @@ impl RecoveryEpoch {
             // optimistic ACKs, was never sent, so it must not count toward the
             // reordering threshold. RFC 9002 Appendix A.10 notes that comparing
             // packet numbers assumes there were no sender-induced gaps.
-            let pkt_thresh = match skip_pn {
-                Some(skip_pn)
-                    if (unacked.pkt_num..=largest_acked).contains(&skip_pn) =>
-                    pkt_thresh + 1,
-                _ => pkt_thresh,
-            };
+            let skipped = self
+                .skipped_packet_numbers
+                .iter()
+                .filter(|&&pn| unacked.pkt_num < pn && pn <= largest_acked)
+                .count() as u64;
+            let packet_distance = largest_acked - unacked.pkt_num - skipped;
 
             // Mark packet as lost, or set time when it should be marked.
             if unacked.time_sent <= lost_send_time ||
-                largest_acked >= unacked.pkt_num + pkt_thresh
+                packet_distance >= pkt_thresh
             {
                 self.lost_frames_ack.extend(unacked.frames.drain(..));
 
@@ -335,6 +337,14 @@ impl RecoveryEpoch {
 
             self.sent_packets.pop_front();
         }
+
+        // Once all packets preceding a gap are gone, the gap cannot affect
+        // packet-threshold loss detection for any current or future packet.
+        if let Some(first) = self.sent_packets.front() {
+            self.skipped_packet_numbers.retain(|&pn| pn > first.pkt_num);
+        } else {
+            self.skipped_packet_numbers.clear();
+        }
     }
 
     /// Returns the next lost frame, trying ACK-based lost frames first,
@@ -375,10 +385,6 @@ pub struct LegacyRecovery {
     lost_spurious_count: usize,
 
     pkt_thresh: u64,
-
-    // The packet number the sender skipped for optimistic ACK detection, as of
-    // the last ACK processed. Gaps it creates are not reordering.
-    skip_pn: Option<u64>,
 
     time_thresh: f64,
 
@@ -422,8 +428,6 @@ impl LegacyRecovery {
             lost_spurious_count: 0,
 
             pkt_thresh: INITIAL_PACKET_THRESHOLD,
-
-            skip_pn: None,
 
             time_thresh: INITIAL_TIME_THRESHOLD,
 
@@ -557,7 +561,6 @@ impl LegacyRecovery {
             now,
             trace_id,
             epoch,
-            self.skip_pn,
         );
 
         if let Some(pkt) = loss.largest_lost_pkt {
@@ -692,8 +695,6 @@ impl RecoveryOps for LegacyRecovery {
         handshake_status: HandshakeStatus, now: Instant, skip_pn: Option<u64>,
         trace_id: &str,
     ) -> Result<OnAckReceivedOutcome> {
-        self.skip_pn = skip_pn;
-
         let AckedDetectionResult {
             acked_bytes,
             spurious_losses,
@@ -709,6 +710,13 @@ impl RecoveryOps for LegacyRecovery {
             trace_id,
         )?;
 
+        if let Some(pn) = skip_pn {
+            let skipped = &mut self.epochs[epoch].skipped_packet_numbers;
+            if !skipped.contains(&pn) {
+                skipped.push(pn);
+            }
+        }
+
         self.lost_spurious_count += spurious_losses;
         if let Some(thresh) = spurious_pkt_thresh {
             self.pkt_thresh =
@@ -721,31 +729,27 @@ impl RecoveryOps for LegacyRecovery {
             (self.congestion.cc_ops.rollback)(&mut self.congestion);
         }
 
-        if self.newly_acked.is_empty() {
-            return Ok(OnAckReceivedOutcome::default());
-        }
-
-        let largest_newly_acked = self.newly_acked.last().unwrap();
-
-        // Update `largest_acked_packet` based on the validated `newly_acked`
-        // value.
+        // ACK ranges are connection-global and were validated above and by
+        // the connection, even if no packet on this path was newly acked.
         let largest_acked_pkt_num = self.epochs[epoch]
             .largest_acked_packet
             .unwrap_or(0)
-            .max(largest_newly_acked.pkt_num);
+            .max(peer_sent_ack_ranges.last().unwrap());
         self.epochs[epoch].largest_acked_packet = Some(largest_acked_pkt_num);
 
-        // Check if largest packet is newly acked.
-        if largest_newly_acked.pkt_num == largest_acked_pkt_num &&
-            has_ack_eliciting
-        {
-            let latest_rtt = now - largest_newly_acked.time_sent;
-            self.rtt_stats.update_rtt(
-                latest_rtt,
-                Duration::from_micros(ack_delay),
-                now,
-                handshake_status.completed,
-            );
+        if let Some(largest_newly_acked) = self.newly_acked.last() {
+            // Only packets sent on this path can provide an RTT sample.
+            if largest_newly_acked.pkt_num == largest_acked_pkt_num &&
+                has_ack_eliciting
+            {
+                let latest_rtt = now - largest_newly_acked.time_sent;
+                self.rtt_stats.update_rtt(
+                    latest_rtt,
+                    Duration::from_micros(ack_delay),
+                    now,
+                    handshake_status.completed,
+                );
+            }
         }
 
         // Detect and mark lost packets without removing them from the sent
@@ -753,16 +757,17 @@ impl RecoveryOps for LegacyRecovery {
         let (lost_packets, lost_bytes) =
             self.detect_lost_packets(epoch, now, trace_id);
 
-        self.congestion.on_packets_acked(
-            self.bytes_in_flight.get(),
-            &mut self.newly_acked,
-            &self.rtt_stats,
-            now,
-        );
+        if !self.newly_acked.is_empty() {
+            self.congestion.on_packets_acked(
+                self.bytes_in_flight.get(),
+                &mut self.newly_acked,
+                &self.rtt_stats,
+                now,
+            );
+            self.pto_count = 0;
+        }
 
         self.bytes_in_flight.saturating_subtract(acked_bytes, now);
-
-        self.pto_count = 0;
 
         self.set_loss_detection_timer(handshake_status, now);
 
@@ -876,6 +881,7 @@ impl RecoveryOps for LegacyRecovery {
         self.bytes_in_flight.saturating_subtract(unacked_bytes, now);
 
         epoch.sent_packets.clear();
+        epoch.skipped_packet_numbers.clear();
         epoch.clear_lost_frames();
         epoch.acked_frames.clear();
 
