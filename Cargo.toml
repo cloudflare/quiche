@@ -70,7 +70,9 @@ futures = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false }
 h3i = { version = "0.7", path = "./h3i" }
 ipnetwork = { version = "0.21" }
-libc = { version = "0.2.76", default-features = false }
+# Temporarily cap libc below 0.2.190, which breaks `backtrace` on iOS.
+# See https://github.com/rust-lang/libc/issues/5601.
+libc = { version = ">=0.2.76, <0.2.190", default-features = false }
 log = { version = "0.4.20" }
 mio = { version = "1" }
 nix = { version = "0.31.3", features = ["net", "uio", "socket"] }
