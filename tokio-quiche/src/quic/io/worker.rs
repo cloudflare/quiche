@@ -703,7 +703,8 @@ where
         let tx_time = if gcongestion_enabled {
             initial_release_decision
                 .filter(|_| self.pacing_enabled(qconn))
-                // Return the time from the release decision if release_decision.time > now, else None.
+                // Return the time from the release decision if
+                // release_decision.time > now, else None.
                 .and_then(|v| v.time(now))
         } else {
             send_info
