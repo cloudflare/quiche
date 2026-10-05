@@ -249,9 +249,9 @@ impl TryFrom<QFrame> for EnrichedHeaders {
     fn try_from(value: QFrame) -> Result<Self, Self::Error> {
         match value {
             QFrame::Headers { header_block } => {
-                let mut qpack_decoder = quiche::h3::qpack::Decoder::new();
+                let mut qpack_decoder = quiche::h3::qpack::Decoder::new(0);
                 let headers =
-                    qpack_decoder.decode(&header_block, u64::MAX).unwrap();
+                    qpack_decoder.decode(&header_block, u64::MAX, 0).unwrap();
 
                 Ok(EnrichedHeaders::from(headers))
             },

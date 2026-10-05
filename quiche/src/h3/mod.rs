@@ -711,6 +711,11 @@ pub trait NameValue {
 
     /// Returns the object's value.
     fn value(&self) -> &[u8];
+
+    /// Return the qpack cost of the pair
+    fn qpack_cost(&self) -> u64 {
+        self.name().len() as u64 + self.value().len() as u64 + 32
+    }
 }
 
 impl<N, V> NameValue for (N, V)
@@ -752,8 +757,11 @@ impl Header {
     /// Creates a new header.
     ///
     /// Both `name` and `value` will be cloned.
-    pub fn new(name: &[u8], value: &[u8]) -> Self {
-        Self(name.to_vec(), value.to_vec())
+    pub fn new<N, V>(name: N, value: V) -> Self
+    where
+        Vec<u8>: From<N> + From<V>,
+    {
+        Self(name.into(), value.into())
     }
 }
 
@@ -1070,7 +1078,9 @@ impl Connection {
             peer_control_stream_id: None,
 
             qpack_encoder: qpack::Encoder::new(),
-            qpack_decoder: qpack::Decoder::new(),
+            qpack_decoder: qpack::Decoder::new(
+                config.qpack_max_table_capacity.unwrap_or(0),
+            ),
 
             local_qpack_streams: Default::default(),
             peer_qpack_streams: Default::default(),
@@ -1903,6 +1913,11 @@ impl Connection {
 
                 Err(Error::Done) => break,
 
+                Err(e @ Error::TransportError(crate::Error::StreamReset(_))) => {
+                    self.qpack_decoder.cancel_stream(stream_id);
+                    return Err(e);
+                },
+
                 Err(e) => return Err(e),
             };
 
@@ -1921,6 +1936,11 @@ impl Connection {
                 Ok(_) => unreachable!(),
 
                 Err(Error::Done) => (),
+
+                Err(e @ Error::TransportError(crate::Error::StreamReset(_))) => {
+                    self.qpack_decoder.cancel_stream(stream_id);
+                    return Err(e);
+                },
 
                 Err(e) => return Err(e),
             };
@@ -2148,6 +2168,25 @@ impl Connection {
             };
         }
 
+        // Send any outstanding QPACK decoder instructions
+        if let Some(stream_id) = self.local_qpack_streams.decoder_stream_id {
+            let mut buf = [0u8; 64];
+
+            while self.qpack_decoder.has_instructions() {
+                let cap = conn.stream_capacity(stream_id)?;
+                if cap == 0 {
+                    break;
+                }
+
+                let n = self.qpack_decoder.emit_instructions(&mut buf);
+                if n == 0 {
+                    break;
+                }
+
+                conn.stream_send(stream_id, &buf[..n], false)?;
+            }
+        }
+
         // Process finished streams list.
         if let Some(ev) = self.pop_finished_stream(conn) {
             return Ok(ev);
@@ -2166,6 +2205,7 @@ impl Connection {
                 // a Finished event later as well.
                 Err(Error::TransportError(crate::Error::StreamReset(e))) => {
                     self.remove_local_finished_stream(s);
+                    self.qpack_decoder.cancel_stream(s);
 
                     return Ok((s, Event::Reset(e)));
                 },
@@ -2882,22 +2922,33 @@ impl Connection {
                     return Ok((stream_id, Event::Data));
                 },
 
-                stream::State::QpackInstruction => {
-                    let mut d = [0; 4096];
+                stream::State::QpackEncoderInstruction => {
+                    let mut d = [0; 1024];
+
+                    loop {
+                        let (n, fin) = conn.stream_recv(stream_id, &mut d)?;
+
+                        self.peer_qpack_streams.encoder_stream_bytes += n as u64;
+
+                        if fin {
+                            close_conn_critical_stream(conn)?;
+                        }
+
+                        self.qpack_decoder
+                            .control(&d[..n])
+                            .map_err(|_| Error::QpackDecompressionFailed)?;
+                    }
+                },
+
+                stream::State::QpackDecoderInstruction => {
+                    let mut d = [0; 1024];
 
                     // Read data from the stream and discard immediately.
                     loop {
                         let (recv, fin) = conn.stream_recv(stream_id, &mut d)?;
 
-                        match stream.ty() {
-                            Some(stream::Type::QpackEncoder) =>
-                                self.peer_qpack_streams.encoder_stream_bytes +=
-                                    recv as u64,
-                            Some(stream::Type::QpackDecoder) =>
-                                self.peer_qpack_streams.decoder_stream_bytes +=
-                                    recv as u64,
-                            _ => unreachable!(),
-                        };
+                        self.peer_qpack_streams.decoder_stream_bytes +=
+                            recv as u64;
 
                         if fin {
                             close_conn_critical_stream(conn)?;
@@ -3006,6 +3057,8 @@ impl Connection {
             if let Err(crate::Error::StreamReset(e)) =
                 conn.stream_recv(finished, &mut [])
             {
+                self.qpack_decoder.cancel_stream(finished);
+
                 return Some((finished, Event::Reset(e)));
             }
         }
@@ -3097,10 +3150,11 @@ impl Connection {
                     .max_field_section_size
                     .unwrap_or(u64::MAX);
 
-                let headers = match self
-                    .qpack_decoder
-                    .decode(&header_block[..], max_size)
-                {
+                let headers = match self.qpack_decoder.decode(
+                    &header_block[..],
+                    max_size,
+                    stream_id,
+                ) {
                     Ok(v) => v,
 
                     Err(e) => {
@@ -3352,6 +3406,23 @@ impl Connection {
                 .peer_qpack_streams
                 .decoder_stream_bytes,
         }
+    }
+
+    /// Shuts down reading or writing from/to the specified stream. This method
+    /// should be preferred over the equivalent `quiche::stream_shutdown`
+    /// method, as the other method may prevent evictions from the QPACK
+    /// decoder.
+    pub fn stream_shutdown<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        direction: crate::Shutdown, err: u64,
+    ) -> Result<()> {
+        let is_read = direction == crate::Shutdown::Read;
+        conn.stream_shutdown(stream_id, direction, err)?;
+        if is_read {
+            self.qpack_decoder.cancel_stream(stream_id);
+        }
+
+        Ok(())
     }
 }
 
@@ -5751,7 +5822,7 @@ mod tests {
         s.handshake().unwrap();
 
         let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
-        let d = [0; 1];
+        let d = [0x20; 1];
 
         s.pipe.client.stream_send(stream_id, &d, false).unwrap();
         s.pipe.client.stream_send(stream_id, &d, true).unwrap();
@@ -5796,7 +5867,7 @@ mod tests {
         s.handshake().unwrap();
 
         let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
-        let d = [0; 1];
+        let d = [0x20; 1];
 
         s.pipe.client.stream_send(stream_id, &d, false).unwrap();
         s.pipe.client.stream_send(stream_id, &d, false).unwrap();
@@ -5822,19 +5893,25 @@ mod tests {
     #[test]
     /// Client sends QPACK data.
     fn qpack_data() {
-        // TODO: QPACK instructions are ignored until dynamic table support is
-        // added so we just test that the data is safely ignored.
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
 
         let e_stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
         let d_stream_id = s.client.local_qpack_streams.decoder_stream_id.unwrap();
-        let d = [0; 20];
+        // Set the dynamic table capacity to zero on the encoder stream.
+        let encoder_data = [0x20; 20];
+        let decoder_data = [0; 20];
 
-        s.pipe.client.stream_send(e_stream_id, &d, false).unwrap();
+        s.pipe
+            .client
+            .stream_send(e_stream_id, &encoder_data, false)
+            .unwrap();
         s.advance().ok();
 
-        s.pipe.client.stream_send(d_stream_id, &d, false).unwrap();
+        s.pipe
+            .client
+            .stream_send(d_stream_id, &decoder_data, false)
+            .unwrap();
         s.advance().ok();
 
         match s.server.poll(&mut s.pipe.server) {
@@ -5853,6 +5930,174 @@ mod tests {
         let stats = s.server.stats();
         assert_eq!(stats.qpack_encoder_stream_recv_bytes, 20);
         assert_eq!(stats.qpack_decoder_stream_recv_bytes, 20);
+    }
+
+    #[test]
+    /// Encoder instructions populate a shared table for multiple request
+    /// streams.
+    fn qpack_dynamic_table_across_streams() {
+        let (mut config, mut h3_config) = Session::default_configs().unwrap();
+        h3_config.set_qpack_max_table_capacity(128);
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        s.handshake().unwrap();
+
+        let e_stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
+        let d_stream_id = s.server.local_qpack_streams.decoder_stream_id.unwrap();
+
+        // Set capacity to 128 and insert :authority and :path using static
+        // names.
+        let encoder_data = b"\x3f\x61\xc0\x0fwww.example.com\xc1\x0c/sample/path";
+
+        // Split the first insertion across reads of the encoder stream.
+        s.send_arbitrary_stream_data_client(
+            &encoder_data[..7],
+            e_stream_id,
+            false,
+        )
+        .unwrap();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        s.send_arbitrary_stream_data_client(
+            &encoder_data[7..],
+            e_stream_id,
+            false,
+        )
+        .unwrap();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.advance(), Ok(()));
+
+        let mut buf = [0; 16];
+        assert_eq!(
+            s.pipe.client.stream_recv(d_stream_id, &mut buf),
+            Ok((1, false))
+        );
+        assert_eq!(buf[0], 0x02); // Insert Count Increment = 2.
+
+        let headers = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"www.example.com"),
+            Header::new(b":path", b"/sample/path"),
+        ];
+
+        // Reference the same entries using relative and post-base indices.
+        for (stream_id, header_block, section_ack) in [
+            (0, [0x03, 0x00, 0xd1, 0xd7, 0x81, 0x80], 0x80),
+            (4, [0x03, 0x81, 0xd1, 0xd7, 0x10, 0x11], 0x84),
+        ] {
+            s.send_frame_client(
+                frame::Frame::Headers {
+                    header_block: header_block.to_vec(),
+                },
+                stream_id,
+                true,
+            )
+            .unwrap();
+
+            assert_eq!(
+                s.poll_server(),
+                Ok((stream_id, Event::Headers {
+                    list: headers.clone(),
+                    more_frames: false,
+                }))
+            );
+            assert_eq!(s.poll_server(), Ok((stream_id, Event::Finished)));
+            assert_eq!(s.poll_server(), Err(Error::Done));
+            assert_eq!(s.advance(), Ok(()));
+
+            assert_eq!(
+                s.pipe.client.stream_recv(d_stream_id, &mut buf),
+                Ok((1, false))
+            );
+            assert_eq!(buf[0], section_ack);
+        }
+
+        assert_eq!(
+            s.server.stats().qpack_encoder_stream_recv_bytes,
+            encoder_data.len() as u64
+        );
+    }
+
+    #[test]
+    /// Dynamic references obey the decoded field size limit, including
+    /// overhead.
+    fn qpack_dynamic_table_header_size_limit() {
+        // All four dynamic representations decode to the same 58-byte field:
+        // 32 bytes of overhead, a 10-byte name, and a 16-byte value.
+        let header_blocks: &[&[u8]] = &[
+            // Indexed field line, relative index.
+            &[0x02, 0x00, 0x80],
+            // Indexed field line, post-base index.
+            &[0x02, 0x80, 0x10],
+            // Dynamic name reference with a Huffman-encoded value.
+            &[
+                0x02, 0x00, 0x40, 0x8a, 0x18, 0xc6, 0x31, 0x8c, 0x63, 0x18, 0xc6,
+                0x31, 0x8c, 0x63,
+            ],
+            // Post-base name reference with the same Huffman-encoded value.
+            &[
+                0x02, 0x80, 0x00, 0x8a, 0x18, 0xc6, 0x31, 0x8c, 0x63, 0x18, 0xc6,
+                0x31, 0x8c, 0x63,
+            ],
+        ];
+
+        for header_block in header_blocks {
+            for limit in [57, 58] {
+                let (mut config, mut h3_config) =
+                    Session::default_configs().unwrap();
+                h3_config.set_qpack_max_table_capacity(128);
+                h3_config.set_max_field_section_size(limit);
+
+                let mut s =
+                    Session::with_configs(&mut config, &h3_config).unwrap();
+                s.handshake().unwrap();
+
+                let e_stream_id =
+                    s.client.local_qpack_streams.encoder_stream_id.unwrap();
+
+                // Set capacity to 128 and insert a literal name and value.
+                let encoder_data = b"\x3f\x61\x4acustom-key\x10aaaaaaaaaaaaaaaa";
+                s.send_arbitrary_stream_data_client(
+                    encoder_data,
+                    e_stream_id,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(s.poll_server(), Err(Error::Done));
+
+                s.send_frame_client(
+                    frame::Frame::Headers {
+                        header_block: header_block.to_vec(),
+                    },
+                    0,
+                    true,
+                )
+                .unwrap();
+
+                if limit == 58 {
+                    assert_eq!(
+                        s.poll_server(),
+                        Ok((0, Event::Headers {
+                            list: vec![Header::new(
+                                b"custom-key",
+                                b"aaaaaaaaaaaaaaaa",
+                            )],
+                            more_frames: false,
+                        }))
+                    );
+                    assert_eq!(s.poll_server(), Ok((0, Event::Finished)));
+                } else {
+                    assert_eq!(s.poll_server(), Err(Error::ExcessiveLoad));
+                    assert_eq!(
+                        s.pipe.server.local_error.as_ref().unwrap().error_code,
+                        Error::ExcessiveLoad.to_wire()
+                    );
+                }
+
+                assert_eq!(s.poll_server(), Err(Error::Done));
+            }
+        }
     }
 
     #[test]
@@ -8266,8 +8511,17 @@ mod tests {
 
     #[test]
     fn reset_finished_at_server_with_data_pending() {
-        let mut s = Session::new().unwrap();
+        let (mut config, mut h3_config) = Session::default_configs().unwrap();
+        h3_config.set_qpack_max_table_capacity(128);
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
         s.handshake().unwrap();
+
+        let e_stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
+        let d_stream_id = s.server.local_qpack_streams.decoder_stream_id.unwrap();
+        s.send_arbitrary_stream_data_client(&[0x3f, 0x61], e_stream_id, false)
+            .unwrap();
+        assert_eq!(s.poll_server(), Err(Error::Done));
 
         // Client sends HEADERS and doesn't fin.
         let (stream, req) = s.send_request(false).unwrap();
@@ -8301,12 +8555,34 @@ mod tests {
         assert_eq!(s.poll_server(), Ok((stream, Event::Reset(0))));
         assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.pipe.server.readable().len(), 0);
+
+        // The reset must also reach the peer's QPACK encoder.
+        assert_eq!(s.advance(), Ok(()));
+        let mut buf = [0; 16];
+        assert_eq!(
+            s.pipe.client.stream_recv(d_stream_id, &mut buf),
+            Ok((1, false))
+        );
+        assert_eq!(buf[0], 0x40); // Stream Cancellation = 0.
+        assert_eq!(
+            s.pipe.client.stream_recv(d_stream_id, &mut buf),
+            Err(crate::Error::Done)
+        );
     }
 
     #[test]
     fn reset_finished_at_server_with_data_pending_2() {
-        let mut s = Session::new().unwrap();
+        let (mut config, mut h3_config) = Session::default_configs().unwrap();
+        h3_config.set_qpack_max_table_capacity(128);
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
         s.handshake().unwrap();
+
+        let e_stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
+        let d_stream_id = s.server.local_qpack_streams.decoder_stream_id.unwrap();
+        s.send_arbitrary_stream_data_client(&[0x3f, 0x61], e_stream_id, false)
+            .unwrap();
+        assert_eq!(s.poll_server(), Err(Error::Done));
 
         // Client sends HEADERS and doesn't fin.
         let (stream, req) = s.send_request(false).unwrap();
@@ -8344,6 +8620,19 @@ mod tests {
         // No more events and there are no more readable streams.
         assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.pipe.server.readable().len(), 0);
+
+        // Reading the reset must also notify the peer's QPACK encoder.
+        assert_eq!(s.advance(), Ok(()));
+        let mut buf = [0; 16];
+        assert_eq!(
+            s.pipe.client.stream_recv(d_stream_id, &mut buf),
+            Ok((1, false))
+        );
+        assert_eq!(buf[0], 0x40); // Stream Cancellation = 0.
+        assert_eq!(
+            s.pipe.client.stream_recv(d_stream_id, &mut buf),
+            Err(crate::Error::Done)
+        );
     }
 
     #[test]

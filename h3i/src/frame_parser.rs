@@ -281,9 +281,10 @@ impl FrameParser {
 
         match qframe {
             QFrame::Headers { ref header_block } => {
-                let mut qpack_decoder = quiche::h3::qpack::Decoder::new();
-                let headers =
-                    qpack_decoder.decode(header_block, u64::MAX).unwrap();
+                let mut qpack_decoder = quiche::h3::qpack::Decoder::new(0);
+                let headers = qpack_decoder
+                    .decode(header_block, u64::MAX, self.stream_id)
+                    .unwrap();
 
                 Ok(H3iFrame::Headers(headers.into()))
             },
