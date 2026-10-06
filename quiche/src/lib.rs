@@ -8179,6 +8179,10 @@ impl<F: BufFactory> Connection<F> {
             }
 
             self.streams.reset_for_early_data_rejection();
+            self.blocked_limit = None;
+            self.streams_blocked_bidi_state = Default::default();
+            self.streams_blocked_uni_state = Default::default();
+            self.dgram_send_queue.purge(|_| true);
             self.tx_data = 0;
             self.last_tx_data = 0;
             self.update_tx_cap();
