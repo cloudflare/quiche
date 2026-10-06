@@ -4158,20 +4158,17 @@ impl<F: BufFactory> Connection<F> {
 
                         let was_flushable = stream.is_flushable();
 
-                        let empty_fin = length == 0 && fin;
-
                         let retransmitted =
                             stream.send.retransmit(offset, length);
+
+                        if fin {
+                            stream.send.retransmit_fin();
+                        }
 
                         // If the stream is now flushable push it to the
                         // flushable queue, but only if it wasn't already
                         // queued.
-                        //
-                        // Consider the stream flushable also when we are
-                        // sending a zero-length frame that has the fin flag
-                        // set.
-                        if (stream.is_flushable() || empty_fin) && !was_flushable
-                        {
+                        if stream.is_flushable() && !was_flushable {
                             let priority_key = Arc::clone(&stream.priority_key);
                             self.streams.insert_flushable(&priority_key);
                         }
@@ -6068,8 +6065,6 @@ impl<F: BufFactory> Connection<F> {
 
         let writable = stream.is_writable();
 
-        let empty_fin = len == 0 && fin;
-
         if sent < cap {
             let max_off = stream.send.max_off();
 
@@ -6084,10 +6079,7 @@ impl<F: BufFactory> Connection<F> {
 
         // If the stream is now flushable push it to the flushable queue, but
         // only if it wasn't already queued.
-        //
-        // Consider the stream flushable also when we are sending a zero-length
-        // frame that has the fin flag set.
-        if (flushable || empty_fin) && !was_flushable {
+        if flushable && !was_flushable {
             self.streams.insert_flushable(&priority_key);
         }
 

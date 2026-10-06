@@ -122,6 +122,11 @@ where
     /// The final stream offset written to the stream, if any.
     fin_off: Option<u64>,
 
+    /// Whether the final size still needs to be sent in a STREAM frame
+    /// carrying FIN, because no such frame has been sent yet or the last one
+    /// was lost.
+    fin_pending: bool,
+
     /// Whether a STREAM frame carrying FIN has been acknowledged.
     fin_acked: bool,
 
@@ -172,8 +177,9 @@ impl<F: BufFactory> SendBuf<F> {
             }
         }
 
-        if fin {
+        if fin && self.fin_off.is_none() {
             self.fin_off = Some(max_off);
+            self.fin_pending = true;
         }
 
         // Don't queue data that was already fully acked.
@@ -303,6 +309,10 @@ impl<F: BufFactory> SendBuf<F> {
         // propagate the final size.
         let fin = self.fin_off == Some(next_off);
 
+        if fin {
+            self.fin_pending = false;
+        }
+
         // Record the largest offset that has been sent so we can accurately
         // report final_size
         self.emit_off = cmp::max(self.emit_off, next_off);
@@ -333,6 +343,7 @@ impl<F: BufFactory> SendBuf<F> {
     /// Marks the stream's final size as acknowledged by the peer.
     pub(crate) fn ack_fin(&mut self) {
         self.fin_acked = true;
+        self.fin_pending = false;
     }
 
     pub fn ack_and_drop(&mut self, off: u64, len: usize) -> usize {
@@ -445,12 +456,28 @@ impl<F: BufFactory> SendBuf<F> {
         total_retransmitted as usize
     }
 
+    /// Marks the final size for retransmission after a STREAM frame carrying
+    /// FIN was lost.
+    ///
+    /// This is needed even when the frame's data was acknowledged in another
+    /// packet, as the FIN still has to reach the peer.
+    pub(crate) fn retransmit_fin(&mut self) {
+        if self.fin_acked || self.shutdown || self.error.is_some() {
+            return;
+        }
+
+        self.fin_pending = self.fin_off.is_some();
+    }
+
     /// Resets the stream at the current offset and clears all buffered data.
     pub fn reset(&mut self) -> (u64, u64) {
         let unsent_off = cmp::max(self.off_front(), self.emit_off);
         let unsent_len = self.off_back().saturating_sub(unsent_off);
 
         self.fin_off = Some(unsent_off);
+
+        // The final size is sent in RESET_STREAM instead.
+        self.fin_pending = false;
 
         // Drop all buffered data.
         self.data.clear();
@@ -535,6 +562,11 @@ impl<F: BufFactory> SendBuf<F> {
         }
 
         false
+    }
+
+    /// Returns true if the final size still needs to be sent to the peer.
+    pub fn is_fin_pending(&self) -> bool {
+        self.fin_pending
     }
 
     /// Returns true if the send-side of the stream is complete.
@@ -905,5 +937,54 @@ mod tests {
         let (fin_off, unsent) = send.stop(0).unwrap();
         assert_eq!(fin_off, 50);
         assert_eq!(unsent, 0);
+    }
+
+    #[test]
+    fn send_buf_fin_pending() {
+        let mut buf = [0; 10];
+
+        let mut send = <SendBuf>::new(u64::MAX);
+
+        assert_eq!(send.write(b"hello", false), Ok(5));
+        assert!(!send.is_fin_pending());
+
+        assert_eq!(send.emit(&mut buf), Ok((5, false)));
+
+        // The final size became known after all data was sent.
+        assert_eq!(send.write(b"", true), Ok(0));
+        assert!(send.is_fin_pending());
+
+        assert_eq!(send.emit(&mut buf), Ok((0, true)));
+        assert!(!send.is_fin_pending());
+
+        // Writing the FIN again doesn't schedule another one.
+        assert_eq!(send.write(b"", true), Ok(0));
+        assert!(!send.is_fin_pending());
+
+        // A lost FIN needs to be resent even if its data was acked.
+        send.ack_and_drop(0, 5);
+        send.retransmit(0, 5);
+        send.retransmit_fin();
+        assert!(send.is_fin_pending());
+
+        send.ack_fin();
+        assert!(!send.is_fin_pending());
+
+        send.retransmit_fin();
+        assert!(!send.is_fin_pending());
+    }
+
+    #[test]
+    fn send_buf_fin_not_pending_after_shutdown() {
+        let mut send = <SendBuf>::new(u64::MAX);
+
+        assert_eq!(send.write(b"hello", true), Ok(5));
+        assert!(send.is_fin_pending());
+
+        assert!(send.shutdown().is_ok());
+        assert!(!send.is_fin_pending());
+
+        send.retransmit_fin();
+        assert!(!send.is_fin_pending());
     }
 }
