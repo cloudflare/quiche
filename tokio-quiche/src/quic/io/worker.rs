@@ -51,6 +51,7 @@ use crate::quic::connection::QuicConnectionStats;
 use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::quic::hooks::ConnectionHook;
 use crate::quic::router::ConnectionMapCommand;
+use crate::quic::DscpHandle;
 use crate::quic::QuicheConnection;
 use crate::QuicResult;
 
@@ -273,6 +274,7 @@ pub(crate) struct IoWorkerParams<Tx, M> {
     pub(crate) cfg: WriterConfig,
     pub(crate) audit_log_stats: Arc<QuicAuditStats>,
     pub(crate) write_state: WriteState,
+    pub(crate) dscp_handle: Option<DscpHandle>,
     pub(crate) conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>,
     pub(crate) cid_generator: Option<SharedConnectionIdGenerator>,
     #[cfg(feature = "perf-quic-listener-metrics")]
@@ -301,6 +303,7 @@ pub(crate) struct IoWorker<Tx, M, S> {
     cfg: WriterConfig,
     audit_log_stats: Arc<QuicAuditStats>,
     write_state: WriteState,
+    dscp_handle: Option<DscpHandle>,
     conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>,
     cid_generator: Option<SharedConnectionIdGenerator>,
     #[cfg(feature = "perf-quic-listener-metrics")]
@@ -334,6 +337,7 @@ where
             cfg: params.cfg,
             audit_log_stats: params.audit_log_stats,
             write_state: params.write_state,
+            dscp_handle: params.dscp_handle,
             conn_map_cmd_tx: params.conn_map_cmd_tx,
             cid_generator: params.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]
@@ -864,17 +868,33 @@ where
             let to = to.unwrap_or(self.cfg.peer_addr);
             let from = from.filter(|_| self.cfg.with_pktinfo);
 
-            let send_res = if let (Some(udp_socket), true) =
-                (self.socket.as_udp_socket(), self.cfg.with_gso)
-            {
-                // Only UDP supports GSO.
+            let dscp = self.dscp_handle.as_ref().and_then(DscpHandle::get);
+            // Don't bypass the socket wrapper when DSCP cannot be applied.
+            let needs_dscp_cmsg =
+                cfg!(all(target_os = "linux", not(feature = "fuzzing"))) &&
+                    dscp.is_some();
+
+            let send_res = if let (Some(udp_socket), true) = (
+                self.socket.as_udp_socket(),
+                self.cfg.with_gso || needs_dscp_cmsg,
+            ) {
+                // Only UDP supports GSO and per-packet DSCP control messages.
+                let (segment_size, tx_time) = if self.cfg.with_gso {
+                    (
+                        Some(self.write_state.segment_size),
+                        self.write_state.tx_time,
+                    )
+                } else {
+                    (None, None)
+                };
                 send_to(
                     udp_socket,
                     to,
                     from,
                     current_send_buf,
-                    self.write_state.segment_size,
-                    self.write_state.tx_time,
+                    segment_size,
+                    tx_time,
+                    dscp,
                     self.metrics
                         .write_errors(labels::QuicWriteError::WouldBlock),
                     self.metrics.send_to_wouldblock_duration_s(),
@@ -1185,6 +1205,7 @@ impl<Tx, M, S> From<IoWorker<Tx, M, S>> for IoWorkerParams<Tx, M> {
             cfg: value.cfg,
             audit_log_stats: value.audit_log_stats,
             write_state: value.write_state,
+            dscp_handle: value.dscp_handle,
             conn_map_cmd_tx: value.conn_map_cmd_tx,
             cid_generator: value.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]

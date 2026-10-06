@@ -181,6 +181,7 @@ where
                 conn,
                 pending_cid: None,
                 initial_pkt: None,
+                enable_per_connection_dscp: false,
                 cid_generator: None,
                 handshake_start_time,
             }))
