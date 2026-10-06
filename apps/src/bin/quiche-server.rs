@@ -276,6 +276,14 @@ fn main() {
                     continue 'read;
                 }
 
+                // Clients must expand Initial datagrams to at least 1200
+                // bytes (RFC 9000 Section 14.1), so anything shorter is
+                // dropped before a Version Negotiation or Retry is sent.
+                if len < quiche::MIN_CLIENT_INITIAL_LEN {
+                    error!("Initial datagram too short: {len} bytes");
+                    continue 'read;
+                }
+
                 if !quiche::version_is_supported(hdr.version) {
                     warn!("Doing version negotiation");
 

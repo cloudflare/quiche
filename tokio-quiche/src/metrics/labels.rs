@@ -106,6 +106,7 @@ impl From<&BoxError> for HandshakeError {
 pub enum QuicInvalidInitialPacketError {
     TokenValidationFail,
     FailedToParse,
+    DatagramTooShort,
     WrongType(quiche::Type),
     AcceptQueueOverflow,
     Unexpected,
@@ -116,6 +117,7 @@ impl std::fmt::Display for QuicInvalidInitialPacketError {
         match self {
             Self::FailedToParse => f.write_str("failed to parse packet"),
             Self::TokenValidationFail => f.write_str("token validation fail"),
+            Self::DatagramTooShort => f.write_str("datagram too short"),
             Self::WrongType(ty) => write!(f, "wrong type: {ty:?}"),
             Self::AcceptQueueOverflow => f.write_str("accept queue overflow"),
             Self::Unexpected => f.write_str("unexpected error"),
