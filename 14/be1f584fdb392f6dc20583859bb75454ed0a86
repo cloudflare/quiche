@@ -1,0 +1,19 @@
+datagram-socket/src/mmsg.rs
+  s_f7c6b24d9f7673::t_e0622459967d0c 41,47,50-52,54-58,60-62,67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "14be1f584fdb392f6dc20583859bb75454ed0a86",
+  "prompts": {},
+  "sessions": {
+    "s_f7c6b24d9f7673": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e9ec8d84-bbd4-4dcf-889c-232fab873d4d",
+        "model": "unknown"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    }
+  }
+}

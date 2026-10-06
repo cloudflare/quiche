@@ -1,0 +1,25 @@
+quiche/src/lib.rs
+  s_0273feb767df01::t_24f225520e8ac0 7921-7926,9535-9539,9557
+quiche/src/recovery/gcongestion/recovery.rs
+  s_0273feb767df01::t_24f225520e8ac0 504-507,574-575,789,815-817,1121-1122
+quiche/src/recovery/mod.rs
+  s_0273feb767df01::t_24f225520e8ac0 276-280,1173-1235
+quiche/src/recovery/congestion/recovery.rs
+  s_0273feb767df01::t_24f225520e8ac0 391-394,436-437,670-673,970-971
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4a0813e522169c715997e458dc6b6ca9cfe57e68",
+  "prompts": {},
+  "sessions": {
+    "s_0273feb767df01": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0570241fdffeocWRcMWfKzudNG",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    }
+  }
+}

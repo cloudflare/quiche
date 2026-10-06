@@ -1,0 +1,23 @@
+quiche/src/stream/mod.rs
+  e55763ce4d225e43 734,752-753,775-776
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "a563a11a1b46e2014d4f9b6b96e2327138212f52",
+  "prompts": {
+    "e55763ce4d225e43": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_205b24cfaffenPZ4ICJJb9pmdS",
+        "model": "anthropic/claude-sonnet-4-5"
+      },
+      "human_author": "Antonio Vicente",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 4,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
