@@ -8499,6 +8499,18 @@ fn early_retransmit(
             .loss_probes(epoch),
         1,
     );
+    // The PTO exception is local to packet generation. Other users, including
+    // send-capacity and PMTUD calculations, observe the actual congestion
+    // window.
+    assert_ne!(
+        pipe.client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .cwnd_available(),
+        usize::MAX,
+    );
 
     // Client retransmits stream data in PTO probe.
     let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -8528,6 +8540,76 @@ fn early_retransmit(
         })
     );
     assert_eq!(pipe.client.stats().retrans, 1);
+}
+
+#[rstest]
+fn pto_probe_not_stranded_by_earlier_epoch_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(0, 1, 2_400)] remaining_cwnd: usize,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    // Advance until the client has Application keys but retains Handshake
+    // state.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    assert!(pipe.client.is_established());
+    assert!(!pipe.client.handshake_confirmed);
+
+    // Queue Handshake CRYPTO data ahead of an Application PTO probe.
+    let handshake_send = &mut pipe.client.crypto_ctx[packet::Epoch::Handshake]
+        .crypto_stream
+        .send;
+    let handshake_len = handshake_send.off_back() as usize;
+    assert!(handshake_send.retransmit(0, handshake_len) > 0);
+
+    let active_pid = pipe.client.paths.get_active_path_id().expect("no active");
+    let handshake_status = pipe.client.handshake_status();
+    let pkt_num = pipe.client.next_pkt_num;
+    pipe.client.next_pkt_num += 1;
+    let now = Instant::now();
+    let path = pipe.client.paths.get_mut(active_pid).expect("no active");
+    let cwnd_available = path.recovery.cwnd_available();
+    assert!(cwnd_available > remaining_cwnd);
+
+    path.recovery.on_packet_sent(
+        test_utils::helper_packet_sent(
+            pkt_num,
+            now,
+            cwnd_available - remaining_cwnd,
+        ),
+        packet::Epoch::Application,
+        handshake_status,
+        now,
+        "",
+    );
+    assert_eq!(path.recovery.cwnd_available(), remaining_cwnd);
+    path.recovery.inc_loss_probes(packet::Epoch::Application);
+
+    // The Application probe bypasses cwnd instead of being stranded behind
+    // the earlier Handshake data.
+    let (ty, _) = pipe
+        .client
+        .send_single(&mut buf, active_pid, false, Instant::now())
+        .unwrap();
+    assert_eq!(ty, Type::Short);
+    assert_eq!(
+        pipe.client
+            .paths
+            .get(active_pid)
+            .expect("no active")
+            .recovery
+            .loss_probes(packet::Epoch::Application),
+        0,
+    );
 }
 
 #[rstest]
@@ -9488,14 +9570,26 @@ fn app_close_by_client(
         assert!(pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
-        // Model a Handshake PTO expiring before the client closes the
-        // connection.
-        pipe.client
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .recovery
-            .inc_loss_probes(packet::Epoch::Handshake);
+        // Exhaust cwnd and model a Handshake PTO expiring before the client
+        // closes the connection.
+        let active_pid = pipe.client.paths.get_active_path_id().unwrap();
+        let handshake_status = pipe.client.handshake_status();
+        let pkt_num = pipe.client.next_pkt_num;
+        pipe.client.next_pkt_num += 1;
+        let now = Instant::now();
+        let path = pipe.client.paths.get_mut(active_pid).unwrap();
+        let cwnd_available = path.recovery.cwnd_available();
+        assert!(cwnd_available > 0);
+
+        path.recovery.on_packet_sent(
+            test_utils::helper_packet_sent(pkt_num, now, cwnd_available),
+            packet::Epoch::Application,
+            handshake_status,
+            now,
+            "",
+        );
+        assert_eq!(path.recovery.cwnd_available(), 0);
+        path.recovery.inc_loss_probes(packet::Epoch::Handshake);
     } else {
         assert_eq!(pipe.handshake(), Ok(()));
     }

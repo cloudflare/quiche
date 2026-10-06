@@ -4085,13 +4085,67 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
+        let has_loss_probe = {
+            let send_path = self.paths.get(send_pid)?;
+
+            packet::Epoch::epochs(
+                packet::Epoch::Initial..=packet::Epoch::Application,
+            )
+            .iter()
+            .any(|&epoch| send_path.recovery.loss_probes(epoch) > 0)
+        };
+
+        if self.local_error.is_none() {
+            for &epoch in packet::Epoch::epochs(
+                packet::Epoch::Initial..=packet::Epoch::Application,
+            ) {
+                let has_probe = self.crypto_ctx[epoch].crypto_seal.is_some() &&
+                    self.paths.get(send_pid)?.recovery.loss_probes(epoch) > 0;
+
+                if !has_probe {
+                    continue;
+                }
+
+                match self.send_single_for_type(
+                    out,
+                    send_pid,
+                    has_initial,
+                    now,
+                    Type::from_epoch(epoch),
+                    true,
+                ) {
+                    Err(Error::Done) => (),
+
+                    result => return result,
+                }
+            }
+        }
+
+        let pkt_type = self.write_pkt_type(send_pid)?;
+        let epoch = pkt_type.to_epoch()?;
+        let bypass_cwnd = self.paths.get(send_pid)?.recovery.loss_probes(epoch) >
+            0 ||
+            (self.local_error.is_some() && has_loss_probe);
+
+        self.send_single_for_type(
+            out,
+            send_pid,
+            has_initial,
+            now,
+            pkt_type,
+            bypass_cwnd,
+        )
+    }
+
+    fn send_single_for_type(
+        &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
+        now: Instant, pkt_type: Type, bypass_cwnd: bool,
+    ) -> Result<(Type, usize)> {
         let is_closing = self.local_error.is_some();
 
         let out_len = out.len();
 
         let mut b = octets::OctetsMut::with_slice(out);
-
-        let pkt_type = self.write_pkt_type(send_pid)?;
 
         let max_dgram_len = if !self.dgram_send_queue.is_empty() {
             self.dgram_max_writable_len()
@@ -4505,8 +4559,15 @@ impl<F: BufFactory> Connection<F> {
 
         let payload_offset = b.off();
 
-        let cwnd_available =
-            path.recovery.cwnd_available().saturating_sub(overhead);
+        // `usize::MAX` bypasses cwnd when authorized by packet selection;
+        // `left` still bounds the packet. Keep this local so other cwnd users
+        // see the actual window.
+        let send_limit_from_cwnd = if bypass_cwnd {
+            usize::MAX
+        } else {
+            path.recovery.cwnd_available()
+        }
+        .saturating_sub(overhead);
 
         let left_before_packing_ack_frame = left;
 
@@ -4550,7 +4611,7 @@ impl<F: BufFactory> Connection<F> {
             // there is not enough cwnd available for both (note that PING
             // frames are always 1 byte, so we just need to check that the
             // ACK's length is lower than cwnd).
-            if pkt_space.ack_elicited || frame.wire_len() < cwnd_available {
+            if pkt_space.ack_elicited || frame.wire_len() < send_limit_from_cwnd {
                 // ACK-only packets are not congestion controlled so ACKs must
                 // be bundled considering the buffer capacity only, and not the
                 // available cwnd.
@@ -4564,7 +4625,8 @@ impl<F: BufFactory> Connection<F> {
         left = cmp::min(
             left,
             // Bytes consumed by ACK frames.
-            cwnd_available.saturating_sub(left_before_packing_ack_frame - left),
+            send_limit_from_cwnd
+                .saturating_sub(left_before_packing_ack_frame - left),
         );
 
         let mut challenge_data = None;
@@ -5323,7 +5385,7 @@ impl<F: BufFactory> Connection<F> {
         if !has_data &&
             !stream_data_skipped &&
             !dgram_emitted &&
-            cwnd_available > frame::MAX_STREAM_OVERHEAD
+            send_limit_from_cwnd > frame::MAX_STREAM_OVERHEAD
         {
             path.recovery.on_app_limited();
         }
