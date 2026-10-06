@@ -1,0 +1,35 @@
+tokio-quiche/src/settings/quic.rs
+  s_036b50709599ae::t_a8a9961128287c 240-243
+tokio-quiche/src/quic/io/worker.rs
+  s_036b50709599ae::t_e4cd7a72f97304 48
+tokio-quiche/tests/integration_tests/zero_rtt.rs
+  s_036b50709599ae::t_f467a1666f976d 27,33,46-47,50-52,57-60,241-445
+tokio-quiche/src/quic/connection/mod.rs
+  s_d7d736c4ff2a3d::t_cccb89c8e45372 333,345
+tokio-quiche/src/quic/io/connection_stage.rs
+  s_d7d736c4ff2a3d::t_17f310e504c399 78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "15928147e8aca6805421201d8d2db83733406fb8",
+  "prompts": {},
+  "sessions": {
+    "s_036b50709599ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "080cae2b-5efe-4ece-ad52-9e87c53fc133",
+        "model": "unknown"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    },
+    "s_d7d736c4ff2a3d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9651f70b-3bbc-4e08-b20f-2648d4d76ce0",
+        "model": "unknown"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    }
+  }
+}

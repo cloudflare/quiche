@@ -1,0 +1,33 @@
+quiche/src/recovery/gcongestion/bbr/bandwidth_sampler.rs
+  s_6e071742c8857c::t_6718310185316e 519
+quiche/src/recovery/gcongestion/bbr2.rs
+  s_dd62640f17183e::t_2971291c02d917 826
+quiche/src/recovery/gcongestion/bbr2/network_model.rs
+  s_6e071742c8857c::t_ce707e59aa47d0 815
+quiche/src/recovery/gcongestion/mod.rs
+  s_dd62640f17183e::t_701d222262ba5c 113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fda3ec6caa2ae3d810ca56588b1f85ca2075db66",
+  "prompts": {},
+  "sessions": {
+    "s_6e071742c8857c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b372-3a7c-7410-b73c-6462fb2c0888",
+        "model": "unknown"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    },
+    "s_dd62640f17183e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0afda-6fab-71b3-839e-6bac4045ef38",
+        "model": "unknown"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    }
+  }
+}
