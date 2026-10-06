@@ -31,6 +31,8 @@ use crate::integration_tests::Http3Settings;
 use crate::integration_tests::QuicSettings;
 use crate::integration_tests::TestConnectionHook;
 use datagram_socket::QuicAuditStats;
+use foundations::telemetry::with_test_telemetry;
+use foundations::telemetry::TestTelemetryContext;
 use futures::SinkExt;
 use h3i;
 use h3i::actions::h3::send_headers_frame;
@@ -410,8 +412,8 @@ impl EarlyDataClient {
 /// A client that resumes a session with 0-RTT, but never completes the
 /// handshake while it keeps sending 0-RTT packets, must still be subject to
 /// the handshake timeout, even though the application was already started.
-#[tokio::test]
-async fn handshake_timeout_after_0_rtt() {
+#[with_test_telemetry(tokio::test)]
+async fn handshake_timeout_after_0_rtt(cx: TestTelemetryContext) {
     const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(1);
 
     let mut server = EarlyDataServer::start(HANDSHAKE_TIMEOUT).await;
@@ -442,4 +444,17 @@ async fn handshake_timeout_after_0_rtt() {
 
     server.assert_handshake_timeout(&audit_stats);
     assert!(failed_handshake_timeouts() > failed_handshake_timeouts_before);
+
+    // A handshake timeout is an expected outcome, it must not be logged as an
+    // error by the application.
+    let error_logs: Vec<_> = cx
+        .log_records()
+        .iter()
+        .filter(|record| record.level.as_str() == "ERROR")
+        .map(|record| record.message.clone())
+        .collect();
+    assert!(
+        error_logs.is_empty(),
+        "unexpected error logs: {error_logs:?}"
+    );
 }

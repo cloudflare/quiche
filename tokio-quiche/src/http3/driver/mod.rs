@@ -77,6 +77,7 @@ use self::streams::WaitForUpstreamCapacity;
 use crate::http3::settings::Http3Settings;
 use crate::http3::H3AuditStats;
 use crate::metrics::Metrics;
+use crate::quic::HandshakeError;
 use crate::quic::HandshakeInfo;
 use crate::quic::QuicCommand;
 use crate::quic::QuicheConnection;
@@ -1454,7 +1455,19 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
 
         let Some(h3_err) = work_loop_error.downcast_ref::<H3ConnectionError>()
         else {
-            log::error!("Found non-H3ConnectionError"; "error" => %work_loop_error);
+            // Errors returned by the IoWorker rather than the driver are
+            // expected and already counted in metrics:
+            // - `HandshakeError`: with 0-RTT early data, the handshake can
+            //   still fail (e.g. time out) after the application was started.
+            // - `quiche::Error`: the connection was closed by quiche, typically
+            //   because of a peer protocol violation.
+            if work_loop_error.is::<HandshakeError>() ||
+                work_loop_error.is::<quiche::Error>()
+            {
+                log::debug!("connection closed by IoWorker"; "error" => %work_loop_error);
+            } else {
+                log::error!("Found non-H3ConnectionError"; "error" => %work_loop_error);
+            }
             return;
         };
 
