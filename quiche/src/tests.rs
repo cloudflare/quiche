@@ -1259,6 +1259,73 @@ fn zero_rtt(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     assert_eq!(&b[..12], b"hello, world");
 }
 
+/// A 1-RTT packet that carries only an ACK is padded when it shares a datagram
+/// with an Initial packet, which puts it in flight. RFC 9002, Section 2 counts
+/// packets containing a PADDING frame toward bytes in flight even though they
+/// are not ack-eliciting, so those bytes must be accounted for.
+#[test]
+fn padding_only_packet_counts_toward_bytes_in_flight() {
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(30000);
+    config.set_initial_max_stream_data_bidi_local(15000);
+    config.set_initial_max_stream_data_bidi_remote(15000);
+    config.set_initial_max_streams_bidi(3);
+    config.enable_early_data();
+    config.verify_peer(false);
+
+    // A resumed connection gives the client 1-RTT keys while it is still
+    // sending Initial packets, so the two get coalesced.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    let session = pipe.client.session().unwrap();
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.client.set_session(session), Ok(()));
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let mut initial = buf[..len].to_vec();
+    assert!(pipe.client.is_in_early_data());
+
+    assert_eq!(pipe.client.stream_send(4, b"hello, world", true), Ok(12));
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let mut zrtt = buf[..len].to_vec();
+
+    assert_eq!(pipe.server_recv(&mut initial), Ok(initial.len()));
+    assert_eq!(pipe.server_recv(&mut zrtt), Ok(zrtt.len()));
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // The client's reply carries a 1-RTT packet holding only an ACK, padded to
+    // the full datagram size.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    let sent: usize = flight.iter().map(|(b, _)| b.len()).sum();
+
+    let bytes_in_flight = pipe
+        .client
+        .paths
+        .get_active()
+        .unwrap()
+        .recovery
+        .bytes_in_flight();
+
+    assert!(
+        bytes_in_flight >= sent * 3 / 4,
+        "padded packets should be accounted for: sent {sent} bytes, {bytes_in_flight} in flight"
+    );
+}
+
 #[rstest]
 fn stream_send_on_32bit_arch(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
