@@ -115,6 +115,10 @@ pub enum Error {
 
     /// An invalid DCID was used when connecting to a remote peer.
     InvalidDcidInitialization,
+
+    /// An error code provided by the application does not fit in the QUIC
+    /// 62-bit variable-length integer space.
+    InvalidErrorCode,
 }
 
 /// QUIC error codes sent on the wire.
@@ -227,6 +231,7 @@ impl Error {
             Error::InvalidAckRange => -21,
             Error::OptimisticAckDetected => -22,
             Error::InvalidDcidInitialization => -23,
+            Error::InvalidErrorCode => -24,
         }
     }
 }
