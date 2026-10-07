@@ -5477,6 +5477,12 @@ mod tests {
         // No event generated at server
         assert_eq!(s.poll_server(), Err(Error::Done));
 
+        // The receive-side reset does not consume the STOP error.
+        assert!(!s.pipe.server.streams.is_collected(0));
+        assert_eq!(
+            s.pipe.server.stream_capacity(0),
+            Err(crate::Error::StreamStopped(0x100))
+        );
         assert!(s.pipe.server.streams.is_collected(0));
         assert!(s.pipe.client.streams.is_collected(0));
     }

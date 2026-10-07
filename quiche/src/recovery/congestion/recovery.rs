@@ -252,12 +252,13 @@ impl RecoveryEpoch {
         let mut last_lost_ack_eliciting: Option<Instant> = None;
         let mut lost_ack_eliciting = 0;
 
-        let unacked_iter = self.sent_packets
-        .iter_mut()
-        // Skip packets that follow the largest acked packet.
-        .take_while(|p| p.pkt_num <= largest_acked)
-        // Skip packets that have already been acked or lost.
-        .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
+        let unacked_iter = self
+            .sent_packets
+            .iter_mut()
+            // Skip packets that follow the largest acked packet.
+            .take_while(|p| p.pkt_num <= largest_acked)
+            // Skip packets that have already been acked or lost.
+            .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
 
         for unacked in unacked_iter {
             // Mark packet as lost, or set time when it should be marked.
@@ -883,12 +884,15 @@ impl RecoveryOps for LegacyRecovery {
             usize::MAX
         };
 
-        let unacked_iter = epoch.sent_packets
+        let unacked_iter = epoch
+            .sent_packets
             .iter()
             .take(sent_packets_iter_limit)
             // Skip packets that have already been acked or lost, and packets
             // that don't contain either CRYPTO or STREAM frames.
-            .filter(|p| p.has_data && p.time_acked.is_none() && p.time_lost.is_none())
+            .filter(|p| {
+                p.has_data && p.time_acked.is_none() && p.time_lost.is_none()
+            })
             // Only return as many packets as the number of probe packets that
             // will be sent.
             .take(epoch.loss_probes);
@@ -957,11 +961,6 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn cwnd_available(&self) -> usize {
-        // Ignore cwnd when sending probe packets.
-        if self.epochs.iter().any(|e| e.loss_probes > 0) {
-            return usize::MAX;
-        }
-
         // Open more space (snd_cnt) for PRR when allowed.
         self.cwnd().saturating_sub(self.bytes_in_flight.get()) +
             self.congestion.prr.snd_cnt

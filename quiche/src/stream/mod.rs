@@ -193,11 +193,12 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     /// having to iterate over the full list of streams.
     pub readable: RBTree<StreamReadablePriorityAdapter>,
 
-    /// Set of stream IDs corresponding to streams that have enough flow control
-    /// capacity to be written to, and is not finished. This is used to generate
-    /// a `StreamIter` of streams without having to iterate over the full list
-    /// of streams.
+    /// Set of streams queued for writable notification. A stopped stream can
+    /// be removed before its error is reported to the application.
     pub writable: RBTree<StreamWritablePriorityAdapter>,
+
+    /// Stopped streams still queued for writable notification.
+    stopped_writable: RBTree<StreamStoppedWritablePriorityAdapter>,
 
     /// Set of stream IDs corresponding to streams that are almost out of flow
     /// control credit and need to send MAX_STREAM_DATA. This is used to
@@ -259,11 +260,9 @@ impl<F: BufFactory> StreamMap<F> {
     /// Returns the mutable stream with the given ID if it exists, or creates
     /// a new one otherwise.
     ///
-    /// The `local` parameter indicates whether the stream's creation was
-    /// requested by the local application rather than the peer, and is
-    /// used to validate the requested stream ID, and to select the initial
-    /// flow control values from the local and remote transport parameters
-    /// (also passed as arguments).
+    /// The `local` parameter indicates whether the stream is locally
+    /// initiated. It validates the stream ID and selects the initial flow
+    /// control values from the local and remote transport parameters.
     ///
     /// This also takes care of enforcing both local and the peer's stream
     /// count limits. If one of these limits is violated, the `StreamLimit`
@@ -426,11 +425,28 @@ impl<F: BufFactory> StreamMap<F> {
         }
     }
 
+    /// Marks a newly stopped stream as queued for writable notification.
+    pub fn insert_stopped_writable(
+        &mut self, priority_key: &Arc<StreamPriorityKey>,
+    ) {
+        if !priority_key.stopped_writable.is_linked() {
+            self.stopped_writable.insert(Arc::clone(priority_key));
+        }
+
+        self.insert_writable(priority_key);
+    }
+
     /// Removes the stream ID from the writable streams set.
     ///
     /// This should also be called anytime an existing stream stops being
     /// writable.
     pub fn remove_writable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
+        if priority_key.stopped_writable.is_linked() {
+            let ptr = Arc::as_ptr(priority_key);
+            let mut c = unsafe { self.stopped_writable.cursor_mut_from_ptr(ptr) };
+            c.remove();
+        }
+
         if !priority_key.writable.is_linked() {
             return;
         }
@@ -480,8 +496,13 @@ impl<F: BufFactory> StreamMap<F> {
         }
 
         if old.writable.is_linked() {
+            let stopped = old.stopped_writable.is_linked();
             self.remove_writable(old);
-            self.writable.insert(Arc::clone(new));
+            if stopped {
+                self.insert_stopped_writable(new);
+            } else {
+                self.insert_writable(new);
+            }
         }
 
         if old.flushable.is_linked() {
@@ -607,10 +628,24 @@ impl<F: BufFactory> StreamMap<F> {
         self.peer_max_streams_uni - self.local_opened_streams_uni
     }
 
+    /// Updates stream state before its STOP error is returned to the caller.
+    pub fn mark_stop_reported(&mut self, stream_id: u64) {
+        let stream = self.streams.get_mut(&stream_id).unwrap();
+        stream.send.mark_stop_reported();
+
+        if stream.is_collectable() {
+            let local = stream.local;
+            self.collect(stream_id, local);
+        } else {
+            let priority_key = Arc::clone(&stream.priority_key);
+            self.remove_writable(&priority_key);
+        }
+    }
+
     /// Drops completed stream.
     ///
-    /// This should only be called when Stream::is_complete() returns true for
-    /// the given stream.
+    /// This should only be called when Stream::is_collectable() returns true
+    /// for the given stream.
     pub fn collect(&mut self, stream_id: u64, local: bool) {
         if !local {
             // If the stream was created by the peer, give back a max streams
@@ -649,6 +684,39 @@ impl<F: BufFactory> StreamMap<F> {
             streams: self.writable.iter().map(|s| s.id).collect(),
             index: 0,
         }
+    }
+
+    /// Creates an iterator over stopped streams in the writable queue.
+    pub fn stopped_writable(&self) -> StreamIter {
+        if self.stopped_writable.is_empty() {
+            return StreamIter::default();
+        }
+
+        StreamIter {
+            streams: self.stopped_writable.iter().map(|key| key.id).collect(),
+            index: 0,
+        }
+    }
+
+    /// Returns and unlinks the next stopped stream awaiting notification.
+    pub fn pop_stopped_writable(&mut self) -> Option<u64> {
+        let priority_key = self.stopped_writable.front().clone_pointer()?;
+        self.remove_writable(&priority_key);
+        Some(priority_key.id)
+    }
+
+    /// Returns true if the given local stream has been opened.
+    ///
+    /// Opening a local stream implicitly opens all lower-numbered local streams
+    /// of the same type, even if they do not have `Stream` objects yet.
+    pub fn local_stream_opened(&self, stream_id: u64) -> bool {
+        let opened = if is_bidi(stream_id) {
+            self.local_opened_streams_bidi
+        } else {
+            self.local_opened_streams_uni
+        };
+
+        stream_id >> 2 < opened
     }
 
     /// Creates an iterator over streams that need to send MAX_STREAM_DATA.
@@ -898,6 +966,13 @@ impl<F: BufFactory> Stream<F> {
             (false, false) => self.recv.is_fin(),
         }
     }
+
+    /// Returns true when no receive data or STOP error remains to deliver.
+    pub fn is_collectable(&self) -> bool {
+        self.is_complete() &&
+            !self.is_readable() &&
+            !self.send.has_unreported_stop()
+    }
 }
 
 /// Returns true if the stream was created locally.
@@ -918,6 +993,7 @@ pub struct StreamPriorityKey {
 
     pub readable: RBTreeAtomicLink,
     pub writable: RBTreeAtomicLink,
+    pub stopped_writable: RBTreeAtomicLink,
     pub flushable: RBTreeAtomicLink,
 }
 
@@ -929,6 +1005,7 @@ impl Default for StreamPriorityKey {
             id: Default::default(),
             readable: Default::default(),
             writable: Default::default(),
+            stopped_writable: Default::default(),
             flushable: Default::default(),
         }
     }
@@ -984,6 +1061,16 @@ impl Ord for StreamPriorityKey {
 intrusive_adapter!(pub StreamWritablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { writable => RBTreeAtomicLink });
 
 impl KeyAdapter<'_> for StreamWritablePriorityAdapter {
+    type Key = StreamPriorityKey;
+
+    fn get_key(&self, s: &StreamPriorityKey) -> Self::Key {
+        s.clone()
+    }
+}
+
+intrusive_adapter!(pub StreamStoppedWritablePriorityAdapter = Arc<StreamPriorityKey>: StreamPriorityKey { stopped_writable => RBTreeAtomicLink });
+
+impl KeyAdapter<'_> for StreamStoppedWritablePriorityAdapter {
     type Key = StreamPriorityKey;
 
     fn get_key(&self, s: &StreamPriorityKey) -> Self::Key {
@@ -1750,6 +1837,9 @@ mod tests {
         assert!(!stream.send.is_complete());
 
         stream.send.ack(0, 1);
+        assert!(!stream.send.is_complete());
+
+        stream.send.ack_fin();
         assert!(stream.send.is_complete());
 
         assert!(!stream.is_complete());
