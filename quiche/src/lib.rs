@@ -2893,7 +2893,15 @@ impl<F: BufFactory> Connection<F> {
                         self.mark_closed();
                     }
 
-                    left
+                    // Long header packets carry their own length. A failed
+                    // packet must not hide a valid packet coalesced after it.
+                    // Short headers and malformed lengths have no reliable
+                    // boundary, so discard the rest of the datagram.
+                    packet::long_header_packet_len(
+                        &mut buf[len - left..len],
+                        self.source_id().len(),
+                    )
+                    .unwrap_or(left)
                 },
 
                 Err(e) => {

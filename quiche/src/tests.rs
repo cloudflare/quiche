@@ -5369,6 +5369,43 @@ fn invalid_initial_client(
 }
 
 #[rstest]
+fn invalid_coalesced_initial_does_not_hide_valid_initial(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+
+    let frames = [frame::Frame::Padding { len: 10 }];
+    let first = test_utils::encode_pkt(
+        &mut pipe.server,
+        Type::Initial,
+        &frames,
+        &mut buf,
+    )
+    .unwrap();
+    buf[first - 1] ^= 0xff;
+
+    let second = test_utils::encode_pkt(
+        &mut pipe.server,
+        Type::Initial,
+        &frames,
+        &mut buf[first..],
+    )
+    .unwrap();
+
+    assert_eq!(pipe.client.recv_count, 0);
+    assert_eq!(
+        pipe.client_recv(&mut buf[..first + second]),
+        Ok(first + second)
+    );
+    assert_eq!(pipe.client.recv_count, 1);
+    assert!(!pipe.client.is_closed());
+}
+
+#[rstest]
 /// Tests that packets with invalid payload length received before any other
 /// valid packet cause the server to close the connection immediately.
 fn invalid_initial_payload(
