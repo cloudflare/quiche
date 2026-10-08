@@ -498,6 +498,14 @@ const MAX_PROBING_TIMEOUTS: usize = 3;
 // The default initial congestion window size in terms of packet count.
 const DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 10;
 
+// The default duration during which packets can remain in flight without any
+// new packet being acknowledged, before the connection is closed.
+const DEFAULT_ACK_PROGRESS_TIMEOUT: Duration = Duration::from_secs(30);
+
+// The default number of sent packets that can be tracked for loss detection
+// before the connection is closed.
+const DEFAULT_MAX_OUTSTANDING_SENT_PACKETS: usize = 40_000;
+
 // The maximum data offset that can be stored in a crypto stream.
 const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
 
@@ -614,6 +622,10 @@ pub struct Config {
     track_unknown_transport_params: Option<usize>,
 
     initial_rtt: Duration,
+
+    ack_progress_timeout: Option<Duration>,
+
+    max_outstanding_sent_packets: usize,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -693,6 +705,10 @@ impl Config {
 
             track_unknown_transport_params: None,
             initial_rtt: DEFAULT_INITIAL_RTT,
+
+            ack_progress_timeout: Some(DEFAULT_ACK_PROGRESS_TIMEOUT),
+
+            max_outstanding_sent_packets: DEFAULT_MAX_OUTSTANDING_SENT_PACKETS,
         })
     }
 
@@ -922,6 +938,37 @@ impl Config {
     /// The default value is `333`.
     pub fn set_initial_rtt(&mut self, v: Duration) {
         self.initial_rtt = v;
+    }
+
+    /// Sets how long packets can remain in flight without the peer
+    /// acknowledging any new packet, while it keeps sending packets, before
+    /// the connection is closed.
+    ///
+    /// The timeout should be much larger than the round-trip time, otherwise
+    /// connections that make progress can be closed.
+    ///
+    /// The connection is closed with a `PROTOCOL_VIOLATION` transport error.
+    ///
+    /// The value `None` disables this timeout. The default value is 30
+    /// seconds.
+    pub fn set_ack_progress_timeout(&mut self, timeout: Option<Duration>) {
+        self.ack_progress_timeout = timeout;
+    }
+
+    /// Sets the number of sent packets that can be tracked for loss detection
+    /// before the connection is closed.
+    ///
+    /// This limits the memory used by a connection whose peer doesn't
+    /// acknowledge packets. Packets that only carry ACK frames are counted
+    /// too. The limit should be much larger than the congestion window, in
+    /// packets, otherwise connections that make progress can be closed.
+    ///
+    /// The connection is closed with a `PROTOCOL_VIOLATION` transport error.
+    ///
+    /// The value `0` disables this limit, so the memory used to track sent
+    /// packets is no longer bounded. The default value is `40000`.
+    pub fn set_max_outstanding_sent_packets(&mut self, max_packets: usize) {
+        self.max_outstanding_sent_packets = max_packets;
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
@@ -1629,6 +1676,14 @@ where
 
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
+
+    /// How long packets can remain in flight without any new packet being
+    /// acknowledged, before the connection is closed.
+    ack_progress_timeout: Option<Duration>,
+
+    /// The number of tracked sent packets after which the connection is
+    /// closed.
+    max_outstanding_sent_packets: usize,
 }
 
 /// Creates a new server-side connection.
@@ -2253,6 +2308,10 @@ impl<F: BufFactory> Connection<F> {
             streams_blocked_uni_state: Default::default(),
 
             max_amplification_factor: config.max_amplification_factor,
+
+            ack_progress_timeout: config.ack_progress_timeout,
+
+            max_outstanding_sent_packets: config.max_outstanding_sent_packets,
         };
         if let Some(retry_cids) = retry_cids {
             conn.local_transport_params
@@ -2750,6 +2809,50 @@ impl<F: BufFactory> Connection<F> {
             ex_data.is_server,
             ssl,
         )
+    }
+
+    /// Sets how long packets can remain in flight without the peer
+    /// acknowledging any new packet, before the connection is closed.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_ack_progress_timeout()`].
+    ///
+    /// [`Config::set_ack_progress_timeout()`]: struct.Config.html#method.set_ack_progress_timeout
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_ack_progress_timeout_in_handshake(
+        ssl: &mut boring::ssl::SslRef, timeout: Option<Duration>,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.ack_progress_timeout = timeout;
+
+        Ok(())
+    }
+
+    /// Sets the number of sent packets that can be tracked for loss detection
+    /// before the connection is closed.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_max_outstanding_sent_packets()`].
+    ///
+    /// [`Config::set_max_outstanding_sent_packets()`]: struct.Config.html#method.set_max_outstanding_sent_packets
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_max_outstanding_sent_packets_in_handshake(
+        ssl: &mut boring::ssl::SslRef, max_packets: usize,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.max_outstanding_sent_packets = max_packets;
+
+        Ok(())
     }
 
     /// Sets the `initial_max_streams_bidi` transport parameter.
@@ -3771,6 +3874,7 @@ impl<F: BufFactory> Connection<F> {
 
         self.recv_count += 1;
         self.paths.get_mut(recv_pid)?.recv_count += 1;
+        self.paths.get_mut(recv_pid)?.last_recv_time = Some(now);
 
         let read = b.off() + aead_tag_len;
 
@@ -4096,16 +4200,6 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        let has_loss_probe = {
-            let send_path = self.paths.get(send_pid)?;
-
-            packet::Epoch::epochs(
-                packet::Epoch::Initial..=packet::Epoch::Application,
-            )
-            .iter()
-            .any(|&epoch| send_path.recovery.loss_probes(epoch) > 0)
-        };
-
         if self.local_error.is_none() {
             for &epoch in packet::Epoch::epochs(
                 packet::Epoch::Initial..=packet::Epoch::Application,
@@ -4134,9 +4228,16 @@ impl<F: BufFactory> Connection<F> {
 
         let pkt_type = self.write_pkt_type(send_pid)?;
         let epoch = pkt_type.to_epoch()?;
-        let bypass_cwnd = self.paths.get(send_pid)?.recovery.loss_probes(epoch) >
-            0 ||
-            (self.local_error.is_some() && has_loss_probe);
+        let send_path = self.paths.get(send_pid)?;
+
+        // A closing connection sends a single packet with a CONNECTION_CLOSE
+        // frame before draining, which must not be delayed when the congestion
+        // window is full of unacknowledged packets.
+        let sends_close = self.local_error.is_some() &&
+            (send_path.active() || self.paths.len() == 1);
+
+        let bypass_cwnd =
+            send_path.recovery.loss_probes(epoch) > 0 || sends_close;
 
         self.send_single_for_type(
             out,
@@ -5637,6 +5738,39 @@ impl<F: BufFactory> Connection<F> {
             &self.trace_id,
         );
 
+        // Sent packets are only discarded once acknowledged or declared lost,
+        // so a peer that doesn't acknowledge packets is misbehaving.
+        if self.max_outstanding_sent_packets > 0 {
+            let tracked_sent_packets: usize = self
+                .paths
+                .iter()
+                .flat_map(|(_, p)| {
+                    packet::Epoch::epochs(
+                        packet::Epoch::Initial..=packet::Epoch::Application,
+                    )
+                    .iter()
+                    .map(|&e| p.recovery.sent_packets_len(e))
+                })
+                .sum();
+
+            if tracked_sent_packets > self.max_outstanding_sent_packets {
+                trace!(
+                    "{} too many outstanding sent packets: {}",
+                    self.trace_id,
+                    tracked_sent_packets
+                );
+
+                // The peer doesn't acknowledge ack-eliciting packets, as
+                // required by RFC 9000 Section 13.2.1.
+                self.close(
+                    false,
+                    WireErrorCode::ProtocolViolation as u64,
+                    b"too many outstanding sent packets",
+                )
+                .ok();
+            }
+        }
+
         Ok(())
     }
 
@@ -7120,10 +7254,54 @@ impl<F: BufFactory> Connection<F> {
                 .as_ref()
                 .map(|key_update| key_update.timer);
 
-            let timers = [self.idle_timer, path_timer, key_update_timer];
+            let timers = [
+                self.idle_timer,
+                path_timer,
+                key_update_timer,
+                self.ack_progress_timer(),
+            ];
 
             timers.iter().filter_map(|&x| x).min()
         }
+    }
+
+    /// Returns when the connection is closed, if packets in flight aren't
+    /// acknowledged.
+    fn ack_progress_timer(&self) -> Option<Instant> {
+        let timeout = self.ack_progress_timeout?;
+
+        if self.local_error.is_some() {
+            return None;
+        }
+
+        // Only the active path is considered, as packets sent on other paths,
+        // such as path probes, might never be acknowledged.
+        let path = self.paths.get_active().ok()?;
+
+        // While the peer acknowledges packets, the oldest ack-eliciting packet
+        // is acknowledged or declared lost within a few round trips. Other
+        // packets don't need to be acknowledged.
+        let time_sent = path.recovery.oldest_ack_eliciting_time_sent()?;
+
+        // Packets sent on the path before it became active, for example before
+        // the peer migrated away from it and back, can be much older.
+        let start = path
+            .active_since
+            .map_or(time_sent, |t| cmp::max(t, time_sent));
+
+        // Peers that stopped sending packets, for example because they became
+        // unreachable, are left to the idle timeout. So the peer must have sent
+        // a packet after it should have acknowledged the oldest packet.
+        let max_ack_delay =
+            Duration::from_millis(self.peer_transport_params.max_ack_delay);
+        let ack_deadline = start + path.recovery.pto() + max_ack_delay;
+
+        if path.last_recv_time.is_none_or(|t| t <= ack_deadline) {
+            return None;
+        }
+
+        // Timeouts too large to be represented never expire.
+        start.checked_add(timeout)
     }
 
     /// Returns the amount of time until the next timeout event.
@@ -7230,6 +7408,24 @@ impl<F: BufFactory> Connection<F> {
                 None => {
                     self.mark_closed();
                 },
+            }
+        }
+
+        // The ack progress timeout is processed last, as the other timers can
+        // declare packets in flight lost, or change the active path.
+        if let Some(timer) = self.ack_progress_timer() {
+            if timer <= now {
+                trace!("{} ack progress timeout expired", self.trace_id);
+
+                // The peer keeps sending packets, but doesn't acknowledge
+                // ack-eliciting packets, as required by RFC 9000 Section
+                // 13.2.1.
+                self.close(
+                    false,
+                    WireErrorCode::ProtocolViolation as u64,
+                    b"ack progress timeout",
+                )
+                .ok();
             }
         }
     }
@@ -8127,6 +8323,10 @@ impl<F: BufFactory> Connection<F> {
 
             tx_cap_factor: self.tx_cap_factor,
 
+            ack_progress_timeout: self.ack_progress_timeout,
+
+            max_outstanding_sent_packets: self.max_outstanding_sent_packets,
+
             pmtud: None,
 
             is_server: self.is_server,
@@ -8162,6 +8362,10 @@ impl<F: BufFactory> Connection<F> {
             if ex_data.tx_cap_factor != self.tx_cap_factor {
                 self.tx_cap_factor = ex_data.tx_cap_factor;
             }
+
+            self.ack_progress_timeout = ex_data.ack_progress_timeout;
+            self.max_outstanding_sent_packets =
+                ex_data.max_outstanding_sent_packets;
 
             if let Some((discover, max_probes)) = ex_data.pmtud {
                 self.paths.set_discover_pmtu_on_existing_paths(
@@ -9237,8 +9441,9 @@ impl<F: BufFactory> Connection<F> {
         &self, from: Option<SocketAddr>, to: Option<SocketAddr>,
     ) -> Result<usize> {
         // A probing packet must be sent, but only if the connection is fully
-        // established.
-        if self.is_established() {
+        // established. A closing connection only sends the CONNECTION_CLOSE
+        // frame, on the active path.
+        if self.is_established() && self.local_error.is_none() {
             let mut probing = self
                 .paths
                 .iter()
@@ -9283,7 +9488,10 @@ impl<F: BufFactory> Connection<F> {
             }
         }
 
-        self.paths.set_active_path(path_id)
+        self.paths.set_active_path(path_id)?;
+        self.paths.get_mut(path_id)?.active_since = Some(now);
+
+        Ok(())
     }
 
     /// Handles potential connection migration.

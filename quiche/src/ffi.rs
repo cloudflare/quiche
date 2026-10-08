@@ -380,6 +380,25 @@ pub extern "C" fn quiche_config_set_unchecked_congestion_window(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_ack_progress_timeout_millis(
+    config: &mut Config, millis: u64,
+) {
+    let timeout = match millis {
+        0 => None,
+        millis => Some(Duration::from_millis(millis)),
+    };
+
+    config.set_ack_progress_timeout(timeout);
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_config_set_max_outstanding_sent_packets(
+    config: &mut Config, max_packets: size_t,
+) {
+    config.set_max_outstanding_sent_packets(max_packets);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }

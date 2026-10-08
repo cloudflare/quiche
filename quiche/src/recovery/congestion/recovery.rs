@@ -962,9 +962,25 @@ impl RecoveryOps for LegacyRecovery {
         )
     }
 
-    #[cfg(test)]
     fn sent_packets_len(&self, epoch: Epoch) -> usize {
         self.epochs[epoch].sent_packets.len()
+    }
+
+    fn oldest_ack_eliciting_time_sent(&self) -> Option<Instant> {
+        self.epochs
+            .iter()
+            .filter(|e| e.in_flight_count > 0)
+            .filter_map(|e| {
+                e.sent_packets
+                    .iter()
+                    .find(|p| {
+                        p.ack_eliciting &&
+                            p.time_acked.is_none() &&
+                            p.time_lost.is_none()
+                    })
+                    .map(|p| p.time_sent)
+            })
+            .min()
     }
 
     #[cfg(test)]

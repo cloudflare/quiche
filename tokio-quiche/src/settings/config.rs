@@ -206,6 +206,10 @@ fn make_quiche_config(
     );
     config.grease(quic_settings.grease);
     config.set_max_amplification_factor(quic_settings.max_amplification_factor);
+    config.set_ack_progress_timeout(quic_settings.ack_progress_timeout);
+    config.set_max_outstanding_sent_packets(
+        quic_settings.max_outstanding_sent_packets,
+    );
     config.set_send_capacity_factor(quic_settings.send_capacity_factor);
     config.set_ack_delay_exponent(quic_settings.ack_delay_exponent);
     config.set_max_ack_delay(quic_settings.max_ack_delay);
