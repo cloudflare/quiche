@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["draw_rtt_plot"]};
