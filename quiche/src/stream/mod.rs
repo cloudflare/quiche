@@ -229,6 +229,15 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
 }
 
 impl<F: BufFactory> StreamMap<F> {
+    /// Forget streams created using parameters from rejected 0-RTT.
+    pub(crate) fn reset_for_early_data_rejection(&mut self) {
+        *self = Self::new(
+            self.initial_max_streams_bidi,
+            self.initial_max_streams_uni,
+            self.max_stream_window,
+        );
+    }
+
     pub fn new(
         max_streams_bidi: u64, max_streams_uni: u64, max_stream_window: u64,
     ) -> Self {

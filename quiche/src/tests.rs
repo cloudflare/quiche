@@ -14141,3 +14141,282 @@ fn server_qlog() {
         panic!("expected Qlog event");
     }
 }
+
+#[rstest]
+fn rejected_zero_rtt_resets_stream_state(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const TICKET_KEY: [u8; 48] = [0xa; 48];
+
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    config.set_ticket_key(&TICKET_KEY).unwrap();
+    config.enable_early_data();
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    let session = pipe.client.session().unwrap();
+
+    let mut client_config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    client_config.enable_early_data();
+    let mut server_config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    server_config.set_ticket_key(&TICKET_KEY).unwrap();
+
+    let mut pipe = test_utils::Pipe::with_client_and_server_config(
+        &mut client_config,
+        &mut server_config,
+    )
+    .unwrap();
+    assert_eq!(pipe.client.set_session(session), Ok(()));
+
+    let mut buf = [0; 65535];
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let mut initial = buf[..len].to_vec();
+    assert!(pipe.client.is_in_early_data());
+
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    assert!(len > 0);
+    assert!(pipe.client.streams.get(4).is_some());
+    let next_packet_number = pipe.client.next_pkt_num;
+    assert_eq!(pipe.client.tx_data, 5);
+
+    // The server never receives the 0-RTT packet.
+    assert_eq!(pipe.server_recv(&mut initial), Ok(initial.len()));
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    assert!(!pipe.client.is_in_early_data());
+    assert!(pipe.client.early_data_rejected());
+    assert_eq!(pipe.client.next_pkt_num, next_packet_number);
+    assert_eq!(pipe.client.streams.len(), 0);
+    assert_eq!(pipe.client.tx_data, 0);
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .sent_packets_len(packet::Epoch::Application),
+        0
+    );
+
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.client.stream_send(4, b"replay", true), Ok(6));
+    assert_eq!(pipe.client.tx_data, 6);
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut received = [0; 6];
+    assert_eq!(pipe.server.stream_recv(4, &mut received), Ok((6, true)));
+    assert_eq!(&received, b"replay");
+    assert!(pipe.client.next_pkt_num > next_packet_number);
+}
+
+#[rstest]
+fn rejected_zero_rtt_clears_auxiliary_send_state(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const TICKET_KEY: [u8; 48] = [0xa; 48];
+
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    config.set_ticket_key(&TICKET_KEY).unwrap();
+    config.enable_early_data();
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    let session = pipe.client.session().unwrap();
+
+    let mut client_config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    client_config.enable_early_data();
+    client_config.enable_dgram(true, 10, 10);
+    let mut server_config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    server_config.set_ticket_key(&TICKET_KEY).unwrap();
+
+    let mut pipe = test_utils::Pipe::with_client_and_server_config(
+        &mut client_config,
+        &mut server_config,
+    )
+    .unwrap();
+    assert_eq!(pipe.client.set_session(session), Ok(()));
+
+    let mut buf = [0; 65535];
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let mut initial = buf[..len].to_vec();
+    assert!(pipe.client.is_in_early_data());
+
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    assert!(len > 0);
+    assert!(pipe.client.streams.get(4).is_some());
+    let next_packet_number = pipe.client.next_pkt_num;
+    assert_eq!(pipe.client.tx_data, 5);
+
+    // Prime auxiliary state after emission so it remains queued when TLS
+    // rejects early data.
+    pipe.client.blocked_limit = Some(123);
+    pipe.client.streams_blocked_bidi_state.update_at(5);
+    pipe.client.streams_blocked_bidi_state.blocked_sent = Some(5);
+    pipe.client.streams_blocked_uni_state.update_at(7);
+    pipe.client.streams_blocked_uni_state.blocked_sent = Some(7);
+    pipe.client
+        .dgram_send_queue
+        .push(b"early datagram".to_vec())
+        .unwrap();
+
+    assert_eq!(pipe.client.blocked_limit, Some(123));
+    assert_eq!(pipe.client.streams_blocked_bidi_state.blocked_at, Some(5));
+    assert_eq!(pipe.client.streams_blocked_bidi_state.blocked_sent, Some(5));
+    assert_eq!(pipe.client.streams_blocked_uni_state.blocked_at, Some(7));
+    assert_eq!(pipe.client.streams_blocked_uni_state.blocked_sent, Some(7));
+    assert!(pipe.client.dgram_send_queue.has_pending());
+
+    // The server never receives the 0-RTT packet.
+    assert_eq!(pipe.server_recv(&mut initial), Ok(initial.len()));
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    assert!(!pipe.client.is_in_early_data());
+    assert!(pipe.client.early_data_rejected());
+    assert_eq!(pipe.client.blocked_limit, None);
+    assert_eq!(pipe.client.streams_blocked_bidi_state.blocked_at, None);
+    assert_eq!(pipe.client.streams_blocked_bidi_state.blocked_sent, None);
+    assert_eq!(pipe.client.streams_blocked_uni_state.blocked_at, None);
+    assert_eq!(pipe.client.streams_blocked_uni_state.blocked_sent, None);
+    assert!(!pipe.client.dgram_send_queue.has_pending());
+    assert_eq!(pipe.client.dgram_send_queue.len(), 0);
+    assert_eq!(pipe.client.dgram_send_queue.byte_size(), 0);
+    assert!(!pipe.client.dgram_send_queue.is_full());
+
+    assert_eq!(pipe.client.next_pkt_num, next_packet_number);
+    assert_eq!(pipe.client.streams.len(), 0);
+    assert_eq!(pipe.client.tx_data, 0);
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .sent_packets_len(packet::Epoch::Application),
+        0
+    );
+
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.client.stream_send(4, b"replay", true), Ok(6));
+    assert_eq!(pipe.client.tx_data, 6);
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut received = [0; 6];
+    assert_eq!(pipe.server.stream_recv(4, &mut received), Ok((6, true)));
+    assert_eq!(&received, b"replay");
+    assert!(pipe.client.next_pkt_num > next_packet_number);
+}
+
+#[rstest]
+fn rejected_zero_rtt_replays_http3_request(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const TICKET_KEY: [u8; 48] = [0xa; 48];
+
+    let configure = || {
+        let mut config =
+            test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(10000);
+        config.set_initial_max_stream_data_bidi_local(1000);
+        config.set_initial_max_stream_data_bidi_remote(1000);
+        config.set_initial_max_stream_data_uni(1000);
+        config.set_initial_max_streams_bidi(5);
+        config.set_initial_max_streams_uni(5);
+        config
+    };
+
+    let mut ticket_config = configure();
+    ticket_config.set_ticket_key(&TICKET_KEY).unwrap();
+    ticket_config.enable_early_data();
+
+    let mut first = test_utils::Pipe::with_config(&mut ticket_config).unwrap();
+    assert_eq!(first.handshake(), Ok(()));
+    let session = first.client.session().unwrap();
+
+    let mut client_config = configure();
+    client_config.enable_early_data();
+    let mut server_config = configure();
+    server_config.set_ticket_key(&TICKET_KEY).unwrap();
+
+    let mut pipe = test_utils::Pipe::with_client_and_server_config(
+        &mut client_config,
+        &mut server_config,
+    )
+    .unwrap();
+    assert_eq!(pipe.client.set_session(session), Ok(()));
+
+    let mut buf = [0; 65535];
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let mut initial = buf[..len].to_vec();
+    assert!(pipe.client.is_in_early_data());
+
+    let h3_config = h3::Config::new().unwrap();
+    let request = vec![
+        h3::Header::new(b":method", b"GET"),
+        h3::Header::new(b":scheme", b"https"),
+        h3::Header::new(b":authority", b"quic.tech"),
+        h3::Header::new(b":path", b"/replay"),
+    ];
+
+    let mut early_h3 =
+        h3::Connection::with_transport(&mut pipe.client, &h3_config).unwrap();
+    let early_stream = early_h3
+        .send_request(&mut pipe.client, &request, true)
+        .unwrap();
+    let early_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert!(!early_flight.is_empty());
+
+    // Withhold the early request and control streams from the server.
+    assert_eq!(pipe.server_recv(&mut initial), Ok(initial.len()));
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    assert!(pipe.client.early_data_rejected());
+
+    // Recreate HTTP/3 state as the example client does after rejection.
+    drop(early_h3);
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let mut client_h3 =
+        h3::Connection::with_transport(&mut pipe.client, &h3_config).unwrap();
+    let mut server_h3 =
+        h3::Connection::with_transport(&mut pipe.server, &h3_config).unwrap();
+
+    let replay_stream = client_h3
+        .send_request(&mut pipe.client, &request, true)
+        .unwrap();
+    assert_eq!(replay_stream, early_stream);
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(
+        server_h3.poll(&mut pipe.server),
+        Ok((replay_stream, h3::Event::Headers {
+            list: request,
+            more_frames: false,
+        },)),
+    );
+
+    let response = vec![h3::Header::new(b":status", b"200")];
+    assert_eq!(
+        server_h3
+            .send_response(&mut pipe.server, replay_stream, &response, true,),
+        Ok(()),
+    );
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(
+        client_h3.poll(&mut pipe.client),
+        Ok((replay_stream, h3::Event::Headers {
+            list: response,
+            more_frames: false,
+        },)),
+    );
+}
