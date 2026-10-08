@@ -3035,6 +3035,81 @@ mod tests {
         // Verify lost_count never increased (PTO doesn't trigger CC)
         assert_eq!(r.lost_count(), 0);
     }
+    /// RFC 9002, Section 6.2.1: a client that is not yet certain the server
+    /// finished validating its address does not reset the PTO backoff when it
+    /// receives acknowledgements in Initial packets.
+    #[rstest]
+    fn pto_backoff_kept_until_peer_validated_address(
+        #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let unvalidated = HandshakeStatus {
+            has_handshake_keys: false,
+            peer_verified_address: false,
+            completed: false,
+        };
+
+        let mut now = Instant::now();
+        let mut r = Recovery::new(&cfg);
+
+        r.on_packet_sent(
+            test_utils::helper_packet_sent(0, now, 1000),
+            packet::Epoch::Initial,
+            unvalidated,
+            now,
+            "",
+        );
+
+        now = r.loss_detection_timer().unwrap();
+        r.on_loss_detection_timeout(unvalidated, now, "");
+        assert_eq!(r.pto_count(), 1);
+
+        // The Initial packet is acknowledged, but the server has not yet
+        // validated the client's address.
+        let mut acked = RangeSet::default();
+        acked.insert(0..1);
+        r.on_ack_received(
+            &acked,
+            25,
+            packet::Epoch::Initial,
+            unvalidated,
+            now,
+            None,
+            "",
+        )
+        .unwrap();
+        assert_eq!(r.pto_count(), 1);
+
+        // Once the peer has validated the address, the backoff is reset.
+        r.on_packet_sent(
+            test_utils::helper_packet_sent(1, now, 1000),
+            packet::Epoch::Initial,
+            unvalidated,
+            now,
+            "",
+        );
+
+        let validated = HandshakeStatus {
+            peer_verified_address: true,
+            ..unvalidated
+        };
+
+        let mut acked = RangeSet::default();
+        acked.insert(0..2);
+        r.on_ack_received(
+            &acked,
+            25,
+            packet::Epoch::Initial,
+            validated,
+            now,
+            None,
+            "",
+        )
+        .unwrap();
+        assert_eq!(r.pto_count(), 0);
+    }
 
     // Test that send_on_path after PTO timeout properly sends retransmissions
     // and doesn't mark packets as lost (lost_count should remain 0).
