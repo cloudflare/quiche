@@ -273,7 +273,6 @@ pub trait RecoveryOps {
     #[cfg(any(test, feature = "qlog"))]
     fn app_limited(&self) -> bool;
 
-    #[cfg(test)]
     fn sent_packets_len(&self, epoch: packet::Epoch) -> usize;
 
     fn bytes_in_flight(&self) -> usize;

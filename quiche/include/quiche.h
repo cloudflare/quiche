@@ -237,6 +237,17 @@ int quiche_config_set_cc_algorithm_name(quiche_config *config, const char *algo)
 // Sets the initial cwnd for the connection in terms of packet count.
 void quiche_config_set_initial_congestion_window_packets(quiche_config *config, size_t packets);
 
+// Sets how long packets can remain in flight without the peer acknowledging any
+// new packet, while it keeps sending packets, in milliseconds, before the
+// connection is closed. The effective timeout is at least three probe timeouts.
+// The value 0 disables this timeout.
+void quiche_config_set_ack_progress_timeout(quiche_config *config, uint64_t v);
+
+// Sets the number of sent packets that can be tracked for loss detection
+// before the connection is closed. The effective limit is raised to fit the
+// congestion window. The value 0 disables this limit.
+void quiche_config_set_max_outstanding_sent_packets(quiche_config *config, size_t v);
+
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
     QUICHE_CC_CUBIC = 1,

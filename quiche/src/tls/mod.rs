@@ -723,6 +723,10 @@ pub struct ExData<'a> {
 
     pub tx_cap_factor: f64,
 
+    pub ack_progress_timeout: Option<std::time::Duration>,
+
+    pub max_outstanding_sent_packets: usize,
+
     /// PMTUD configuration: (enable, max_probes)
     pub pmtud: Option<(bool, u8)>,
 
