@@ -237,7 +237,7 @@ impl ServerHooks {
 
         driver
             .waiting_streams
-            .push(stream_ctx.wait_for_recv(stream_id));
+            .push(stream_ctx.wait_for_recv(stream_id))?;
         driver.insert_stream(stream_id, stream_ctx);
 
         // A STOP_SENDING received before HEADERS had no stream context for
