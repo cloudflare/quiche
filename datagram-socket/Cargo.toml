@@ -18,5 +18,8 @@ libc = { workspace = true }
 smallvec = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt"] }
 
+[target.'cfg(not(target_has_atomic = "64"))'.dependencies]
+portable-atomic = "1.15"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
