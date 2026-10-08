@@ -1,0 +1,44 @@
+tokio-quiche/src/quic/io/worker.rs
+  s_01e9900562842f::t_45a590b7b71593 54,277,306,340,871,876-878,880-881,887-893,1204
+  s_01e9900562842f::t_ff5d4d78fb6a89 874-875
+  s_01e9900562842f::t_0401f5405378f6 872-873,879
+tokio-quiche/src/quic/io/gso.rs
+  s_01e9900562842f::t_45a590b7b71593 31-32,123-125,134,141-142,144,146-148,160-172,201-203,208-327,330-332,334-431
+  s_01e9900562842f::t_0b5141b62ee713 432
+  s_01e9900562842f::t_d2351dea34de84 333
+  s_01e9900562842f::t_2b1b1d565a83c8 328-329
+tokio-quiche/src/quic/router/acceptor.rs
+  s_01e9900562842f::t_45a590b7b71593 49,67,147,159-160,188,190,268-316
+  s_01e9900562842f::t_ff1859564ad644 317-318
+tokio-quiche/src/quic/mod.rs
+  s_01e9900562842f::t_45a590b7b71593 107,128-129,312
+tokio-quiche/src/quic/dscp.rs
+  s_01e9900562842f::t_45a590b7b71593 1-71,73-112
+  s_01e9900562842f::t_0fdaeddd350310 72
+tokio-quiche/src/quic/connection/mod.rs
+  s_01e9900562842f::t_45a590b7b71593 70,285-293,350,482
+tokio-quiche/src/settings/mod.rs
+  s_01e9900562842f::t_45a590b7b71593 34-35,58-65,87-88,108,126
+tokio-quiche/src/quic/router/mod.rs
+  s_01e9900562842f::t_45a590b7b71593 41-42,318,355,870,953,958,970,1004-1007
+tokio-quiche/src/quic/raw.rs
+  s_01e9900562842f::t_45a590b7b71593 123
+tokio-quiche/src/quic/router/connector.rs
+  s_01e9900562842f::t_45a590b7b71593 184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bf7dde1fee52106c54a0c61f94d09bba2ab27c92",
+  "prompts": {},
+  "sessions": {
+    "s_01e9900562842f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ef263177affeXcKAb5bMK127Nc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}

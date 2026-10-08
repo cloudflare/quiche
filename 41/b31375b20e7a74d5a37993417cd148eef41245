@@ -1,0 +1,29 @@
+tokio-quiche/src/http3/driver/server.rs
+  s_b75b2040c6e9f5::t_3bd462c6447955 240
+tokio-quiche/src/http3/driver/waiting_streams.rs
+  s_b75b2040c6e9f5::t_3bd462c6447955 1-284
+tokio-quiche/src/http3/driver/streams.rs
+  s_b75b2040c6e9f5::t_3bd462c6447955 202-211
+tokio-quiche/src/http3/driver/tests.rs
+  s_b75b2040c6e9f5::t_3bd462c6447955 549-551,712-713,728-729,1260-1355
+tokio-quiche/src/http3/driver/mod.rs
+  s_b75b2040c6e9f5::t_3bd462c6447955 40,74,369,420,638,700,996-997,1227
+tokio-quiche/src/http3/driver/client.rs
+  s_b75b2040c6e9f5::t_3bd462c6447955 245
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "41b31375b20e7a74d5a37993417cd148eef41245",
+  "prompts": {},
+  "sessions": {
+    "s_b75b2040c6e9f5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdb07b243ffeTQhO72F82G268V",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Minaz Inamdar <minaz@cloudflare.com>"
+    }
+  }
+}
