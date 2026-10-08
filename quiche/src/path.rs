@@ -250,6 +250,10 @@ pub struct Path {
     /// to be validated.
     migrating: bool,
 
+    /// Whether the connection was using this path before switching to another
+    /// one.
+    superseded: bool,
+
     /// Whether or not we should force eliciting of an ACK (e.g. via PING frame)
     pub needs_ack_eliciting: bool,
 }
@@ -319,6 +323,7 @@ impl Path {
             challenge_requested: false,
             failure_notified: false,
             migrating: false,
+            superseded: false,
             needs_ack_eliciting: false,
         }
     }
@@ -787,19 +792,30 @@ impl PathMap {
     }
 
     /// Checks if creating a new path will not exceed the current `self.paths`
-    /// capacity. If yes, this method tries to remove one unused path. If it
-    /// fails to do so, returns [`Done`].
+    /// capacity. If yes, this method tries to remove one unused path, or one
+    /// the connection migrated away from. If it fails to do so, returns
+    /// [`Done`].
+    ///
+    /// On success, returns the sequence number of the Destination Connection
+    /// ID the removed path was using, if any.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    fn make_room_for_new_path(&mut self) -> Result<()> {
+    fn make_room_for_new_path(&mut self) -> Result<Option<u64>> {
         if self.paths.len() < self.max_concurrent_paths {
-            return Ok(());
+            return Ok(None);
         }
 
         let (pid_to_remove, _) = self
             .paths
             .iter()
             .find(|(_, p)| p.unused())
+            .or_else(|| {
+                if !self.get_active().is_ok_and(Path::validated) {
+                    return None;
+                }
+
+                self.paths.iter().find(|(_, p)| p.superseded)
+            })
             .ok_or(Error::Done)?;
 
         let path = self.paths.remove(pid_to_remove);
@@ -808,7 +824,7 @@ impl PathMap {
 
         self.notify_event(PathEvent::Closed(path.local_addr, path.peer_addr));
 
-        Ok(())
+        Ok(path.active_dcid_seq)
     }
 
     /// Records the provided `Path` and returns its assigned identifier.
@@ -817,12 +833,16 @@ impl PathMap {
     /// serving application, if it serves a server-side connection.
     ///
     /// If there are already `max_concurrent_paths` currently recorded, this
-    /// method tries to remove an unused `Path` first. If it fails to do so,
-    /// it returns [`Done`].
+    /// method tries to remove an unused or superseded `Path` first. If it
+    /// fails to do so, it returns [`Done`]. Otherwise, it also returns the
+    /// sequence number of the Destination Connection ID the removed path was
+    /// using, if any, so that the caller can release it.
     ///
     /// [`Done`]: enum.Error.html#variant.Done
-    pub fn insert_path(&mut self, path: Path, is_server: bool) -> Result<usize> {
-        self.make_room_for_new_path()?;
+    pub fn insert_path(
+        &mut self, path: Path, is_server: bool,
+    ) -> Result<(usize, Option<u64>)> {
+        let released_dcid_seq = self.make_room_for_new_path()?;
 
         let local_addr = path.local_addr;
         let peer_addr = path.peer_addr;
@@ -835,7 +855,7 @@ impl PathMap {
             self.notify_event(PathEvent::New(local_addr, peer_addr));
         }
 
-        Ok(pid)
+        Ok((pid, released_dcid_seq))
     }
 
     /// Notifies a path event to the application served by the connection.
@@ -919,10 +939,12 @@ impl PathMap {
 
         if let Ok(old_active_path) = self.get_active_mut() {
             old_active_path.active = false;
+            old_active_path.superseded = true;
         }
 
         let new_active_path = self.get_mut(path_id)?;
         new_active_path.active = true;
+        new_active_path.superseded = false;
 
         if is_server {
             if new_active_path.validated() {
