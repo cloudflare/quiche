@@ -90,6 +90,9 @@ const MAX_PTO_PROBES_COUNT: usize = 2;
 
 const MINIMUM_WINDOW_PACKETS: usize = 2;
 
+// https://www.rfc-editor.org/rfc/rfc9002.html#section-7.6.1
+const PERSISTENT_CONGESTION_THRESHOLD: u32 = 3;
+
 const LOSS_REDUCTION_FACTOR: f64 = 0.5;
 
 // How many non ACK eliciting packets we send before including a PING to solicit
@@ -2626,6 +2629,83 @@ mod tests {
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_micros(11250));
         assert_eq!(r.lost_count(), 0);
         assert_eq!(r.startup_exit(), None);
+    }
+
+    /// RFC 9002, Section 7.6: losing every packet sent over a period longer
+    /// than the persistent congestion duration collapses the window to the
+    /// minimum.
+    #[rstest]
+    fn persistent_congestion_collapses_cwnd(
+        #[values("cubic", "reno")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let mut r = Recovery::new(&cfg);
+        let epoch = packet::Epoch::Application;
+        let start = Instant::now();
+
+        // An RTT sample is needed before the duration can be computed.
+        r.on_packet_sent(
+            test_utils::helper_packet_sent(0, start, 1000),
+            epoch,
+            HandshakeStatus::default(),
+            start,
+            "",
+        );
+
+        let mut acked = RangeSet::default();
+        acked.insert(0..1);
+        r.on_ack_received(
+            &acked,
+            0,
+            epoch,
+            HandshakeStatus::default(),
+            start + Duration::from_millis(10),
+            None,
+            "",
+        )
+        .unwrap();
+
+        // Three packets spanning ten seconds, none of which is acknowledged.
+        for (pkt_num, offset) in [(1, 0), (2, 5), (3, 10)] {
+            let sent_at = start + Duration::from_secs(offset);
+            r.on_packet_sent(
+                test_utils::helper_packet_sent(pkt_num, sent_at, 1000),
+                epoch,
+                HandshakeStatus::default(),
+                sent_at,
+                "",
+            );
+        }
+
+        let cwnd_before = r.cwnd();
+        assert!(cwnd_before > r.max_datagram_size() * MINIMUM_WINDOW_PACKETS);
+
+        // A later packet gets through, so the three above are declared lost.
+        let now = start + Duration::from_secs(11);
+        r.on_packet_sent(
+            test_utils::helper_packet_sent(4, now, 1000),
+            epoch,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        let mut acked = RangeSet::default();
+        acked.insert(4..5);
+        r.on_ack_received(
+            &acked,
+            0,
+            epoch,
+            HandshakeStatus::default(),
+            now,
+            None,
+            "",
+        )
+        .unwrap();
+
+        assert_eq!(r.cwnd(), r.max_datagram_size() * MINIMUM_WINDOW_PACKETS);
     }
 
     // Modeling delivery_rate for gcongestion is non-trivial so we only test the

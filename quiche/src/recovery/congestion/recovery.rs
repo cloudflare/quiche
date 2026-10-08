@@ -65,7 +65,9 @@ use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
+use crate::recovery::MINIMUM_WINDOW_PACKETS;
 use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
+use crate::recovery::PERSISTENT_CONGESTION_THRESHOLD;
 
 #[derive(Default)]
 struct RecoveryEpoch {
@@ -113,6 +115,13 @@ struct LossDetectionResult {
     lost_packets: usize,
     lost_bytes: usize,
     pmtud_lost_bytes: usize,
+
+    // Send times of the first and last ack-eliciting in-flight packets
+    // declared lost, and how many there were, to establish persistent
+    // congestion.
+    first_lost_ack_eliciting: Option<Instant>,
+    last_lost_ack_eliciting: Option<Instant>,
+    lost_ack_eliciting: usize,
 }
 
 impl RecoveryEpoch {
@@ -239,6 +248,10 @@ impl RecoveryEpoch {
 
         let mut largest_lost_pkt = None;
 
+        let mut first_lost_ack_eliciting: Option<Instant> = None;
+        let mut last_lost_ack_eliciting: Option<Instant> = None;
+        let mut lost_ack_eliciting = 0;
+
         let unacked_iter = self
             .sent_packets
             .iter_mut()
@@ -266,6 +279,14 @@ impl RecoveryEpoch {
 
                 if unacked.in_flight {
                     lost_bytes += unacked.size;
+
+                    if unacked.ack_eliciting {
+                        // Packets are visited in packet number order, so this
+                        // records the span the lost packets were sent over.
+                        first_lost_ack_eliciting.get_or_insert(unacked.time_sent);
+                        last_lost_ack_eliciting = Some(unacked.time_sent);
+                        lost_ack_eliciting += 1;
+                    }
 
                     // Frames have already been removed from the packet, so
                     // cloning the whole packet should be relatively cheap.
@@ -300,6 +321,9 @@ impl RecoveryEpoch {
             lost_packets,
             lost_bytes,
             pmtud_lost_bytes,
+            first_lost_ack_eliciting,
+            last_lost_ack_eliciting,
+            lost_ack_eliciting,
         }
     }
 
@@ -529,6 +553,43 @@ impl LegacyRecovery {
         }
     }
 
+    // https://www.rfc-editor.org/rfc/rfc9002.html#section-7.6.2
+    fn in_persistent_congestion(&self, first: Instant, last: Instant) -> bool {
+        // The duration is derived from the RTT, so it cannot be established
+        // before the first RTT sample.
+        if !self.rtt_stats.has_first_rtt_sample {
+            return false;
+        }
+
+        // https://www.rfc-editor.org/rfc/rfc9002.html#section-7.6.1
+        let duration = (self.rtt_stats.smoothed_rtt +
+            cmp::max(self.rtt_stats.rttvar * 4, GRANULARITY) +
+            self.rtt_stats.max_ack_delay) *
+            PERSISTENT_CONGESTION_THRESHOLD;
+
+        if last.saturating_duration_since(first) <= duration {
+            return false;
+        }
+
+        // Across all packet number spaces, none of the packets sent between the
+        // two may have been acknowledged.
+        !self.epochs.iter().any(|epoch| {
+            epoch.sent_packets.iter().any(|pkt| {
+                pkt.time_acked.is_some() &&
+                    pkt.time_sent > first &&
+                    pkt.time_sent < last
+            })
+        })
+    }
+
+    fn on_persistent_congestion(&mut self) {
+        self.congestion.congestion_window =
+            self.max_datagram_size * MINIMUM_WINDOW_PACKETS;
+        self.congestion.congestion_recovery_start_time = None;
+        self.congestion.bytes_acked_sl = 0;
+        self.congestion.bytes_acked_ca = 0;
+    }
+
     fn detect_lost_packets(
         &mut self, epoch: Epoch, now: Instant, trace_id: &str,
     ) -> (usize, usize) {
@@ -559,6 +620,19 @@ impl LegacyRecovery {
             self.bytes_in_flight
                 .saturating_subtract(loss.lost_bytes, now);
         };
+
+        // https://www.rfc-editor.org/rfc/rfc9002.html#section-7.6
+        // Losing every packet sent over a long enough period means the network
+        // is in persistent congestion and the window collapses.
+        if loss.lost_ack_eliciting >= 2 {
+            if let (Some(first), Some(last)) =
+                (loss.first_lost_ack_eliciting, loss.last_lost_ack_eliciting)
+            {
+                if self.in_persistent_congestion(first, last) {
+                    self.on_persistent_congestion();
+                }
+            }
+        }
 
         self.bytes_in_flight
             .saturating_subtract(loss.pmtud_lost_bytes, now);
