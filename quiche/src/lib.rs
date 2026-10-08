@@ -8400,18 +8400,23 @@ impl<F: BufFactory> Connection<F> {
                     "ACK frames should always have at least one ack range",
                 );
 
-                for (_, p) in self.paths.iter_mut() {
-                    if self.pkt_num_spaces[epoch]
-                        .largest_tx_pkt_num
-                        .is_some_and(|largest_sent| largest_sent < largest_acked)
-                    {
-                        // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
-                        // An endpoint SHOULD treat receipt of an acknowledgment
-                        // for a packet it did not send as
-                        // a connection error of type PROTOCOL_VIOLATION
-                        return Err(Error::InvalidAckRange);
-                    }
+                if self.pkt_num_spaces[epoch]
+                    .largest_tx_pkt_num
+                    .is_none_or(|largest_sent| largest_sent < largest_acked)
+                {
+                    // RFC 9000 Section 13.1: an ACK cannot exceed the largest
+                    // packet number sent in this space, across all paths.
+                    return Err(Error::InvalidAckRange);
+                }
 
+                // Every path must see the same skipped number before the
+                // connection clears its optimistic-ACK validation marker.
+                let skip_pn = self.pkt_num_manager.skip_pn();
+                if skip_pn.is_some_and(|pn| ranges.contains(pn)) {
+                    return Err(Error::OptimisticAckDetected);
+                }
+
+                for (_, p) in self.paths.iter_mut() {
                     if is_app_limited {
                         p.recovery.delivery_rate_update_app_limited(true);
                     }
@@ -8427,27 +8432,20 @@ impl<F: BufFactory> Connection<F> {
                         epoch,
                         handshake_status,
                         now,
-                        self.pkt_num_manager.skip_pn(),
+                        skip_pn,
                         &self.trace_id,
                     )?;
-
-                    let skip_pn = self.pkt_num_manager.skip_pn();
-                    let largest_acked =
-                        p.recovery.get_largest_acked_on_epoch(epoch);
-
-                    // A higher ACK validates `skip_pn`.
-                    if let Some((largest_acked, skip_pn)) =
-                        largest_acked.zip(skip_pn)
-                    {
-                        if largest_acked > skip_pn {
-                            self.pkt_num_manager.set_skip_pn(None);
-                        }
-                    }
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
                     self.acked_bytes += acked_bytes as u64;
                     self.spurious_lost_count += spurious_losses;
+                }
+
+                // A higher ACK validates the marker, but recovery keeps the
+                // gap until it no longer affects packet-threshold distance.
+                if skip_pn.is_some_and(|pn| largest_acked > pn) {
+                    self.pkt_num_manager.set_skip_pn(None);
                 }
             },
 

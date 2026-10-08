@@ -848,6 +848,315 @@ mod tests {
     use smallvec::smallvec;
     use std::str::FromStr;
 
+    /// quiche skips a packet number now and then to detect optimistic ACKs.
+    /// That gap is not reordering, so it must not bring a packet closer to the
+    /// packet reordering threshold. RFC 9002 Appendix A.10 notes that the
+    /// packet-number comparison assumes no sender-induced gaps.
+    #[rstest]
+    fn skipped_pkt_num_does_not_count_toward_pkt_thresh(
+        #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+
+        let now = Instant::now();
+        let mut r = Recovery::new(&cfg);
+
+        // Packet number 2 is skipped, so only two packets follow packet 0.
+        for pkt_num in [0, 1, 3] {
+            r.on_packet_sent(
+                test_utils::helper_packet_sent(pkt_num, now, 1000),
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        let mut acked = RangeSet::default();
+        acked.insert(3..4);
+        let outcome = r
+            .on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                Some(2),
+                "",
+            )
+            .unwrap();
+        assert_eq!(outcome.lost_packets, 0);
+
+        // A third packet after packet 0 does reach the threshold.
+        r.on_packet_sent(
+            test_utils::helper_packet_sent(4, now, 1000),
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        let mut acked = RangeSet::default();
+        acked.insert(3..5);
+        let outcome = r
+            .on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                Some(2),
+                "",
+            )
+            .unwrap();
+        assert_eq!(outcome.lost_packets, 1);
+    }
+
+    #[rstest]
+    fn sender_gap_does_not_shorten_packet_threshold(
+        #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+
+        let now = Instant::now();
+        let epoch = packet::Epoch::Application;
+        let handshake_status = HandshakeStatus::default();
+        let mut r = Recovery::new(&cfg);
+
+        for pkt_num in [0, 1, 3] {
+            r.on_packet_sent(
+                test_utils::helper_packet_sent(pkt_num, now, 1000),
+                epoch,
+                handshake_status,
+                now,
+                "",
+            );
+        }
+
+        let mut acked = RangeSet::default();
+        acked.insert(3..4);
+        let outcome = r
+            .on_ack_received(&acked, 0, epoch, handshake_status, now, Some(2), "")
+            .unwrap();
+        assert_eq!(outcome.lost_packets, 0);
+
+        // Once the connection validates ACK 3, it clears the optimistic-ACK
+        // marker. Recovery must still remember the gap for older packets.
+        for pkt_num in [4, 5] {
+            r.on_packet_sent(
+                test_utils::helper_packet_sent(pkt_num, now, 1000),
+                epoch,
+                handshake_status,
+                now,
+                "",
+            );
+            acked.insert(pkt_num..pkt_num + 1);
+            let outcome = r
+                .on_ack_received(
+                    &acked,
+                    0,
+                    epoch,
+                    handshake_status,
+                    now,
+                    None,
+                    "",
+                )
+                .unwrap();
+
+            // ACK 4 loses packet 0 only; packet 1 needs ACK 5 to reach three
+            // actually sent packets after it. Time has not advanced.
+            assert_eq!(outcome.lost_packets, 1);
+            assert_eq!(outcome.lost_bytes, 1000);
+            assert_eq!(outcome.acked_bytes, 1000);
+        }
+        assert_eq!(r.bytes_in_flight(), 0);
+    }
+
+    #[rstest]
+    fn multiple_sender_gaps_do_not_shorten_packet_threshold(
+        #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+
+        let now = Instant::now();
+        let epoch = packet::Epoch::Application;
+        let handshake_status = HandshakeStatus::default();
+        let mut r = Recovery::new(&cfg);
+
+        for pkt_num in [0, 1, 3] {
+            r.on_packet_sent(
+                test_utils::helper_packet_sent(pkt_num, now, 1000),
+                epoch,
+                handshake_status,
+                now,
+                "",
+            );
+        }
+
+        let mut acked = RangeSet::default();
+        acked.insert(3..4);
+        // Duplicate ACKs must not record the same gap more than once.
+        for _ in 0..2 {
+            let outcome = r
+                .on_ack_received(
+                    &acked,
+                    0,
+                    epoch,
+                    handshake_status,
+                    now,
+                    Some(2),
+                    "",
+                )
+                .unwrap();
+            assert_eq!(outcome.lost_packets, 0);
+        }
+
+        // Skip packet 4 as well, before packet 1 crosses the threshold.
+        for (pkt_num, skip_pn) in [(5, Some(4)), (6, None)] {
+            r.on_packet_sent(
+                test_utils::helper_packet_sent(pkt_num, now, 1000),
+                epoch,
+                handshake_status,
+                now,
+                "",
+            );
+            acked.insert(pkt_num..pkt_num + 1);
+            let outcome = r
+                .on_ack_received(
+                    &acked,
+                    0,
+                    epoch,
+                    handshake_status,
+                    now,
+                    skip_pn,
+                    "",
+                )
+                .unwrap();
+
+            // ACK 5 loses packet 0 only. ACK 6 then loses packet 1.
+            assert_eq!(outcome.lost_packets, 1);
+            assert_eq!(outcome.lost_bytes, 1000);
+            assert_eq!(outcome.acked_bytes, 1000);
+        }
+        assert_eq!(r.bytes_in_flight(), 0);
+    }
+
+    #[rstest]
+    fn cross_path_ack_marks_control_frame_lost(
+        #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+
+        let now = Instant::now();
+        let epoch = packet::Epoch::Application;
+        let handshake_status = HandshakeStatus::default();
+        let mut path_a = Recovery::new(&cfg);
+        let mut path_b = Recovery::new(&cfg);
+
+        let mut sent = test_utils::helper_packet_sent(0, now, 1000);
+        sent.frames.push(frame::Frame::MaxData { max: 100 });
+        sent.has_data = false;
+        path_a.on_packet_sent(sent, epoch, handshake_status, now, "");
+        for pkt_num in 1..=3 {
+            path_b.on_packet_sent(
+                test_utils::helper_packet_sent(pkt_num, now, 1000),
+                epoch,
+                handshake_status,
+                now,
+                "",
+            );
+        }
+
+        // ACK ranges are validated by the connection and passed to each
+        // path's recovery. Only path B has a newly acknowledged packet.
+        let mut acked = RangeSet::default();
+        acked.insert(3..4);
+        let outcome = path_b
+            .on_ack_received(&acked, 0, epoch, handshake_status, now, None, "")
+            .unwrap();
+        assert_eq!(outcome.acked_bytes, 1000);
+        assert_eq!(outcome.lost_packets, 0);
+
+        let outcome = path_a
+            .on_ack_received(&acked, 0, epoch, handshake_status, now, None, "")
+            .unwrap();
+        assert_eq!(outcome.acked_bytes, 0);
+        assert_eq!(outcome.lost_packets, 1);
+        assert_eq!(outcome.lost_bytes, 1000);
+        assert_eq!(path_a.bytes_in_flight(), 0);
+        assert!(matches!(
+            path_a.next_lost_frame(epoch),
+            Some(frame::Frame::MaxData { max: 100 })
+        ));
+        assert!(path_a.next_lost_frame(epoch).is_none());
+
+        // Repeated ACKs must not requeue the same lost control frame.
+        let outcome = path_a
+            .on_ack_received(&acked, 0, epoch, handshake_status, now, None, "")
+            .unwrap();
+        assert_eq!(outcome.lost_packets, 0);
+        assert!(path_a.next_lost_frame(epoch).is_none());
+    }
+    #[rstest]
+    fn invalid_ack_does_not_mutate_recovery(
+        #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+
+        let now = Instant::now();
+        let epoch = packet::Epoch::Application;
+        let handshake_status = HandshakeStatus::default();
+        let mut r = Recovery::new(&cfg);
+        let mut sent = test_utils::helper_packet_sent(0, now, 1000);
+        sent.frames.push(frame::Frame::MaxData { max: 100 });
+        r.on_packet_sent(sent, epoch, handshake_status, now, "");
+        let timer = r.loss_detection_timer();
+
+        // The first range acknowledges a real packet; the second includes
+        // the deliberately skipped number. Reject the entire ACK before
+        // processing either range.
+        let mut acked = RangeSet::default();
+        acked.insert(0..1);
+        acked.insert(2..3);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                0,
+                epoch,
+                handshake_status,
+                now,
+                Some(2),
+                "",
+            ),
+            Err(crate::Error::OptimisticAckDetected)
+        );
+        assert_eq!(r.bytes_in_flight(), 1000);
+        assert_eq!(r.in_flight_count(epoch), 1);
+        assert_eq!(r.sent_packets_len(epoch), 1);
+        assert_eq!(r.get_largest_acked_on_epoch(epoch), None);
+        assert_eq!(r.loss_detection_timer(), timer);
+        assert!(r.next_acked_frame(epoch).is_none());
+        assert!(r.next_lost_frame(epoch).is_none());
+
+        // A subsequent valid ACK must still acknowledge the original packet.
+        let mut acked = RangeSet::default();
+        acked.insert(0..1);
+        let outcome = r
+            .on_ack_received(&acked, 0, epoch, handshake_status, now, Some(2), "")
+            .unwrap();
+        assert_eq!(outcome.acked_bytes, 1000);
+        assert_eq!(outcome.lost_packets, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
+        assert!(matches!(
+            r.next_acked_frame(epoch),
+            Some(frame::Frame::MaxData { max: 100 })
+        ));
+    }
     fn recovery_for_alg(algo: CongestionControlAlgorithm) -> Recovery {
         let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
         cfg.set_cc_algorithm(algo);
@@ -2456,7 +2765,9 @@ mod tests {
         assert_eq!(r.sent_packets_len(epoch), 0);
         assert_eq!(r.bytes_in_flight(), 0);
 
-        assert_eq!(r.get_largest_acked_on_epoch(epoch).unwrap(), 3);
+        // The connection validates the range globally, so packets through 9
+        // can have been acknowledged on another path.
+        assert_eq!(r.get_largest_acked_on_epoch(epoch).unwrap(), 9);
         assert_eq!(r.largest_sent_pkt_num_on_path(epoch).unwrap(), 3);
     }
 
