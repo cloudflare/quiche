@@ -242,7 +242,7 @@ impl ClientHooks {
             let _ = body_writer.send(send.clone());
             driver
                 .waiting_streams
-                .push(stream_ctx.wait_for_recv(stream_id));
+                .push(stream_ctx.wait_for_recv(stream_id))?;
         }
 
         driver.insert_stream(stream_id, stream_ctx);
