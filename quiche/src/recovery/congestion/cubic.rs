@@ -757,6 +757,7 @@ mod tests {
             // To exit from recovery
             time_sent: sender.time + rtt,
             size,
+            in_flight: true,
             delivered: 0,
             delivered_time: sender.time,
             first_sent_time: sender.time,

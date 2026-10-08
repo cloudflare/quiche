@@ -72,6 +72,10 @@ fn on_packets_acked(
 fn on_packet_acked(
     r: &mut Congestion, packet: &Acked, now: Instant, rtt_stats: &RttStats,
 ) {
+    if !packet.in_flight {
+        return;
+    }
+
     if r.in_congestion_recovery(packet.time_sent) {
         return;
     }
@@ -220,6 +224,36 @@ mod tests {
 
         // Acked 3 packets.
         assert_eq!(sender.congestion_window, cwnd_prev + size * 3);
+    }
+
+    #[test]
+    fn reno_ignores_non_in_flight_ack() {
+        let mut sender = test_sender();
+        let size = sender.max_datagram_size;
+
+        for _ in 0..sender.initial_congestion_window_packets {
+            sender.send_packet(size);
+        }
+
+        let cwnd_prev = sender.congestion_window;
+        let now = sender.time;
+
+        sender.inject_ack(
+            Acked {
+                pkt_num: 0,
+                time_sent: now,
+                size,
+                in_flight: false,
+                rtt: Duration::ZERO,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+            },
+            now,
+        );
+
+        assert_eq!(sender.congestion_window, cwnd_prev);
     }
 
     #[test]
