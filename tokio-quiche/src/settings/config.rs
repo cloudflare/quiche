@@ -33,9 +33,11 @@ use std::time::Duration;
 use qlog::writer::QlogCompression;
 
 use crate::quic::ConnectionHook;
+use crate::quic::RETRY_TOKEN_SECRET_LEN;
 use crate::result::QuicResult;
 use crate::settings::CertificateKind;
 use crate::settings::ConnectionParams;
+use crate::settings::RetryTokenSecret;
 use crate::settings::TlsCertificatePaths;
 use crate::socket::SocketCapabilities;
 
@@ -48,6 +50,7 @@ const KEYLOGFILE_ENABLED: bool =
 pub(crate) struct Config {
     pub quiche_config: quiche::Config,
     pub disable_client_ip_validation: bool,
+    pub retry_token_key: Option<[u8; RETRY_TOKEN_SECRET_LEN]>,
     pub qlog_dir: Option<String>,
     pub qlog_compression: QlogCompression,
     pub has_gso: bool,
@@ -103,6 +106,10 @@ impl Config {
             quiche_config: make_quiche_config(params, keylog_file.is_some())?,
             disable_client_ip_validation: quic_settings
                 .disable_client_ip_validation,
+            retry_token_key: quic_settings
+                .retry_token_secret
+                .as_ref()
+                .map(RetryTokenSecret::key),
             qlog_dir: quic_settings.qlog_dir.clone(),
             qlog_compression: quic_settings.qlog_compression,
             has_gso,

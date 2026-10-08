@@ -92,7 +92,7 @@ pin-project = { workspace = true }
 qlog = { workspace = true, features = ["foundations"] }
 quiche = { workspace = true, features = ["boringssl-boring-crate", "qlog"] }
 serde = { workspace = true, features = ["derive", "rc"] }
-serde_with = { workspace = true }
+serde_with = { workspace = true, features = ["hex"] }
 slog-scope = { workspace = true }
 slog-stdlog = { workspace = true }
 smallvec = { workspace = true }

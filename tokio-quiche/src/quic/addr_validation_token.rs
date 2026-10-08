@@ -24,6 +24,10 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+//! Generation and validation of QUIC stateless [RETRY] tokens.
+//!
+//! [RETRY]: https://datatracker.ietf.org/doc/html/rfc9000#section-17.2.5
+
 use quiche::ConnectionId;
 use std::io::Write;
 use std::io::{
@@ -34,16 +38,31 @@ use std::net::SocketAddr;
 
 use crate::QuicResultExt;
 
-const HMAC_KEY_LEN: usize = 32;
+/// The length in bytes of the HMAC-SHA256 signing key used by
+/// [`AddrValidationTokenManager`].
+pub const RETRY_TOKEN_SECRET_LEN: usize = 32;
+
 const HMAC_TAG_LEN: usize = 32;
 
-pub(crate) struct AddrValidationTokenManager {
-    sign_key: [u8; HMAC_KEY_LEN],
+/// Signs and validates QUIC stateless [RETRY] tokens.
+///
+/// A token binds the client's IP address and the original destination
+/// connection ID with an HMAC-SHA256 tag, computed with the manager's
+/// signing key. The key is the only secret material involved: managers
+/// sharing the same key can validate each other's tokens.
+///
+/// [RETRY]: https://datatracker.ietf.org/doc/html/rfc9000#section-17.2.5
+pub struct AddrValidationTokenManager {
+    sign_key: [u8; RETRY_TOKEN_SECRET_LEN],
 }
 
 impl Default for AddrValidationTokenManager {
+    /// Creates a manager with a random signing key. Each call generates a
+    /// distinct key, so tokens can only be validated by the listener that
+    /// owns this manager. Use [`AddrValidationTokenManager::new`] to share
+    /// a key between multiple listeners or servers.
     fn default() -> Self {
-        let mut key_bytes = [0; HMAC_KEY_LEN];
+        let mut key_bytes = [0; RETRY_TOKEN_SECRET_LEN];
         boring::rand::rand_bytes(&mut key_bytes).unwrap();
 
         AddrValidationTokenManager {
@@ -53,9 +72,22 @@ impl Default for AddrValidationTokenManager {
 }
 
 impl AddrValidationTokenManager {
-    pub(super) fn gen(
-        &self, original_dcid: &[u8], client_addr: SocketAddr,
-    ) -> Vec<u8> {
+    /// Creates a manager that signs and validates retry tokens with the
+    /// given key.
+    ///
+    /// All managers constructed with the same key can validate each other's
+    /// tokens, which allows token generation and validation to be performed
+    /// by different servers, e.g., a network front end issuing [RETRY]
+    /// packets on behalf of the servers that terminate the connections.
+    ///
+    /// [RETRY]: https://datatracker.ietf.org/doc/html/rfc9000#section-17.2.5
+    pub fn new(sign_key: [u8; RETRY_TOKEN_SECRET_LEN]) -> Self {
+        AddrValidationTokenManager { sign_key }
+    }
+
+    /// Generates a retry token for the given client address, embedding the
+    /// original destination connection ID.
+    pub fn gen(&self, original_dcid: &[u8], client_addr: SocketAddr) -> Vec<u8> {
         let ip_bytes = match client_addr.ip() {
             IpAddr::V4(addr) => addr.octets().to_vec(),
             IpAddr::V6(addr) => addr.octets().to_vec(),
@@ -80,7 +112,13 @@ impl AddrValidationTokenManager {
         token.into_inner()
     }
 
-    pub(super) fn validate_and_extract_original_dcid<'t>(
+    /// Validates a retry token received from the given client address and
+    /// extracts the original destination connection ID it carries.
+    ///
+    /// Returns an error if the token is malformed, fails signature
+    /// validation with this manager's key, or was issued for a different
+    /// client IP address.
+    pub fn validate_and_extract_original_dcid<'t>(
         &self, token: &'t [u8], client_addr: SocketAddr,
     ) -> io::Result<ConnectionId<'t>> {
         let ip_bytes = match client_addr.ip() {
@@ -145,23 +183,25 @@ mod tests {
 
     #[test]
     fn validate() {
-        let manager = AddrValidationTokenManager::default();
+        let key = [42u8; RETRY_TOKEN_SECRET_LEN];
+        let issuer = AddrValidationTokenManager::new(key);
+        let validator = AddrValidationTokenManager::new(key);
 
         let addr = "127.0.0.1:1337".parse().unwrap();
-        let token = manager.gen(b"foo", addr);
+        let token = issuer.gen(b"foo", addr);
 
         assert_eq!(
-            manager
+            validator
                 .validate_and_extract_original_dcid(&token, addr)
                 .unwrap(),
             ConnectionId::from_ref(b"foo")
         );
 
         let addr = "[::1]:1338".parse().unwrap();
-        let token = manager.gen(b"barbaz", addr);
+        let token = issuer.gen(b"barbaz", addr);
 
         assert_eq!(
-            manager
+            validator
                 .validate_and_extract_original_dcid(&token, addr)
                 .unwrap(),
             ConnectionId::from_ref(b"barbaz")
@@ -223,6 +263,15 @@ mod tests {
         let mut token = manager.gen(b"foo", addr);
 
         token[..HMAC_TAG_LEN].copy_from_slice(&[1u8; HMAC_TAG_LEN]);
+
+        assert!(manager
+            .validate_and_extract_original_dcid(&token, addr)
+            .is_err());
+
+        // A token signed with a different key is rejected.
+        let token =
+            AddrValidationTokenManager::new([2u8; RETRY_TOKEN_SECRET_LEN])
+                .gen(b"foo", addr);
 
         assert!(manager
             .validate_and_extract_original_dcid(&token, addr)

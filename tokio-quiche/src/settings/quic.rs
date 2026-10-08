@@ -25,11 +25,61 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use foundations::settings::settings;
+use foundations::settings::Settings;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 use std::time::Duration;
 
+use crate::quic::RETRY_TOKEN_SECRET_LEN;
+
 pub use qlog::writer::QlogCompression;
+
+/// A 32-byte secret used to sign and validate QUIC stateless retry tokens.
+///
+/// See [`QuicSettings::retry_token_secret`].
+///
+/// In configuration files, the secret is represented as a 64-character hex
+/// string. Its [`Debug`](std::fmt::Debug) output is redacted to prevent
+/// accidental exposure in logs.
+#[serde_as]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetryTokenSecret(
+    #[serde_as(as = "serde_with::hex::Hex")] [u8; RETRY_TOKEN_SECRET_LEN],
+);
+
+impl RetryTokenSecret {
+    /// Creates a secret from its raw key bytes.
+    pub fn new(key: [u8; RETRY_TOKEN_SECRET_LEN]) -> Self {
+        Self(key)
+    }
+
+    /// Returns the raw key bytes.
+    pub fn key(&self) -> [u8; RETRY_TOKEN_SECRET_LEN] {
+        self.0
+    }
+}
+
+impl Default for RetryTokenSecret {
+    /// Generates a random secret. Note that a secret created this way is
+    /// only known to the current process; use [`RetryTokenSecret::new`] or
+    /// configuration to share a secret between servers.
+    fn default() -> Self {
+        let mut key = [0; RETRY_TOKEN_SECRET_LEN];
+        boring::rand::rand_bytes(&mut key).unwrap();
+
+        Self(key)
+    }
+}
+
+impl std::fmt::Debug for RetryTokenSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RetryTokenSecret([REDACTED])")
+    }
+}
+
+impl Settings for RetryTokenSecret {}
 
 /// QUIC configuration parameters.
 #[serde_as]
@@ -337,6 +387,30 @@ pub struct QuicSettings {
     /// Defaults to `None`.
     pub stateless_reset_token: Option<u128>,
 
+    /// Sets the secret used to sign and validate stateless [RETRY] tokens.
+    ///
+    /// When a client's initial packet does not carry a token, the server
+    /// responds with a [RETRY] packet containing a token that binds the
+    /// client's IP address and the original destination connection ID. The
+    /// client must echo this token on its next initial packet.
+    ///
+    /// By default, each listener signs tokens with its own random secret, so
+    /// tokens can only be validated by the listener that issued them.
+    /// Settings this to a shared value allows multiple listeners and
+    /// servers to validate each other's tokens, which is required when a
+    /// network frontend issues retry tokens on behalf of the backends.
+    ///
+    /// The secret must be exactly 32 bytes, encoded as a 64-character hex
+    /// string, e.g., `openssl rand -hex 32`.
+    ///
+    /// Note that this applies only to server-side connections - on client-side
+    /// connections, this is a no-op.
+    ///
+    /// Defaults to `None`.
+    ///
+    /// [RETRY]: https://datatracker.ietf.org/doc/html/rfc9000#section-17.2.5
+    pub retry_token_secret: Option<RetryTokenSecret>,
+
     /// Sets whether the QUIC connection should avoid reusing DCIDs over
     /// different paths.
     ///
@@ -517,5 +591,75 @@ mod test {
 
         assert_eq!(quic.handshake_timeout.unwrap(), Duration::from_secs(5));
         assert_eq!(quic.max_idle_timeout.unwrap(), Duration::from_secs(7));
+    }
+
+    #[test]
+    fn retry_token_secret_serde() {
+        let expected = std::array::from_fn(|i| i as u8);
+
+        let hex_variants = [
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F",
+        ];
+
+        for hex in hex_variants {
+            let settings = serde_json::from_str::<QuicSettings>(&format!(
+                r#"{{ "retry_token_secret": "{hex}" }}"#
+            ))
+            .unwrap();
+            let secret = settings.retry_token_secret.unwrap();
+
+            assert_eq!(secret.key(), expected);
+
+            assert_eq!(
+                serde_json::to_string(&secret).unwrap(),
+                "\"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\"",
+            );
+        }
+
+        // A missing secret defaults to none.
+        let settings = serde_json::from_str::<QuicSettings>(r#"{}"#).unwrap();
+
+        assert!(settings.retry_token_secret.is_none());
+    }
+
+    #[test]
+    fn retry_token_secret_rejects_invalid_input() {
+        let invalid_values: Vec<String> = vec![
+            "".into(),
+            "00".into(),
+            "zz".into(),
+            "0".repeat(63),
+            "0".repeat(65),
+            "z".repeat(64),
+        ];
+
+        for value in &invalid_values {
+            let json = format!(r#"{{ "retry_token_secret": "{value}" }}"#);
+
+            assert!(
+                serde_json::from_str::<QuicSettings>(&json).is_err(),
+                "expected '{value}' to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn retry_token_secret_debug_is_redacted() {
+        let hex =
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+        let settings = serde_json::from_str::<QuicSettings>(&format!(
+            r#"{{ "retry_token_secret": "{hex}" }}"#
+        ))
+        .unwrap();
+
+        assert_eq!(
+            format!("{:?}", settings.retry_token_secret.as_ref().unwrap()),
+            "RetryTokenSecret([REDACTED])"
+        );
+
+        // The secret must not leak through the derived Debug output of the
+        // settings struct.
+        assert!(!format!("{settings:?}").contains("00010203"));
     }
 }
