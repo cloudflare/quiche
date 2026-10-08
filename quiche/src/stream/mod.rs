@@ -443,6 +443,10 @@ impl<F: BufFactory> StreamMap<F> {
     pub fn remove_writable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
         if priority_key.stopped_writable.is_linked() {
             let ptr = Arc::as_ptr(priority_key);
+            // SAFETY: `priority_key` originates from this `StreamMap`, and its
+            // `stopped_writable` link is only inserted into this map's
+            // corresponding tree. The link is linked, and the `Arc` keeps the
+            // allocation alive, so `ptr` identifies an element of this tree.
             let mut c = unsafe { self.stopped_writable.cursor_mut_from_ptr(ptr) };
             c.remove();
         }
@@ -630,7 +634,9 @@ impl<F: BufFactory> StreamMap<F> {
 
     /// Updates stream state before its STOP error is returned to the caller.
     pub fn mark_stop_reported(&mut self, stream_id: u64) {
-        let stream = self.streams.get_mut(&stream_id).unwrap();
+        let Some(stream) = self.streams.get_mut(&stream_id) else {
+            return;
+        };
         stream.send.mark_stop_reported();
 
         if stream.is_collectable() {
