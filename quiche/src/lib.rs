@@ -1145,6 +1145,10 @@ impl Config {
     /// The default is `usize::MAX`. Other congestion control algorithms ignore
     /// this setting. Recovery probes can temporarily bypass this window.
     ///
+    /// Values are not clamped. Zero can prevent connection establishment, and
+    /// windows too small for outgoing packets or PMTU probes can stall
+    /// transmission. At least two maximum-sized datagrams are recommended.
+    ///
     /// This API is available even when the
     /// `congestion_window_unchecked_available` feature is disabled, in which
     /// case the setting has no effect.

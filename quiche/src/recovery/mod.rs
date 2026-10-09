@@ -372,6 +372,10 @@ impl Recovery {
 ///
 /// This enum provides currently available list of congestion control
 /// algorithms.
+///
+/// The `congestion_window_unchecked_available` Cargo feature adds a variant to
+/// this enum. Cargo can enable it through another dependency, so exhaustive
+/// matches must account for the feature-enabled enum.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
@@ -386,9 +390,18 @@ pub enum CongestionControlAlgorithm {
     /// The window defaults to `usize::MAX` and can be set through
     /// [`Config::set_unchecked_congestion_window()`]. ACK processing, RTT
     /// estimation, loss detection, and recovery remain enabled. The default
-    /// window provides no congestion-window protection and makes optimistic-ACK
-    /// probes extremely infrequent.
+    /// window provides no congestion-window protection and, on 64-bit targets,
+    /// effectively disables packet-skipping optimistic-ACK probes.
+    ///
+    /// This intentionally bypasses adaptive congestion control ([RFC 9002,
+    /// Section 7]) and does not pace packets. Callers must provide their own
+    /// transmission constraints and pace or limit bursts ([RFC 9002,
+    /// Section 7.7]).
+    ///
     /// `congestion_window_unchecked` in string form.
+    ///
+    /// [RFC 9002, Section 7]: https://www.rfc-editor.org/rfc/rfc9002.html#section-7
+    /// [RFC 9002, Section 7.7]: https://www.rfc-editor.org/rfc/rfc9002.html#section-7.7
     #[cfg(feature = "congestion_window_unchecked_available")]
     #[cfg_attr(
         docsrs,
@@ -979,24 +992,36 @@ mod tests {
     #[cfg(feature = "congestion_window_unchecked_available")]
     #[test]
     fn congestion_window_unchecked_discards_packet_space() {
-        let mut recovery = recovery_for_alg(
+        let mut config = Config::new(crate::PROTOCOL_VERSION)
+            .expect("create transport configuration");
+        config.set_cc_algorithm(
             CongestionControlAlgorithm::CongestionWindowUnchecked,
         );
+        let packet_size = config.max_send_udp_payload_size;
+        let window = packet_size * MINIMUM_WINDOW_PACKETS;
+        config.set_unchecked_congestion_window(window);
+        let mut recovery = Recovery::new(&config);
         let now = Instant::now();
+        assert_eq!(recovery.cwnd(), window);
+        assert_eq!(recovery.cwnd_available(), window);
         recovery.on_packet_sent(
-            test_utils::helper_packet_sent(0, now, 1_200),
+            test_utils::helper_packet_sent(0, now, packet_size),
             packet::Epoch::Initial,
             HandshakeStatus::default(),
             now,
             "",
         );
-        assert_eq!(recovery.bytes_in_flight(), 1_200);
+        assert_eq!(recovery.bytes_in_flight(), packet_size);
+        assert_eq!(recovery.cwnd(), window);
+        assert_eq!(recovery.cwnd_available(), window - packet_size);
         recovery.on_pkt_num_space_discarded(
             packet::Epoch::Initial,
             HandshakeStatus::default(),
             now + Duration::from_secs(1),
         );
         assert_eq!(recovery.bytes_in_flight(), 0);
+        assert_eq!(recovery.cwnd(), window);
+        assert_eq!(recovery.cwnd_available(), window);
     }
 
     #[cfg(feature = "congestion_window_unchecked_available")]
