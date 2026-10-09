@@ -237,7 +237,7 @@ impl ServerHooks {
 
         driver
             .waiting_streams
-            .push(stream_ctx.wait_for_recv(stream_id));
+            .push(stream_ctx.wait_for_recv(stream_id))?;
         driver.insert_stream(stream_id, stream_ctx);
 
         // A STOP_SENDING received before HEADERS had no stream context for
@@ -326,6 +326,14 @@ impl DriverHooks for ServerHooks {
         }
 
         Self::handle_request(driver, qconn, headers)
+    }
+
+    fn stream_recv_closed(_driver: &mut H3Driver<Self>, _stream_id: u64) {}
+
+    fn stream_closed(driver: &mut H3Driver<Self>, stream_id: u64) {
+        let _ = driver
+            .h3_event_sender
+            .send(H3Event::StreamClosed { stream_id }.into());
     }
 
     fn conn_command(

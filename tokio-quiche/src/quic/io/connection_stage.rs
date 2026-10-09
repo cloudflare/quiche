@@ -27,13 +27,10 @@
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
-use std::time::Instant;
 
 use tokio::sync::mpsc;
 
 use crate::quic::connection::ApplicationOverQuic;
-use crate::quic::connection::HandshakeError;
-use crate::quic::connection::HandshakeInfo;
 use crate::quic::connection::Incoming;
 use crate::quic::connection::QuicConnectionStatsShared;
 use crate::quic::hooks::ConnectionHook;
@@ -66,16 +63,6 @@ pub trait ConnectionStage: Send + Debug {
     ) -> ControlFlow<QuicResult<()>> {
         ControlFlow::Continue(())
     }
-
-    fn wait_deadline(&mut self) -> Option<Instant> {
-        None
-    }
-
-    fn post_wait(
-        &self, _qconn: &mut QuicheConnection,
-    ) -> ControlFlow<QuicResult<()>> {
-        ControlFlow::Continue(())
-    }
 }
 
 /// Global context shared across all [ConnectionStage]s for a given connection
@@ -88,26 +75,7 @@ pub struct ConnectionStageContext<A> {
 }
 
 #[derive(Debug)]
-pub struct Handshake {
-    pub handshake_info: HandshakeInfo,
-}
-
-impl Handshake {
-    fn check_handshake_timeout_expired(
-        &self, conn: &mut QuicheConnection,
-    ) -> QuicResult<()> {
-        if self.handshake_info.is_expired() {
-            let _ = conn.close(
-                false,
-                quiche::WireErrorCode::ApplicationError as u64,
-                &[],
-            );
-            return Err(HandshakeError::Timeout.into());
-        }
-
-        Ok(())
-    }
-}
+pub struct Handshake;
 
 impl ConnectionStage for Handshake {
     fn on_flush<A: ApplicationOverQuic>(
@@ -120,19 +88,6 @@ impl ConnectionStage for Handshake {
             ControlFlow::Break(Ok(()))
         } else {
             ControlFlow::Continue(())
-        }
-    }
-
-    fn wait_deadline(&mut self) -> Option<Instant> {
-        self.handshake_info.deadline()
-    }
-
-    fn post_wait(
-        &self, qconn: &mut QuicheConnection,
-    ) -> ControlFlow<QuicResult<()>> {
-        match self.check_handshake_timeout_expired(qconn) {
-            Ok(_) => ControlFlow::Continue(()),
-            Err(e) => ControlFlow::Break(Err(e)),
         }
     }
 }

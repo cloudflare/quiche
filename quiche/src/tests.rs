@@ -1689,6 +1689,8 @@ fn flow_control_empty_stream_frame_after_shutdown(
 fn zero_length_stream_frame_not_sent(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
+    const STREAM_ID: u64 = 1 << 14;
+
     let mut buf = [0; 65535];
 
     let mut config = Config::new(PROTOCOL_VERSION).unwrap();
@@ -1705,25 +1707,25 @@ fn zero_length_stream_frame_not_sent(
     config.set_initial_max_data(4_000_000_000);
     config.set_initial_max_stream_data_bidi_local(2_000_000_000);
     config.set_initial_max_stream_data_bidi_remote(2_000_000_000);
-    config.set_initial_max_streams_bidi(20);
+    config.set_initial_max_streams_bidi((STREAM_ID >> 2) + 1);
     config.verify_peer(false);
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
-    // Only a STREAM header longer than MAX_STREAM_OVERHEAD can leave room for
-    // the header but not the payload, which needs an eight-byte offset varint.
-    // Seed the offset rather than transferring a gigabyte.
-    assert_eq!(pipe.client.stream_send(64, b"", false), Ok(0));
+    // Use four-byte stream ID and eight-byte offset varints, producing a
+    // 15-byte STREAM header. Seed the offset rather than transferring a
+    // gigabyte.
+    assert_eq!(pipe.client.stream_send(STREAM_ID, b"", false), Ok(0));
     pipe.client
         .streams
-        .get_mut(64)
+        .get_mut(STREAM_ID)
         .unwrap()
         .send
         .seed_offsets_for_test(1 << 30);
 
     let data = [0xa; 4096];
-    assert_eq!(pipe.client.stream_send(64, &data, false), Ok(4096));
+    assert_eq!(pipe.client.stream_send(STREAM_ID, &data, false), Ok(4096));
 
     // Sweep output buffer sizes across the range where the packet has room
     // for the STREAM frame header but not for any payload.
@@ -1754,7 +1756,7 @@ fn zero_length_stream_frame_not_sent(
     assert_eq!(pipe.advance(), Ok(()));
 
     assert_eq!(
-        pipe.server.streams.get(64).unwrap().recv.max_off(),
+        pipe.server.streams.get(STREAM_ID).unwrap().recv.max_off(),
         (1 << 30) + 4096
     );
 }
@@ -8559,6 +8561,18 @@ fn early_retransmit(
             .loss_probes(epoch),
         1,
     );
+    // The PTO exception is local to packet generation. Other users, including
+    // send-capacity and PMTUD calculations, observe the actual congestion
+    // window.
+    assert_ne!(
+        pipe.client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .cwnd_available(),
+        usize::MAX,
+    );
 
     // Client retransmits stream data in PTO probe.
     let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -8588,6 +8602,76 @@ fn early_retransmit(
         })
     );
     assert_eq!(pipe.client.stats().retrans, 1);
+}
+
+#[rstest]
+fn pto_probe_not_stranded_by_earlier_epoch_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(0, 1, 2_400)] remaining_cwnd: usize,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    // Advance until the client has Application keys but retains Handshake
+    // state.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    assert!(pipe.client.is_established());
+    assert!(!pipe.client.handshake_confirmed);
+
+    // Queue Handshake CRYPTO data ahead of an Application PTO probe.
+    let handshake_send = &mut pipe.client.crypto_ctx[packet::Epoch::Handshake]
+        .crypto_stream
+        .send;
+    let handshake_len = handshake_send.off_back() as usize;
+    assert!(handshake_send.retransmit(0, handshake_len) > 0);
+
+    let active_pid = pipe.client.paths.get_active_path_id().expect("no active");
+    let handshake_status = pipe.client.handshake_status();
+    let pkt_num = pipe.client.next_pkt_num;
+    pipe.client.next_pkt_num += 1;
+    let now = Instant::now();
+    let path = pipe.client.paths.get_mut(active_pid).expect("no active");
+    let cwnd_available = path.recovery.cwnd_available();
+    assert!(cwnd_available > remaining_cwnd);
+
+    path.recovery.on_packet_sent(
+        test_utils::helper_packet_sent(
+            pkt_num,
+            now,
+            cwnd_available - remaining_cwnd,
+        ),
+        packet::Epoch::Application,
+        handshake_status,
+        now,
+        "",
+    );
+    assert_eq!(path.recovery.cwnd_available(), remaining_cwnd);
+    path.recovery.inc_loss_probes(packet::Epoch::Application);
+
+    // The Application probe bypasses cwnd instead of being stranded behind
+    // the earlier Handshake data.
+    let (ty, _) = pipe
+        .client
+        .send_single(&mut buf, active_pid, false, Instant::now())
+        .unwrap();
+    assert_eq!(ty, Type::Short);
+    assert_eq!(
+        pipe.client
+            .paths
+            .get(active_pid)
+            .expect("no active")
+            .recovery
+            .loss_probes(packet::Epoch::Application),
+        0,
+    );
 }
 
 #[rstest]
@@ -8660,6 +8744,10 @@ fn retransmit_data_acked_before_fully_retransmitted(
         0,
         "tx_buffered should be 0 after ACK"
     );
+    assert!(!pipe.client.streams.has_flushable());
+
+    assert_eq!(pipe.client.stream_send(0, b"more", false), Ok(4));
+    assert!(pipe.client.streams.has_flushable());
 }
 
 #[rstest]
@@ -9548,14 +9636,26 @@ fn app_close_by_client(
         assert!(pipe.client.is_established());
         assert!(!pipe.client.handshake_confirmed);
 
-        // Model a Handshake PTO expiring before the client closes the
-        // connection.
-        pipe.client
-            .paths
-            .get_active_mut()
-            .unwrap()
-            .recovery
-            .inc_loss_probes(packet::Epoch::Handshake);
+        // Exhaust cwnd and model a Handshake PTO expiring before the client
+        // closes the connection.
+        let active_pid = pipe.client.paths.get_active_path_id().unwrap();
+        let handshake_status = pipe.client.handshake_status();
+        let pkt_num = pipe.client.next_pkt_num;
+        pipe.client.next_pkt_num += 1;
+        let now = Instant::now();
+        let path = pipe.client.paths.get_mut(active_pid).unwrap();
+        let cwnd_available = path.recovery.cwnd_available();
+        assert!(cwnd_available > 0);
+
+        path.recovery.on_packet_sent(
+            test_utils::helper_packet_sent(pkt_num, now, cwnd_available),
+            packet::Epoch::Application,
+            handshake_status,
+            now,
+            "",
+        );
+        assert_eq!(path.recovery.cwnd_available(), 0);
+        path.recovery.inc_loss_probes(packet::Epoch::Handshake);
     } else {
         assert_eq!(pipe.handshake(), Ok(()));
     }

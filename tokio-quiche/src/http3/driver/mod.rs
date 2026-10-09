@@ -37,6 +37,7 @@ mod streams;
 pub mod test_utils;
 #[cfg(test)]
 mod tests;
+mod waiting_streams;
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -52,7 +53,6 @@ use datagram_socket::DgramBuffer;
 use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
 use futures::FutureExt;
-use futures_util::stream::FuturesUnordered;
 use quiche::h3;
 use quiche::h3::WireErrorCode;
 use tokio::select;
@@ -71,12 +71,11 @@ use self::streams::HaveUpstreamCapacity;
 use self::streams::ReceivedDownstreamData;
 use self::streams::StreamCtx;
 use self::streams::StreamReady;
-use self::streams::WaitForDownstreamData;
-use self::streams::WaitForStream;
-use self::streams::WaitForUpstreamCapacity;
+use self::waiting_streams::WaitingStreams;
 use crate::http3::settings::Http3Settings;
 use crate::http3::H3AuditStats;
 use crate::metrics::Metrics;
+use crate::quic::HandshakeError;
 use crate::quic::HandshakeInfo;
 use crate::quic::QuicCommand;
 use crate::quic::QuicheConnection;
@@ -387,7 +386,7 @@ pub struct H3Driver<H: DriverHooks> {
     /// Set of [`WaitForStream`] futures. A stream is added to this set if
     /// we need to send to it and its channel is at capacity, or if we need
     /// data from its channel and the channel is empty.
-    waiting_streams: FuturesUnordered<WaitForStream>,
+    waiting_streams: WaitingStreams,
 
     /// Receives [`OutboundFrame`]s from all datagram flows on the connection.
     dgram_recv: OutboundFrameStream,
@@ -448,7 +447,7 @@ impl<H: DriverHooks> H3Driver<H> {
                     .filter(|&size| size > 0)
                     .unwrap_or(DEFAULT_MAX_BODY_RECV_BUF_SIZE),
 
-                waiting_streams: FuturesUnordered::new(),
+                waiting_streams: WaitingStreams::new(),
 
                 settings_received_and_forwarded: false,
                 h3_event_receiver_dropped: false,
@@ -654,15 +653,17 @@ impl<H: DriverHooks> H3Driver<H> {
             StreamStatus::Reset { wire_err_code } => {
                 debug_assert!(ctx.send.is_some());
                 ctx.handle_recvd_reset(wire_err_code);
+                let cleanup = ctx.both_directions_done();
+                H::stream_recv_closed(self, stream_id);
                 self.h3_event_sender
                     .send(H3Event::ResetStream { stream_id }.into())
                     .map_err(|_| H3ConnectionError::ControllerWentAway)?;
-                if ctx.both_directions_done() {
+                if cleanup {
                     return self.cleanup_stream(qconn, stream_id);
                 }
             },
             StreamStatus::Blocked => {
-                self.waiting_streams.push(ctx.wait_for_send(stream_id));
+                self.waiting_streams.push(ctx.wait_for_send(stream_id))?;
             },
         }
 
@@ -689,6 +690,7 @@ impl<H: DriverHooks> H3Driver<H> {
         ctx.fin_or_reset_recv = true;
         ctx.audit_stats
             .set_recvd_stream_fin(StreamClosureKind::Explicit);
+        H::stream_recv_closed(self, stream_id);
 
         // It's important to send this H3Event before process_h3_data so that
         // a server can (potentially) generate the control response before the
@@ -728,26 +730,14 @@ impl<H: DriverHooks> H3Driver<H> {
             h3::Event::Reset(code) => {
                 if let Some(ctx) = self.stream_map.get_mut(&stream_id) {
                     ctx.handle_recvd_reset(code);
-                    // Close the channel if this stream is waiting. Otherwise,
-                    // `handle_recvd_reset()` already closed it.
-                    for pending in self.waiting_streams.iter_mut() {
-                        match pending {
-                            WaitForStream::Upstream(
-                                WaitForUpstreamCapacity {
-                                    stream_id: id,
-                                    chan: Some(chan),
-                                },
-                            ) if stream_id == *id => {
-                                chan.close();
-                            },
-                            _ => {},
-                        }
-                    }
+                    self.waiting_streams.cancel_upstream(stream_id);
 
+                    let cleanup = ctx.both_directions_done();
+                    H::stream_recv_closed(self, stream_id);
                     self.h3_event_sender
                         .send(H3Event::ResetStream { stream_id }.into())
                         .map_err(|_| H3ConnectionError::ControllerWentAway)?;
-                    if ctx.both_directions_done() {
+                    if cleanup {
                         return self.cleanup_stream(qconn, stream_id);
                     }
                 } else {
@@ -1078,36 +1068,15 @@ impl<H: DriverHooks> H3Driver<H> {
             stream_ctx.handle_recvd_stop_sending(code);
         }
 
-        // Find if the stream also has any pending futures associated with it
-        for pending in self.waiting_streams.iter_mut() {
-            match pending {
-                WaitForStream::Downstream(WaitForDownstreamData {
-                    stream_id: id,
-                    chan: Some(chan),
-                }) if stream_id == *id => {
-                    chan.close();
-                },
-                WaitForStream::Upstream(WaitForUpstreamCapacity {
-                    stream_id: id,
-                    chan: Some(chan),
-                }) if stream_id == *id => {
-                    chan.close();
-                },
-                _ => {},
-            }
-        }
+        self.waiting_streams.cancel_upstream(stream_id);
+        self.waiting_streams.cancel_downstream(stream_id);
 
         // Close any DATAGRAM-proxying channels associated with the stream.
         if let Some(mapped_flow_id) = stream_ctx.associated_dgram_flow_id {
             self.flow_map.remove(&mapped_flow_id);
         }
 
-        if qconn.is_server() {
-            // Signal the server to remove the stream from its map.
-            let _ = self
-                .h3_event_sender
-                .send(H3Event::StreamClosed { stream_id }.into());
-        }
+        H::stream_closed(self, stream_id);
 
         self.close_if_idle(qconn);
 
@@ -1271,21 +1240,9 @@ impl<H: DriverHooks> H3Driver<H> {
                     ctx.handle_recvd_stop_sending(e);
 
                     // An idle stream's outbound receiver can be owned by a
-                    // waiting future instead of ctx.recv. Close it so the
+                    // waiting future instead of ctx.recv. Cancel it so the
                     // application cannot send another frame.
-                    for pending in self.waiting_streams.iter_mut() {
-                        let WaitForStream::Downstream(wait) = pending else {
-                            continue;
-                        };
-
-                        if wait.stream_id != stream_id {
-                            continue;
-                        }
-
-                        if let Some(recv) = wait.chan.as_mut() {
-                            recv.close();
-                        }
-                    }
+                    self.waiting_streams.cancel_downstream(stream_id);
 
                     if ctx.both_directions_done() {
                         return self.cleanup_stream(qconn, stream_id);
@@ -1346,7 +1303,7 @@ impl<H: DriverHooks> H3Driver<H> {
                     break;
                 },
                 Err(TryRecvError::Empty) => {
-                    self.waiting_streams.push(ctx.wait_for_recv(stream_id));
+                    self.waiting_streams.push(ctx.wait_for_recv(stream_id))?;
                     break;
                 },
             }
@@ -1454,7 +1411,19 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
 
         let Some(h3_err) = work_loop_error.downcast_ref::<H3ConnectionError>()
         else {
-            log::error!("Found non-H3ConnectionError"; "error" => %work_loop_error);
+            // Errors returned by the IoWorker rather than the driver are
+            // expected and already counted in metrics:
+            // - `HandshakeError`: with 0-RTT early data, the handshake can
+            //   still fail (e.g. time out) after the application was started.
+            // - `quiche::Error`: the connection was closed by quiche, typically
+            //   because of a peer protocol violation.
+            if work_loop_error.is::<HandshakeError>() ||
+                work_loop_error.is::<quiche::Error>()
+            {
+                log::debug!("connection closed by IoWorker"; "error" => %work_loop_error);
+            } else {
+                log::error!("Found non-H3ConnectionError"; "error" => %work_loop_error);
+            }
             return;
         };
 

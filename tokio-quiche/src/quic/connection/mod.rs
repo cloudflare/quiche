@@ -67,6 +67,7 @@ use super::io::worker::IoWorkerParams;
 use super::io::worker::Running;
 use super::io::worker::RunningOrClosing;
 use super::io::worker::WriteState;
+use super::DscpHandle;
 use super::QuicheConnection;
 use crate::metrics::Metrics;
 use crate::quic::io::worker::IoWorker;
@@ -281,6 +282,15 @@ where
         (*self.params.quiche_conn).as_mut()
     }
 
+    /// Returns the outgoing DSCP handle when server marking is configured.
+    ///
+    /// Clone it before starting the handshake to update the worker's marking
+    /// from a certificate-selection callback. Until then the handle has no
+    /// per-packet override, so packets inherit the UDP socket's TOS/TClass.
+    pub fn dscp_handle(&self) -> Option<&DscpHandle> {
+        self.params.dscp_handle.as_ref()
+    }
+
     /// A handle to the [`QuicAuditStats`] for this connection.
     ///
     /// # Note
@@ -330,20 +340,20 @@ where
             stats: Arc::clone(&self.stats),
             connection_hook: self.params.connection_hook,
         };
-        let conn_stage = Handshake {
-            handshake_info: self.params.handshake_info,
-        };
+        let conn_stage = Handshake;
         let params = IoWorkerParams {
             socket: MaybeConnectedSocket::new(self.params.socket),
             shutdown_tx: self.params.shutdown_tx,
             cfg: self.params.writer_cfg,
             audit_log_stats: self.audit_log_stats,
             write_state: WriteState::default(),
+            dscp_handle: self.params.dscp_handle,
             conn_map_cmd_tx: self.params.conn_map_cmd_tx,
             cid_generator: self.params.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: self.params.init_rx_time,
             metrics: self.params.metrics.clone(),
+            handshake_info: self.params.handshake_info,
         };
 
         let handshake_fut = async move {
@@ -469,6 +479,7 @@ where
 {
     pub writer_cfg: WriterConfig,
     pub initial_pkt: Option<Incoming>,
+    pub dscp_handle: Option<DscpHandle>,
     pub shutdown_tx: mpsc::Sender<()>,
     pub conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>, /* channel that signals connection map changes */
     pub scid: ConnectionId<'static>,
