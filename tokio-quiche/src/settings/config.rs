@@ -203,6 +203,19 @@ fn make_quiche_config(
     );
     config.grease(quic_settings.grease);
     config.set_max_amplification_factor(quic_settings.max_amplification_factor);
+    // quiche disables the timeout with `0`, so round up sub-millisecond values.
+    let ack_progress_timeout_ms = match quic_settings.ack_progress_timeout {
+        Some(timeout) if !timeout.is_zero() => timeout
+            .as_millis()
+            .max(1)
+            .try_into()
+            .map_err(|_| "QuicSettings::ack_progress_timeout exceeds u64")?,
+        _ => 0,
+    };
+    config.set_ack_progress_timeout(ack_progress_timeout_ms);
+    config.set_max_outstanding_sent_packets(
+        quic_settings.max_outstanding_sent_packets,
+    );
     config.set_send_capacity_factor(quic_settings.send_capacity_factor);
     config.set_ack_delay_exponent(quic_settings.ack_delay_exponent);
     config.set_max_ack_delay(quic_settings.max_ack_delay);

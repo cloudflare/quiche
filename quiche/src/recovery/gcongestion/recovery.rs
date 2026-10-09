@@ -1095,7 +1095,6 @@ impl RecoveryOps for GRecovery {
         self.pacer.on_app_limited(self.bytes_in_flight.get())
     }
 
-    #[cfg(test)]
     fn sent_packets_len(&self, epoch: packet::Epoch) -> usize {
         self.epochs[epoch].sent_packets.len()
     }

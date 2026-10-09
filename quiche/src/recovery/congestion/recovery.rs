@@ -961,7 +961,6 @@ impl RecoveryOps for LegacyRecovery {
         )
     }
 
-    #[cfg(test)]
     fn sent_packets_len(&self, epoch: Epoch) -> usize {
         self.epochs[epoch].sent_packets.len()
     }

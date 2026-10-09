@@ -252,6 +252,18 @@ pub struct Path {
 
     /// Whether or not we should force eliciting of an ACK (e.g. via PING frame)
     pub needs_ack_eliciting: bool,
+
+    /// The last time packets in flight on this path were acknowledged, packets
+    /// were sent on this path while none were in flight, or this path became
+    /// active.
+    pub last_ack_progress: Option<Instant>,
+
+    /// The last time a packet was received on this path.
+    pub last_recv_time: Option<Instant>,
+
+    /// The largest congestion window, in packets, used to send packets on this
+    /// path.
+    pub max_cwnd_packets: usize,
 }
 
 impl Path {
@@ -320,6 +332,9 @@ impl Path {
             failure_notified: false,
             migrating: false,
             needs_ack_eliciting: false,
+            last_ack_progress: None,
+            last_recv_time: None,
+            max_cwnd_packets: 0,
         }
     }
 

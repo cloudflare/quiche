@@ -369,6 +369,20 @@ pub extern "C" fn quiche_config_set_initial_congestion_window_packets(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_ack_progress_timeout(
+    config: &mut Config, v: u64,
+) {
+    config.set_ack_progress_timeout(v);
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_config_set_max_outstanding_sent_packets(
+    config: &mut Config, v: size_t,
+) {
+    config.set_max_outstanding_sent_packets(v);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }
