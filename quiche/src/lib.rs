@@ -7752,7 +7752,8 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// If revalidation invalidates a previously discovered larger size, a
     /// [`PathEvent::PmtuUpdated`] event is queued with QUIC's minimum packet
-    /// size. Further events report larger sizes as probes validate them.
+    /// size, and the path's max datagram size falls back to it. Further events
+    /// report larger sizes as probes validate them.
     #[inline]
     pub fn revalidate_pmtu(&mut self) {
         let Ok(active_path) = self.paths.get_active_mut() else {
@@ -7767,13 +7768,16 @@ impl<F: BufFactory> Connection<F> {
 
         let old_pmtu = pmtud.get_current_mtu();
         pmtud.revalidate_pmtu();
+        let new_pmtu = pmtud.get_current_mtu();
 
-        let Some(event) =
-            path::pmtu_event(local, peer, old_pmtu, pmtud.get_current_mtu())
+        let Some(event) = path::pmtu_event(local, peer, old_pmtu, new_pmtu)
         else {
             return;
         };
 
+        active_path
+            .recovery
+            .pmtud_update_max_datagram_size(new_pmtu);
         self.paths.notify_event(event);
     }
 

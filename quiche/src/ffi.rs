@@ -1086,6 +1086,11 @@ pub extern "C" fn quiche_conn_max_send_udp_payload_size(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_conn_revalidate_pmtu(conn: &mut Connection) {
+    conn.revalidate_pmtu()
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_is_readable(conn: &Connection) -> bool {
     conn.is_readable()
 }
