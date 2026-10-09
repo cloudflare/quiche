@@ -1029,7 +1029,13 @@ fn amplification_limited_stat() {
 }
 
 #[rstest]
-fn streamio(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
+#[case::cubic("cubic")]
+#[case::bbr2_gcongestion("bbr2_gcongestion")]
+#[cfg_attr(
+    feature = "congestion_window_unchecked_available",
+    case::congestion_window_unchecked("congestion_window_unchecked")
+)]
+fn streamio(#[case] cc_algorithm_name: &str) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -8465,6 +8471,60 @@ fn stream_datagram_priority(
         };
         assert_eq!(frame_iter.next(), None);
     }
+}
+
+#[cfg(feature = "congestion_window_unchecked_available")]
+#[test]
+fn congestion_window_unchecked_pto_probe() -> Result<()> {
+    let window =
+        DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS * MAX_SEND_UDP_PAYLOAD_SIZE;
+    let mut config =
+        test_utils::Pipe::default_config("congestion_window_unchecked")?;
+    config.set_unchecked_congestion_window(window);
+    config.discover_pmtu(false);
+    config.set_initial_max_data(100_000);
+    config.set_initial_max_stream_data_bidi_local(100_000);
+    config.set_initial_max_stream_data_bidi_remote(100_000);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config)?;
+    pipe.handshake()?;
+    pipe.advance()?;
+
+    let data = vec![0; window];
+    assert_eq!(pipe.client.stream_send(0, &data, false), Ok(window));
+    test_utils::emit_flight(&mut pipe.client)?;
+
+    let recovery = &pipe.client.paths.get_active()?.recovery;
+    assert_eq!(recovery.bytes_in_flight(), window);
+    assert_eq!(recovery.cwnd(), window);
+    assert!(pipe.client.streams.tx_buffered() > 0);
+
+    let mut buffer = [0; MAX_SEND_UDP_PAYLOAD_SIZE];
+    assert_eq!(pipe.client.send(&mut buffer), Err(Error::Done));
+
+    let timeout = pipe.client.timeout().expect("PTO timer is armed");
+    std::thread::sleep(timeout + Duration::from_millis(1));
+    pipe.client.on_timeout();
+
+    let epoch = packet::Epoch::Application;
+    assert_eq!(
+        pipe.client.paths.get_active()?.recovery.loss_probes(epoch),
+        1
+    );
+
+    let (probe_len, _) = pipe.client.send(&mut buffer)?;
+    let frames =
+        test_utils::decode_pkt(&mut pipe.server, &mut buffer[..probe_len])?;
+    assert!(frames.iter().any(frame::Frame::ack_eliciting));
+
+    let recovery = &pipe.client.paths.get_active()?.recovery;
+    assert_eq!(recovery.loss_probes(epoch), 0);
+    assert_eq!(recovery.cwnd(), window);
+    assert!(recovery.bytes_in_flight() > window);
+    assert!(pipe.client.streams.tx_buffered() > 0);
+    assert_eq!(pipe.client.send(&mut buffer), Err(Error::Done));
+
+    Ok(())
 }
 
 #[rstest]

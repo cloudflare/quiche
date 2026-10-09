@@ -953,6 +953,7 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         self.max_datagram_size = new_max_datagram_size;
+        (self.congestion.cc_ops.on_mtu_update)(&mut self.congestion);
     }
 
     fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
