@@ -26,6 +26,7 @@ use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::HandshakeStatus;
 use crate::recovery::LossDetectionTimer;
 use crate::recovery::OnAckReceivedOutcome;
+use crate::recovery::PmtudSignals;
 use crate::recovery::RangeSet;
 use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryOps;
@@ -173,7 +174,8 @@ impl RecoveryEpoch {
     // `peer_sent_ack_ranges` should not be used without validation.
     fn detect_and_remove_acked_packets(
         &mut self, peer_sent_ack_ranges: &RangeSet, newly_acked: &mut Vec<Acked>,
-        skip_pn: Option<u64>, trace_id: &str,
+        mut pmtud_signals: Option<&mut PmtudSignals>, skip_pn: Option<u64>,
+        trace_id: &str,
     ) -> Result<AckedDetectionResult> {
         newly_acked.clear();
 
@@ -224,11 +226,17 @@ impl RecoveryEpoch {
                             sent_bytes,
                             frames,
                             ack_eliciting,
+                            is_pmtud_probe,
                             ..
                         } => {
                             if in_flight {
                                 self.pkts_in_flight -= 1;
                                 acked_bytes += sent_bytes;
+                            }
+                            if let Some(signals) = pmtud_signals.as_mut() {
+                                if !is_pmtud_probe {
+                                    signals.on_acked(*pkt_num, sent_bytes);
+                                }
                             }
                             newly_acked.push(Acked {
                                 pkt_num: *pkt_num,
@@ -497,6 +505,8 @@ pub struct GRecovery {
     /// [`Self::detect_and_remove_lost_packets`] to avoid allocations
     lost_reuse: Vec<Lost>,
 
+    pmtud_signals: PmtudSignals,
+
     pacer: Pacer,
 }
 
@@ -562,6 +572,7 @@ impl GRecovery {
 
             newly_acked: Vec::new(),
             lost_reuse: Vec::new(),
+            pmtud_signals: PmtudSignals::default(),
         })
     }
 
@@ -589,6 +600,14 @@ impl GRecovery {
 
         for pkt in pmtud_lost_packets {
             self.pacer.on_packet_neutered(pkt);
+        }
+
+        if epoch == packet::Epoch::Application {
+            self.pmtud_signals.lost.extend(
+                self.lost_reuse
+                    .iter()
+                    .map(|lost| (lost.packet_number, lost.bytes_lost)),
+            );
         }
 
         (lost_bytes, lost_packets)
@@ -823,6 +842,8 @@ impl RecoveryOps for GRecovery {
         } = self.epochs[epoch].detect_and_remove_acked_packets(
             peer_sent_ack_ranges,
             &mut self.newly_acked,
+            (epoch == packet::Epoch::Application)
+                .then_some(&mut self.pmtud_signals),
             skip_pn,
             trace_id,
         )?;
@@ -1082,6 +1103,10 @@ impl RecoveryOps for GRecovery {
     fn pmtud_update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
         self.max_datagram_size = new_max_datagram_size;
         self.pacer.update_mss(self.max_datagram_size);
+    }
+
+    fn take_pmtud_signals(&mut self) -> PmtudSignals {
+        std::mem::take(&mut self.pmtud_signals)
     }
 
     fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {

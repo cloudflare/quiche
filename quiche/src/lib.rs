@@ -3970,6 +3970,8 @@ impl<F: BufFactory> Connection<F> {
 
         // Increase the maximum datagram size for a PMTUD probe.
         if let Some(pmtud) = send_path.pmtud.as_mut() {
+            pmtud.poll_search(now);
+
             if pmtud.should_probe() {
                 let size = if self.handshake_confirmed || self.handshake_completed
                 {
@@ -7157,6 +7159,7 @@ impl<F: BufFactory> Connection<F> {
         }
 
         let handshake_status = self.handshake_status();
+        let mut pmtu_events = Vec::new();
 
         for (_, p) in self.paths.iter_mut() {
             if let Some(timer) = p.recovery.loss_detection_timer() {
@@ -7172,6 +7175,7 @@ impl<F: BufFactory> Connection<F> {
                         self.is_server,
                         &self.trace_id,
                     );
+                    pmtu_events.extend(p.on_packets_settled(now));
 
                     self.lost_count += lost_packets;
                     self.lost_bytes += lost_bytes as u64;
@@ -7181,6 +7185,10 @@ impl<F: BufFactory> Connection<F> {
                     });
                 }
             }
+        }
+
+        for event in pmtu_events {
+            self.paths.notify_event(event);
         }
 
         // Notify timeout events to the application.
@@ -8400,6 +8408,8 @@ impl<F: BufFactory> Connection<F> {
                     "ACK frames should always have at least one ack range",
                 );
 
+                let mut pmtu_events = Vec::new();
+
                 for (_, p) in self.paths.iter_mut() {
                     if self.pkt_num_spaces[epoch]
                         .largest_tx_pkt_num
@@ -8430,6 +8440,7 @@ impl<F: BufFactory> Connection<F> {
                         self.pkt_num_manager.skip_pn(),
                         &self.trace_id,
                     )?;
+                    pmtu_events.extend(p.on_packets_settled(now));
 
                     let skip_pn = self.pkt_num_manager.skip_pn();
                     let largest_acked =
@@ -8448,6 +8459,10 @@ impl<F: BufFactory> Connection<F> {
                     self.lost_bytes += lost_bytes as u64;
                     self.acked_bytes += acked_bytes as u64;
                     self.spurious_lost_count += spurious_losses;
+                }
+
+                for event in pmtu_events {
+                    self.paths.notify_event(event);
                 }
             },
 

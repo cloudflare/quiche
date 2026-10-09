@@ -13058,6 +13058,109 @@ fn pmtud_probe_success(
 }
 
 #[rstest]
+/// After PMTUD settles, a path that starts dropping full-size packets is
+/// detected as a black hole, and packets fall back to the minimum size.
+fn pmtud_black_hole_falls_back_to_minimum(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config.set_cc_algorithm_name(cc_algorithm_name).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config.set_application_protos(&[b"proto1"]).unwrap();
+    config.verify_peer(false);
+    config.set_initial_max_data(10_000_000);
+    config.set_initial_max_stream_data_bidi_local(10_000_000);
+    config.set_initial_max_stream_data_bidi_remote(10_000_000);
+    config.set_initial_max_streams_bidi(3);
+    config.set_max_send_udp_payload_size(1400);
+    config.discover_pmtu(true);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let current_mtu = |pipe: &mut test_utils::Pipe| {
+        pipe.client
+            .paths
+            .get_active_mut()
+            .unwrap()
+            .pmtud
+            .as_ref()
+            .unwrap()
+            .get_current_mtu()
+    };
+    assert_eq!(current_mtu(&mut pipe), 1400);
+
+    // The path now drops anything larger than this from the client.
+    let shrunk_mtu = 1300;
+    let deliver_from_client = |pipe: &mut test_utils::Pipe| {
+        let Ok(flight) = test_utils::emit_flight(&mut pipe.client) else {
+            return;
+        };
+        let flight = flight
+            .into_iter()
+            .filter(|(pkt, _)| pkt.len() <= shrunk_mtu)
+            .collect();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    };
+
+    pipe.client.stream_send(0, &[0; 4000], false).unwrap();
+
+    for _ in 0..20 {
+        if current_mtu(&mut pipe) == 1200 {
+            break;
+        }
+
+        // Full-size packets are lost, but a small ack-eliciting packet still
+        // gets through. Its ACK lets the client declare the others lost.
+        deliver_from_client(&mut pipe);
+        pipe.client.send_ack_eliciting().unwrap();
+        deliver_from_client(&mut pipe);
+
+        std::thread::sleep(Duration::from_millis(5));
+
+        if let Ok(flight) = test_utils::emit_flight(&mut pipe.server) {
+            test_utils::process_flight(&mut pipe.client, flight).unwrap();
+        }
+
+        // With nothing acked, the loss detection timer has to fire.
+        if let Some(timeout) = pipe.client.timeout() {
+            std::thread::sleep(timeout);
+            pipe.client.on_timeout();
+        }
+    }
+
+    assert_eq!(current_mtu(&mut pipe), 1200);
+    assert_eq!(pipe.client.path_stats().next().unwrap().pmtu, 1200);
+
+    let mut fell_back = false;
+    while let Some(event) = pipe.client.path_event_next() {
+        if let PathEvent::PmtuUpdated { pmtu, .. } = event {
+            fell_back = pmtu == 1200;
+        }
+    }
+    assert!(fell_back, "no PmtuUpdated event reported the fallback");
+
+    // Every packet now fits the shrunk path, so the data gets through.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert!(flight.iter().all(|(pkt, _)| pkt.len() <= 1200));
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut buf = [0; 65535];
+    let mut received = 0;
+    while let Ok((len, _)) = pipe.server.stream_recv(0, &mut buf) {
+        received += len;
+    }
+    assert!(received > 0);
+}
+
+#[rstest]
 /// This test verifies that multiple send() calls after handshake completion
 /// only generate one PMTUD probe packet, not multiple identical probes.
 fn pmtud_no_duplicate_probes(
