@@ -472,6 +472,11 @@ quiche_stream_iter *quiche_conn_writable(const quiche_conn *conn);
 // Returns the maximum possible size of egress UDP payloads.
 size_t quiche_conn_max_send_udp_payload_size(const quiche_conn *conn);
 
+// Revalidates the PMTU for the active path by sending a new probe packet of
+// PMTU size. Packets fall back to QUIC's minimum size until the probe is
+// acknowledged.
+void quiche_conn_revalidate_pmtu(quiche_conn *conn);
+
 // Returns the amount of time until the next timeout event, in nanoseconds.
 uint64_t quiche_conn_timeout_as_nanos(const quiche_conn *conn);
 

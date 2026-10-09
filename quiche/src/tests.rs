@@ -13048,6 +13048,15 @@ fn pmtud_probe_success(
             pmtu: MIN_CLIENT_INITIAL_LEN,
         })
     );
+    assert_eq!(
+        pipe.client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .max_datagram_size(),
+        MIN_CLIENT_INITIAL_LEN
+    );
 
     pipe.client.revalidate_pmtu();
     assert_eq!(pipe.client.path_event_next(), None);
