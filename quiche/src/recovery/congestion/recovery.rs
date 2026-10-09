@@ -57,6 +57,7 @@ use crate::recovery::bytes_in_flight::BytesInFlight;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::LossDetectionTimer;
 use crate::recovery::OnAckReceivedOutcome;
+use crate::recovery::PmtudSignals;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
 use crate::recovery::GRANULARITY;
@@ -117,10 +118,12 @@ struct LossDetectionResult {
 
 impl RecoveryEpoch {
     // `peer_sent_ack_ranges` should not be used without validation.
+    #[allow(clippy::too_many_arguments)]
     fn detect_and_remove_acked_packets(
         &mut self, now: Instant, peer_sent_ack_ranges: &RangeSet,
-        newly_acked: &mut Vec<Acked>, rtt_stats: &RttStats, skip_pn: Option<u64>,
-        trace_id: &str,
+        newly_acked: &mut Vec<Acked>,
+        mut pmtud_signals: Option<&mut PmtudSignals>, rtt_stats: &RttStats,
+        skip_pn: Option<u64>, trace_id: &str,
     ) -> Result<AckedDetectionResult> {
         newly_acked.clear();
 
@@ -186,6 +189,12 @@ impl RecoveryEpoch {
                         acked_bytes += unacked.size;
                     }
 
+                    if let Some(signals) = pmtud_signals.as_mut() {
+                        if !unacked.is_pmtud_probe {
+                            signals.on_acked(unacked.pkt_num, unacked.size);
+                        }
+                    }
+
                     newly_acked.push(Acked {
                         pkt_num: unacked.pkt_num,
                         time_sent: unacked.time_sent,
@@ -222,7 +231,8 @@ impl RecoveryEpoch {
 
     fn detect_lost_packets(
         &mut self, loss_delay: Duration, pkt_thresh: u64, now: Instant,
-        trace_id: &str, epoch: Epoch,
+        mut pmtud_signals: Option<&mut PmtudSignals>, trace_id: &str,
+        epoch: Epoch,
     ) -> LossDetectionResult {
         self.loss_time = None;
 
@@ -262,6 +272,10 @@ impl RecoveryEpoch {
 
                     // Do not track PMTUD probes losses.
                     continue;
+                }
+
+                if let Some(signals) = pmtud_signals.as_mut() {
+                    signals.lost.push((unacked.pkt_num, unacked.size));
                 }
 
                 if unacked.in_flight {
@@ -389,6 +403,8 @@ pub struct LegacyRecovery {
 
     /// A resusable list of acks.
     newly_acked: Vec<Acked>,
+
+    pmtud_signals: PmtudSignals,
 }
 
 impl LegacyRecovery {
@@ -430,6 +446,8 @@ impl LegacyRecovery {
             congestion: Congestion::from_config(recovery_config),
 
             newly_acked: Vec::new(),
+
+            pmtud_signals: PmtudSignals::default(),
         }
     }
 
@@ -539,6 +557,7 @@ impl LegacyRecovery {
             loss_delay,
             self.pkt_thresh,
             now,
+            (epoch == Epoch::Application).then_some(&mut self.pmtud_signals),
             trace_id,
             epoch,
         );
@@ -685,6 +704,7 @@ impl RecoveryOps for LegacyRecovery {
             now,
             peer_sent_ack_ranges,
             &mut self.newly_acked,
+            (epoch == Epoch::Application).then_some(&mut self.pmtud_signals),
             &self.rtt_stats,
             skip_pn,
             trace_id,
@@ -953,6 +973,10 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         self.max_datagram_size = new_max_datagram_size;
+    }
+
+    fn take_pmtud_signals(&mut self) -> PmtudSignals {
+        std::mem::take(&mut self.pmtud_signals)
     }
 
     fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {

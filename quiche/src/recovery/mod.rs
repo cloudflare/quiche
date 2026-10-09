@@ -178,6 +178,26 @@ pub struct OnAckReceivedOutcome {
     pub spurious_losses: usize,
 }
 
+/// Ordinary application packets that recovery newly settled, for PMTUD's
+/// black hole detection. PMTUD probes are left out.
+#[derive(Debug, Default)]
+pub struct PmtudSignals {
+    /// The largest packet newly acked, as (packet number, size).
+    pub largest_acked: Option<(u64, usize)>,
+
+    /// Packets newly declared lost, as (packet number, size), in packet
+    /// number order.
+    pub lost: Vec<(u64, usize)>,
+}
+
+impl PmtudSignals {
+    fn on_acked(&mut self, pkt_num: u64, size: usize) {
+        if self.largest_acked.is_none_or(|(_, largest)| size > largest) {
+            self.largest_acked = Some((pkt_num, size));
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct OnLossDetectionTimeoutOutcome {
     pub lost_packets: usize,
@@ -260,6 +280,10 @@ pub trait RecoveryOps {
     fn max_datagram_size(&self) -> usize;
 
     fn pmtud_update_max_datagram_size(&mut self, new_max_datagram_size: usize);
+
+    /// Returns the packets settled since the last call. Callers must take
+    /// them after every ACK and loss detection timeout, or they accumulate.
+    fn take_pmtud_signals(&mut self) -> PmtudSignals;
 
     fn update_max_datagram_size(&mut self, new_max_datagram_size: usize);
 

@@ -15,7 +15,23 @@
 //! A successful probe at any point resets the failure counter and updates
 //! the largest known working size.
 //!
+//! A search that ends below the max supported MTU runs again after
+//! [`RESEARCH_INTERVAL`], in case the path has grown.
+//!
+//! # Black hole detection
+//!
+//! After the search, the path MTU can shrink, for example when a VPN starts
+//! or a route changes. Full-size packets are then lost while small ones still
+//! get through. [`BlackHoleDetector`] watches for that pattern in the losses
+//! of ordinary packets. When it fires, the MTU drops back to [`MIN_PLPMTU`]
+//! and the search runs again after [`BLACK_HOLE_COOLDOWN`].
+//!
 //! [RFC 8899]: https://datatracker.ietf.org/doc/html/rfc8899
+
+use std::time::Duration;
+use std::time::Instant;
+
+use crate::recovery::PmtudSignals;
 
 /// Maximum number of probe attempts before treating a size as failed.
 /// https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
@@ -25,6 +41,17 @@ pub(crate) const MAX_PROBES_DEFAULT: u8 = 3;
 /// https://datatracker.ietf.org/doc/html/rfc8899#section-5.1.2
 /// For QUIC, this is 1200 bytes per https://datatracker.ietf.org/doc/html/rfc9000#section-14.1
 const MIN_PLPMTU: usize = crate::MIN_CLIENT_INITIAL_LEN;
+
+/// How long after a black hole the search runs again.
+const BLACK_HOLE_COOLDOWN: Duration = Duration::from_secs(60);
+
+/// How long after a search that ended below the max supported MTU it runs
+/// again.
+const RESEARCH_INTERVAL: Duration = Duration::from_secs(600);
+
+/// The number of suspicious loss bursts that must be exceeded to declare a
+/// black hole.
+const BLACK_HOLE_THRESHOLD: usize = 3;
 
 #[derive(Default)]
 pub struct Pmtud {
@@ -54,6 +81,12 @@ pub struct Pmtud {
     /// The maximum number of failed probe attempts before treating a size as
     /// failed.
     max_probes: u8,
+
+    /// When probing may resume, after a black hole or a search that ended
+    /// below the max supported MTU.
+    next_search: Option<Instant>,
+
+    black_hole: BlackHoleDetector,
 }
 
 impl Pmtud {
@@ -82,11 +115,90 @@ impl Pmtud {
     /// Indicates whether probing should continue on the connection.
     ///
     /// Checks there are no probes in flight, that a PMTU has not been
-    /// found, and that the minimum supported MTU has not been reached.
+    /// found, that the minimum supported MTU has not been reached, and that
+    /// probing is not paused until a later search.
     pub fn should_probe(&self) -> bool {
         !self.in_flight &&
+            self.next_search.is_none() &&
             self.pmtu.is_none() &&
             self.smallest_failed_probe_size != Some(MIN_PLPMTU)
+    }
+
+    /// Advances the search timers. A search that ended below the max
+    /// supported MTU is scheduled to run again after [`RESEARCH_INTERVAL`],
+    /// and a paused search resumes once its time comes.
+    pub fn poll_search(&mut self, now: Instant) {
+        match self.next_search {
+            Some(next_search) if now >= next_search => {
+                self.next_search = None;
+                if self.search_ended_below_max() {
+                    self.reopen_search();
+                }
+            },
+
+            Some(_) => (),
+
+            None if self.search_ended_below_max() =>
+                self.next_search = Some(now + RESEARCH_INTERVAL),
+
+            None => (),
+        }
+    }
+
+    fn search_ended_below_max(&self) -> bool {
+        match self.pmtu {
+            Some(pmtu) => pmtu < self.maximum_supported_mtu,
+            None => self.smallest_failed_probe_size == Some(MIN_PLPMTU),
+        }
+    }
+
+    /// Probes the max supported MTU again, keeping the largest size known to
+    /// work.
+    fn reopen_search(&mut self) {
+        self.pmtu = None;
+        self.smallest_failed_probe_size = None;
+        self.probe_failure_count = 0;
+        self.probe_size = self.maximum_supported_mtu;
+    }
+
+    /// Feeds the packets recovery just settled to the black hole detector.
+    ///
+    /// Returns true if they show a black hole. The current MTU has then
+    /// dropped back to [`MIN_PLPMTU`], and the caller must lower the path's
+    /// max datagram size to match.
+    pub fn on_packets_settled(
+        &mut self, signals: &PmtudSignals, now: Instant,
+    ) -> bool {
+        if let Some((pkt_num, size)) = signals.largest_acked {
+            self.black_hole.on_non_probe_acked(pkt_num, size);
+        }
+
+        if signals.lost.is_empty() {
+            return false;
+        }
+
+        for &(pkt_num, size) in &signals.lost {
+            self.black_hole.on_non_probe_lost(pkt_num, size);
+        }
+
+        if !self.black_hole.black_hole_detected() {
+            return false;
+        }
+
+        if self.get_current_mtu() <= MIN_PLPMTU {
+            return false;
+        }
+
+        warn!(
+            "PMTU black hole detected at {}, falling back to {}",
+            self.get_current_mtu(),
+            MIN_PLPMTU
+        );
+
+        self.restart_pmtud();
+        self.next_search = Some(now + BLACK_HOLE_COOLDOWN);
+
+        true
     }
 
     /// Sets the PMTUD probe size.
@@ -233,6 +345,7 @@ impl Pmtud {
             self.pmtu = None;
             self.probe_failure_count = 0;
             self.largest_successful_probe_size = None;
+            self.next_search = None;
         }
     }
 
@@ -247,13 +360,137 @@ impl std::fmt::Debug for Pmtud {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "pmtu={:?} ", self.pmtu)?;
         write!(f, "probe_size={:?} ", self.probe_size)?;
-        write!(f, "should_probe={:?} ", self.should_probe())?;
+        write!(f, "in_flight={:?} ", self.in_flight)?;
+        write!(f, "next_search={:?} ", self.next_search)?;
         write!(
             f,
             "failures={}/{} ",
             self.probe_failure_count, self.max_probes
         )?;
         Ok(())
+    }
+}
+
+/// Spots a path MTU that shrank after the search, from the losses of ordinary
+/// packets.
+///
+/// A loss burst is a run of consecutive packet numbers declared lost. A burst
+/// is suspicious when every packet in it is larger than [`MIN_PLPMTU`], unless
+/// a packet at least as large as its smallest one was acked after it. More
+/// than [`BLACK_HOLE_THRESHOLD`] suspicious bursts declare a black hole.
+///
+/// Ported from Quinn's `BlackHoleDetector`.
+struct BlackHoleDetector {
+    /// Suspicious loss bursts, as the size of the smallest packet in each.
+    suspicious_loss_bursts: Vec<usize>,
+
+    /// The loss burst being aggregated, if any.
+    current_loss_burst: Option<CurrentLossBurst>,
+
+    /// The packet number of the largest packet acked more recently than any
+    /// suspicious loss burst.
+    largest_post_loss_packet: u64,
+
+    /// The size of `largest_post_loss_packet`, or [`MIN_PLPMTU`] if no larger
+    /// packet has been acked since the most recent suspicious loss burst.
+    acked_mtu: usize,
+}
+
+#[derive(Clone, Copy)]
+struct CurrentLossBurst {
+    latest_non_probe: u64,
+    smallest_packet_size: usize,
+}
+
+impl Default for BlackHoleDetector {
+    fn default() -> Self {
+        Self {
+            suspicious_loss_bursts: Vec::with_capacity(BLACK_HOLE_THRESHOLD + 1),
+            current_loss_burst: None,
+            largest_post_loss_packet: 0,
+            acked_mtu: MIN_PLPMTU,
+        }
+    }
+}
+
+impl BlackHoleDetector {
+    fn on_non_probe_acked(&mut self, pkt_num: u64, size: usize) {
+        if size <= self.acked_mtu {
+            return;
+        }
+
+        self.acked_mtu = size;
+        self.largest_post_loss_packet = pkt_num;
+
+        // A burst of packets smaller than one the path just carried was not
+        // caused by the MTU.
+        self.suspicious_loss_bursts
+            .retain(|&smallest_packet_size| smallest_packet_size > size);
+    }
+
+    fn on_non_probe_lost(&mut self, pkt_num: u64, size: usize) {
+        let ends_last_burst = self.current_loss_burst.is_some_and(|burst| {
+            pkt_num.saturating_sub(burst.latest_non_probe) != 1
+        });
+
+        if ends_last_burst {
+            self.finish_loss_burst();
+        }
+
+        self.current_loss_burst = Some(CurrentLossBurst {
+            latest_non_probe: pkt_num,
+            smallest_packet_size: self
+                .current_loss_burst
+                .map_or(size, |burst| burst.smallest_packet_size.min(size)),
+        });
+    }
+
+    fn black_hole_detected(&mut self) -> bool {
+        self.finish_loss_burst();
+
+        if self.suspicious_loss_bursts.len() <= BLACK_HOLE_THRESHOLD {
+            return false;
+        }
+
+        self.suspicious_loss_bursts.clear();
+
+        true
+    }
+
+    fn finish_loss_burst(&mut self) {
+        let Some(burst) = self.current_loss_burst.take() else {
+            return;
+        };
+
+        // A burst holding a minimum-size packet, or one sent before a larger
+        // packet that was acked, is not suspicious.
+        if burst.smallest_packet_size <= MIN_PLPMTU ||
+            (burst.latest_non_probe < self.largest_post_loss_packet &&
+                burst.smallest_packet_size < self.acked_mtu)
+        {
+            return;
+        }
+
+        // A suspicious burst sent after the largest acked packet means that
+        // packet no longer shows what the path carries.
+        if burst.latest_non_probe > self.largest_post_loss_packet {
+            self.acked_mtu = MIN_PLPMTU;
+        }
+
+        if self.suspicious_loss_bursts.len() <= BLACK_HOLE_THRESHOLD {
+            self.suspicious_loss_bursts.push(burst.smallest_packet_size);
+            return;
+        }
+
+        // Only the most suspicious bursts are kept, to bound memory.
+        if let Some(smallest) = self
+            .suspicious_loss_bursts
+            .iter_mut()
+            .min()
+            .filter(|smallest| **smallest < burst.smallest_packet_size)
+        {
+            *smallest = burst.smallest_packet_size;
+        }
     }
 }
 
@@ -650,5 +887,161 @@ mod tests {
         } else {
             assert_eq!(pmtud.get_pmtu(), Some(test_pmtu));
         }
+    }
+
+    fn lost(pkt_nums: std::ops::Range<u64>, size: usize) -> PmtudSignals {
+        PmtudSignals {
+            largest_acked: None,
+            lost: pkt_nums.map(|pkt_num| (pkt_num, size)).collect(),
+        }
+    }
+
+    fn acked(pkt_num: u64, size: usize) -> PmtudSignals {
+        PmtudSignals {
+            largest_acked: Some((pkt_num, size)),
+            lost: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn pmtud_black_hole_falls_back_to_minimum() {
+        let now = Instant::now();
+        let mut pmtud = Pmtud::new(1452, 3);
+        pmtud.successful_probe(1452);
+        assert_eq!(pmtud.get_current_mtu(), 1452);
+
+        // Three suspicious bursts are not enough.
+        assert!(!pmtud.on_packets_settled(&lost(10..13, 1452), now));
+        assert!(!pmtud.on_packets_settled(&lost(20..23, 1452), now));
+        assert!(!pmtud.on_packets_settled(&lost(30..33, 1452), now));
+        assert_eq!(pmtud.get_current_mtu(), 1452);
+
+        // The fourth one is.
+        assert!(pmtud.on_packets_settled(&lost(40..43, 1452), now));
+        assert_eq!(pmtud.get_current_mtu(), MIN_PLPMTU);
+        assert_eq!(pmtud.get_pmtu(), None);
+
+        // The search waits out the cooldown, then probes the max again.
+        pmtud.poll_search(now + BLACK_HOLE_COOLDOWN - Duration::from_secs(1));
+        assert!(!pmtud.should_probe());
+
+        pmtud.poll_search(now + BLACK_HOLE_COOLDOWN);
+        assert!(pmtud.should_probe());
+        assert_eq!(pmtud.get_probe_size(), 1452);
+    }
+
+    #[test]
+    fn pmtud_consecutive_losses_are_one_burst() {
+        let now = Instant::now();
+        let mut pmtud = Pmtud::new(1452, 3);
+        pmtud.successful_probe(1452);
+
+        // However many packets one round declares lost, consecutive ones are
+        // a single burst.
+        for burst in 0..3 {
+            let start = burst * 100;
+            assert!(
+                !pmtud.on_packets_settled(&lost(start..start + 50, 1452), now)
+            );
+        }
+
+        assert_eq!(pmtud.get_current_mtu(), 1452);
+    }
+
+    #[test]
+    fn pmtud_minimum_size_losses_are_not_suspicious() {
+        let now = Instant::now();
+        let mut pmtud = Pmtud::new(1452, 3);
+        pmtud.successful_probe(1452);
+
+        for burst in 0..10 {
+            let start = burst * 10;
+            assert!(!pmtud
+                .on_packets_settled(&lost(start..start + 3, MIN_PLPMTU), now));
+        }
+
+        assert_eq!(pmtud.get_current_mtu(), 1452);
+    }
+
+    #[test]
+    fn pmtud_large_ack_clears_earlier_bursts() {
+        let now = Instant::now();
+        let mut pmtud = Pmtud::new(1452, 3);
+        pmtud.successful_probe(1452);
+
+        assert!(!pmtud.on_packets_settled(&lost(10..13, 1452), now));
+        assert!(!pmtud.on_packets_settled(&lost(20..23, 1452), now));
+        assert!(!pmtud.on_packets_settled(&lost(30..33, 1452), now));
+
+        // A full-size packet sent after those bursts got through, so they
+        // were congestion, not the MTU.
+        assert!(!pmtud.on_packets_settled(&acked(35, 1452), now));
+
+        assert!(!pmtud.on_packets_settled(&lost(40..43, 1452), now));
+        assert_eq!(pmtud.get_current_mtu(), 1452);
+    }
+
+    #[test]
+    fn pmtud_black_hole_at_minimum_keeps_probing() {
+        let now = Instant::now();
+        let mut pmtud = Pmtud::new(1452, 3);
+
+        for burst in 0..4 {
+            let start = burst * 10;
+            assert!(!pmtud.on_packets_settled(&lost(start..start + 3, 1300), now));
+        }
+
+        assert_eq!(pmtud.get_current_mtu(), MIN_PLPMTU);
+        assert!(pmtud.should_probe());
+    }
+
+    #[test]
+    fn pmtud_search_below_max_runs_again() {
+        let now = Instant::now();
+        let mut pmtud = Pmtud::new(1500, 1);
+
+        pmtud.failed_probe(1500);
+        pmtud.successful_probe(1350);
+        pmtud.failed_probe(1425);
+        pmtud.successful_probe(1387);
+        pmtud.successful_probe(1406);
+        pmtud.successful_probe(1415);
+        pmtud.successful_probe(1420);
+        pmtud.successful_probe(1422);
+        pmtud.successful_probe(1423);
+        pmtud.successful_probe(1424);
+        assert_eq!(pmtud.get_pmtu(), Some(1424));
+
+        pmtud.poll_search(now);
+        assert!(!pmtud.should_probe());
+
+        pmtud.poll_search(now + RESEARCH_INTERVAL);
+        assert!(pmtud.should_probe());
+        assert_eq!(pmtud.get_probe_size(), 1500);
+        assert_eq!(pmtud.get_current_mtu(), 1424);
+    }
+
+    #[test]
+    fn pmtud_search_at_max_does_not_run_again() {
+        let now = Instant::now();
+        let mut pmtud = Pmtud::new(1452, 3);
+        pmtud.successful_probe(1452);
+
+        pmtud.poll_search(now);
+        pmtud.poll_search(now + RESEARCH_INTERVAL);
+        assert!(!pmtud.should_probe());
+    }
+
+    #[test]
+    fn pmtud_revalidate_cancels_scheduled_search() {
+        let now = Instant::now();
+        let mut pmtud = Pmtud::new(1500, 1);
+        pmtud.successful_probe(1400);
+        pmtud.poll_search(now);
+        assert!(!pmtud.should_probe());
+
+        pmtud.revalidate_pmtu();
+        assert!(pmtud.should_probe());
+        assert_eq!(pmtud.get_probe_size(), 1400);
     }
 }
