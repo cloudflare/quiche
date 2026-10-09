@@ -2206,16 +2206,77 @@ fn std_time_to_c(time: &Instant, out: &mut timespec) {
     out.tv_nsec = raw_time.subsec_nanos() as libc::c_long;
 }
 
+/// Writes `time` on the platform's raw monotonic clock, which `Instant` also
+/// reads. Its epoch is not reachable on these platforms, so this offsets the
+/// clock's current reading by the time until `time`.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
-fn std_time_to_c(_time: &Instant, out: &mut timespec) {
-    // TODO: implement Instant conversion for systems that don't use timespec.
-    out.tv_sec = 0;
-    out.tv_nsec = 0;
+fn std_time_to_c(time: &Instant, out: &mut timespec) {
+    const NANOS_PER_SEC: u64 = 1_000_000_000;
+
+    let now = Instant::now();
+    let now_nanos = monotonic_now_nanos();
+
+    let nanos = if *time >= now {
+        now_nanos.saturating_add((*time - now).as_nanos() as u64)
+    } else {
+        now_nanos.saturating_sub((now - *time).as_nanos() as u64)
+    };
+
+    out.tv_sec = (nanos / NANOS_PER_SEC) as libc::time_t;
+    out.tv_nsec = (nanos % NANOS_PER_SEC) as libc::c_long;
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn monotonic_now_nanos() -> u64 {
+    let mut now: timespec = unsafe { std::mem::zeroed() };
+    unsafe { libc::clock_gettime(libc::CLOCK_UPTIME_RAW, &mut now) };
+
+    now.tv_sec as u64 * 1_000_000_000 + now.tv_nsec as u64
+}
+
+#[cfg(target_os = "windows")]
+fn monotonic_now_nanos() -> u64 {
+    use windows_sys::Win32::System::Performance::QueryPerformanceCounter;
+    use windows_sys::Win32::System::Performance::QueryPerformanceFrequency;
+
+    let mut count = 0;
+    let mut frequency = 0;
+    unsafe {
+        QueryPerformanceCounter(&mut count);
+        QueryPerformanceFrequency(&mut frequency);
+    }
+
+    (count as u128 * 1_000_000_000 / frequency as u128) as u64
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn timespec_nanos(t: &timespec) -> u128 {
+        t.tv_sec as u128 * 1_000_000_000 + t.tv_nsec as u128
+    }
+
+    #[test]
+    fn std_time_to_c_tracks_instant() {
+        let now = Instant::now();
+        let later = now + Duration::from_millis(250);
+
+        let mut now_c: timespec = unsafe { std::mem::zeroed() };
+        let mut later_c: timespec = unsafe { std::mem::zeroed() };
+        std_time_to_c(&now, &mut now_c);
+        std_time_to_c(&later, &mut later_c);
+
+        assert_ne!(timespec_nanos(&now_c), 0);
+
+        // The conversion reads two clocks, so allow for the time between
+        // those reads.
+        let delta = timespec_nanos(&later_c) - timespec_nanos(&now_c);
+        assert!(
+            delta.abs_diff(250_000_000) < 1_000_000,
+            "delta was {delta} ns"
+        );
+    }
 
     use libc::c_void;
     #[cfg(windows)]

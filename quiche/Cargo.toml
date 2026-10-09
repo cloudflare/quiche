@@ -113,6 +113,7 @@ enum_dispatch = "0.3"
 windows-sys = { version = "0.59", features = [
   "Win32_Networking_WinSock",
   "Win32_Security_Cryptography",
+  "Win32_System_Performance",
 ] }
 
 [dev-dependencies]
