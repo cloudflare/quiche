@@ -387,7 +387,9 @@ typedef struct {
     struct sockaddr_storage to;
     socklen_t to_len;
 
-    // The time to send the packet out.
+    // The time to send the packet out, on the platform's monotonic clock:
+    // CLOCK_MONOTONIC on Linux, CLOCK_UPTIME_RAW on Apple platforms and
+    // QueryPerformanceCounter on Windows.
     struct timespec at;
 } quiche_send_info;
 
