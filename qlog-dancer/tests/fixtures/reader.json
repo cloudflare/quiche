@@ -1,0 +1,5 @@
+{"constants":{"activeFieldTrialGroups":[],"addressFamily":{},"certPathBuilderDigestPolicy":{},"certStatusFlag":{},"certVerifierFlags":{},"clientInfo":{},"dnsQueryType":{},"loadFlag":{},"loadState":{},"logEventPhase":{"PHASE_BEGIN":1,"PHASE_END":2},"logEventTypes":{"HTTP2_SESSION":1},"logFormatVersion":1,"logSourceType":{},"netError":{},"quicError":{},"quicRstStreamError":{},"secureDnsMode":{},"timeTickOffset":0},
+"events": [
+{"phase":1,"source":{"id":1,"start_time":"0","type":1},"time":"42","type":1,"params":{"host":"example.com:443","proxy":"direct"}},
+{"phase":2,"source":{"id":1,"start_time":"0","type":1},"time":"43","type":1,"params":{"host":"example.com:443","proxy":"direct"}}],
+"polledData":{}}
