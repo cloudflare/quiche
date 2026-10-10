@@ -96,6 +96,7 @@ impl ModeImpl for ProbeBW {
         _: &[Lost], congestion_event: &mut BBRv2CongestionEvent,
         target_bytes_inflight: usize, params: &Params,
         _recovery_stats: &mut RecoveryStats, _cwnd: usize,
+        _cwnd_lower_bound: usize,
     ) -> Mode {
         if congestion_event.end_of_round_trip {
             if self.cycle.start_time != event_time {
