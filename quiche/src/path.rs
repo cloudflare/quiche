@@ -285,6 +285,7 @@ impl Path {
                     pmtud::PmtudConfig {
                         enable: c.pmtud,
                         max_probes: c.pmtud_max_probes,
+                        pkts_between_probes: c.pmtud_pkts_between_probes,
                     },
                 ))
             } else {
@@ -1192,6 +1193,7 @@ mod tests {
             pmtud::PmtudConfig {
                 enable: false,
                 max_probes: 1,
+                pkts_between_probes: 0,
             },
             1400,
         );
@@ -1201,6 +1203,7 @@ mod tests {
             pmtud::PmtudConfig {
                 enable: true,
                 max_probes: 1,
+                pkts_between_probes: 0,
             },
             1400,
         );

@@ -236,6 +236,13 @@ pub extern "C" fn quiche_config_set_pmtud_max_probes(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_pmtud_pkts_between_probes(
+    config: &mut Config, v: usize,
+) {
+    config.set_pmtud_pkts_between_probes(v);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_log_keys(config: &mut Config) {
     config.log_keys();
 }

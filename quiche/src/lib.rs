@@ -584,6 +584,7 @@ pub struct Config {
 
     pmtud: bool,
     pmtud_max_probes: u8,
+    pmtud_pkts_between_probes: usize,
 
     hystart: bool,
 
@@ -665,6 +666,7 @@ impl Config {
             enable_send_streams_blocked: false,
             pmtud: false,
             pmtud_max_probes: pmtud::MAX_PROBES_DEFAULT,
+            pmtud_pkts_between_probes: pmtud::PKTS_BETWEEN_PROBES_DEFAULT,
             hystart: true,
             pacing: true,
             max_pacing_rate: None,
@@ -802,6 +804,14 @@ impl Config {
     /// If 0 is passed, the default value is used.
     pub fn set_pmtud_max_probes(&mut self, max_probes: u8) {
         self.pmtud_max_probes = max_probes;
+    }
+
+    /// Configures the number of non-probe packets required between PMTUD
+    /// probes.
+    ///
+    /// The default value is `0`.
+    pub fn set_pmtud_pkts_between_probes(&mut self, pkts: usize) {
+        self.pmtud_pkts_between_probes = pkts;
     }
 
     /// Configures whether to send GREASE values.
@@ -1427,6 +1437,9 @@ where
 
     /// The send capacity factor.
     tx_cap_factor: f64,
+
+    /// PMTUD spacing policy, including when discovery is enabled in TLS.
+    pmtud_pkts_between_probes: usize,
 
     /// Total number of bytes sent to the peer.
     tx_data: u64,
@@ -2128,6 +2141,8 @@ impl<F: BufFactory> Connection<F> {
 
             tx_cap: 0,
             tx_cap_factor: config.tx_cap_factor,
+
+            pmtud_pkts_between_probes: config.pmtud_pkts_between_probes,
 
             tx_data: 0,
             max_tx_data: 0,
@@ -5549,6 +5564,12 @@ impl<F: BufFactory> Connection<F> {
         path.sent_count += 1;
         path.sent_bytes += written as u64;
 
+        if !is_pmtud_probe {
+            if let Some(pmtud) = path.pmtud.as_mut() {
+                pmtud.on_non_probe_sent();
+            }
+        }
+
         if self.dgram_send_queue.byte_size() > path.recovery.cwnd_available() {
             path.recovery.update_app_limited(false);
         }
@@ -8135,7 +8156,11 @@ impl<F: BufFactory> Connection<F> {
 
             if let Some((enable, max_probes)) = ex_data.pmtud {
                 self.paths.set_discover_pmtu_on_existing_paths(
-                    pmtud::PmtudConfig { enable, max_probes },
+                    pmtud::PmtudConfig {
+                        enable,
+                        max_probes,
+                        pkts_between_probes: self.pmtud_pkts_between_probes,
+                    },
                     self.recovery_config.max_send_udp_payload_size,
                 );
             }
