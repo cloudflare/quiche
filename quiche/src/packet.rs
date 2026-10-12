@@ -570,8 +570,9 @@ pub fn pkt_num_len(pn: u64, largest_acked: u64) -> usize {
     let num_unacked: u64 = pn.saturating_sub(largest_acked) + 1;
     // computes ceil of num_unacked.log2() + 1
     let min_bits = u64::BITS - num_unacked.leading_zeros() + 1;
-    // get the num len in bytes
-    min_bits.div_ceil(8) as usize
+    // get the num len in bytes, avoiding one-byte packet numbers, which
+    // become ambiguous after deep reordering
+    (min_bits.div_ceil(8) as usize).max(2)
 }
 
 pub fn decrypt_hdr(
@@ -1357,7 +1358,7 @@ mod tests {
     #[test]
     fn pkt_num_encode_decode() {
         let num_len = pkt_num_len(0, 0);
-        assert_eq!(num_len, 1);
+        assert_eq!(num_len, 2);
         let pn = decode_pkt_num(0xa82f30ea, 0x9b32, 2);
         assert_eq!(pn, 0xa82f9b32);
         let mut d = [0; 10];
@@ -1380,19 +1381,17 @@ mod tests {
         let hdr_num = u64::from(b.get_u24().unwrap());
         let pn = decode_pkt_num(0xace9fa, hdr_num, num_len);
         assert_eq!(pn, 0xace9fe);
+        // one-byte packet numbers are never sent, but peers may send them
+        let pn = decode_pkt_num(0xdeadbeef, 0x6e, 1);
+        assert_eq!(pn, 0xdeadbf6e);
         // roundtrip
         let base = 0xdeadbeef;
         for i in 1..255 {
             let pn = base + i;
             let num_len = pkt_num_len(pn, base);
-            if num_len == 1 {
-                let decoded = decode_pkt_num(base, pn & 0xff, num_len);
-                assert_eq!(decoded, pn);
-            } else {
-                assert_eq!(num_len, 2);
-                let decoded = decode_pkt_num(base, pn & 0xffff, num_len);
-                assert_eq!(decoded, pn);
-            }
+            assert_eq!(num_len, 2);
+            let decoded = decode_pkt_num(base, pn & 0xffff, num_len);
+            assert_eq!(decoded, pn);
         }
     }
 
