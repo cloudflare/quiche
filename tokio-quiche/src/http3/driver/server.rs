@@ -238,7 +238,7 @@ impl ServerHooks {
             h3_audit_stats: Arc::clone(&stream_ctx.audit_stats),
         };
 
-        stream_ctx.wait_for_recv();
+        stream_ctx.schedule_outbound();
         driver.insert_stream(stream_id, stream_ctx);
 
         // A STOP_SENDING received before HEADERS had no stream context for

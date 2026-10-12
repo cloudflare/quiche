@@ -25,15 +25,25 @@ fn downstream_readiness_does_not_overwrite_queued_frame(
     } else {
         drop(outbound);
     }
-    ctx.queued_frame =
-        Some(OutboundFrame::Body(Bytes::from_static(b"queued"), false));
-    // Deliberately violate the invariant: receiving channel readiness must
-    // fail rather than replacing output already blocked on the transport.
-    ctx.wait_for_recv();
+    ctx.send_state
+        .queue_frame(OutboundFrame::Body(Bytes::from_static(b"queued"), false))
+        .unwrap();
+    // A stale channel wake cannot replace transport-blocked output.
+    ctx.schedule_outbound();
     helper.driver.insert_stream(0, ctx);
+    helper
+        .driver
+        .upstream_ready(&mut helper.pipe.server, 0)
+        .unwrap();
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        helper.driver.upstream_ready(&mut helper.pipe.server, 0)
+        helper
+            .driver
+            .stream_map
+            .get_mut(&0)
+            .unwrap()
+            .send_state
+            .queue_frame(OutboundFrame::PeerStreamError)
     }));
     if cfg!(debug_assertions) {
         let panic = result.expect_err("queued output must trigger the assertion");
@@ -42,7 +52,7 @@ fn downstream_readiness_does_not_overwrite_queued_frame(
             .map(String::as_str)
             .or_else(|| panic.downcast_ref::<&str>().copied())
             .expect("the assertion must have a string panic message");
-        assert!(message.contains("queued outbound frame"), "{message}");
+        assert!(message.contains("empty open send state"), "{message}");
     } else {
         assert_matches!(
             result,
@@ -52,18 +62,18 @@ fn downstream_readiness_does_not_overwrite_queued_frame(
     // Verify retained output after either the debug panic or the runtime error.
     let ctx = helper.driver.stream_map.get(&0).unwrap();
     assert_matches!(
-        &ctx.queued_frame,
-        Some(OutboundFrame::Body(data, false)) if data.as_ref() == b"queued"
+        ctx.send_state.queued_frame(),
+        Some(QueuedFrame::Body(data, false)) if data.as_ref() == b"queued"
     );
 }
 
 #[test]
 fn fin_completion_requires_open_send_direction() {
     let (ready_tx, _ready_rx) = ReadyStreams::new();
-    let (mut ctx, _outbound, _inbound) = StreamCtx::new(0, 1, ready_tx);
+    let (mut ctx, outbound, _inbound) = StreamCtx::new(0, 1, ready_tx);
     H3Driver::<ServerHooks>::on_fin_sent(&mut ctx).unwrap();
-    assert_eq!(ctx.send_state, SendState::Closed);
-    assert!(ctx.recv.is_none());
+    assert!(ctx.send_state.is_closed());
+    assert!(outbound.get_ref().unwrap().is_closed());
     assert_eq!(
         ctx.audit_stats.sent_stream_fin(),
         StreamClosureKind::Explicit
@@ -979,13 +989,17 @@ mod client_side_driver {
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
         assert!(!ctx.waiting_for_send());
         assert!(!ctx.waiting_for_recv());
-        assert!(helper.driver.stream_map.get(&0).unwrap().recv.is_some());
+        assert!(matches!(
+            helper.driver.stream_map.get(&0).unwrap().send_state,
+            SendState::Open { .. }
+        ));
         assert!(helper
             .driver
             .stream_map
             .get(&0)
             .unwrap()
-            .queued_frame
+            .send_state
+            .queued_frame()
             .is_some());
 
         // clsoe the channel.
@@ -1350,7 +1364,7 @@ mod server_side_driver {
         helper.advance_and_run_loop().unwrap();
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
         assert_matches!(&ctx.recv_state, RecvState::FinPending(_));
-        assert!(ctx.queued_frame.is_none());
+        assert!(ctx.send_state.queued_frame().is_none());
         assert!(ctx.waiting_for_send());
         assert!(ctx.waiting_for_recv());
         assert!(helper.driver.ready_streams.try_recv().is_err());
@@ -1425,6 +1439,179 @@ mod server_side_driver {
         assert_response_fin(&mut helper, stream_id);
     }
 
+    #[test]
+    fn partial_fin_body_drops_receiver_but_retains_transport_output() {
+        let ParkedPeerFin {
+            mut helper,
+            stream_id,
+            to_client,
+            mut from_client,
+            audit_stats,
+        } = parked_peer_fin_fixture();
+        let body = vec![23; 1024];
+        to_client
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&body), true))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+        let written = audit_stats.downstream_bytes_sent() as usize;
+        assert!(written > 0 && written < body.len());
+        let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+        assert_matches!(&ctx.send_state, SendState::FlushingFinalBody { remaining }
+            if remaining.as_ref() == &body[written..]);
+        assert!(!ctx.fully_closed());
+        assert!(to_client.is_closed());
+        assert!(to_client.try_send(OutboundFrame::PeerStreamError).is_err());
+
+        // Delivering peer FIN must not collect the still-flushing write side.
+        drain_parked_body(&mut from_client);
+        helper.work_loop_iter().unwrap();
+        let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+        assert_matches!(&ctx.recv_state, RecvState::Closed);
+        assert_matches!(&ctx.send_state, SendState::FlushingFinalBody { .. });
+        assert_matches!(from_client.try_recv(), Ok(InboundFrame::Body(data, true)) if data.is_empty());
+
+        // Reading at the peer replenishes flow control until the remainder and
+        // its FIN reach the wire, after which the driver can collect the
+        // stream.
+        let mut received = Vec::new();
+        let mut finished = false;
+        for _ in 0..100 {
+            helper.advance_and_run_loop().unwrap();
+            while let Ok((id, event)) = helper.peer_client_poll() {
+                assert_eq!(id, stream_id);
+                finished |= matches!(event, h3::Event::Finished);
+            }
+            match helper.peer_client_recv_body_vec(stream_id, 1024) {
+                Ok(chunk) => received.extend_from_slice(&chunk),
+                Err(h3::Error::Done) => {},
+                other => panic!("unexpected body read: {other:?}"),
+            }
+            if finished {
+                break;
+            }
+        }
+        assert_eq!(received, body);
+        assert!(finished);
+        assert!(!helper.driver.stream_map.contains_key(&stream_id));
+        assert_eq!(audit_stats.sent_stream_fin(), StreamClosureKind::Explicit);
+        assert_matches!(from_client.try_recv(), Err(TryRecvError::Disconnected));
+    }
+
+    #[rstest]
+    fn stop_sending_discards_partially_flushed_final_body(
+        #[values(false, true)] deliver_peer_fin_first: bool,
+    ) {
+        let ParkedPeerFin {
+            mut helper,
+            stream_id,
+            to_client,
+            mut from_client,
+            audit_stats,
+        } = parked_peer_fin_fixture();
+        to_client
+            .try_send(OutboundFrame::Body(Bytes::from(vec![23; 1024]), true))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+        let written = audit_stats.downstream_bytes_sent();
+        assert!(written > 0 && written < 1024);
+        assert_matches!(&helper.driver.stream_map.get(&stream_id).unwrap().send_state, SendState::FlushingFinalBody { remaining } if !remaining.is_empty());
+        assert!(to_client.is_closed());
+
+        if deliver_peer_fin_first {
+            drain_parked_body(&mut from_client);
+            helper.work_loop_iter().unwrap();
+            assert_matches!(from_client.try_recv(), Ok(InboundFrame::Body(data, true)) if data.is_empty());
+        }
+
+        helper.pipe.advance().unwrap();
+        helper
+            .pipe
+            .client
+            .stream_shutdown(stream_id, quiche::Shutdown::Read, 4242)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(audit_stats.recvd_stop_sending_error_code(), 4242);
+        assert_eq!(audit_stats.downstream_bytes_sent(), written);
+        assert_eq!(audit_stats.sent_stream_fin(), StreamClosureKind::None);
+        if !deliver_peer_fin_first {
+            let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+            assert!(ctx.send_state.is_closed());
+            assert_matches!(&ctx.recv_state, RecvState::FinPending(_));
+            drain_parked_body(&mut from_client);
+            helper.work_loop_iter().unwrap();
+            assert_delivered_fin(&mut helper, stream_id, &mut from_client);
+        }
+        assert!(!helper.driver.stream_map.contains_key(&stream_id));
+        assert_matches!(from_client.try_recv(), Err(TryRecvError::Disconnected));
+        // Stale wakes cannot revive the discarded remainder or synthesize FIN.
+        helper
+            .driver
+            .upstream_ready(&mut helper.pipe.server, stream_id)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(audit_stats.downstream_bytes_sent(), written);
+        assert_eq!(audit_stats.sent_stream_fin(), StreamClosureKind::None);
+    }
+
+    #[test]
+    fn blocked_trailers_retain_receiver_until_fin_is_written() {
+        let ParkedPeerFin {
+            mut helper,
+            stream_id,
+            to_client,
+            mut from_client,
+            ..
+        } = parked_peer_fin_fixture();
+        let capacity = helper.pipe.server.stream_capacity(stream_id).unwrap();
+        assert!(capacity > 66);
+        // DATA has a one-byte type and a two-byte length at this size.
+        let body = vec![23; capacity - 3];
+        to_client
+            .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&body), false))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+        assert_eq!(helper.pipe.server.stream_capacity(stream_id), Ok(0));
+        to_client
+            .try_send(OutboundFrame::Trailers(make_response_trailers(), None))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+        let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+        assert_matches!(&ctx.send_state, SendState::Open {
+            queued: Some(QueuedFrame::Trailers { .. }),
+            ..
+        });
+        assert!(!to_client.is_closed());
+        // Existing trailer semantics allow buffering while transport-blocked.
+        // The queued trailers must not be overwritten by this subsequent frame.
+        to_client
+            .try_send(OutboundFrame::Body(Bytes::from_static(b"late"), false))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+
+        helper.pipe.advance().unwrap();
+        assert_matches!(helper.peer_client_poll(), Ok((id, h3::Event::Headers { .. })) if id == stream_id);
+        assert_eq!(helper.peer_client_poll(), Ok((stream_id, h3::Event::Data)));
+        assert_eq!(helper.peer_client_recv_body_vec(stream_id, 1024), Ok(body));
+        helper.advance_and_run_loop().unwrap();
+        assert!(to_client.is_closed());
+        assert!(helper
+            .driver
+            .stream_map
+            .get(&stream_id)
+            .unwrap()
+            .send_state
+            .is_closed());
+        assert_matches!(helper.peer_client_poll(), Ok((id, h3::Event::Headers { .. })) if id == stream_id);
+        assert_eq!(
+            helper.peer_client_poll(),
+            Ok((stream_id, h3::Event::Finished))
+        );
+
+        drain_parked_body(&mut from_client);
+        helper.work_loop_iter().unwrap();
+        assert_delivered_fin(&mut helper, stream_id, &mut from_client);
+    }
+
     #[rstest]
     #[case::outbound_fin(WriteClose::Fin)]
     #[case::sender_dropped(WriteClose::DropSender)]
@@ -1464,7 +1651,7 @@ mod server_side_driver {
         // Closing the write side must retain the pending peer FIN.
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
         assert_matches!(&ctx.recv_state, RecvState::FinPending(_));
-        assert_eq!(ctx.send_state, SendState::Closed);
+        assert!(ctx.send_state.is_closed());
         assert_eq!(from_client.len(), STREAM_CAPACITY);
         assert!(ctx.waiting_for_send());
         assert!(!ctx.waiting_for_recv());
@@ -1517,7 +1704,7 @@ mod server_side_driver {
         helper.work_loop_iter().unwrap();
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
         assert_matches!(&ctx.recv_state, RecvState::FinPending(_));
-        assert_eq!(ctx.send_state, SendState::Closed);
+        assert!(ctx.send_state.is_closed());
         assert!(ctx.waiting_for_send());
         assert_eq!(from_client.len(), STREAM_CAPACITY);
         assert!(helper.driver.ready_streams.try_recv().is_err());
@@ -1630,9 +1817,10 @@ mod server_side_driver {
         let ctx = helper.driver.stream_map.get_mut(&stream_id).unwrap();
         // Queue a real notification before STOP cancels outbound waiting.
         // Blocked output waits on transport rather than on the app channel.
-        ctx.wait_for_recv();
-        ctx.cancel_recv_wait();
-        ctx.queued_frame = Some(OutboundFrame::Body(Bytes::new(), false));
+        ctx.schedule_outbound();
+        ctx.send_state
+            .queue_frame(OutboundFrame::Body(Bytes::new(), false))
+            .unwrap();
         assert_eq!(helper.driver.ready_streams.len(), 1);
 
         helper
@@ -1644,8 +1832,7 @@ mod server_side_driver {
         assert_eq!(audit_stats.recvd_stop_sending_error_code(), 4242);
 
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
-        assert!(ctx.queued_frame.is_none());
-        assert!(ctx.recv.is_none());
+        assert!(ctx.send_state.is_closed());
         assert!(!ctx.waiting_for_recv());
 
         // Drain the stale notification through the driver's ready queue.
@@ -1658,8 +1845,7 @@ mod server_side_driver {
         assert!(helper.driver.ready_streams.try_recv().is_err());
 
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
-        assert!(ctx.queued_frame.is_none());
-        assert!(ctx.recv.is_none());
+        assert!(ctx.send_state.is_closed());
         assert!(!ctx.waiting_for_recv());
 
         // STOP_SENDING only closes one half of the stream. The client
@@ -1691,7 +1877,7 @@ mod server_side_driver {
     #[case::buffered_error_survives_stop(false)]
     #[case::queued_error_skips_stop_probe(true)]
     fn peer_stream_error_after_stop_closes_both_directions(
-        #[case] error_queued: bool,
+        #[case] error_queued: bool, #[values(false, true)] body_fin: bool,
     ) {
         let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
         helper.complete_handshake().unwrap();
@@ -1712,7 +1898,7 @@ mod server_side_driver {
         // An already queued error takes MessageError directly, skipping the
         // STOP probe; cleanup drops the buffered body and records the stop.
         let to_client = req.send.get_ref().unwrap();
-        let body = OutboundFrame::Body(Bytes::from_static(b"body"), false);
+        let body = OutboundFrame::Body(Bytes::from_static(b"body"), body_fin);
         let (queued, buffered) = if error_queued {
             (OutboundFrame::PeerStreamError, body)
         } else {
@@ -1721,8 +1907,7 @@ mod server_side_driver {
         let ctx = helper.driver.stream_map.get_mut(&stream_id).unwrap();
         // Model output blocked on transport: receiving from the channel is
         // no longer parked while a frame is queued.
-        ctx.cancel_recv_wait();
-        ctx.queued_frame = Some(queued);
+        ctx.send_state.queue_frame(queued).unwrap();
         to_client.try_send(buffered).unwrap();
 
         helper
@@ -1790,7 +1975,7 @@ mod server_side_driver {
             .stream_map
             .get_mut(&stream_id)
             .unwrap()
-            .wait_for_recv();
+            .schedule_outbound();
         // Register the channel waker and consume the initial notification.
         helper
             .driver

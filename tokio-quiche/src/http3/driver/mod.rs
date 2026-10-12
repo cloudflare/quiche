@@ -43,6 +43,7 @@ use std::error::Error;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Instant;
 
 use bytes::BufMut as _;
@@ -65,10 +66,12 @@ use tokio_util::sync::PollSender;
 use self::hooks::DriverHooks;
 use self::hooks::InboundHeaders;
 use self::streams::FlowCtx;
+use self::streams::QueuedFrame;
 use self::streams::ReadyStreamSender;
 use self::streams::ReadyStreams;
 use self::streams::RecvState;
 use self::streams::SendState;
+use self::streams::StopSendingOutcome;
 use self::streams::StreamCtx;
 use crate::http3::settings::Http3Settings;
 use crate::http3::H3AuditStats;
@@ -819,7 +822,10 @@ impl<H: DriverHooks> H3Driver<H> {
         // be valid, e.g. body data before response headers). An application
         // error must still close both directions even after the write side
         // has stopped, so let it reach the MessageError path below.
-        if !matches!(ctx.queued_frame, Some(OutboundFrame::PeerStreamError)) {
+        if !matches!(
+            ctx.send_state.queued_frame(),
+            Some(QueuedFrame::PeerStreamError)
+        ) {
             if let Err(error @ quiche::Error::StreamStopped(_)) =
                 qconn.stream_capacity(stream_id)
             {
@@ -827,8 +833,17 @@ impl<H: DriverHooks> H3Driver<H> {
             }
         }
 
-        match &mut ctx.queued_frame {
-            Some(OutboundFrame::Headers(headers, priority)) => {
+        ctx.send_state.begin_fin_body();
+        match &mut ctx.send_state {
+            SendState::Open {
+                queued:
+                    Some(QueuedFrame::Headers {
+                        headers,
+                        priority,
+                        blocked_since,
+                    }),
+                ..
+            } => {
                 let prio = priority.as_ref().unwrap_or(&DEFAULT_PRIO);
 
                 let res = if ctx.initial_headers_sent {
@@ -846,14 +861,11 @@ impl<H: DriverHooks> H3Driver<H> {
                 };
 
                 if let Err(h3::Error::StreamBlocked) = res {
-                    ctx.first_full_headers_flush_fail_time
-                        .get_or_insert(Instant::now());
+                    blocked_since.get_or_insert(Instant::now());
                 }
 
                 if res.is_ok() {
-                    if let Some(first) =
-                        ctx.first_full_headers_flush_fail_time.take()
-                    {
+                    if let Some(first) = blocked_since.take() {
                         ctx.audit_stats.add_header_flush_duration(
                             Instant::now().duration_since(first),
                         );
@@ -863,45 +875,31 @@ impl<H: DriverHooks> H3Driver<H> {
                 return res;
             },
 
-            Some(OutboundFrame::Body(body, fin)) if !body.is_empty() || *fin => {
-                let len = body.len();
-
-                if *fin {
-                    // Drop the receiver on FIN to prevent more frames.
-                    // We cannot use `mpsc::Receiver::close()` because of a
-                    // Tokio inconsistency when reading a closed channel.
-                    // See https://github.com/tokio-rs/tokio/issues/7631.
-                    ctx.recv = None;
-                }
-
-                let n = conn.send_body_zc(qconn, stream_id, body, *fin)?;
-
-                audit_stats.add_downstream_bytes_sent(n as _);
-
-                return if n != len {
-                    // Couldn't write the entire body, `send_body_zc` will
-                    // have trimmed `body` accordingly. The driver keeps
-                    // the remainder of the body to send in the future.
-                    debug_assert_eq!(
-                        n + body.len(),
-                        len,
-                        "send_body_zc() should have trimmed body but did not"
+            SendState::Open {
+                queued: Some(QueuedFrame::Body(body, _)),
+                ..
+            } => {
+                if !body.is_empty() {
+                    return Self::write_body(
+                        conn,
+                        qconn,
+                        audit_stats,
+                        body,
+                        false,
                     );
-                    Err(h3::Error::StreamBlocked)
-                } else {
-                    if *fin {
-                        Self::on_fin_sent(ctx)?;
-                    }
-
-                    Ok(())
-                };
+                }
+                // Empty non-FIN bodies need no H3 write; STOP was probed above.
             },
 
-            Some(OutboundFrame::Body(..)) => {
-                // Empty non-FIN bodies need no H3 write. STOP was probed above.
+            SendState::FlushingFinalBody { remaining } => {
+                Self::write_body(conn, qconn, audit_stats, remaining, true)?;
+                return Self::on_fin_sent(ctx);
             },
 
-            Some(OutboundFrame::Trailers(headers, priority)) => {
+            SendState::Open {
+                queued: Some(QueuedFrame::Trailers { headers, priority }),
+                ..
+            } => {
                 let prio = priority.as_ref().unwrap_or(&DEFAULT_PRIO);
 
                 // trailers always set fin=true
@@ -916,19 +914,14 @@ impl<H: DriverHooks> H3Driver<H> {
                 return res;
             },
 
-            Some(OutboundFrame::PeerStreamError) => {
+            SendState::Open {
+                queued: Some(QueuedFrame::PeerStreamError),
+                ..
+            } => {
                 return Err(h3::Error::MessageError);
             },
 
-            Some(OutboundFrame::FlowShutdown { .. }) => {
-                unreachable!("Only flows send shutdowns")
-            },
-
-            Some(OutboundFrame::Datagram(..)) => {
-                unreachable!("Only flows send datagrams")
-            },
-
-            None => {
+            SendState::Open { queued: None, .. } | SendState::Closed => {
                 // Idle streams still observe STOP through the probe above.
             },
         }
@@ -936,9 +929,28 @@ impl<H: DriverHooks> H3Driver<H> {
         Ok(())
     }
 
+    fn write_body(
+        conn: &mut h3::Connection, qconn: &mut QuicheConnection,
+        audit_stats: &H3AuditStats, body: &mut Bytes, fin: bool,
+    ) -> h3::Result<()> {
+        let len = body.len();
+        let n = conn.send_body_zc(qconn, audit_stats.stream_id(), body, fin)?;
+        audit_stats.add_downstream_bytes_sent(n as _);
+        if n != len {
+            // send_body_zc trims the body; retain its remainder for a retry.
+            debug_assert_eq!(
+                n + body.len(),
+                len,
+                "send_body_zc() should have trimmed body but did not"
+            );
+            return Err(h3::Error::StreamBlocked);
+        }
+        Ok(())
+    }
+
     fn on_fin_sent(ctx: &mut StreamCtx) -> h3::Result<()> {
         match ctx.send_state {
-            SendState::Open => {},
+            SendState::Open { .. } | SendState::FlushingFinalBody { .. } => {},
             SendState::Closed => {
                 debug_assert!(
                     false,
@@ -947,8 +959,6 @@ impl<H: DriverHooks> H3Driver<H> {
                 return Err(h3::Error::InternalError);
             },
         }
-        ctx.cancel_recv_wait();
-        ctx.recv = None;
         ctx.send_state = SendState::Closed;
         ctx.audit_stats
             .set_sent_stream_fin(StreamClosureKind::Explicit);
@@ -1205,7 +1215,11 @@ impl<H: DriverHooks> H3Driver<H> {
             // Process each writable frame, queue the next frame for processing
             // and shut down any errored streams.
             match Self::process_write_frame(conn, qconn, ctx) {
-                Ok(()) => ctx.queued_frame = None,
+                Ok(()) => {
+                    if let SendState::Open { queued, .. } = &mut ctx.send_state {
+                        *queued = None;
+                    }
+                },
                 Err(h3::Error::StreamBlocked | h3::Error::Done) => break,
                 Err(h3::Error::MessageError) => {
                     return self.shutdown_stream(
@@ -1220,15 +1234,23 @@ impl<H: DriverHooks> H3Driver<H> {
                 Err(h3::Error::TransportError(quiche::Error::StreamStopped(
                     e,
                 ))) => {
-                    ctx.handle_recvd_stop_sending(e);
-
-                    // A buffered application error still closes both halves
-                    // after STOP_SENDING has discarded ordinary outbound data.
-                    if matches!(
-                        ctx.queued_frame,
-                        Some(OutboundFrame::PeerStreamError)
-                    ) {
-                        continue;
+                    match ctx.handle_recvd_stop_sending(e) {
+                        StopSendingOutcome::PeerStreamError => {
+                            // No error frame needs to live in a closed
+                            // pipeline.
+                            return self.shutdown_stream(
+                                qconn,
+                                stream_id,
+                                StreamShutdown::Both {
+                                    read_error_code: WireErrorCode::MessageError
+                                        as u64,
+                                    write_error_code: WireErrorCode::MessageError
+                                        as u64,
+                                },
+                            );
+                        },
+                        StopSendingOutcome::AlreadyClosed |
+                        StopSendingOutcome::WriteClosed => {},
                     }
 
                     if ctx.fully_closed() {
@@ -1246,60 +1268,39 @@ impl<H: DriverHooks> H3Driver<H> {
                 },
             }
 
-            if ctx.waiting_for_recv() {
+            if ctx.send_state.is_closed() {
                 return Ok(());
             }
-            let Some(recv) = ctx.recv.as_mut() else {
-                // We wrote a fin or otherwise closed the channel.
-                // Defensive: successful frame processing cleared queued output.
-                if ctx.queued_frame.is_some() {
-                    debug_assert!(
-                        false,
-                        "A closed outbound channel must not have a queued frame"
-                    );
-                    return Err(H3ConnectionError::H3(h3::Error::InternalError));
-                }
-                return Ok(());
-            };
 
             // Attempt to queue the next frame for processing. The corresponding
             // sender is created at the same time as the `StreamCtx`
             // and ultimately ends up in an `H3Body`. The body then
             // determines which frames to send to the peer via
             // this processing loop.
-            match recv.try_recv() {
-                Ok(frame) => ctx.queued_frame = Some(frame),
-                Err(TryRecvError::Disconnected) => {
-                    match ctx.send_state {
-                        SendState::Open => {
-                            if ctx.associated_dgram_flow_id.is_none()
-                            // Datagram exchanges can close the body channel.
-                            // TODO: remove this exception once applications
-                            // consistently shut down those streams explicitly.
-                            {
-                                // No FIN was written before channel closure.
-                                // Reset because no more data will follow.
-                                let err =
-                                    h3::WireErrorCode::RequestCancelled as u64;
-                                let _ = qconn.stream_shutdown(
-                                    stream_id,
-                                    quiche::Shutdown::Write,
-                                    err,
-                                );
-                                ctx.handle_sent_reset(err)?;
-                                if ctx.fully_closed() {
-                                    return self.cleanup_stream(qconn, stream_id);
-                                }
-                            }
-                        },
-                        SendState::Closed => {},
+            match ctx.poll_outbound()? {
+                Poll::Ready(true) => {},
+                Poll::Ready(false) => {
+                    if ctx.associated_dgram_flow_id.is_none()
+                    // Datagram exchanges can close the body channel.
+                    // TODO: remove this exception once applications
+                    // consistently shut down those streams explicitly.
+                    {
+                        // No FIN was written before channel closure.
+                        // Reset because no more data will follow.
+                        let err = h3::WireErrorCode::RequestCancelled as u64;
+                        let _ = qconn.stream_shutdown(
+                            stream_id,
+                            quiche::Shutdown::Write,
+                            err,
+                        );
+                        ctx.handle_sent_reset(err)?;
+                        if ctx.fully_closed() {
+                            return self.cleanup_stream(qconn, stream_id);
+                        }
                     }
                     break;
                 },
-                Err(TryRecvError::Empty) => {
-                    ctx.wait_for_recv();
-                    break;
-                },
+                Poll::Pending => break,
             }
         }
 

@@ -238,7 +238,7 @@ impl ClientHooks {
 
         if let Some(body_writer) = request.body_writer {
             let _ = body_writer.send(send.clone());
-            stream_ctx.wait_for_recv();
+            stream_ctx.schedule_outbound();
         }
 
         driver.insert_stream(stream_id, stream_ctx);

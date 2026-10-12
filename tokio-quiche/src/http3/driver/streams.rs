@@ -34,6 +34,7 @@ use std::task::Wake;
 use std::task::Waker;
 use std::time::Instant;
 
+use bytes::Bytes;
 use quiche::h3;
 use tokio::sync::mpsc;
 use tokio_util::sync::PollSender;
@@ -156,13 +157,139 @@ impl RecvState {
     }
 }
 
-/// The transport write direction is closed by FIN, reset, or peer STOP.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Owns application output until it has been written or discarded.
+#[derive(Debug)]
 pub(super) enum SendState {
-    /// Transport writes have not yet finished or been canceled.
-    Open,
-    /// Transport writes ended through FIN, local reset, or peer STOP_SENDING.
+    /// Accepts application output and owns at most one transport-blocked frame.
+    Open {
+        receiver: OutboundFrameStream,
+        queued: Option<QueuedFrame>,
+    },
+    /// Flushes a FIN-bearing body's remainder after checking STOP_SENDING.
+    ///
+    /// The receiver has been dropped, rejecting further application output.
+    FlushingFinalBody { remaining: Bytes },
+    /// No application endpoint or pending output remains.
     Closed,
+}
+
+/// The next application frame retained until transport accepts or discards it.
+#[derive(Debug)]
+pub(super) enum QueuedFrame {
+    /// A header section with its priority and first blocked-flush timestamp.
+    Headers {
+        headers: Vec<h3::Header>,
+        priority: Option<h3::Priority>,
+        blocked_since: Option<Instant>,
+    },
+    /// Body bytes and FIN; retain the receiver until STOP is checked.
+    Body(Bytes, bool),
+    /// A trailing header section whose successful write also sends FIN.
+    Trailers {
+        headers: Vec<h3::Header>,
+        priority: Option<h3::Priority>,
+    },
+    /// An application error that must cancel both stream directions.
+    PeerStreamError,
+}
+
+/// Result of applying peer STOP_SENDING to the outbound pipeline.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum StopSendingOutcome {
+    /// The outbound pipeline was already closed.
+    AlreadyClosed,
+    /// Ordinary output was discarded and the write direction was closed.
+    WriteClosed,
+    /// A buffered application error requires both directions to be closed.
+    PeerStreamError,
+}
+
+impl SendState {
+    pub(super) fn queued_frame(&self) -> Option<&QueuedFrame> {
+        match self {
+            Self::Open { queued, .. } => queued.as_ref(),
+            Self::FlushingFinalBody { .. } | Self::Closed => None,
+        }
+    }
+
+    pub(super) fn is_closed(&self) -> bool {
+        matches!(self, Self::Closed)
+    }
+
+    #[cfg(test)]
+    pub(super) fn waiting_for_recv(&self) -> bool {
+        matches!(self, Self::Open { queued: None, .. })
+    }
+
+    pub(super) fn queue_frame(
+        &mut self, frame: OutboundFrame,
+    ) -> H3ConnectionResult<()> {
+        let Self::Open {
+            queued: queued @ None,
+            ..
+        } = self
+        else {
+            debug_assert!(
+                false,
+                "Channel output requires an empty open send state"
+            );
+            return Err(H3ConnectionError::H3(h3::Error::InternalError));
+        };
+        *queued = Some(match frame {
+            OutboundFrame::Headers(headers, priority) => QueuedFrame::Headers {
+                headers,
+                priority,
+                blocked_since: None,
+            },
+            OutboundFrame::Body(body, fin) => QueuedFrame::Body(body, fin),
+            OutboundFrame::Trailers(headers, priority) =>
+                QueuedFrame::Trailers { headers, priority },
+            OutboundFrame::PeerStreamError => QueuedFrame::PeerStreamError,
+            OutboundFrame::Datagram(..) | OutboundFrame::FlowShutdown { .. } => {
+                return Err(H3ConnectionError::H3(h3::Error::InternalError));
+            },
+        });
+        Ok(())
+    }
+
+    /// Drops the receiver only after the write path has checked STOP_SENDING.
+    pub(super) fn begin_fin_body(&mut self) {
+        if !matches!(self.queued_frame(), Some(QueuedFrame::Body(_, true))) {
+            return;
+        }
+        if let Self::Open {
+            queued: Some(QueuedFrame::Body(body, true)),
+            ..
+        } = mem::replace(self, Self::Closed)
+        {
+            *self = Self::FlushingFinalBody { remaining: body };
+        }
+    }
+
+    fn stop(&mut self) -> StopSendingOutcome {
+        match mem::replace(self, Self::Closed) {
+            Self::Closed => StopSendingOutcome::AlreadyClosed,
+            Self::FlushingFinalBody { .. } => StopSendingOutcome::WriteClosed,
+            Self::Open {
+                mut receiver,
+                queued,
+            } => {
+                let mut peer_error =
+                    matches!(queued, Some(QueuedFrame::PeerStreamError));
+                receiver.close();
+                // Only errors already buffered at STOP survive. Dropping the
+                // receiver rejects output later sent through reserved permits.
+                while let Ok(frame) = receiver.try_recv() {
+                    peer_error |= matches!(frame, OutboundFrame::PeerStreamError);
+                }
+                if peer_error {
+                    StopSendingOutcome::PeerStreamError
+                } else {
+                    StopSendingOutcome::WriteClosed
+                }
+            },
+        }
+    }
 }
 
 /// Receives coalesced stream notifications and rearms their wake state.
@@ -236,26 +363,15 @@ impl Wake for StreamWake {
 }
 
 pub(crate) struct StreamCtx {
-    /// Receives [`OutboundFrame`]s from a local task.
-    /// Dropped before transport completion when a FIN-bearing body is queued.
-    pub(crate) recv: Option<OutboundFrameStream>,
-    /// Stores the next [`OutboundFrame`] to write to the connection.
-    /// Retained here when the transport cannot write the complete frame.
-    pub(crate) queued_frame: Option<OutboundFrame>,
+    pub(super) send_state: SendState,
     pub(crate) audit_stats: Arc<H3AuditStats>,
     /// Indicates the stream sent initial headers.
     pub(crate) initial_headers_sent: bool,
-    /// First time that a HEADERS frame was not fully flushed.
-    pub(crate) first_full_headers_flush_fail_time: Option<Instant>,
     /// Receive-side lifecycle and the sender for local application delivery.
     pub(super) recv_state: RecvState,
-    /// Transport write-side lifecycle.
-    pub(super) send_state: SendState,
     /// The flow ID for proxying datagrams over this stream. If `None`,
     /// the stream has no associated DATAGRAM flow.
     pub(crate) associated_dgram_flow_id: Option<u64>,
-    /// Whether the outbound channel needs to be re-polled for application data.
-    waiting_for_recv: bool,
     waker: Waker,
 }
 
@@ -274,20 +390,19 @@ impl StreamCtx {
         });
 
         let ctx = StreamCtx {
-            recv: Some(backward_receiver),
-            queued_frame: None,
+            send_state: SendState::Open {
+                receiver: backward_receiver,
+                queued: None,
+            },
             audit_stats: Arc::new(H3AuditStats::new(stream_id)),
 
             initial_headers_sent: false,
-            first_full_headers_flush_fail_time: None,
 
             recv_state: RecvState::Open(InboundDelivery::new(PollSender::new(
                 forward_sender,
             ))),
-            send_state: SendState::Open,
 
             associated_dgram_flow_id: None,
-            waiting_for_recv: false,
             waker: Waker::from(wake),
         };
 
@@ -296,10 +411,13 @@ impl StreamCtx {
 
     /// Cleanup requires closed transport writes and closed app delivery.
     pub(super) fn fully_closed(&self) -> bool {
-        match (&self.recv_state, self.send_state) {
+        match (&self.recv_state, &self.send_state) {
             (RecvState::Closed, SendState::Closed) => true,
             (RecvState::Open(_) | RecvState::FinPending(_), _) |
-            (RecvState::Closed, SendState::Open) => false,
+            (
+                RecvState::Closed,
+                SendState::Open { .. } | SendState::FlushingFinalBody { .. },
+            ) => false,
         }
     }
 
@@ -313,8 +431,7 @@ impl StreamCtx {
 
     /// Schedules the initial poll to register for downstream channel data.
     /// Subsequent readiness uses the same coalescing ready queue.
-    pub(crate) fn wait_for_recv(&mut self) {
-        self.waiting_for_recv = true;
+    pub(crate) fn schedule_outbound(&self) {
         self.waker.wake_by_ref();
     }
 
@@ -323,12 +440,30 @@ impl StreamCtx {
         self.recv_state.waiting_for_capacity()
     }
 
+    #[cfg(test)]
     pub(super) fn waiting_for_recv(&self) -> bool {
-        self.waiting_for_recv
+        self.send_state.waiting_for_recv()
     }
 
-    pub(super) fn cancel_recv_wait(&mut self) {
-        self.waiting_for_recv = false;
+    /// Polls application output only when the pipeline has no queued frame.
+    /// Ready(true) queues a frame; Ready(false) reports channel abandonment.
+    pub(super) fn poll_outbound(&mut self) -> H3ConnectionResult<Poll<bool>> {
+        let SendState::Open {
+            receiver,
+            queued: None,
+        } = &mut self.send_state
+        else {
+            return Ok(Poll::Pending);
+        };
+        let mut cx = Context::from_waker(&self.waker);
+        match receiver.poll_recv(&mut cx) {
+            Poll::Pending => Ok(Poll::Pending),
+            Poll::Ready(None) => Ok(Poll::Ready(false)),
+            Poll::Ready(Some(frame)) => {
+                self.send_state.queue_frame(frame)?;
+                Ok(Poll::Ready(true))
+            },
+        }
     }
 
     /// Re-polls waiting endpoints, retaining waits on spurious wakes or when
@@ -338,28 +473,8 @@ impl StreamCtx {
     /// Queue acknowledgment belongs to `ReadyStreams`, not this method. Direct
     /// or spurious polling leaves the queue's coalescing state unchanged.
     pub(super) fn poll_waiting(&mut self) -> H3ConnectionResult<(bool, bool)> {
+        let recv_ready = self.poll_outbound()?.is_ready();
         let mut cx = Context::from_waker(&self.waker);
-        let mut recv_ready = false;
-
-        if self.waiting_for_recv() {
-            let Some(recv) = self.recv.as_mut() else {
-                debug_assert!(false, "Outbound waiting requires a receiver");
-                return Err(H3ConnectionError::H3(h3::Error::InternalError));
-            };
-            if let Poll::Ready(data) = recv.poll_recv(&mut cx) {
-                if self.queued_frame.is_some() {
-                    debug_assert!(
-                            false,
-                            "channel readiness cannot replace a queued outbound frame"
-                        );
-                    return Err(H3ConnectionError::H3(h3::Error::InternalError));
-                }
-                self.queued_frame = data;
-                self.waiting_for_recv = false;
-                recv_ready = true;
-            }
-        }
-
         let send_ready = self.recv_state.poll_waiting_capacity(&mut cx);
 
         Ok((recv_ready, send_ready))
@@ -370,39 +485,14 @@ impl StreamCtx {
     /// Also note, that quiche will automatically send a RESET_STREAM frame
     /// in response when it receives a STOP_SENDING (as recommended by the
     /// RFC)
-    pub(crate) fn handle_recvd_stop_sending(&mut self, wire_err_code: u64) {
+    pub(crate) fn handle_recvd_stop_sending(
+        &mut self, wire_err_code: u64,
+    ) -> StopSendingOutcome {
         // Update stats even if the stream is already closing.
         self.audit_stats
             .set_recvd_stop_sending_error_code(wire_err_code as i64);
 
-        match self.send_state {
-            SendState::Closed => {
-                // STOP may arrive after FIN or reset has closed the write side.
-                return;
-            },
-            SendState::Open => self.send_state = SendState::Closed,
-        }
-
-        // We received a STOP_SENDING frame. This indicates that the
-        // write direction has closed. We still need to continue
-        // reading from the stream until we receive a RESET_FRAME or
-        // `fin`.
-        // Close immediately, but preserve a buffered application error: it
-        // shuts down the read direction too. All ordinary outbound data is
-        // discarded after STOP_SENDING.
-        let mut peer_error =
-            matches!(self.queued_frame, Some(OutboundFrame::PeerStreamError));
-        if let Some(mut recv) = self.recv.take() {
-            recv.close();
-            // Retain errors already buffered at STOP. A sender holding a
-            // reserved permit can still send later; dropping this receiver
-            // rejects that late output, including any late PeerStreamError.
-            while let Ok(frame) = recv.try_recv() {
-                peer_error |= matches!(frame, OutboundFrame::PeerStreamError);
-            }
-        }
-        self.waiting_for_recv = false;
-        self.queued_frame = peer_error.then_some(OutboundFrame::PeerStreamError);
+        self.send_state.stop()
     }
 
     pub(crate) fn handle_recvd_reset(
@@ -431,7 +521,7 @@ impl StreamCtx {
         &mut self, wire_err_code: u64,
     ) -> H3ConnectionResult<()> {
         match self.send_state {
-            SendState::Open => {},
+            SendState::Open { .. } | SendState::FlushingFinalBody { .. } => {},
             SendState::Closed => {
                 debug_assert!(
                     false,
@@ -443,7 +533,6 @@ impl StreamCtx {
         self.audit_stats
             .set_sent_reset_stream_error_code(wire_err_code as i64);
         self.send_state = SendState::Closed;
-        self.waiting_for_recv = false;
         Ok(())
     }
 
@@ -509,7 +598,7 @@ mod tests {
     async fn queue_acknowledgment_is_independent_of_channel_polling() {
         let (ready_tx, mut ready_rx) = ReadyStreams::new();
         let (mut ctx, _outbound, _inbound) = StreamCtx::new(4, 1, ready_tx);
-        ctx.wait_for_recv();
+        ctx.schedule_outbound();
         assert_eq!(ready_rx.len(), 1);
 
         // Polling directly must not clear a notification still in the queue.
@@ -535,6 +624,12 @@ mod tests {
     ) {
         let (ready_tx, mut ready_rx) = ReadyStreams::new();
         let (mut ctx, outbound, mut inbound) = StreamCtx::new(4, 1, ready_tx);
+        if !recv_wait {
+            // Transport-blocked output must not poll the application receiver.
+            ctx.send_state
+                .queue_frame(OutboundFrame::Body(Default::default(), false))
+                .unwrap();
+        }
         ctx.recv_state
             .channel_sender()
             .unwrap()
@@ -548,8 +643,8 @@ mod tests {
             ctx.wait_for_send();
         }
         if recv_wait {
-            ctx.wait_for_recv();
-            ctx.wait_for_recv();
+            ctx.schedule_outbound();
+            ctx.schedule_outbound();
         }
         // Re-registering either direction still queues only one notification.
         assert_eq!(ready_rx.try_recv().unwrap(), 4);
@@ -568,7 +663,7 @@ mod tests {
             assert_eq!(ctx.waiting_for_recv(), recv_wait);
         }
         assert!(ctx.recv_state.channel_sender().is_some());
-        assert!(ctx.recv.is_some());
+        assert!(matches!(ctx.send_state, SendState::Open { .. }));
 
         // Real channel wakes after dequeue must produce a fresh notification.
         inbound.try_recv().unwrap();
@@ -583,7 +678,10 @@ mod tests {
         assert!(!ctx.waiting_for_send());
         assert!(!ctx.waiting_for_recv());
         assert_eq!(
-            matches!(ctx.queued_frame, Some(OutboundFrame::PeerStreamError)),
+            matches!(
+                ctx.send_state.queued_frame(),
+                Some(QueuedFrame::PeerStreamError)
+            ),
             recv_wait
         );
         // The capacity reservation used for readiness has been released.
@@ -617,7 +715,7 @@ mod tests {
             .try_send(InboundFrame::Body(Default::default(), false))
             .unwrap();
         ctx.wait_for_send();
-        ctx.wait_for_recv();
+        ctx.schedule_outbound();
         assert_eq!(ready_rx.try_recv().unwrap(), 4);
         assert_eq!(ctx.poll_waiting().unwrap(), (false, false));
 
@@ -655,7 +753,7 @@ mod tests {
         assert!(ready_rx.try_recv().is_err());
         assert_eq!(ctx.poll_waiting().unwrap(), (false, false));
         assert!(ctx.waiting_for_recv());
-        assert!(ctx.queued_frame.is_none());
+        assert!(ctx.send_state.queued_frame().is_none());
 
         let tx = outbound.get_ref().unwrap();
         assert!(!tx.is_closed());
@@ -664,8 +762,8 @@ mod tests {
         assert!(ready_rx.try_recv().is_err());
         assert_eq!(ctx.poll_waiting().unwrap(), (true, false));
         assert!(matches!(
-            ctx.queued_frame,
-            Some(OutboundFrame::PeerStreamError)
+            ctx.send_state.queued_frame(),
+            Some(QueuedFrame::PeerStreamError)
         ));
     }
 
@@ -688,12 +786,13 @@ mod tests {
         let (mut ctx, outbound, inbound) = StreamCtx::new(4, 4, ready_tx);
         let tx = outbound.get_ref().unwrap();
         ctx.wait_for_send();
-        ctx.wait_for_recv();
+        ctx.schedule_outbound();
         assert_eq!(ready_rx.try_recv().unwrap(), 4);
         if matches!(error, ErrorPlacement::Queued) {
             // Queued output waits on transport, not on channel receive.
-            ctx.cancel_recv_wait();
-            ctx.queued_frame = Some(OutboundFrame::PeerStreamError);
+            ctx.send_state
+                .queue_frame(OutboundFrame::PeerStreamError)
+                .unwrap();
         }
         for position in 0..3 {
             let frame = if matches!(error, ErrorPlacement::Channel(p) if p == position)
@@ -710,7 +809,7 @@ mod tests {
         } else {
             None
         };
-        ctx.handle_recvd_stop_sending(42);
+        let outcome = ctx.handle_recvd_stop_sending(42);
         if let Some(permit) = late_error {
             // Sending through a pre-STOP permit is infallible, but its late
             // error must not become retained output after the receiver drops.
@@ -721,19 +820,18 @@ mod tests {
         assert!(ctx.waiting_for_send());
         assert!(!ctx.waiting_for_recv());
         assert!(ctx.recv_state.channel_sender().is_some());
-        assert!(ctx.recv.is_none());
+        assert!(ctx.send_state.is_closed());
         let has_error =
             matches!(error, ErrorPlacement::Channel(_) | ErrorPlacement::Queued);
-        assert_eq!(
-            matches!(ctx.queued_frame, Some(OutboundFrame::PeerStreamError)),
-            has_error
-        );
+        assert_eq!(outcome == StopSendingOutcome::PeerStreamError, has_error);
 
-        // A stale wake cannot receive canceled data or erase the error.
+        // A stale wake cannot receive canceled output. The error is returned
+        // to the caller, not retained in a closed pipeline.
         assert_eq!(ctx.poll_waiting().unwrap(), (false, true));
+        assert!(ctx.send_state.is_closed());
         assert_eq!(
-            matches!(ctx.queued_frame, Some(OutboundFrame::PeerStreamError)),
-            has_error
+            ctx.handle_recvd_stop_sending(43),
+            StopSendingOutcome::AlreadyClosed
         );
     }
 
@@ -762,7 +860,7 @@ mod tests {
             .try_send(InboundFrame::Body(Default::default(), false))
             .unwrap();
         ctx.wait_for_send();
-        ctx.wait_for_recv();
+        ctx.schedule_outbound();
         assert_eq!(ready_rx.try_recv().unwrap(), 4);
         assert_eq!(ctx.poll_waiting().unwrap(), (false, false));
         // The driver resets after its outbound channel disconnects.
@@ -773,7 +871,7 @@ mod tests {
         assert!(!ctx.waiting_for_recv());
         assert_eq!(ctx.audit_stats.sent_reset_stream_error_code(), 42);
         assert_eq!(ctx.poll_waiting().unwrap(), (false, false));
-        assert!(ctx.queued_frame.is_none());
+        assert!(ctx.send_state.queued_frame().is_none());
     }
 
     #[rstest]
@@ -788,7 +886,7 @@ mod tests {
         let (mut ctx, _outbound, _inbound) = StreamCtx::new(4, 1, ready_tx);
         cancel(&mut ctx, 42).unwrap();
         assert_eq!(matches!(ctx.recv_state, RecvState::Closed), closes_receive);
-        assert_eq!(ctx.send_state == SendState::Closed, !closes_receive);
+        assert_eq!(ctx.send_state.is_closed(), !closes_receive);
 
         // Only the second call is allowed to reject the closed direction.
         let result = catch_unwind(AssertUnwindSafe(|| cancel(&mut ctx, 43)));
@@ -821,13 +919,17 @@ mod tests {
 
         let result = tokio::time::timeout(Duration::from_secs(5), async {
             for _ in 0..256 {
-                ctx.wait_for_recv();
+                ctx.schedule_outbound();
                 loop {
                     assert_eq!(ready_rx.recv().await.unwrap(), 4);
                     if ctx.poll_waiting().unwrap().0 {
+                        let SendState::Open { queued, .. } = &mut ctx.send_state
+                        else {
+                            panic!("a non-FIN body must retain the receiver");
+                        };
                         assert!(matches!(
-                            ctx.queued_frame.take(),
-                            Some(OutboundFrame::Body(..))
+                            queued.take(),
+                            Some(QueuedFrame::Body(..))
                         ));
                         break;
                     }
@@ -840,19 +942,6 @@ mod tests {
         let produced = producer.join().unwrap();
         result.expect("a channel wake was lost while repeatedly parking");
         produced.unwrap();
-    }
-
-    #[test]
-    #[cfg_attr(debug_assertions, should_panic(expected = "waiting requires"))]
-    fn outbound_waiting_requires_channel_endpoint() {
-        let (ready_tx, _ready_rx) = ReadyStreams::new();
-        let (mut ctx, _outbound, _inbound) = StreamCtx::new(4, 1, ready_tx);
-        ctx.recv = None;
-        ctx.wait_for_recv();
-        assert!(matches!(
-            ctx.poll_waiting(),
-            Err(H3ConnectionError::H3(h3::Error::InternalError))
-        ));
     }
 
     #[test]
@@ -902,7 +991,7 @@ mod tests {
         if capacity_wait {
             ctx.wait_for_send();
         } else {
-            ctx.wait_for_recv();
+            ctx.schedule_outbound();
             outbound
                 .get_ref()
                 .unwrap()
@@ -916,7 +1005,7 @@ mod tests {
         }
         assert_eq!(ctx.poll_waiting().unwrap(), (false, false));
         assert_eq!(ctx.waiting_for_send(), capacity_wait);
-        assert_eq!(ctx.waiting_for_recv(), !capacity_wait);
+        assert!(ctx.waiting_for_recv());
         tokio::task::yield_now().await;
         let ready = tokio::time::timeout(Duration::from_secs(5), ready_rx.recv())
             .await
@@ -924,9 +1013,12 @@ mod tests {
         assert_eq!(ready.unwrap(), 4);
         assert_eq!(ctx.poll_waiting().unwrap(), (!capacity_wait, capacity_wait));
         assert!(!ctx.waiting_for_send());
-        assert!(!ctx.waiting_for_recv());
+        assert_eq!(ctx.waiting_for_recv(), capacity_wait);
         assert_eq!(
-            matches!(ctx.queued_frame, Some(OutboundFrame::PeerStreamError)),
+            matches!(
+                ctx.send_state.queued_frame(),
+                Some(QueuedFrame::PeerStreamError)
+            ),
             !capacity_wait
         );
     }

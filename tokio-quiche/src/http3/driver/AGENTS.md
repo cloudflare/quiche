@@ -12,7 +12,7 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
 | `hooks.rs` | `DriverHooks` trait (sealed). Defines `headers_received`, `stream_recv_closed`, `stream_closed`, `conn_established`, `conn_command`, `wait_for_action` |
 | `client.rs` | `ClientHooks` impl, `ClientH3Driver`/`ClientH3Controller` aliases, `ClientH3Event`/`ClientH3Command` |
 | `server.rs` | `ServerHooks` impl, `ServerH3Driver`/`ServerH3Controller` aliases, `ServerH3Event`/`ServerH3Command` |
-| `streams.rs` | `StreamCtx`, `FlowCtx`, shared per-stream waker and channel waiting flags |
+| `streams.rs` | `StreamCtx`, `FlowCtx`, owned lifecycle pipelines and shared per-stream waker |
 | `datagram.rs` | DATAGRAM/CONNECT-UDP flow handling |
 | `connection.rs` | `H3Conn` wrapper exposing `h3::Connection` operations |
 | `test_utils.rs` | `DriverTestHelper<H>` -- wraps `Pipe` + `H3Driver` for unit tests |
@@ -25,7 +25,7 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
 | Channel architecture | `mod.rs` (`H3Driver` struct fields: `h3_event_sender`, `cmd_recv`, `stream_map`, `ready_streams`) |
 | `select!` loop / priority ordering | `mod.rs` `wait_for_data` impl -- uses `biased` select! |
 | Stream lifecycle | `cleanup_stream`, `shutdown_stream`, `process_h3_fin`, `process_h3_data` in `mod.rs` |
-| Per-stream backpressure | `streams.rs` keeps endpoints in `StreamCtx`; one generic waker queues each stream ID once, and the driver re-polls both waiting directions |
+| Per-stream backpressure | `streams.rs` keeps endpoints in `StreamCtx`; one generic waker queues each stream ID once, and the driver polls app-bound waits and empty open outbound pipelines |
 | Adding endpoint-specific behavior | `hooks.rs` -- add method to `DriverHooks`, impl in `client.rs`/`server.rs` |
 | Writing tests | `test_utils.rs` for `DriverTestHelper`, `tests.rs` for examples |
 
@@ -35,9 +35,11 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
   imply completion. Received FIN and app-channel FIN delivery are distinct
   receive states. Open and pending receive states own an `InboundDelivery` payload
   with its sender and capacity-wait flag; closing the state drops both. FIN
-  preserves the payload, including an existing wait. The outbound receiver is
-  independent: queued FIN can drop it
-  while the transport still has body data to send.
+  preserves the payload, including an existing wait. `SendState::Open` owns
+  the receiver and optional queued frame. After probing STOP, a FIN body enters
+  `FlushingFinalBody` and drops the
+  receiver while retaining its remaining bytes. Blocked trailers keep the
+  receiver until their FIN is written. `Closed` owns no output or endpoints.
 - Do not add overlapping boolean completion methods for these states. A single
   derived helper can centralize the cleanup decision without conflating pending
   FIN with closed delivery. Match lifecycle enums exhaustively where a new
@@ -48,15 +50,19 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
 - **`process_write_frame` uses `Error::Done` as success** -- non-obvious control flow, don't replicate elsewhere.
 - **`DriverHooks` is sealed** -- `mod hooks` is `pub(crate)`, trait has `#[allow(private_interfaces)]`. Do not expose.
 - **Stream cleanup is distributed** across 4+ functions (`cleanup_stream`, `shutdown_stream`, `process_h3_fin`, `process_h3_data`). Understand all paths before modifying.
-- **Waiting-stream cancellation must be keyed** -- clear flags and drop endpoints
-  through `stream_map`; do not linearly scan the ready queue.
+- **Waiting-stream cancellation must be keyed** -- update lifecycle state and
+  drop endpoints through `stream_map`; do not linearly scan the ready queue.
 - `ReadyStreams` owns queue acknowledgment: dequeueing clears the queued wake
   flag before returning the stream ID. Channel polling never changes that flag.
-  Keep waiting flags set on `Pending`, including spurious wakes and
-  cooperative-budget yields.
+  Keep app-bound waits and outbound pipeline state intact on `Pending`, including
+  spurious wakes and cooperative-budget yields. An open outbound pipeline with no queued
+  frame registers its channel waker directly; no outbound waiting bit is stored.
 - Stream cleanup drops channel endpoints immediately; stale ready IDs are ignored.
 - STOP_SENDING discards ordinary outbound frames, but a buffered `PeerStreamError`
-  must still shut down both directions.
+  returns an explicit outcome that shuts down both directions. It must never be
+  retained as queued output in a closed pipeline.
+- The first blocked-header timestamp belongs to the queued headers; dropping or
+  replacing them also drops their retry metadata.
 - **`STREAM_CAPACITY`** is 1 in test/debug, 16 in release. Tests exercise backpressure differently from prod.
 
 ## NOTES
