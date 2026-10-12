@@ -79,6 +79,52 @@ impl<F: BufFactory> Drop for SendReserve<'_, F> {
     }
 }
 
+/// A received STOP_SENDING error and its application notification state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PeerStopSendingState {
+    /// No STOP_SENDING has been received.
+    #[default]
+    NotReceived,
+
+    /// STOP_SENDING was received but has not been reported to the application.
+    NotReported(u64),
+
+    /// STOP_SENDING was reported; retain its code for subsequent write errors.
+    Reported(u64),
+}
+
+impl PeerStopSendingState {
+    /// Returns whether a STOP_SENDING has been received, regardless of
+    /// delivery.
+    pub(crate) fn is_stopped(self) -> bool {
+        match self {
+            Self::NotReceived => false,
+            Self::NotReported(_) | Self::Reported(_) => true,
+        }
+    }
+
+    /// Returns the peer's error without consuming its application notification.
+    fn check_not_stopped(self) -> Result<()> {
+        match self {
+            Self::NotReceived => Ok(()),
+            Self::NotReported(code) | Self::Reported(code) =>
+                Err(Error::StreamStopped(code)),
+        }
+    }
+
+    /// Records application delivery and retains the code for later errors.
+    fn report(&mut self) -> Result<()> {
+        match *self {
+            Self::NotReceived => Ok(()),
+            Self::NotReported(code) => {
+                *self = Self::Reported(code);
+                Err(Error::StreamStopped(code))
+            },
+            Self::Reported(code) => Err(Error::StreamStopped(code)),
+        }
+    }
+}
+
 /// Send-side stream buffer.
 ///
 /// Stream data scheduled to be sent to the peer is buffered in a list of data
@@ -131,11 +177,8 @@ where
     /// Ranges of data offsets that have been acked.
     acked: ranges::RangeSet,
 
-    /// The error code received via STOP_SENDING.
-    error: Option<u64>,
-
-    /// Whether the STOP_SENDING error was returned to the application.
-    error_reported: bool,
+    /// The STOP_SENDING error and whether it was returned to the application.
+    peer_stop_sending: PeerStopSendingState,
 }
 
 impl<F: BufFactory> SendBuf<F> {
@@ -469,13 +512,13 @@ impl<F: BufFactory> SendBuf<F> {
     ///
     /// Calling this again after the first time has no effect.
     pub fn stop(&mut self, error_code: u64) -> Result<(u64, u64)> {
-        if self.error.is_some() {
+        if self.peer_stop_sending.is_stopped() {
             return Err(Error::Done);
         }
 
         let (max_off, unsent) = self.reset();
 
-        self.error = Some(error_code);
+        self.peer_stop_sending = PeerStopSendingState::NotReported(error_code);
 
         Ok((max_off, unsent))
     }
@@ -548,7 +591,9 @@ impl<F: BufFactory> SendBuf<F> {
     /// all stream data up to that point, or the stream has been reset.
     pub fn is_complete(&self) -> bool {
         if let Some(fin_off) = self.fin_off {
-            if (self.fin_acked || self.shutdown || self.error.is_some()) &&
+            if (self.fin_acked ||
+                self.shutdown ||
+                self.peer_stop_sending.is_stopped()) &&
                 self.acked == (0..fin_off)
             {
                 return true;
@@ -558,19 +603,9 @@ impl<F: BufFactory> SendBuf<F> {
         false
     }
 
-    /// Returns true if the stream was stopped before completion.
-    pub fn is_stopped(&self) -> bool {
-        self.error.is_some()
-    }
-
-    /// Returns true if a STOP_SENDING error still needs to be delivered.
-    pub fn has_unreported_stop(&self) -> bool {
-        self.error.is_some() && !self.error_reported && !self.shutdown
-    }
-
-    /// Marks the STOP_SENDING error as reported to the application.
-    pub fn mark_stop_reported(&mut self) {
-        self.error_reported = true;
+    /// Returns the received STOP_SENDING error's notification state.
+    pub(crate) fn peer_stop_sending_state(&self) -> PeerStopSendingState {
+        self.peer_stop_sending
     }
 
     /// Returns true if the stream was shut down.
@@ -597,11 +632,16 @@ impl<F: BufFactory> SendBuf<F> {
     /// Returns the outgoing flow control capacity.
     pub fn cap(&self) -> Result<usize> {
         // The stream was stopped, so return the error code instead.
-        if let Some(e) = self.error {
-            return Err(Error::StreamStopped(e));
-        }
+        self.peer_stop_sending.check_not_stopped()?;
 
         Ok((self.max_data - self.off) as usize)
+    }
+
+    /// Returns capacity, reporting a received STOP_SENDING to the application.
+    /// Internal writability checks use `cap()` without consuming notification.
+    pub fn cap_and_report_stop_sending(&mut self) -> Result<usize> {
+        self.peer_stop_sending.report()?;
+        self.cap()
     }
 
     /// Returns the number of separate buffers stored.
@@ -910,5 +950,46 @@ mod tests {
         let (fin_off, unsent) = send.stop(0).unwrap();
         assert_eq!(fin_off, 50);
         assert_eq!(unsent, 0);
+    }
+
+    #[test]
+    fn peer_stop_sending_notification_lifecycle() {
+        let mut send = <SendBuf>::new(100);
+        assert_eq!(send.cap_and_report_stop_sending(), Ok(100));
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::NotReceived
+        );
+
+        send.stop(0).unwrap();
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::NotReported(0)
+        );
+        assert_eq!(send.cap(), Err(Error::StreamStopped(0)));
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::NotReported(0)
+        );
+        assert_eq!(
+            send.cap_and_report_stop_sending(),
+            Err(Error::StreamStopped(0))
+        );
+        assert_eq!(
+            send.cap_and_report_stop_sending(),
+            Err(Error::StreamStopped(0))
+        );
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::Reported(0)
+        );
+        // Reporting preserves the code for subsequent writes and duplicate
+        // STOP_SENDING must not replace it or create another notification.
+        assert_eq!(send.stop(42), Err(Error::Done));
+        assert_eq!(send.cap(), Err(Error::StreamStopped(0)));
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::Reported(0)
+        );
     }
 }
