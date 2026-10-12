@@ -8133,11 +8133,10 @@ impl<F: BufFactory> Connection<F> {
                 self.tx_cap_factor = ex_data.tx_cap_factor;
             }
 
-            if let Some((discover, max_probes)) = ex_data.pmtud {
+            if let Some((enable, max_probes)) = ex_data.pmtud {
                 self.paths.set_discover_pmtu_on_existing_paths(
-                    discover,
+                    pmtud::PmtudConfig { enable, max_probes },
                     self.recovery_config.max_send_udp_payload_size,
-                    max_probes,
                 );
             }
 
