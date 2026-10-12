@@ -966,6 +966,13 @@ impl<H: DriverHooks> H3Driver<H> {
         // any such frame, except a peer stream error, which must still shut
         // down the read side.
         if !stream.fin_or_reset_sent {
+            if stream.queued_frame.is_some() {
+                debug_assert!(
+                    false,
+                    "channel readiness cannot replace a queued outbound frame"
+                );
+                return Err(H3ConnectionError::H3(h3::Error::InternalError));
+            }
             stream.recv = Some(chan);
             stream.queued_frame = data;
         } else if let Some(OutboundFrame::PeerStreamError) = data {
