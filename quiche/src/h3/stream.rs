@@ -110,6 +110,14 @@ impl Type {
     }
 }
 
+/// The local message phase, retained even after transport termination.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HttpSendPhase {
+    Uninitialized,
+    Headers,
+    Trailers,
+}
+
 /// An HTTP/3 stream.
 ///
 /// This maintains the HTTP/3 state for streams of any type (control, request,
@@ -155,10 +163,10 @@ pub struct Stream {
     /// Whether the stream has been remotely initialized.
     remote_initialized: bool,
 
-    /// Whether the stream has been locally initialized.
-    local_initialized: bool,
+    /// The local message phase, independent of send-side termination.
+    send_phase: HttpSendPhase,
 
-    /// Whether the local send-side of the stream has finished.
+    /// Whether the local send side has finished, including before headers.
     local_finished: bool,
 
     /// Whether a `Data` event has been triggered for this stream.
@@ -172,9 +180,6 @@ pub struct Stream {
 
     /// Whether a DATA frame has been received.
     data_received: bool,
-
-    /// Whether a trailing HEADER field has been sent.
-    trailers_sent: bool,
 
     /// Whether a trailing HEADER field has been received.
     trailers_received: bool,
@@ -233,7 +238,7 @@ impl Stream {
 
             remote_initialized: false,
 
-            local_initialized: false,
+            send_phase: HttpSendPhase::Uninitialized,
             local_finished: false,
 
             data_event_triggered: false,
@@ -244,7 +249,6 @@ impl Stream {
 
             data_received: false,
 
-            trailers_sent: false,
             trailers_received: false,
 
             max_encoded_headers_payload_size,
@@ -704,21 +708,35 @@ impl Stream {
     }
 
     /// Initialize the local part of the stream.
-    pub fn initialize_local(&mut self) {
-        self.local_initialized = true
+    pub fn initialize_local(&mut self) -> Result<()> {
+        match self.send_phase {
+            HttpSendPhase::Uninitialized =>
+                self.send_phase = HttpSendPhase::Headers,
+            // Additional headers and trailer-bearing FIN use this helper too.
+            HttpSendPhase::Headers => {},
+            HttpSendPhase::Trailers => {
+                debug_assert!(
+                    false,
+                    "Local initialization cannot follow trailers"
+                );
+                return Err(Error::InternalError);
+            },
+        }
+
+        Ok(())
     }
 
-    /// Whether the stream has been locally initialized.
-    pub fn local_initialized(&self) -> bool {
-        self.local_initialized
+    /// Returns the send message phase, including after termination.
+    pub(super) fn send_phase(&self) -> HttpSendPhase {
+        self.send_phase
     }
 
     /// Finish the local part of the stream.
     pub fn finish_local(&mut self) {
-        self.local_finished = true
+        self.local_finished = true;
     }
 
-    /// Whether the local send-side of the stream has finished.
+    /// Whether the local send side has finished.
     pub fn local_finished(&self) -> bool {
         self.local_finished
     }
@@ -732,12 +750,21 @@ impl Stream {
         self.headers_received_count
     }
 
-    pub fn mark_trailers_sent(&mut self) {
-        self.trailers_sent = true;
-    }
+    /// Records trailers after initial headers have been sent.
+    pub fn mark_trailers_sent(&mut self) -> Result<()> {
+        match self.send_phase() {
+            HttpSendPhase::Uninitialized => {
+                debug_assert!(false, "Trailers require initial headers");
+                return Err(Error::InternalError);
+            },
+            HttpSendPhase::Headers => self.send_phase = HttpSendPhase::Trailers,
+            HttpSendPhase::Trailers => {
+                debug_assert!(false, "Trailers cannot be recorded twice");
+                return Err(Error::InternalError);
+            },
+        }
 
-    pub fn trailers_sent(&self) -> bool {
-        self.trailers_sent
+        Ok(())
     }
 
     /// Tries to fill the state buffer by reading data from the given cursor.
@@ -1011,6 +1038,41 @@ mod tests {
             SETTINGS_MAX_FIELD_SECTION_SIZE_DEFAULT,
             PRIORITY_UPDATE_FRAME_PAYLOAD_MAX_SIZE_DEFAULT,
         )
+    }
+
+    #[test]
+    #[cfg_attr(debug_assertions, should_panic(expected = "initial headers"))]
+    fn trailers_require_initial_headers() {
+        let mut stream = open_remote_request_stream();
+        assert_eq!(stream.mark_trailers_sent(), Err(Error::InternalError));
+        assert_eq!(stream.send_phase(), HttpSendPhase::Uninitialized);
+    }
+
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "cannot follow trailers")
+    )]
+    fn local_initialization_cannot_follow_trailers() {
+        let mut stream = open_remote_request_stream();
+        stream.initialize_local().unwrap();
+        stream.initialize_local().unwrap();
+        stream.mark_trailers_sent().unwrap();
+        assert_eq!(stream.initialize_local(), Err(Error::InternalError));
+        assert_eq!(stream.send_phase(), HttpSendPhase::Trailers);
+    }
+
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "cannot be recorded twice")
+    )]
+    fn trailers_cannot_be_recorded_twice() {
+        let mut stream = open_remote_request_stream();
+        stream.initialize_local().unwrap();
+        stream.mark_trailers_sent().unwrap();
+        assert_eq!(stream.mark_trailers_sent(), Err(Error::InternalError));
+        assert_eq!(stream.send_phase(), HttpSendPhase::Trailers);
     }
 
     fn parse_uni(

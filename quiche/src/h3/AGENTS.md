@@ -32,6 +32,13 @@ qpack/
 
 ## ANTI-PATTERNS
 
+- Represent related HTTP/3 message-phase flags with explicit enums. Preserve
+  message phase separately from local termination, including termination
+  before initial headers and trailers sent without FIN.
+- Match phase enums exhaustively in transitions and validation decisions where
+  a new variant could require a different outcome. Simple predicates are suitable
+  for yes/no decisions with an obvious safe default for new variants. Keep
+  independent termination flags separate; payload wildcards are fine.
 - **h3::Error != quiche::Error.** 19 variants; `TransportError(quiche::Error)` wraps transport errors. Don't confuse.
 - **`Error::Done` is success** in poll/read loops. Not a failure — signals "no more work".
 - **`to_wire()` maps `BufferTooShort` → `0x999`** — non-standard wire code. Don't propagate this pattern.

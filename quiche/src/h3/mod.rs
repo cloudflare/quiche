@@ -1317,8 +1317,11 @@ impl Connection {
         match self.streams.get(&stream_id) {
             Some(s) => {
                 // Only one initial HEADERS allowed.
-                if s.local_initialized() {
-                    return Err(Error::FrameUnexpected);
+                match s.send_phase() {
+                    stream::HttpSendPhase::Uninitialized => {},
+                    stream::HttpSendPhase::Headers |
+                    stream::HttpSendPhase::Trailers =>
+                        return Err(Error::FrameUnexpected),
                 }
 
                 s
@@ -1377,14 +1380,12 @@ impl Connection {
 
         match self.streams.get(&stream_id) {
             Some(s) => {
-                // Initial HEADERS must have been sent.
-                if !s.local_initialized() {
-                    return Err(Error::FrameUnexpected);
-                }
-
-                // Only one trailing HEADERS allowed.
-                if s.trailers_sent() {
-                    return Err(Error::FrameUnexpected);
+                // Initial HEADERS are required and trailers end the message.
+                match s.send_phase() {
+                    stream::HttpSendPhase::Headers => {},
+                    stream::HttpSendPhase::Uninitialized |
+                    stream::HttpSendPhase::Trailers =>
+                        return Err(Error::FrameUnexpected),
                 }
 
                 s
@@ -1399,7 +1400,7 @@ impl Connection {
             // send_headers() might have tidied the stream away, so we need to
             // check again.
             if let Some(s) = self.streams.get_mut(&stream_id) {
-                s.mark_trailers_sent();
+                s.mark_trailers_sent()?;
             }
         }
 
@@ -1553,9 +1554,9 @@ impl Connection {
         });
 
         if fin {
-            self.finish_local_stream(conn, stream_id, true);
+            self.finish_local_stream(conn, stream_id, true)?;
         } else if let Some(s) = self.streams.get_mut(&stream_id) {
-            s.initialize_local();
+            s.initialize_local()?;
         }
 
         Ok(())
@@ -1696,14 +1697,11 @@ impl Connection {
         }
 
         match self.streams.get_mut(&stream_id) {
-            Some(s) => {
-                if !s.local_initialized() {
-                    return Err(Error::FrameUnexpected);
-                }
-
-                if s.trailers_sent() {
-                    return Err(Error::FrameUnexpected);
-                }
+            Some(s) => match s.send_phase() {
+                stream::HttpSendPhase::Headers => {},
+                stream::HttpSendPhase::Uninitialized |
+                stream::HttpSendPhase::Trailers =>
+                    return Err(Error::FrameUnexpected),
             },
 
             None => {
@@ -1796,7 +1794,7 @@ impl Connection {
         }
 
         if fin && written == len {
-            self.finish_local_stream(conn, stream_id, false);
+            self.finish_local_stream(conn, stream_id, false)?;
         }
 
         Ok(ret)
@@ -2964,17 +2962,17 @@ impl Connection {
     fn finish_local_stream<F: BufFactory>(
         &mut self, conn: &super::Connection<F>, stream_id: u64,
         initialize_local: bool,
-    ) {
+    ) -> Result<()> {
         let hash_map::Entry::Occupied(mut stream) = self.streams.entry(stream_id)
         else {
-            return;
+            return Ok(());
         };
 
         {
             let stream = stream.get_mut();
 
             if initialize_local {
-                stream.initialize_local();
+                stream.initialize_local()?;
             }
 
             stream.finish_local();
@@ -2983,6 +2981,8 @@ impl Connection {
         if conn.stream_finished(stream_id) {
             stream.remove();
         }
+
+        Ok(())
     }
 
     fn remove_local_finished_stream(&mut self, stream_id: u64) {
