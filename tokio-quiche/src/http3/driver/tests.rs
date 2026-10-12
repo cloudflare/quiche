@@ -56,6 +56,37 @@ fn downstream_readiness_does_not_overwrite_queued_frame(
     );
 }
 
+#[test]
+fn fin_completion_requires_open_send_direction() {
+    let (mut ctx, _outbound, _inbound) = StreamCtx::new(0, 1);
+    H3Driver::<ServerHooks>::on_fin_sent(&mut ctx).unwrap();
+    assert_eq!(ctx.send_state, SendState::Closed);
+    assert!(ctx.recv.is_none());
+    assert_eq!(
+        ctx.audit_stats.sent_stream_fin(),
+        StreamClosureKind::Explicit
+    );
+
+    // Only the repeated transition may panic; the first call must succeed.
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        H3Driver::<ServerHooks>::on_fin_sent(&mut ctx)
+    }));
+    if cfg!(debug_assertions) {
+        let panic = result.expect_err("repeated FIN completion must assert");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .expect("the assertion must have a string panic message");
+        assert!(
+            message.contains("requires an open send direction"),
+            "{message}"
+        );
+    } else {
+        assert_matches!(result, Ok(Err(h3::Error::InternalError)));
+    }
+}
+
 /// Tests for the body receive buffer sizing helper.
 mod body_recv_buf_size {
     use super::*;
@@ -1458,139 +1489,132 @@ mod server_side_driver {
         );
     }
 
-    #[test]
-    fn stop_sending_closes_idle_responses_for_all_request_states() {
-        #[derive(Clone, Copy, Debug)]
-        enum RequestState {
-            Open,
-            Fin,
-            Reset,
-        }
+    #[derive(Clone, Copy, Debug)]
+    enum RequestState {
+        Open,
+        Fin,
+        Reset,
+    }
 
-        #[derive(Clone, Copy, Debug)]
-        enum ResponseState {
-            NotStarted,
-            InformationalHeaders,
-            FinalHeaders,
-            BodyStalled,
-        }
+    #[derive(Clone, Copy, Debug)]
+    enum ResponseState {
+        NotStarted,
+        InformationalHeaders,
+        FinalHeaders,
+        BodyStalled,
+    }
 
-        fn assert_stop_closes_response(
-            request_state: RequestState, response_state: ResponseState,
-        ) {
-            let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
-            helper.complete_handshake().unwrap();
-            helper.advance_and_run_loop().unwrap();
+    #[rstest]
+    #[case::open(RequestState::Open, RecvState::Open)]
+    #[case::fin(RequestState::Fin, RecvState::Closed)]
+    #[case::reset(RequestState::Reset, RecvState::Closed)]
+    fn stop_sending_closes_idle_responses_for_all_request_states(
+        #[case] request_state: RequestState,
+        #[case] expected_recv_state: RecvState,
+        #[values(
+            ResponseState::NotStarted,
+            ResponseState::InformationalHeaders,
+            ResponseState::FinalHeaders,
+            ResponseState::BodyStalled
+        )]
+        response_state: ResponseState,
+    ) {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
 
-            let stream_id = helper
-                .peer_client_send_request(
-                    make_request_headers("POST"),
-                    matches!(request_state, RequestState::Fin),
-                )
-                .unwrap();
+        let stream_id = helper
+            .peer_client_send_request(
+                make_request_headers("POST"),
+                matches!(request_state, RequestState::Fin),
+            )
+            .unwrap();
 
-            helper.advance_and_run_loop().unwrap();
+        helper.advance_and_run_loop().unwrap();
 
-            let req = assert_matches!(
-                helper.driver_recv_server_event().unwrap(),
-                ServerH3Event::Headers { incoming_headers, .. } => {
-                    incoming_headers
-                }
-            );
-
-            let to_client = req.send.get_ref().unwrap().clone();
-            let audit_stats = req.h3_audit_stats;
-
-            if matches!(request_state, RequestState::Reset) {
-                helper
-                    .pipe
-                    .client
-                    .stream_shutdown(stream_id, quiche::Shutdown::Write, 1234)
-                    .unwrap();
-
-                helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { incoming_headers, .. } => {
+                incoming_headers
             }
+        );
 
-            let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
-            assert_eq!(
-                ctx.fin_or_reset_recv,
-                !matches!(request_state, RequestState::Open)
-            );
+        let to_client = req.send.get_ref().unwrap().clone();
+        let audit_stats = req.h3_audit_stats;
 
-            let headers = match response_state {
-                ResponseState::NotStarted => None,
-                ResponseState::InformationalHeaders =>
-                    Some(vec![h3::Header::new(b":status", b"103")]),
-                ResponseState::FinalHeaders | ResponseState::BodyStalled =>
-                    Some(make_response_headers()),
-            };
-
-            if let Some(headers) = headers {
-                to_client
-                    .try_send(OutboundFrame::Headers(headers, None))
-                    .unwrap();
-
-                helper.advance_and_run_loop().unwrap();
-
-                let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
-                assert!(ctx.initial_headers_sent);
-            }
-
-            if matches!(response_state, ResponseState::BodyStalled) {
-                to_client
-                    .try_send(OutboundFrame::Body(
-                        Bytes::copy_from_slice(b"first chunk"),
-                        false,
-                    ))
-                    .unwrap();
-
-                helper.advance_and_run_loop().unwrap();
-
-                assert!(audit_stats.downstream_bytes_sent() > 0);
-            }
-
+        if matches!(request_state, RequestState::Reset) {
             helper
                 .pipe
                 .client
-                .stream_shutdown(stream_id, quiche::Shutdown::Read, 4242)
+                .stream_shutdown(stream_id, quiche::Shutdown::Write, 1234)
                 .unwrap();
 
-            // Keep the automatic RESET_STREAM unacknowledged until the driver
-            // has observed STOP_SENDING.
-            let flight =
-                quiche::test_utils::emit_flight(&mut helper.pipe.client).unwrap();
-            quiche::test_utils::process_flight(&mut helper.pipe.server, flight)
-                .unwrap();
-
-            // Process the stopped stream without another application frame.
-            helper
-                .driver
-                .process_writes(&mut helper.pipe.server)
-                .unwrap();
-
-            assert!(
-                to_client.is_closed(),
-                "request={request_state:?}, response={response_state:?}"
-            );
-            assert_eq!(
-                audit_stats.recvd_stop_sending_error_code(),
-                4242,
-                "request={request_state:?}, response={response_state:?}"
-            );
+            helper.advance_and_run_loop().unwrap();
         }
 
-        for request_state in
-            [RequestState::Open, RequestState::Fin, RequestState::Reset]
-        {
-            for response_state in [
-                ResponseState::NotStarted,
-                ResponseState::InformationalHeaders,
-                ResponseState::FinalHeaders,
-                ResponseState::BodyStalled,
-            ] {
-                assert_stop_closes_response(request_state, response_state);
-            }
+        let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+        assert_eq!(ctx.recv_state, expected_recv_state);
+
+        let headers = match response_state {
+            ResponseState::NotStarted => None,
+            ResponseState::InformationalHeaders =>
+                Some(vec![h3::Header::new(b":status", b"103")]),
+            ResponseState::FinalHeaders | ResponseState::BodyStalled =>
+                Some(make_response_headers()),
+        };
+
+        if let Some(headers) = headers {
+            to_client
+                .try_send(OutboundFrame::Headers(headers, None))
+                .unwrap();
+
+            helper.advance_and_run_loop().unwrap();
+
+            let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+            assert!(ctx.initial_headers_sent);
         }
+
+        if matches!(response_state, ResponseState::BodyStalled) {
+            to_client
+                .try_send(OutboundFrame::Body(
+                    Bytes::copy_from_slice(b"first chunk"),
+                    false,
+                ))
+                .unwrap();
+
+            helper.advance_and_run_loop().unwrap();
+
+            assert!(audit_stats.downstream_bytes_sent() > 0);
+        }
+
+        helper
+            .pipe
+            .client
+            .stream_shutdown(stream_id, quiche::Shutdown::Read, 4242)
+            .unwrap();
+
+        // Keep the automatic RESET_STREAM unacknowledged until the driver
+        // has observed STOP_SENDING.
+        let flight =
+            quiche::test_utils::emit_flight(&mut helper.pipe.client).unwrap();
+        quiche::test_utils::process_flight(&mut helper.pipe.server, flight)
+            .unwrap();
+
+        // Process the stopped stream without another application frame.
+        helper
+            .driver
+            .process_writes(&mut helper.pipe.server)
+            .unwrap();
+
+        assert!(
+            to_client.is_closed(),
+            "request={request_state:?}, response={response_state:?}"
+        );
+        assert_eq!(
+            audit_stats.recvd_stop_sending_error_code(),
+            4242,
+            "request={request_state:?}, response={response_state:?}"
+        );
     }
 
     #[test]
