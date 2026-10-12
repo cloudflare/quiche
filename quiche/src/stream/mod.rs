@@ -45,6 +45,8 @@ use crate::BufFactory;
 use crate::Error;
 use crate::Result;
 
+pub(crate) use self::send_buf::PeerStopSendingState;
+
 const DEFAULT_URGENCY: u8 = 127;
 
 /// The maximum size of the receiver stream flow control window.
@@ -632,12 +634,11 @@ impl<F: BufFactory> StreamMap<F> {
         self.peer_max_streams_uni - self.local_opened_streams_uni
     }
 
-    /// Updates stream state before its STOP error is returned to the caller.
-    pub fn mark_stop_reported(&mut self, stream_id: u64) {
+    /// Collects or disarms a stream after reporting STOP_SENDING to the caller.
+    pub fn on_stop_sending_reported(&mut self, stream_id: u64) {
         let Some(stream) = self.streams.get_mut(&stream_id) else {
             return;
         };
-        stream.send.mark_stop_reported();
 
         if stream.state() == StreamState::Collectable {
             let local = stream.local;
@@ -996,9 +997,15 @@ impl<F: BufFactory> Stream<F> {
             (false, false) => self.recv.is_fin(),
         };
 
+        let pending_stop_sending = match self.send.peer_stop_sending_state() {
+            PeerStopSendingState::NotReported(_) => !self.send.is_shutdown(),
+            PeerStopSendingState::NotReceived |
+            PeerStopSendingState::Reported(_) => false,
+        };
+
         if !complete {
             StreamState::Incomplete
-        } else if self.is_readable() || self.send.has_unreported_stop() {
+        } else if self.is_readable() || pending_stop_sending {
             StreamState::CompleteWithPendingDelivery
         } else {
             StreamState::Collectable
@@ -1886,7 +1893,10 @@ mod tests {
         // A completed stream must retain each undelivered terminal event.
         stream.send.stop(42).unwrap();
         assert_eq!(stream.state(), StreamState::CompleteWithPendingDelivery);
-        stream.send.mark_stop_reported();
+        assert_eq!(
+            stream.send.cap_and_report_stop_sending(),
+            Err(Error::StreamStopped(42))
+        );
         assert_eq!(stream.state(), StreamState::Collectable);
 
         let mut stream =
@@ -1896,6 +1906,15 @@ mod tests {
         assert_eq!(stream.state(), StreamState::CompleteWithPendingDelivery);
         assert_eq!(stream.recv.emit(&mut buf), Err(Error::StreamReset(43)));
         assert_eq!(stream.state(), StreamState::Collectable);
+
+        // Local shutdown permits collection without reporting a later peer
+        // STOP.
+        stream.send.stop(42).unwrap();
+        assert_eq!(stream.state(), StreamState::Collectable);
+        assert_eq!(
+            stream.send.peer_stop_sending_state(),
+            PeerStopSendingState::NotReported(42)
+        );
     }
 
     #[test]
