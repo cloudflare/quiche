@@ -32,6 +32,15 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
 
 ## ANTI-PATTERNS
 
+- Store receive and send lifecycle states explicitly; channel absence does not
+  imply completion, especially when a waiting future owns the endpoint.
+  Received FIN and app-channel FIN delivery are distinct receive states.
+- Do not add overlapping boolean completion methods for these states. A single
+  derived helper can centralize the cleanup decision without conflating pending
+  FIN with closed delivery. Match lifecycle enums exhaustively where a new
+  variant could require a different transition or cleanup outcome. Simple
+  predicates suit yes/no decisions with an obvious safe default; payload
+  wildcards and independent readiness queries are fine.
 - **`connection_not_present()` returns `TlsFail`** -- misleading sentinel error. Do not propagate this pattern.
 - **`process_write_frame` uses `Error::Done` as success** -- non-obvious control flow, don't replicate elsewhere.
 - **`DriverHooks` is sealed** -- `mod hooks` is `pub(crate)`, trait has `#[allow(private_interfaces)]`. Do not expose.

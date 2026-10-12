@@ -29,7 +29,6 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
-use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
 use quiche::h3;
 use tokio::sync::mpsc;
@@ -219,11 +218,7 @@ impl ClientHooks {
             // `send_request()` already sent FIN for bodyless requests, so
             // mark the send side complete and drop the outbound-frame receiver
             // since no body will be sent.
-            stream_ctx.fin_or_reset_sent = true;
-            stream_ctx.recv = None;
-            stream_ctx
-                .audit_stats
-                .set_sent_stream_fin(StreamClosureKind::Explicit);
+            H3Driver::<ClientHooks>::on_fin_sent(&mut stream_ctx)?;
         }
 
         if let Some(quarter_stream_id) =
