@@ -53,6 +53,19 @@ pub(super) enum RecvState {
     Closed,
 }
 
+impl RecvState {
+    /// Records peer FIN once, preserving pending or closed delivery states.
+    pub(super) fn mark_fin_pending(&mut self) -> bool {
+        match self {
+            Self::Open => {
+                *self = Self::FinPending;
+                true
+            },
+            Self::FinPending | Self::Closed => false,
+        }
+    }
+}
+
 /// The transport write direction is closed by FIN, reset, or peer STOP.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SendState {
@@ -109,6 +122,15 @@ impl StreamCtx {
         };
 
         (ctx, PollSender::new(backward_sender), forward_receiver)
+    }
+
+    /// Cleanup requires closed transport writes and closed app delivery.
+    pub(super) fn fully_closed(&self) -> bool {
+        match (self.recv_state, self.send_state) {
+            (RecvState::Closed, SendState::Closed) => true,
+            (RecvState::Open | RecvState::FinPending, _) |
+            (RecvState::Closed, SendState::Open) => false,
+        }
     }
 
     /// Creates a [Future] that resolves when `send` has capacity again.
