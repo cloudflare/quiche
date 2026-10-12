@@ -179,23 +179,24 @@ impl BoundedNonEmptyConnectionIdVecDeque {
 
     /// Removes the element in the collection having the provided `seq`.
     ///
-    /// If this method is called when there remains a single element in the
-    /// collection, this method raises an [`OutOfIdentifiers`].
+    /// If the element is the last one remaining in the collection, this method
+    /// raises an [`OutOfIdentifiers`].
     ///
     /// Returns `Some` if the element was in the collection and removed, or
     /// `None` if it was not and nothing was modified.
     ///
     /// [`OutOfIdentifiers`]: enum.Error.html#OutOfIdentifiers
     fn remove(&mut self, seq: u64) -> Result<Option<ConnectionIdEntry>> {
+        let index = match self.inner.iter().position(|e| e.seq == seq) {
+            Some(i) => i,
+            None => return Ok(None),
+        };
+
         if self.inner.len() <= 1 {
             return Err(Error::OutOfIdentifiers);
         }
 
-        Ok(self
-            .inner
-            .iter()
-            .position(|e| e.seq == seq)
-            .and_then(|index| self.inner.remove(index)))
+        Ok(self.inner.remove(index))
     }
 
     /// Removes all elements in the collection with sequence numbers less than
@@ -971,6 +972,8 @@ mod tests {
 
         // Trying to remove the last DCID triggers an error.
         assert_eq!(ids.retire_dcid(2), Err(Error::OutOfIdentifiers));
+        assert_eq!(ids.retire_dcid(0), Err(Error::InvalidState));
+        assert_eq!(ids.retire_dcid(1), Err(Error::InvalidState));
         assert_eq!(ids.available_dcids(), 0);
         assert!(!ids.has_retire_dcids());
         assert_eq!(ids.dcids.len(), 1);
@@ -1134,8 +1137,17 @@ mod tests {
         assert_eq!(ids.pop_retired_scid(), None);
 
         assert_eq!(ids.retire_scid(1, &scid3), Ok(None));
+        assert_eq!(ids.scids.len(), 1);
+
+        // The peer may retransmit RETIRE_CONNECTION_ID.
+        assert_eq!(ids.retire_scid(1, &scid3), Ok(None));
+        assert_eq!(ids.scids.len(), 1);
 
         assert_eq!(ids.pop_retired_scid(), Some(scid2));
         assert_eq!(ids.pop_retired_scid(), None);
+
+        // The last SCID cannot be retired.
+        assert_eq!(ids.retire_scid(2, &scid3), Err(Error::OutOfIdentifiers));
+        assert_eq!(ids.scids.len(), 1);
     }
 }

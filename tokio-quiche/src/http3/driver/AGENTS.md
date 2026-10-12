@@ -9,10 +9,11 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
 | File | Role |
 |------|------|
 | `mod.rs` | `H3Driver`, `H3Controller`, `H3Event`, `H3Command`, `OutboundFrame`/`InboundFrame`, channel types, `ApplicationOverQuic` impl |
-| `hooks.rs` | `DriverHooks` trait (sealed). Defines `headers_received`, `conn_established`, `conn_command`, `wait_for_action` |
+| `hooks.rs` | `DriverHooks` trait (sealed). Defines `headers_received`, `stream_recv_closed`, `stream_closed`, `conn_established`, `conn_command`, `wait_for_action` |
 | `client.rs` | `ClientHooks` impl, `ClientH3Driver`/`ClientH3Controller` aliases, `ClientH3Event`/`ClientH3Command` |
 | `server.rs` | `ServerHooks` impl, `ServerH3Driver`/`ServerH3Controller` aliases, `ServerH3Event`/`ServerH3Command` |
 | `streams.rs` | `StreamCtx`, `FlowCtx`, `WaitForStream` future, capacity/readiness signals |
+| `waiting_streams.rs` | `WaitingStreams` keyed tracker for pending upstream-capacity and downstream-data waits |
 | `datagram.rs` | DATAGRAM/CONNECT-UDP flow handling |
 | `connection.rs` | `H3Conn` wrapper exposing `h3::Connection` operations |
 | `test_utils.rs` | `DriverTestHelper<H>` -- wraps `Pipe` + `H3Driver` for unit tests |
@@ -25,7 +26,7 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
 | Channel architecture | `mod.rs:332` (`H3Driver` struct fields: `h3_event_sender`, `cmd_recv`, `stream_map`, `waiting_streams`) |
 | `select!` loop / priority ordering | `mod.rs` `wait_for_data` impl -- uses `biased` select! |
 | Stream lifecycle | `cleanup_stream`, `shutdown_stream`, `process_h3_fin`, `process_h3_data` in `mod.rs` |
-| Per-stream backpressure | `streams.rs` -- `FuturesUnordered<WaitForStream>`, `WaitForDownstreamData`, `WaitForUpstreamCapacity` |
+| Per-stream backpressure | `streams.rs` defines wait futures; `waiting_streams.rs` tracks and cancels them by stream ID |
 | Adding endpoint-specific behavior | `hooks.rs` -- add method to `DriverHooks`, impl in `client.rs`/`server.rs` |
 | Writing tests | `test_utils.rs` for `DriverTestHelper`, `tests.rs` for examples |
 
@@ -35,6 +36,7 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
 - **`process_write_frame` uses `Error::Done` as success** -- non-obvious control flow, don't replicate elsewhere.
 - **`DriverHooks` is sealed** -- `mod hooks` is `pub(crate)`, trait has `#[allow(private_interfaces)]`. Do not expose.
 - **Stream cleanup is distributed** across 4+ functions (`cleanup_stream`, `shutdown_stream`, `process_h3_fin`, `process_h3_data`). Understand all paths before modifying.
+- **Waiting-stream cancellation must be keyed** -- cancelling waiting streams must not linearly walk all pending futures for performance reasons.
 - **`STREAM_CAPACITY`** is 1 in test/debug, 16 in release. Tests exercise backpressure differently from prod.
 
 ## NOTES

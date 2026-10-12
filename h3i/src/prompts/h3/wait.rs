@@ -92,8 +92,8 @@ fn prompt_stream_wait(stream_wait_type: &str) -> InquireResult<WaitType> {
     } else {
         None
     }
-    // If somehow we've gotten an invalid input, we can panic. This is post validation so that
-    // shouldn't happen
+    // If somehow we've gotten an invalid input, we can panic. This is post
+    // validation so that shouldn't happen
     .unwrap();
 
     Ok(WaitType::StreamEvent(StreamEvent {

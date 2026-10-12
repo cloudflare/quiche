@@ -41,6 +41,7 @@ use tokio_util::time::delay_queue::{
 /// Unified configuration parameters for
 /// [H3Driver](crate::http3::driver::H3Driver)s.
 #[derive(Default, Clone, Debug)]
+#[non_exhaustive]
 pub struct Http3Settings {
     /// Maximum number of requests a
     /// [ServerH3Driver](crate::http3::driver::ServerH3Driver) allows per

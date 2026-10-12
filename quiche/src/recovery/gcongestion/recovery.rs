@@ -1033,11 +1033,6 @@ impl RecoveryOps for GRecovery {
     }
 
     fn cwnd_available(&self) -> usize {
-        // Ignore cwnd when sending probe packets.
-        if self.epochs.iter().any(|e| e.loss_probes > 0) {
-            return usize::MAX;
-        }
-
         self.cwnd().saturating_sub(self.bytes_in_flight.get())
     }
 
@@ -1159,7 +1154,7 @@ impl RecoveryOps for GRecovery {
         self.epochs[epoch].test_largest_sent_pkt_num_on_path
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "qlog"))]
     fn app_limited(&self) -> bool {
         self.pacer.is_app_limited(self.bytes_in_flight.get())
     }
@@ -1213,6 +1208,7 @@ impl RecoveryOps for GRecovery {
             lost_packets: Some(self.lost_count as u64),
             lost_bytes: Some(self.bytes_lost),
             pto_count: Some(self.pto_count),
+            app_limited: Some(self.app_limited()),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)

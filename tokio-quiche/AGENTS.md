@@ -35,7 +35,7 @@ src/
 
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
-| `ApplicationOverQuic` | trait | `quic/connection/mod.rs` | Extension point: on_conn_established, process_reads/writes, wait_for_data |
+| `ApplicationOverQuic` | trait | `quic/connection/mod.rs` | Extension point: connection lifecycle, reads/writes, wait_for_data |
 | `H3Driver<H>` | struct | `http3/driver/mod.rs` | Implements `ApplicationOverQuic` for HTTP/3 |
 | `DriverHooks` | sealed trait | `http3/driver/hooks.rs` | Client vs server H3 behavior |
 | `IoWorker<Tx,M,S>` | struct | `quic/io/worker.rs` | Per-connection state machine (recv -> app -> send) |
@@ -58,6 +58,7 @@ src/
 - `QuicAuditStats` (from `datagram-socket`) threaded through all connections via `Arc`.
 - Task spawning via `metrics::tokio_task::spawn()` / `spawn_with_killswitch()` — wraps `tokio::spawn` with optional schedule/poll histograms.
 - `ConnectionStage` FSM: `Handshake` -> `RunningApplication` -> `Close`.
+- `IoWorker` drains `PathEvent`s and forwards them directly through `ConnectionHook::on_path_event` when a hook is configured, avoiding protocol-specific H3 plumbing.
 
 ## ANTI-PATTERNS
 

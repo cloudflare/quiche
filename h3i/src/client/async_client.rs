@@ -118,6 +118,7 @@ fn create_config(args: &H3iConfig) -> QuicSettings {
     quic_settings.verify_peer = args.verify_peer;
     quic_settings.max_idle_timeout =
         Some(Duration::from_millis(args.idle_timeout));
+    quic_settings.send_capacity_factor = args.send_capacity_factor;
     quic_settings.max_recv_udp_payload_size = MAX_DATAGRAM_SIZE;
     quic_settings.max_send_udp_payload_size = MAX_DATAGRAM_SIZE;
     quic_settings.initial_max_data = 10_000_000;

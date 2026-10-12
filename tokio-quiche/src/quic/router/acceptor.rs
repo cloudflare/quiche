@@ -63,6 +63,7 @@ pub(crate) struct ConnectionAcceptor<S, M> {
 
 pub(crate) struct ConnectionAcceptorConfig {
     pub(crate) disable_client_ip_validation: bool,
+    pub(crate) enable_per_connection_dscp: bool,
     pub(crate) qlog_dir: Option<String>,
     pub(crate) qlog_compression: QlogCompression,
     pub(crate) keylog_file: Option<File>,
@@ -142,6 +143,7 @@ where
             pending_cid: Some(pending_cid),
             cid_generator: Some(Arc::clone(&self.cid_generator)),
             initial_pkt: Some(incoming),
+            enable_per_connection_dscp: self.config.enable_per_connection_dscp,
         }))
     }
 
@@ -180,7 +182,8 @@ where
                     to,
                     from,
                     send_buf,
-                    send_buf.len(),
+                    Some(send_buf.len()),
+                    None,
                     None,
                     would_block_metric,
                     send_to_wouldblock_duration_s,
@@ -257,5 +260,79 @@ where
         });
 
         self.accept_conn(incoming, retry_cids, hdr.dcid.clone(), quiche_config)
+    }
+}
+
+#[cfg(all(target_os = "linux", test, not(feature = "fuzzing")))]
+mod tests {
+    use super::*;
+    use crate::metrics::DefaultMetrics;
+    use crate::quic::connection::SimpleConnectionIdGenerator;
+    use crate::quic::io::gso::test::enable_tos;
+    use crate::quic::io::gso::test::recv_tos;
+    use nix::sys::socket::setsockopt;
+    use nix::sys::socket::sockopt;
+    use tokio::net::UdpSocket;
+
+    async fn check_stateless_reply_inherits_socket_dscp(
+        bind_addr: &str, dscp: u8,
+    ) {
+        let sender = Arc::new(UdpSocket::bind(bind_addr).await.unwrap());
+        let receiver = UdpSocket::bind(bind_addr).await.unwrap();
+        enable_tos(&receiver);
+        let tos = i32::from(dscp) << 2;
+        if sender.local_addr().unwrap().is_ipv4() {
+            setsockopt(sender.as_ref(), sockopt::Ipv4Tos, &tos).unwrap();
+        } else {
+            setsockopt(sender.as_ref(), sockopt::Ipv6TClass, &tos).unwrap();
+        }
+
+        let acceptor = ConnectionAcceptor::new(
+            ConnectionAcceptorConfig {
+                disable_client_ip_validation: false,
+                enable_per_connection_dscp: dscp != 0,
+                qlog_dir: None,
+                qlog_compression: QlogCompression::None,
+                keylog_file: None,
+                with_pktinfo: true,
+            },
+            Arc::clone(&sender),
+            Default::default(),
+            Arc::new(SimpleConnectionIdGenerator),
+            DefaultMetrics,
+        );
+
+        let incoming = Incoming {
+            peer_addr: receiver.local_addr().unwrap(),
+            local_addr: sender.local_addr().unwrap(),
+            rx_time: None,
+            buf: Vec::new(),
+            gro: None,
+            so_mark_data: None,
+        };
+        acceptor
+            .handshake_reply(incoming, |buf| {
+                buf[..5].copy_from_slice(b"reply");
+                Ok(5)
+            })
+            .unwrap();
+
+        let (payload, tos) = recv_tos(&receiver).await;
+        assert_eq!(payload, b"reply");
+        assert_eq!(tos >> 2, dscp);
+    }
+
+    #[tokio::test]
+    async fn stateless_reply_inherits_ipv4_socket_dscp() {
+        for dscp in [34, 0] {
+            check_stateless_reply_inherits_socket_dscp("127.0.0.1:0", dscp).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn stateless_reply_inherits_ipv6_socket_dscp() {
+        for dscp in [34, 0] {
+            check_stateless_reply_inherits_socket_dscp("[::1]:0", dscp).await;
+        }
     }
 }

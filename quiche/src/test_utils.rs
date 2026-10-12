@@ -30,6 +30,28 @@ use smallvec::smallvec;
 
 use crate::recovery::Sent;
 
+/// Curve preference list that excludes post-quantum groups.
+///
+/// Several tests were written against a pre-PQ world where the ClientHello
+/// fit in a single Initial packet; those tests opt out of PQ to keep that
+/// invariant. See [`config_no_pq`] and
+/// [`Config::set_curves_list`](crate::Config::set_curves_list).
+const NO_PQ_CURVES: &str = "X25519:P-256:P-384";
+
+/// Returns a `Config` equivalent to `Config::new(version)` but with
+/// post-quantum TLS curves disabled.
+///
+/// Use this as a drop-in replacement for `Config::new(version)` in tests
+/// whose expected packet counts/sizes were calibrated against a
+/// single-Initial ClientHello. A post-quantum keyshare pushes the
+/// ClientHello across two Initial packets, which perturbs those
+/// expectations.
+pub fn config_no_pq(version: u32) -> Result<Config> {
+    let mut config = Config::new(version)?;
+    config.set_curves_list(NO_PQ_CURVES)?;
+    Ok(config)
+}
+
 pub struct Pipe<F = DefaultBufFactory>
 where
     F: BufFactory,
@@ -54,6 +76,14 @@ impl Pipe {
         config.set_max_idle_timeout(180_000);
         config.verify_peer(false);
         config.set_ack_delay_exponent(8);
+        Ok(config)
+    }
+
+    /// Like [`default_config`](Self::default_config) but with post-quantum
+    /// TLS curves disabled. See [`config_no_pq`] for the rationale.
+    pub fn default_config_no_pq(cc_algorithm_name: &str) -> Result<Config> {
+        let mut config = Self::default_config(cc_algorithm_name)?;
+        config.set_curves_list(NO_PQ_CURVES)?;
         Ok(config)
     }
 

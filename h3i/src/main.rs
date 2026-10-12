@@ -307,6 +307,7 @@ fn config_from_clap() -> std::result::Result<Config, String> {
         source_port: 0,
         verify_peer,
         idle_timeout,
+        send_capacity_factor: 1.0,
         max_data,
         max_stream_data_bidi_local,
         max_stream_data_bidi_remote,

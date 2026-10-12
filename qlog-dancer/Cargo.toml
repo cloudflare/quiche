@@ -26,7 +26,7 @@ regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tabled = "0.15.0"
-table_to_html = "0.9.0"
+table_to_html = "0.11.0"
 
 wirefilter-engine = { git = "https://github.com/cloudflare/wirefilter.git", rev="f3116d9f244d10a2d9a37d036cfa7129c5e50d3b" }
 
@@ -35,11 +35,11 @@ wirefilter-engine = { git = "https://github.com/cloudflare/wirefilter.git", rev=
 # This also requires that the backend is set via .cargo/config.toml.
 # For more information see: https://docs.rs/getrandom/#webassembly-support
 [target.'cfg(target_family = "wasm")'.dependencies]
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 plotters-canvas = "0.3"
 serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2"
-wasm-streams = "0.4"
+wasm-streams = "0.6"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["HtmlCanvasElement", "MouseEvent", "console"] }
 

@@ -763,6 +763,16 @@ fn handle_path_events(client: &mut Client) {
                     peer_addr
                 );
             },
+
+            quiche::PathEvent::PmtuUpdated { local, peer, pmtu } => info!(
+                "{} Path ({}, {}) validated PMTU {}",
+                client.conn.trace_id(),
+                local,
+                peer,
+                pmtu
+            ),
+
+            _ => (),
         }
     }
 }

@@ -168,6 +168,9 @@ int quiche_config_load_verify_locations_from_file(quiche_config *config,
 int quiche_config_load_verify_locations_from_directory(quiche_config *config,
                                                        const char *path);
 
+// Configures the TLS curve preference list (colon-separated, e.g. "X25519MLKEM768:X25519:P-256:P-384").
+int quiche_config_set_curves_list(quiche_config *config, const char *curves);
+
 // Configures whether to verify the peer's certificate.
 void quiche_config_verify_peer(quiche_config *config, bool v);
 
@@ -889,6 +892,7 @@ enum quiche_path_event_type {
     QUICHE_PATH_EVENT_CLOSED,
     QUICHE_PATH_EVENT_REUSED_SOURCE_CONNECTION_ID,
     QUICHE_PATH_EVENT_PEER_MIGRATED,
+    QUICHE_PATH_EVENT_PMTU_UPDATED,
 };
 
 typedef struct quiche_path_event quiche_path_event;
@@ -926,6 +930,13 @@ void quiche_path_event_reused_source_connection_id(const quiche_path_event *ev, 
 void quiche_path_event_peer_migrated(const quiche_path_event *ev,
                            struct sockaddr_storage *local, socklen_t *local_len,
                            struct sockaddr_storage *peer, socklen_t *peer_len);
+
+// Should be called if the quiche_path_event_type(...) returns QUICHE_PATH_EVENT_PMTU_UPDATED.
+// Sets "pmtu" to the current validated PMTU limit for normal application traffic.
+void quiche_path_event_pmtu_updated(const quiche_path_event *ev,
+                           struct sockaddr_storage *local, socklen_t *local_len,
+                           struct sockaddr_storage *peer, socklen_t *peer_len,
+                           size_t *pmtu);
 
 // Frees the path event object.
 void quiche_path_event_free(quiche_path_event *ev);

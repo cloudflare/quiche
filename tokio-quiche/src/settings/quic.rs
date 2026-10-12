@@ -237,6 +237,10 @@ pub struct QuicSettings {
 
     /// A timeout for the QUIC handshake, in milliseconds.
     ///
+    /// For connections that accept 0-RTT early data, the application is
+    /// started before the handshake completes, but the timeout still applies
+    /// until the handshake completes.
+    ///
     /// Disabled by default.
     #[serde(rename = "handshake_timeout_ms")]
     #[serde_as(as = "Option<DurationMilliSeconds>")]

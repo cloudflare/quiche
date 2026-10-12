@@ -122,6 +122,9 @@ where
     /// The final stream offset written to the stream, if any.
     fin_off: Option<u64>,
 
+    /// Whether a STREAM frame carrying FIN has been acknowledged.
+    fin_acked: bool,
+
     /// Whether the stream's send-side has been shut down.
     shutdown: bool,
 
@@ -130,6 +133,9 @@ where
 
     /// The error code received via STOP_SENDING.
     error: Option<u64>,
+
+    /// Whether the STOP_SENDING error was returned to the application.
+    error_reported: bool,
 }
 
 impl<F: BufFactory> SendBuf<F> {
@@ -324,6 +330,11 @@ impl<F: BufFactory> SendBuf<F> {
         self.acked.insert(off..off + len as u64);
     }
 
+    /// Marks the stream's final size as acknowledged by the peer.
+    pub(crate) fn ack_fin(&mut self) {
+        self.fin_acked = true;
+    }
+
     pub fn ack_and_drop(&mut self, off: u64, len: usize) -> usize {
         self.ack(off, len);
 
@@ -480,6 +491,14 @@ impl<F: BufFactory> SendBuf<F> {
         Ok(self.reset())
     }
 
+    /// Seeds send offsets without buffering the preceding data.
+    #[cfg(test)]
+    pub fn seed_offsets_for_test(&mut self, off: u64) {
+        assert!(self.data.is_empty());
+        self.off = off;
+        self.emit_off = off;
+    }
+
     /// Returns the largest offset of data buffered.
     pub fn off_back(&self) -> u64 {
         self.off
@@ -501,6 +520,11 @@ impl<F: BufFactory> SendBuf<F> {
         self.off
     }
 
+    /// Returns true if the next call to [`Self::emit`] will emit an empty FIN.
+    pub fn empty_fin_next(&self) -> bool {
+        self.fin_off == Some(self.off_front())
+    }
+
     /// The maximum offset we are allowed to send to the peer.
     pub fn max_off(&self) -> u64 {
         self.max_data
@@ -520,11 +544,13 @@ impl<F: BufFactory> SendBuf<F> {
 
     /// Returns true if the send-side of the stream is complete.
     ///
-    /// This happens when the stream's send final size is known, and the peer
-    /// has already acked all stream data up to that point.
+    /// This happens when the peer has acknowledged the stream's final size and
+    /// all stream data up to that point, or the stream has been reset.
     pub fn is_complete(&self) -> bool {
         if let Some(fin_off) = self.fin_off {
-            if self.acked == (0..fin_off) {
+            if (self.fin_acked || self.shutdown || self.error.is_some()) &&
+                self.acked == (0..fin_off)
+            {
                 return true;
             }
         }
@@ -535,6 +561,16 @@ impl<F: BufFactory> SendBuf<F> {
     /// Returns true if the stream was stopped before completion.
     pub fn is_stopped(&self) -> bool {
         self.error.is_some()
+    }
+
+    /// Returns true if a STOP_SENDING error still needs to be delivered.
+    pub fn has_unreported_stop(&self) -> bool {
+        self.error.is_some() && !self.error_reported && !self.shutdown
+    }
+
+    /// Marks the STOP_SENDING error as reported to the application.
+    pub fn mark_stop_reported(&mut self) {
+        self.error_reported = true;
     }
 
     /// Returns true if the stream was shut down.

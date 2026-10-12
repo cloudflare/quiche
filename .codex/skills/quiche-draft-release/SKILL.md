@@ -30,7 +30,7 @@ If the release ref is missing or ambiguous, ask one short clarification question
 1. Run a dry run with the helper script:
 
    ```bash
-   ./.opencode/skills/quiche-draft-release/scripts/create-draft-release.sh --dry-run <release-ref>
+   ./.codex/skills/quiche-draft-release/scripts/create-draft-release.sh --dry-run <release-ref>
    ```
 
 2. Use the dry-run output to identify the version, previous quiche release tag,
@@ -49,7 +49,7 @@ If the release ref is missing or ambiguous, ask one short clarification question
 4. Write the release notes to a temporary file, for example:
 
    ```bash
-   /tmp/opencode/quiche-release-<version>.md
+   /tmp/quiche-release-<version>.md
    ```
 
 5. Before creating the release, unless the user has explicitly asked to proceed
@@ -59,9 +59,9 @@ If the release ref is missing or ambiguous, ask one short clarification question
 6. Create the GitHub draft release with the helper script:
 
    ```bash
-   ./.opencode/skills/quiche-draft-release/scripts/create-draft-release.sh \
+   ./.codex/skills/quiche-draft-release/scripts/create-draft-release.sh \
      --title "<emoji> <version>" \
-     --notes-file /tmp/opencode/quiche-release-<version>.md \
+     --notes-file /tmp/quiche-release-<version>.md \
      <release-ref>
    ```
 
@@ -97,32 +97,32 @@ The helper script:
 Dry run:
 
 ```bash
-./.opencode/skills/quiche-draft-release/scripts/create-draft-release.sh \
+./.codex/skills/quiche-draft-release/scripts/create-draft-release.sh \
   --dry-run f0c7193c3
 ```
 
 Dry run with an existing tag:
 
 ```bash
-./.opencode/skills/quiche-draft-release/scripts/create-draft-release.sh \
+./.codex/skills/quiche-draft-release/scripts/create-draft-release.sh \
   --dry-run 0.29.1
 ```
 
 Create a draft release:
 
 ```bash
-./.opencode/skills/quiche-draft-release/scripts/create-draft-release.sh \
+./.codex/skills/quiche-draft-release/scripts/create-draft-release.sh \
   --title "🩹 0.29.1" \
-  --notes-file /tmp/opencode/quiche-release-0.29.1.md \
+  --notes-file /tmp/quiche-release-0.29.1.md \
   f0c7193c3
 ```
 
 Create a draft release from an existing tag:
 
 ```bash
-./.opencode/skills/quiche-draft-release/scripts/create-draft-release.sh \
+./.codex/skills/quiche-draft-release/scripts/create-draft-release.sh \
   --title "🩹 0.29.1" \
-  --notes-file /tmp/opencode/quiche-release-0.29.1.md \
+  --notes-file /tmp/quiche-release-0.29.1.md \
   0.29.1
 ```
 
