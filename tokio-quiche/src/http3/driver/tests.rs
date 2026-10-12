@@ -1,3 +1,6 @@
+use std::panic::catch_unwind;
+use std::panic::AssertUnwindSafe;
+
 use assert_matches::assert_matches;
 use rstest::rstest;
 
@@ -7,6 +10,51 @@ use crate::http3::driver::server::ServerHooks;
 
 use super::test_utils::*;
 use super::*;
+
+#[rstest]
+#[case::data(Some(OutboundFrame::Body(Bytes::from_static(b"new"), false)))]
+#[case::closed(None)]
+fn downstream_readiness_does_not_overwrite_queued_frame(
+    #[case] data: Option<OutboundFrame>,
+) {
+    let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+    let (mut ctx, _outbound, _inbound) = StreamCtx::new(0, 1);
+    let chan = ctx.recv.take().unwrap();
+    ctx.queued_frame =
+        Some(OutboundFrame::Body(Bytes::from_static(b"queued"), false));
+    helper.driver.insert_stream(0, ctx);
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        helper.driver.upstream_read_ready(
+            &mut helper.pipe.server,
+            ReceivedDownstreamData {
+                stream_id: 0,
+                chan,
+                data,
+            },
+        )
+    }));
+    if cfg!(debug_assertions) {
+        let panic = result.expect_err("queued output must trigger the assertion");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .expect("the assertion must have a string panic message");
+        assert!(message.contains("queued outbound frame"), "{message}");
+    } else {
+        assert_matches!(
+            result,
+            Ok(Err(H3ConnectionError::H3(h3::Error::InternalError)))
+        );
+    }
+    // Verify retained output after either the debug panic or the runtime error.
+    let ctx = helper.driver.stream_map.get(&0).unwrap();
+    assert_matches!(
+        &ctx.queued_frame,
+        Some(OutboundFrame::Body(data, false)) if data.as_ref() == b"queued"
+    );
+}
 
 /// Tests for the body receive buffer sizing helper.
 mod body_recv_buf_size {
