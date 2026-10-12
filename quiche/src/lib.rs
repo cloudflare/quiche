@@ -5884,7 +5884,7 @@ impl<F: BufFactory> Connection<F> {
             Err(e) => {
                 // A StreamReset read completes the receive side, but an
                 // unreported STOP error still needs the send-side state.
-                if stream.is_collectable() {
+                if stream.state() == stream::StreamState::Collectable {
                     self.streams.collect(stream_id, local);
                 }
 
@@ -5897,7 +5897,7 @@ impl<F: BufFactory> Connection<F> {
 
         let readable = stream.is_readable();
 
-        let collectable = stream.is_collectable();
+        let state = stream.state();
 
         if stream.recv.almost_full() {
             self.streams.insert_almost_full(stream_id);
@@ -5907,7 +5907,7 @@ impl<F: BufFactory> Connection<F> {
             self.streams.remove_readable(&priority_key);
         }
 
-        if collectable {
+        if state == stream::StreamState::Collectable {
             self.streams.collect(stream_id, local);
         }
 
@@ -6314,7 +6314,7 @@ impl<F: BufFactory> Connection<F> {
 
                 // Discarding unread data can complete the receive side, so no
                 // later read would collect the stream.
-                let collectable = stream.is_collectable();
+                let state = stream.state();
                 let local = stream.local;
 
                 if !stream.recv.is_fin() {
@@ -6327,7 +6327,7 @@ impl<F: BufFactory> Connection<F> {
                 self.stopped_stream_local_count =
                     self.stopped_stream_local_count.saturating_add(1);
 
-                if collectable {
+                if state == stream::StreamState::Collectable {
                     self.streams.collect(stream_id, local);
                 }
             },
@@ -8521,7 +8521,7 @@ impl<F: BufFactory> Connection<F> {
 
                 // The receive side can complete without the stream becoming
                 // readable, so no later read would collect it.
-                let collectable = stream.is_collectable();
+                let state = stream.state();
                 let local = stream.local;
 
                 if !was_readable && stream.is_readable() {
@@ -8536,7 +8536,7 @@ impl<F: BufFactory> Connection<F> {
                 self.reset_stream_remote_count =
                     self.reset_stream_remote_count.saturating_add(1);
 
-                if collectable {
+                if state == stream::StreamState::Collectable {
                     self.streams.collect(stream_id, local);
                 }
             },
@@ -8704,7 +8704,7 @@ impl<F: BufFactory> Connection<F> {
 
                 // The receive side can complete without the stream becoming
                 // readable, so no later read would collect it.
-                let collectable = stream.is_collectable();
+                let state = stream.state();
                 let local = stream.local;
 
                 if !was_readable && stream.is_readable() {
@@ -8721,7 +8721,7 @@ impl<F: BufFactory> Connection<F> {
                     self.flow_control.add_consumed(max_off_delta);
                 }
 
-                if collectable {
+                if state == stream::StreamState::Collectable {
                     self.streams.collect(stream_id, local);
                 }
             },
