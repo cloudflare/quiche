@@ -3295,7 +3295,7 @@ fn reset_stream_data_recvd(
 /// been read, discards all buffered data and notifies the application.
 fn reset_stream_data_not_recvd(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
-    #[values(true, false)] discard: bool,
+    #[values(true, false)] discard: bool, #[values(true, false)] fin_known: bool,
 ) {
     let mut buf = [0; 65535];
 
@@ -3332,6 +3332,12 @@ fn reset_stream_data_not_recvd(
         Ok((0, true))
     );
     assert!(pipe.client.stream_finished(0));
+
+    if fin_known {
+        assert_eq!(pipe.client.stream_send(0, b"ello", true), Ok(4));
+        assert_eq!(pipe.advance(), Ok(()));
+        assert!(pipe.server.stream_readable(0));
+    }
 
     // Client sends RESET_STREAM, closing stream.
     let frames = [frame::Frame::ResetStream {
