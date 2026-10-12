@@ -424,17 +424,12 @@ mod client_side_driver {
         });
         helper.work_loop_iter().unwrap();
 
-        // FIXME: This should not produce `Disconnected`. The test channel has
-        // capacity one. The driver reads the prior body, observes
-        // `Event::Finished`, then processes the pending client FIN. It drops
-        // the context and channel because both directions are finished.
-        // H3Body treats disconnection as FIN. This behavior may be incorrect.
-
-        // assert_matches!(from_server.try_recv(), Ok(InboundFrame::Body(buf,
-        // fin)) => {
-        //    assert_eq!(buf.into_inner().into_vec().len(), 0);
-        //    assert!(fin);
-        //});
+        // The peer FIN must be forwarded after capacity becomes available,
+        // even though our write direction has already finished.
+        assert_matches!(
+            from_server.try_recv(),
+            Ok(InboundFrame::Body(buf, true)) if buf.is_empty()
+        );
         assert_matches!(from_server.try_recv(), Err(TryRecvError::Disconnected));
         assert_eq!(helper.driver.stream_map.len(), 0);
     }
@@ -1253,6 +1248,233 @@ mod server_side_driver {
         assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Finished)));
 
         assert_eq!(helper.driver.stream_map.len(), 0);
+    }
+
+    struct ParkedPeerFin {
+        helper: DriverTestHelper<ServerHooks>,
+        stream_id: u64,
+        to_client: mpsc::Sender<OutboundFrame>,
+        from_client: InboundFrameStream,
+        audit_stats: Arc<H3AuditStats>,
+    }
+
+    enum WriteClose {
+        Fin,
+        DropSender,
+        PeerStop,
+    }
+
+    fn parked_peer_fin_fixture() -> ParkedPeerFin {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("POST"), false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { incoming_headers, .. } => incoming_headers
+        );
+        let to_client = req.send.get_ref().unwrap().clone();
+        drop(req.send);
+        let from_client = req.recv;
+        let audit_stats = req.h3_audit_stats;
+        to_client
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Fill the app channel through real reads, including release capacity.
+        // Leave the response channel idle while peer FIN waits for capacity.
+        for _ in 0..STREAM_CAPACITY {
+            assert_eq!(
+                helper.peer_client_send_body(stream_id, &[1], false),
+                Ok(1)
+            );
+            helper.advance_and_run_loop().unwrap();
+        }
+        assert_eq!(from_client.len(), STREAM_CAPACITY);
+        assert_eq!(helper.peer_client_send_body(stream_id, &[], true), Ok(0));
+        helper.advance_and_run_loop().unwrap();
+        let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+        assert_eq!(ctx.recv_state, RecvState::FinPending);
+        assert!(ctx.queued_frame.is_none());
+        assert_eq!(helper.driver.waiting_streams.upstream_len(), 1);
+        assert_eq!(helper.driver.waiting_streams.downstream_len(), 1);
+
+        ParkedPeerFin {
+            helper,
+            stream_id,
+            to_client,
+            from_client,
+            audit_stats,
+        }
+    }
+
+    fn drain_parked_body(recv: &mut InboundFrameStream) {
+        for _ in 0..STREAM_CAPACITY {
+            assert_matches!(
+                recv.try_recv(),
+                Ok(InboundFrame::Body(data, false)) if data.as_ref() == [1]
+            );
+        }
+    }
+
+    fn assert_delivered_fin(
+        helper: &mut DriverTestHelper<ServerHooks>, stream_id: u64,
+        from_client: &mut InboundFrameStream,
+    ) {
+        // FIN is queued before cleanup; the app need not consume it first.
+        assert!(!helper.driver.stream_map.contains_key(&stream_id));
+        assert_matches!(from_client.try_recv(), Ok(InboundFrame::Body(data, true)) if data.is_empty());
+        assert_matches!(from_client.try_recv(), Err(TryRecvError::Disconnected));
+        assert_eq!(helper.driver.waiting_streams.upstream_len(), 0);
+        assert_eq!(helper.driver.waiting_streams.downstream_len(), 0);
+    }
+
+    fn assert_response_fin(
+        helper: &mut DriverTestHelper<ServerHooks>, stream_id: u64,
+    ) {
+        // Cleanup must follow the wire closure, not merely closing channels.
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(helper.peer_client_poll(), Ok((id, h3::Event::Headers { .. })) if id == stream_id);
+        assert_eq!(helper.peer_client_poll(), Ok((stream_id, h3::Event::Data)));
+        assert_eq!(
+            helper.peer_client_recv_body_vec(stream_id, 1024),
+            Err(h3::Error::Done)
+        );
+        assert_eq!(
+            helper.peer_client_poll(),
+            Ok((stream_id, h3::Event::Finished))
+        );
+        assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+    }
+
+    #[test]
+    fn coalesced_ready_delivers_fin_then_cleans_up() {
+        let ParkedPeerFin {
+            mut helper,
+            stream_id,
+            to_client,
+            mut from_client,
+            ..
+        } = parked_peer_fin_fixture();
+
+        // Both channel directions become ready before the driver runs.
+        drain_parked_body(&mut from_client);
+        to_client
+            .try_send(OutboundFrame::Body(Bytes::new(), true))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+
+        assert_delivered_fin(&mut helper, stream_id, &mut from_client);
+        assert!(to_client.is_closed());
+        assert_response_fin(&mut helper, stream_id);
+    }
+
+    #[rstest]
+    #[case::outbound_fin(WriteClose::Fin)]
+    #[case::sender_dropped(WriteClose::DropSender)]
+    #[case::peer_stop(WriteClose::PeerStop)]
+    fn write_closure_retains_pending_peer_fin(#[case] write_close: WriteClose) {
+        let ParkedPeerFin {
+            mut helper,
+            stream_id,
+            to_client,
+            mut from_client,
+            audit_stats,
+        } = parked_peer_fin_fixture();
+
+        let to_client = match write_close {
+            WriteClose::Fin => {
+                to_client
+                    .try_send(OutboundFrame::Body(Bytes::new(), true))
+                    .unwrap();
+                Some(to_client)
+            },
+            WriteClose::DropSender => {
+                drop(to_client);
+                None
+            },
+            WriteClose::PeerStop => {
+                helper
+                    .pipe
+                    .client
+                    .stream_shutdown(stream_id, quiche::Shutdown::Read, 4242)
+                    .unwrap();
+                helper.pipe.advance().unwrap();
+                Some(to_client)
+            },
+        };
+        helper.work_loop_iter().unwrap();
+
+        // Closing the write side must retain the pending peer FIN.
+        let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+        assert_eq!(ctx.recv_state, RecvState::FinPending);
+        assert_eq!(ctx.send_state, SendState::Closed);
+        assert_eq!(from_client.len(), STREAM_CAPACITY);
+        assert_eq!(helper.driver.waiting_streams.upstream_len(), 1);
+        assert_eq!(helper.driver.waiting_streams.downstream_len(), 0);
+
+        drain_parked_body(&mut from_client);
+        helper.work_loop_iter().unwrap();
+        assert_delivered_fin(&mut helper, stream_id, &mut from_client);
+        if let Some(to_client) = to_client {
+            assert!(to_client.is_closed());
+        }
+
+        match write_close {
+            WriteClose::Fin => assert_response_fin(&mut helper, stream_id),
+            WriteClose::DropSender => {
+                helper.advance_and_run_loop().unwrap();
+                let err = h3::WireErrorCode::RequestCancelled;
+                assert_eq!(
+                    audit_stats.sent_reset_stream_error_code(),
+                    err as i64
+                );
+                assert_eq!(
+                    helper.peer_client_poll(),
+                    Ok((stream_id, h3::Event::Reset(err as u64)))
+                );
+                assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+            },
+            WriteClose::PeerStop => {
+                helper.advance_and_run_loop().unwrap();
+                assert_eq!(audit_stats.recvd_stop_sending_error_code(), 4242);
+                assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+            },
+        }
+    }
+
+    #[test]
+    fn receiver_drop_releases_pending_peer_fin() {
+        let ParkedPeerFin {
+            mut helper,
+            stream_id,
+            to_client,
+            from_client,
+            ..
+        } = parked_peer_fin_fixture();
+
+        to_client
+            .try_send(OutboundFrame::Body(Bytes::new(), true))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+        let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+        assert_eq!(ctx.recv_state, RecvState::FinPending);
+        assert_eq!(ctx.send_state, SendState::Closed);
+        assert_eq!(helper.driver.waiting_streams.upstream_len(), 1);
+        assert_eq!(helper.driver.waiting_streams.downstream_len(), 0);
+        assert_eq!(from_client.len(), STREAM_CAPACITY);
+
+        drop(from_client);
+        helper.work_loop_iter().unwrap();
+        assert!(!helper.driver.stream_map.contains_key(&stream_id));
+        assert_eq!(helper.driver.waiting_streams.upstream_len(), 0);
+        assert_eq!(helper.driver.waiting_streams.downstream_len(), 0);
+        assert!(to_client.is_closed());
+        assert_response_fin(&mut helper, stream_id);
     }
 
     #[test]
