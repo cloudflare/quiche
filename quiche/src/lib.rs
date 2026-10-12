@@ -4170,7 +4170,12 @@ impl<F: BufFactory> Connection<F> {
                         let stream = match self.streams.get_mut(stream_id) {
                             // Only retransmit data if the stream is not closed
                             // or stopped.
-                            Some(v) if !v.send.is_stopped() => v,
+                            Some(v)
+                                if !v
+                                    .send
+                                    .peer_stop_sending_state()
+                                    .is_stopped() =>
+                                v,
 
                             // Data on a closed stream will not be retransmitted
                             // or acked after it is declared lost, so just drop
@@ -5225,7 +5230,8 @@ impl<F: BufFactory> Connection<F> {
                     //
                     // This might happen if stream data was buffered but not yet
                     // flushed on the wire when a STOP_SENDING frame is received.
-                    Some(v) if !v.send.is_stopped() => v,
+                    Some(v) if !v.send.peer_stop_sending_state().is_stopped() =>
+                        v,
                     _ => {
                         self.streams.remove_flushable(&priority_key);
                         continue;
@@ -6070,8 +6076,10 @@ impl<F: BufFactory> Connection<F> {
         let was_flushable = stream.is_flushable();
 
         // Return the stop before collecting a completed stream.
-        if let Err(Error::StreamStopped(e)) = stream.send.cap() {
-            self.streams.mark_stop_reported(stream_id);
+        if let Err(Error::StreamStopped(e)) =
+            stream.send.cap_and_report_stop_sending()
+        {
+            self.streams.on_stop_sending_reported(stream_id);
             return Err(Error::StreamStopped(e));
         };
 
@@ -6379,12 +6387,12 @@ impl<F: BufFactory> Connection<F> {
     /// [`StreamStopped`]: enum.Error.html#variant.StreamStopped
     #[inline]
     pub fn stream_capacity(&mut self, stream_id: u64) -> Result<usize> {
-        if let Some(stream) = self.streams.get(stream_id) {
-            let stream_cap = match stream.send.cap() {
+        if let Some(stream) = self.streams.get_mut(stream_id) {
+            let stream_cap = match stream.send.cap_and_report_stop_sending() {
                 Ok(v) => v,
 
                 Err(Error::StreamStopped(e)) => {
-                    self.streams.mark_stop_reported(stream_id);
+                    self.streams.on_stop_sending_reported(stream_id);
                     return Err(Error::StreamStopped(e));
                 },
 
