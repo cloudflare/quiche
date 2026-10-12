@@ -542,14 +542,16 @@ impl<F: BufFactory> StreamMap<F> {
         self.blocked.remove(&stream_id);
     }
 
-    /// Adds the stream ID to the reset streams set with the
-    /// given error code and final size values.
-    ///
-    /// If the stream was already in the list, this does nothing.
+    /// Queues RESET_STREAM unless the send side is already complete or the
+    /// stream has been collected.
     pub fn insert_reset(
         &mut self, stream_id: u64, error_code: u64, final_size: u64,
     ) {
-        self.reset.insert(stream_id, (error_code, final_size));
+        if let Some(stream) = self.streams.get(&stream_id) {
+            if !stream.send.is_complete() {
+                self.reset.insert(stream_id, (error_code, final_size));
+            }
+        }
     }
 
     /// Removes the stream ID from the reset streams set.
@@ -1902,6 +1904,7 @@ mod tests {
         let mut stream =
             <Stream>::new(0, 30, 30, true, 30, DEFAULT_STREAM_WINDOW);
         stream.send.shutdown().unwrap();
+        stream.send.ack_reset_stream();
         stream.recv.reset(43, 5).unwrap();
         assert_eq!(stream.state(), StreamState::CompleteWithPendingDelivery);
         assert_eq!(stream.recv.emit(&mut buf), Err(Error::StreamReset(43)));

@@ -171,6 +171,10 @@ where
     /// Whether a STREAM frame carrying FIN has been acknowledged.
     fin_acked: bool,
 
+    /// Whether a RESET_STREAM frame has been acknowledged, or is not needed
+    /// because the send side was already complete when it was reset.
+    reset_acked: bool,
+
     /// Whether the stream's send-side has been shut down.
     shutdown: bool,
 
@@ -378,6 +382,11 @@ impl<F: BufFactory> SendBuf<F> {
         self.fin_acked = true;
     }
 
+    /// Marks the stream's reset as acknowledged by the peer.
+    pub(crate) fn ack_reset_stream(&mut self) {
+        self.reset_acked = true;
+    }
+
     pub fn ack_and_drop(&mut self, off: u64, len: usize) -> usize {
         self.ack(off, len);
 
@@ -490,6 +499,11 @@ impl<F: BufFactory> SendBuf<F> {
 
     /// Resets the stream at the current offset and clears all buffered data.
     pub fn reset(&mut self) -> (u64, u64) {
+        // A send side whose data and FIN were already acknowledged needs no
+        // RESET_STREAM and stays complete. This must run before the caller
+        // marks the stream as stopped or shut down.
+        self.reset_acked |= self.is_complete();
+
         let unsent_off = cmp::max(self.off_front(), self.emit_off);
         let unsent_len = self.off_back().saturating_sub(unsent_off);
 
@@ -529,9 +543,11 @@ impl<F: BufFactory> SendBuf<F> {
             return Err(Error::Done);
         }
 
+        let (max_off, unsent) = self.reset();
+
         self.shutdown = true;
 
-        Ok(self.reset())
+        Ok((max_off, unsent))
     }
 
     /// Seeds send offsets without buffering the preceding data.
@@ -588,14 +604,14 @@ impl<F: BufFactory> SendBuf<F> {
     /// Returns true if the send-side of the stream is complete.
     ///
     /// This happens when the peer has acknowledged the stream's final size and
-    /// all stream data up to that point, or the stream has been reset.
+    /// all stream data up to that point, or has acknowledged RESET_STREAM.
     pub fn is_complete(&self) -> bool {
+        if self.is_reset() {
+            return self.reset_acked;
+        }
+
         if let Some(fin_off) = self.fin_off {
-            if (self.fin_acked ||
-                self.shutdown ||
-                self.peer_stop_sending.is_stopped()) &&
-                self.acked == (0..fin_off)
-            {
+            if self.fin_acked && self.acked == (0..fin_off) {
                 return true;
             }
         }
@@ -611,6 +627,12 @@ impl<F: BufFactory> SendBuf<F> {
     /// Returns true if the stream was shut down.
     pub fn is_shutdown(&self) -> bool {
         self.shutdown
+    }
+
+    /// Returns true if the send side was shut down by the application or
+    /// stopped by the peer.
+    pub(crate) fn is_reset(&self) -> bool {
+        self.shutdown || self.peer_stop_sending.is_stopped()
     }
 
     /// Returns true if there is no data.
@@ -662,7 +684,40 @@ impl<F: BufFactory> SendBuf<F> {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
+
+    #[rstest]
+    fn reset_waits_for_ack(
+        #[values(true, false)] local_reset: bool,
+        #[values(true, false)] acked_before_reset: bool,
+    ) {
+        let mut send = <SendBuf>::new(15);
+        let mut out = [0; 5];
+        assert_eq!(send.write(b"hello", true), Ok(5));
+        assert_eq!(send.emit(&mut out), Ok((5, true)));
+
+        if acked_before_reset {
+            send.ack_and_drop(0, 5);
+            send.ack_fin();
+        }
+
+        let result = if local_reset {
+            send.shutdown()
+        } else {
+            send.stop(42)
+        };
+        assert_eq!(result, Ok((5, 0)));
+        assert_eq!(send.is_complete(), acked_before_reset);
+
+        send.ack_and_drop(0, 5);
+        send.ack_fin();
+        assert_eq!(send.is_complete(), acked_before_reset);
+
+        send.ack_reset_stream();
+        assert!(send.is_complete());
+    }
 
     #[test]
     fn empty_write() {
