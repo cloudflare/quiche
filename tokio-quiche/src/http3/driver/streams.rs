@@ -42,6 +42,26 @@ use super::OutboundFrameSender;
 use super::OutboundFrameStream;
 use crate::http3::H3AuditStats;
 
+/// Receive-side application-delivery state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RecvState {
+    /// Peer body data or a terminal event can still be delivered.
+    Open,
+    /// Peer FIN was received but has not been queued to the application.
+    FinPending,
+    /// No further frames will be delivered to the application.
+    Closed,
+}
+
+/// The transport write direction is closed by FIN, reset, or peer STOP.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SendState {
+    /// Transport writes have not yet finished or been canceled.
+    Open,
+    /// Transport writes ended through FIN, local reset, or peer STOP_SENDING.
+    Closed,
+}
+
 pub(crate) struct StreamCtx {
     /// Sends [`InboundFrame`]s to a local task, for example an `H3Body`.
     pub(crate) send: Option<InboundFrameSender>,
@@ -55,11 +75,10 @@ pub(crate) struct StreamCtx {
     pub(crate) initial_headers_sent: bool,
     /// First time that a HEADERS frame was not fully flushed.
     pub(crate) first_full_headers_flush_fail_time: Option<Instant>,
-    /// Indicates the stream received fin or reset. No more data will be
-    /// received.
-    pub(crate) fin_or_reset_recv: bool,
-    /// Indicates the stream sent fin or reset. No more data will be sent.
-    pub(crate) fin_or_reset_sent: bool,
+    /// Receive-side lifecycle, independent of channel ownership while waiting.
+    pub(super) recv_state: RecvState,
+    /// Transport write-side lifecycle.
+    pub(super) send_state: SendState,
     /// The flow ID for proxying datagrams over this stream. If `None`,
     /// the stream has no associated DATAGRAM flow.
     pub(crate) associated_dgram_flow_id: Option<u64>,
@@ -83,8 +102,8 @@ impl StreamCtx {
             initial_headers_sent: false,
             first_full_headers_flush_fail_time: None,
 
-            fin_or_reset_recv: false,
-            fin_or_reset_sent: false,
+            recv_state: RecvState::Open,
+            send_state: SendState::Open,
 
             associated_dgram_flow_id: None,
         };
@@ -118,18 +137,18 @@ impl StreamCtx {
         self.audit_stats
             .set_recvd_stop_sending_error_code(wire_err_code as i64);
 
-        if self.fin_or_reset_sent {
-            // It is valid to receive STOP_SENDING after we already sent fin
-            // (or a reset): the write side is already finished and there is
-            // nothing left to do.
-            return;
+        match self.send_state {
+            SendState::Closed => {
+                // STOP may arrive after FIN or reset has closed the write side.
+                return;
+            },
+            SendState::Open => self.send_state = SendState::Closed,
         }
 
         // We received a STOP_SENDING frame. This indicates that the
         // write direction has closed. We still need to continue
         // reading from the stream until we receive a RESET_FRAME or
         // `fin`.
-        self.fin_or_reset_sent = true;
         // Drop any pending data and close the write side.
         // We can't accept additional frames
         self.queued_frame = None;
@@ -137,36 +156,32 @@ impl StreamCtx {
     }
 
     pub(crate) fn handle_recvd_reset(&mut self, wire_err_code: u64) {
-        debug_assert!(!self.fin_or_reset_recv);
+        debug_assert_eq!(self.recv_state, RecvState::Open);
         // We received a RESET_STREAM frame, which closes the read direction
         // but not the write direction. If the peer wants to shut down write,
         // it must also send STOP_SENDING
         self.audit_stats
             .set_recvd_reset_stream_error_code(wire_err_code as i64);
-        self.fin_or_reset_recv = true;
+        self.recv_state = RecvState::Closed;
         self.send = None;
     }
 
     pub(crate) fn handle_sent_reset(&mut self, wire_err_code: u64) {
-        debug_assert!(!self.fin_or_reset_sent);
+        debug_assert_eq!(self.send_state, SendState::Open);
         self.audit_stats
             .set_sent_reset_stream_error_code(wire_err_code as i64);
-        self.fin_or_reset_sent = true;
+        self.send_state = SendState::Closed;
     }
 
     pub(crate) fn handle_sent_stop_sending(&mut self, wire_err_code: u64) {
-        debug_assert!(!self.fin_or_reset_recv);
+        debug_assert_eq!(self.recv_state, RecvState::Open);
         self.audit_stats
             .set_sent_stop_sending_error_code(wire_err_code as i64);
-        // Setting `fin_or_reset_recv` here is safe. The peer must still send
+        // Closing the receive state here is safe. The peer must still send
         // FIN or RESET_STREAM with its final size, but `quiche` handles
         // that without an application read.
-        self.fin_or_reset_recv = true;
+        self.recv_state = RecvState::Closed;
         self.send = None;
-    }
-
-    pub(crate) fn both_directions_done(&self) -> bool {
-        self.fin_or_reset_recv && self.fin_or_reset_sent
     }
 }
 
