@@ -35,6 +35,10 @@ qpack/
 - Represent related HTTP/3 message-phase flags with explicit enums. Preserve
   message phase separately from local termination, including termination
   before initial headers and trailers sent without FIN.
+- `StreamKind` owns type-specific state: request origins, message phases,
+  local termination, DATA notifications, and pending priority updates; control
+  SETTINGS initialization; and push DATA notifications. Match it directly for
+  stream dispatch and cleanup. `Type` is only a wire-decoding/qlog value.
 - Match phase enums exhaustively in transitions and validation decisions where
   a new variant could require a different outcome. Simple predicates are suitable
   for yes/no decisions with an obvious safe default for new variants. Keep

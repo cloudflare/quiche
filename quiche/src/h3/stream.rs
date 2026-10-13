@@ -43,7 +43,6 @@ const MAX_STATE_BUF_ALLOC_SIZE: usize = 4096;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {
     Control,
-    Request,
     Push,
     QpackEncoder,
     QpackDecoder,
@@ -55,7 +54,6 @@ impl Type {
     pub fn to_qlog(self) -> qlog::events::http3::StreamType {
         match self {
             Type::Control => qlog::events::http3::StreamType::Control,
-            Type::Request => qlog::events::http3::StreamType::Request,
             Type::Push => qlog::events::http3::StreamType::Push,
             Type::QpackEncoder => qlog::events::http3::StreamType::QpackEncode,
             Type::QpackDecoder => qlog::events::http3::StreamType::QpackDecode,
@@ -83,9 +81,6 @@ pub enum State {
 
     /// Reading the push ID.
     PushId,
-
-    /// Reading a QPACK instruction.
-    QpackInstruction,
 
     /// Reading the stream's current frame's payload without buffering the data.
     SkipFramePayload,
@@ -127,252 +122,140 @@ enum HttpRecvPhase {
     AfterTrailers,
 }
 
-/// An HTTP/3 stream.
-///
-/// This maintains the HTTP/3 state for streams of any type (control, request,
-/// QPACK, ...).
-///
-/// A number of bytes, depending on the current stream's state, is read from the
-/// transport stream into the HTTP/3 stream's "state buffer". This intermediate
-/// buffering is required due to the fact that data read from the transport
-/// might not be complete (e.g. a varint might be split across multiple QUIC
-/// packets).
-///
-/// When enough data to complete the current state has been buffered, it is
-/// consumed from the state buffer and the stream is transitioned to the next
-/// state (see `State` for a list of possible states).
+/// A stream's identity and the semantic state belonging to that identity.
 #[derive(Debug)]
-pub struct Stream {
-    /// The corresponding transport stream's ID.
-    id: u64,
-
-    /// The stream's type (if known).
-    ty: Option<Type>,
-
-    /// The current stream state.
-    state: State,
-
-    /// The buffer holding partial data for the current state.
-    state_buf: Vec<u8>,
-
-    /// The expected amount of bytes required to complete the state.
-    state_len: usize,
-
-    /// The write offset in the state buffer, that is, how many bytes have
-    /// already been read from the transport for the current state. When
-    /// it reaches `stream_len` the state can be completed.
-    state_off: usize,
-
-    /// The type of the frame currently being parsed.
-    frame_type: Option<u64>,
-
-    /// Whether the stream was created locally, or by the peer.
-    is_local: bool,
-
-    /// Whether the control stream's initial SETTINGS frame has been received.
-    control_initialized: bool,
-
-    /// The receive message phase, separate from control stream initialization.
-    recv_phase: HttpRecvPhase,
-
-    /// The local message phase, independent of send-side termination.
-    send_phase: HttpSendPhase,
-
-    /// Whether the local send side has finished, including before headers.
-    local_finished: bool,
-
-    /// Whether a `Data` event has been triggered for this stream.
-    data_event_triggered: bool,
-
-    /// The last `PRIORITY_UPDATE` frame encoded field value, if any.
-    last_priority_update: Option<Vec<u8>>,
-
-    /// Max size of QPACK encoded headers carried in HEADERS or PUSH_PROMISE
-    /// frames. Related to SETTINGS_MAX_FIELD_LIST_SIZE; see
-    /// <https://datatracker.ietf.org/doc/html/rfc9114#section-7.2.4.1>
-    max_encoded_headers_payload_size: u64,
-
-    /// Max PRIORITY_UPDATE frame payload size; see
-    /// <https://datatracker.ietf.org/doc/html/rfc9218#section-7.2>
-    max_priority_update_size: u64,
+pub(super) enum StreamKind {
+    /// The unidirectional stream's type has not yet been read.
+    Undetermined,
+    /// A control stream, initialized when its first SETTINGS type is accepted.
+    Control(ControlState),
+    /// A bidirectional request stream carrying requests and responses.
+    Request(RequestState),
+    /// A push stream carrying inbound HTTP frames.
+    Push(PushState),
+    /// The peer's QPACK encoder instruction stream.
+    QpackEncoder,
+    /// The peer's QPACK decoder instruction stream.
+    QpackDecoder,
+    /// An unrecognized unidirectional stream whose bytes are discarded.
+    Unknown,
 }
 
-impl Stream {
-    /// Creates a new HTTP/3 stream.
-    ///
-    /// The `is_local` parameter indicates whether the stream was created by the
-    /// local endpoint, or by the peer.
-    pub fn new(
-        id: u64, is_local: bool, max_field_section_size: u64,
-        max_priority_update_size: u64,
-    ) -> Stream {
-        let (ty, state) = if crate::stream::is_bidi(id) {
-            // All bidirectional streams are "request" streams, so we don't
-            // need to read the stream type.
-            (Some(Type::Request), State::FrameType)
-        } else {
-            // The stream's type is yet to be determined.
-            (None, State::StreamType)
-        };
-
-        // Huffman encoding might inflate the size of encoded headers
-        // when transferred in HEADERS or PUSH_PROMISE frames. Scale up
-        // the limit by 50% to accommodate this.
-        let max_encoded_headers_payload_size =
-            max_field_section_size.saturating_add(max_field_section_size / 2);
-
-        Stream {
-            id,
-            ty,
-
-            state,
-
-            // Pre-allocate a buffer to avoid multiple tiny early allocations.
-            state_buf: Vec::with_capacity(16),
-
-            // Expect one byte for the initial state, to parse the initial
-            // varint length.
-            state_len: 1,
-            state_off: 0,
-
-            frame_type: None,
-
-            is_local,
-
-            control_initialized: false,
-            recv_phase: HttpRecvPhase::AwaitingHeaders,
-
-            send_phase: HttpSendPhase::Uninitialized,
-            local_finished: false,
-
-            data_event_triggered: false,
-
-            last_priority_update: None,
-
-            max_encoded_headers_payload_size,
-            max_priority_update_size,
+impl StreamKind {
+    /// Returns whether the stream's identity is critical to the connection.
+    fn is_critical(&self) -> bool {
+        match self {
+            Self::Control(_) | Self::QpackEncoder | Self::QpackDecoder => true,
+            Self::Undetermined |
+            Self::Request(_) |
+            Self::Push(_) |
+            Self::Unknown => false,
         }
     }
 
-    pub fn ty(&self) -> Option<Type> {
-        self.ty
+    /// Validates a frame type using the stream's semantic state.
+    fn validate_frame_type(&mut self, ty: u64) -> Result<()> {
+        match self {
+            Self::Control(state) => state.validate_frame_type(ty),
+            Self::Request(state) => state.validate_frame_type(ty),
+            Self::Push(state) => state.validate_frame_type(ty),
+            Self::Undetermined |
+            Self::QpackEncoder |
+            Self::QpackDecoder |
+            Self::Unknown => Err(Error::FrameUnexpected),
+        }
     }
 
-    pub fn state(&self) -> State {
-        self.state
+    /// Triggers a DATA event only once until receive processing rearms it.
+    pub(super) fn try_trigger_data_event(&mut self) -> bool {
+        match self {
+            Self::Request(state) => state.try_trigger_data_event(),
+            Self::Push(state) => state.try_trigger_data_event(),
+            Self::Undetermined |
+            Self::Control(_) |
+            Self::QpackEncoder |
+            Self::QpackDecoder |
+            Self::Unknown => false,
+        }
     }
 
-    /// Sets the stream's type and transitions to the next state.
-    pub fn set_ty(&mut self, ty: Type) -> Result<()> {
-        assert_eq!(self.state, State::StreamType);
-
-        self.ty = Some(ty);
-
-        let state = match ty {
-            Type::Control | Type::Request => State::FrameType,
-
-            Type::Push => State::PushId,
-
-            Type::QpackEncoder | Type::QpackDecoder => State::QpackInstruction,
-
-            Type::Unknown => State::Drain,
-        };
-
-        self.state_transition(state, 1, true)?;
-
-        Ok(())
+    /// Rearms DATA notifications after receive processing.
+    fn reset_data_event(&mut self) {
+        match self {
+            Self::Request(state) => state.reset_data_event(),
+            Self::Push(state) => state.reset_data_event(),
+            Self::Undetermined |
+            Self::Control(_) |
+            Self::QpackEncoder |
+            Self::QpackDecoder |
+            Self::Unknown => {},
+        }
     }
+}
 
-    /// Sets the push ID and transitions to the next state.
-    pub fn set_push_id(&mut self, _id: u64) -> Result<()> {
-        assert_eq!(self.state, State::PushId);
+/// Receive initialization, separate from parsing the SETTINGS payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ControlState {
+    /// Only an initial SETTINGS frame is allowed.
+    AwaitingSettings,
+    /// SETTINGS was accepted; further SETTINGS frames are forbidden.
+    Initialized,
+}
 
-        // TODO: implement push ID.
+impl ControlState {
+    fn validate_frame_type(&mut self, ty: u64) -> Result<()> {
+        // Only SETTINGS is accepted before initialization. Once initialized,
+        // no more SETTINGS are permitted.
+        match (ty, *self) {
+            (frame::SETTINGS_FRAME_TYPE_ID, Self::AwaitingSettings) =>
+                *self = Self::Initialized,
 
-        self.state_transition(State::FrameType, 1, true)?;
+            (_, Self::AwaitingSettings) => return Err(Error::MissingSettings),
 
-        Ok(())
-    }
+            (frame::SETTINGS_FRAME_TYPE_ID, Self::Initialized) |
+            (frame::DATA_FRAME_TYPE_ID, Self::Initialized) |
+            (frame::HEADERS_FRAME_TYPE_ID, Self::Initialized) |
+            (frame::PUSH_PROMISE_FRAME_TYPE_ID, Self::Initialized) =>
+                return Err(Error::FrameUnexpected),
 
-    /// Sets the frame type and transitions to the next state.
-    pub fn set_frame_type(&mut self, ty: u64) -> Result<()> {
-        assert_eq!(self.state, State::FrameType);
-
-        // Only expect frames on Control, Request and Push streams.
-        match self.ty {
-            Some(Type::Control) => {
-                // Control stream starts uninitialized and only SETTINGS is
-                // accepted in that state. Other frames cause an error. Once
-                // initialized, no more SETTINGS are permitted.
-                match (ty, self.control_initialized) {
-                    // Initialize control stream.
-                    (frame::SETTINGS_FRAME_TYPE_ID, false) =>
-                        self.control_initialized = true,
-
-                    // Non-SETTINGS frames not allowed on control stream
-                    // before initialization.
-                    (_, false) => return Err(Error::MissingSettings),
-
-                    // Additional SETTINGS frame.
-                    (frame::SETTINGS_FRAME_TYPE_ID, true) =>
-                        return Err(Error::FrameUnexpected),
-
-                    // Frames that can't be received on control stream
-                    // after initialization.
-                    (frame::DATA_FRAME_TYPE_ID, true) =>
-                        return Err(Error::FrameUnexpected),
-
-                    (frame::HEADERS_FRAME_TYPE_ID, true) =>
-                        return Err(Error::FrameUnexpected),
-
-                    (frame::PUSH_PROMISE_FRAME_TYPE_ID, true) =>
-                        return Err(Error::FrameUnexpected),
-
-                    // All other frames are ignored after initialization.
-                    (_, true) => (),
-                }
-            },
-
-            Some(Type::Request) => {
-                self.validate_request_frame_type(ty)?;
-            },
-
-            Some(Type::Push) => {
-                match ty {
-                    // Frames that can never be received on request streams.
-                    frame::CANCEL_PUSH_FRAME_TYPE_ID =>
-                        return Err(Error::FrameUnexpected),
-
-                    frame::SETTINGS_FRAME_TYPE_ID =>
-                        return Err(Error::FrameUnexpected),
-
-                    frame::PUSH_PROMISE_FRAME_TYPE_ID =>
-                        return Err(Error::FrameUnexpected),
-
-                    frame::GOAWAY_FRAME_TYPE_ID =>
-                        return Err(Error::FrameUnexpected),
-
-                    frame::MAX_PUSH_FRAME_TYPE_ID =>
-                        return Err(Error::FrameUnexpected),
-
-                    _ => (),
-                }
-            },
-
-            _ => return Err(Error::FrameUnexpected),
+            // All other frame types are ignored after initialization.
+            (_, Self::Initialized) => (),
         }
 
-        self.frame_type = Some(ty);
-
-        self.state_transition(State::FramePayloadLen, 1, true)?;
-
         Ok(())
     }
+}
 
+/// The endpoint that opened a request stream, determining receive sequencing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RequestOrigin {
+    /// The local endpoint opened the stream and receives a response.
+    Local,
+    /// The peer opened the stream and sends a request.
+    Remote,
+}
+
+/// Message phases and independent application bookkeeping for request streams.
+#[derive(Debug)]
+pub(super) struct RequestState {
+    origin: RequestOrigin,
+    recv_phase: HttpRecvPhase,
+    send_phase: HttpSendPhase,
+    /// Local termination retains the send phase, even before initial headers.
+    local_finished: bool,
+    /// Suppresses repeated DATA notifications until receive processing rearms
+    /// it.
+    data_event_triggered: bool,
+    /// The most recent priority update, possibly before the first request
+    /// bytes.
+    last_priority_update: Option<Vec<u8>>,
+}
+
+impl RequestState {
     /// Validates request-stream frame sequencing in either receive direction.
     /// Clients allow multiple HEADERS before DATA without inspecting :status.
     /// Servers recognize a second HEADERS as trailers, even without DATA.
-    fn validate_request_frame_type(&mut self, ty: u64) -> Result<()> {
+    fn validate_frame_type(&mut self, ty: u64) -> Result<()> {
         // Frames that are never valid on a request stream, regardless of which
         // endpoint opened it.
         if matches!(
@@ -395,10 +278,11 @@ impl Stream {
                 _ => (),
             },
             HttpRecvPhase::Headers => match ty {
-                frame::HEADERS_FRAME_TYPE_ID =>
-                    if !self.is_local {
-                        self.recv_phase = HttpRecvPhase::AfterTrailers;
-                    },
+                frame::HEADERS_FRAME_TYPE_ID => match self.origin {
+                    RequestOrigin::Local => {},
+                    RequestOrigin::Remote =>
+                        self.recv_phase = HttpRecvPhase::AfterTrailers,
+                },
                 frame::DATA_FRAME_TYPE_ID =>
                     self.recv_phase = HttpRecvPhase::Data,
                 _ => (),
@@ -420,6 +304,276 @@ impl Stream {
         Ok(())
     }
 
+    /// Initializes the local message, including additional header sections.
+    pub(super) fn initialize_local(&mut self) -> Result<()> {
+        match self.send_phase {
+            HttpSendPhase::Uninitialized =>
+                self.send_phase = HttpSendPhase::Headers,
+            // Additional headers and trailer-bearing FIN use this helper too.
+            HttpSendPhase::Headers => {},
+            HttpSendPhase::Trailers => {
+                debug_assert!(
+                    false,
+                    "Local initialization cannot follow trailers"
+                );
+                return Err(Error::InternalError);
+            },
+        }
+
+        Ok(())
+    }
+
+    /// Returns the send message phase, including after termination.
+    pub(super) fn send_phase(&self) -> HttpSendPhase {
+        self.send_phase
+    }
+
+    /// Finishes the local part without changing its message phase.
+    pub(super) fn finish_local(&mut self) {
+        self.local_finished = true;
+    }
+
+    /// Whether the local send side has finished.
+    pub(super) fn local_finished(&self) -> bool {
+        self.local_finished
+    }
+
+    /// Records trailers after initial headers have been sent.
+    pub(super) fn mark_trailers_sent(&mut self) -> Result<()> {
+        match self.send_phase {
+            HttpSendPhase::Uninitialized => {
+                debug_assert!(false, "Trailers require initial headers");
+                return Err(Error::InternalError);
+            },
+            HttpSendPhase::Headers => self.send_phase = HttpSendPhase::Trailers,
+            HttpSendPhase::Trailers => {
+                debug_assert!(false, "Trailers cannot be recorded twice");
+                return Err(Error::InternalError);
+            },
+        }
+
+        Ok(())
+    }
+
+    fn try_trigger_data_event(&mut self) -> bool {
+        !std::mem::replace(&mut self.data_event_triggered, true)
+    }
+
+    fn reset_data_event(&mut self) {
+        self.data_event_triggered = false;
+    }
+
+    /// Sets the last priority update for the request stream.
+    pub(super) fn set_last_priority_update(
+        &mut self, priority_update: Option<Vec<u8>>,
+    ) {
+        self.last_priority_update = priority_update;
+    }
+
+    /// Takes the last priority update and leaves `None` in its place.
+    pub(super) fn take_last_priority_update(&mut self) -> Option<Vec<u8>> {
+        self.last_priority_update.take()
+    }
+
+    /// Returns `true` if there is a priority update.
+    pub(super) fn has_last_priority_update(&self) -> bool {
+        self.last_priority_update.is_some()
+    }
+}
+
+/// Inbound DATA notification bookkeeping; server push sending is unimplemented.
+#[derive(Debug)]
+pub(super) struct PushState {
+    data_event_triggered: bool,
+}
+
+impl PushState {
+    fn validate_frame_type(&self, ty: u64) -> Result<()> {
+        match ty {
+            frame::CANCEL_PUSH_FRAME_TYPE_ID |
+            frame::SETTINGS_FRAME_TYPE_ID |
+            frame::PUSH_PROMISE_FRAME_TYPE_ID |
+            frame::GOAWAY_FRAME_TYPE_ID |
+            frame::MAX_PUSH_FRAME_TYPE_ID => Err(Error::FrameUnexpected),
+            _ => Ok(()),
+        }
+    }
+
+    fn try_trigger_data_event(&mut self) -> bool {
+        !std::mem::replace(&mut self.data_event_triggered, true)
+    }
+
+    fn reset_data_event(&mut self) {
+        self.data_event_triggered = false;
+    }
+}
+
+/// An HTTP/3 stream.
+///
+/// This maintains the HTTP/3 state for streams of any type (control, request,
+/// QPACK, ...).
+///
+/// A number of bytes, depending on the current stream's state, is read from the
+/// transport stream into the HTTP/3 stream's "state buffer". This intermediate
+/// buffering is required due to the fact that data read from the transport
+/// might not be complete (e.g. a varint might be split across multiple QUIC
+/// packets).
+///
+/// When enough data to complete the current state has been buffered, it is
+/// consumed from the state buffer and the stream is transitioned to the next
+/// state (see `State` for a list of possible states).
+#[derive(Debug)]
+pub struct Stream {
+    /// The corresponding transport stream's ID.
+    id: u64,
+
+    /// Stream identity owns its type-specific semantic state.
+    pub(super) kind: StreamKind,
+
+    /// The current parser state, unused once a QPACK stream is identified.
+    state: State,
+
+    /// The buffer holding partial data for the current state.
+    state_buf: Vec<u8>,
+
+    /// The expected amount of bytes required to complete the state.
+    state_len: usize,
+
+    /// The write offset in the state buffer, that is, how many bytes have
+    /// already been read from the transport for the current state. When
+    /// it reaches `stream_len` the state can be completed.
+    state_off: usize,
+
+    /// The type of the frame currently being parsed.
+    frame_type: Option<u64>,
+
+    /// Max size of QPACK encoded headers carried in HEADERS or PUSH_PROMISE
+    /// frames. Related to SETTINGS_MAX_FIELD_LIST_SIZE; see
+    /// <https://datatracker.ietf.org/doc/html/rfc9114#section-7.2.4.1>
+    max_encoded_headers_payload_size: u64,
+
+    /// Max PRIORITY_UPDATE frame payload size; see
+    /// <https://datatracker.ietf.org/doc/html/rfc9218#section-7.2>
+    max_priority_update_size: u64,
+}
+
+impl Stream {
+    /// Creates a new HTTP/3 stream.
+    ///
+    /// The `is_local` parameter indicates whether the stream was created by the
+    /// local endpoint, or by the peer.
+    pub fn new(
+        id: u64, is_local: bool, max_field_section_size: u64,
+        max_priority_update_size: u64,
+    ) -> Stream {
+        let (kind, state) = if crate::stream::is_bidi(id) {
+            // All bidirectional streams are "request" streams, so we don't
+            // need to read the stream type.
+            (
+                StreamKind::Request(RequestState {
+                    origin: if is_local {
+                        RequestOrigin::Local
+                    } else {
+                        RequestOrigin::Remote
+                    },
+                    recv_phase: HttpRecvPhase::AwaitingHeaders,
+                    send_phase: HttpSendPhase::Uninitialized,
+                    local_finished: false,
+                    data_event_triggered: false,
+                    last_priority_update: None,
+                }),
+                State::FrameType,
+            )
+        } else {
+            // The stream's type is yet to be determined.
+            (StreamKind::Undetermined, State::StreamType)
+        };
+
+        // Huffman encoding might inflate the size of encoded headers
+        // when transferred in HEADERS or PUSH_PROMISE frames. Scale up
+        // the limit by 50% to accommodate this.
+        let max_encoded_headers_payload_size =
+            max_field_section_size.saturating_add(max_field_section_size / 2);
+
+        Stream {
+            id,
+            kind,
+
+            state,
+
+            // Pre-allocate a buffer to avoid multiple tiny early allocations.
+            state_buf: Vec::with_capacity(16),
+
+            // Expect one byte for the initial state, to parse the initial
+            // varint length.
+            state_len: 1,
+            state_off: 0,
+
+            frame_type: None,
+
+            max_encoded_headers_payload_size,
+            max_priority_update_size,
+        }
+    }
+
+    pub fn state(&self) -> State {
+        self.state
+    }
+
+    /// Sets the stream's type and transitions framed streams to the next state.
+    pub fn set_ty(&mut self, ty: Type) -> Result<()> {
+        assert!(matches!(self.kind, StreamKind::Undetermined));
+
+        let (kind, state) = match ty {
+            Type::Control => (
+                StreamKind::Control(ControlState::AwaitingSettings),
+                Some(State::FrameType),
+            ),
+            Type::Push => (
+                StreamKind::Push(PushState {
+                    data_event_triggered: false,
+                }),
+                Some(State::PushId),
+            ),
+            // QPACK instruction streams are processed directly by kind and do
+            // not use the HTTP frame parser after type discovery.
+            Type::QpackEncoder => (StreamKind::QpackEncoder, None),
+            Type::QpackDecoder => (StreamKind::QpackDecoder, None),
+            Type::Unknown => (StreamKind::Unknown, Some(State::Drain)),
+        };
+
+        self.kind = kind;
+        if let Some(state) = state {
+            self.state_transition(state, 1, true)?;
+        }
+
+        Ok(())
+    }
+
+    /// Sets the push ID and transitions to the next state.
+    pub fn set_push_id(&mut self, _id: u64) -> Result<()> {
+        assert_eq!(self.state, State::PushId);
+
+        // TODO: implement push ID.
+
+        self.state_transition(State::FrameType, 1, true)?;
+
+        Ok(())
+    }
+
+    /// Sets the frame type and transitions to the next state.
+    pub fn set_frame_type(&mut self, ty: u64) -> Result<()> {
+        assert_eq!(self.state, State::FrameType);
+
+        self.kind.validate_frame_type(ty)?;
+
+        self.frame_type = Some(ty);
+
+        self.state_transition(State::FramePayloadLen, 1, true)?;
+
+        Ok(())
+    }
+
     // Returns the stream's current frame type, if any
     pub fn frame_type(&self) -> Option<u64> {
         self.frame_type
@@ -430,8 +584,14 @@ impl Stream {
         assert_eq!(self.state, State::FramePayloadLen);
 
         // Only expect frames on Control, Request and Push streams.
-        if !matches!(self.ty, Some(Type::Control | Type::Request | Type::Push)) {
-            return Err(Error::InternalError);
+        match &self.kind {
+            StreamKind::Control(_) |
+            StreamKind::Request(_) |
+            StreamKind::Push(_) => {},
+            StreamKind::Undetermined |
+            StreamKind::QpackEncoder |
+            StreamKind::QpackDecoder |
+            StreamKind::Unknown => return Err(Error::InternalError),
         }
 
         let (state, resize) = match self.frame_type {
@@ -576,7 +736,7 @@ impl Stream {
                 Ok((read, fin)) => {
                     self.commit_state_buf_read(read);
 
-                    if fin && self.is_critical() {
+                    if fin && self.kind.is_critical() {
                         super::close_conn_critical_stream(conn)?;
                     }
 
@@ -597,7 +757,7 @@ impl Stream {
                 },
 
                 Err(e @ crate::Error::StreamReset(_)) => {
-                    if self.is_critical() {
+                    if self.kind.is_critical() {
                         super::close_conn_critical_stream(conn)?;
                     }
 
@@ -608,7 +768,7 @@ impl Stream {
                     // The stream is not readable anymore, so re-arm the Data
                     // event.
                     if e == crate::Error::Done {
-                        self.reset_data_event();
+                        self.kind.reset_data_event();
                     }
 
                     return Err(e.into());
@@ -617,7 +777,7 @@ impl Stream {
         }
 
         if !self.state_buffer_complete() {
-            self.reset_data_event();
+            self.kind.reset_data_event();
 
             return Err(Error::Done);
         }
@@ -642,7 +802,7 @@ impl Stream {
 
         let read = match conn.stream_discard(self.id, len) {
             Ok((len, fin)) => {
-                if fin && self.is_critical() {
+                if fin && self.kind.is_critical() {
                     super::close_conn_critical_stream(conn)?;
                 }
 
@@ -650,7 +810,7 @@ impl Stream {
             },
 
             Err(e @ crate::Error::StreamReset(_)) => {
-                if self.is_critical() {
+                if self.kind.is_critical() {
                     super::close_conn_critical_stream(conn)?;
                 }
 
@@ -661,7 +821,7 @@ impl Stream {
                 // The stream is not readable anymore, so re-arm the Data
                 // event.
                 if e == crate::Error::Done {
-                    self.reset_data_event();
+                    self.kind.reset_data_event();
                 }
 
                 return Err(e.into());
@@ -678,60 +838,9 @@ impl Stream {
         self.state_off += read;
 
         if !self.state_buffer_complete() {
-            self.reset_data_event();
+            self.kind.reset_data_event();
 
             return Err(Error::Done);
-        }
-
-        Ok(())
-    }
-
-    /// Initialize the local part of the stream.
-    pub fn initialize_local(&mut self) -> Result<()> {
-        match self.send_phase {
-            HttpSendPhase::Uninitialized =>
-                self.send_phase = HttpSendPhase::Headers,
-            // Additional headers and trailer-bearing FIN use this helper too.
-            HttpSendPhase::Headers => {},
-            HttpSendPhase::Trailers => {
-                debug_assert!(
-                    false,
-                    "Local initialization cannot follow trailers"
-                );
-                return Err(Error::InternalError);
-            },
-        }
-
-        Ok(())
-    }
-
-    /// Returns the send message phase, including after termination.
-    pub(super) fn send_phase(&self) -> HttpSendPhase {
-        self.send_phase
-    }
-
-    /// Finish the local part of the stream.
-    pub fn finish_local(&mut self) {
-        self.local_finished = true;
-    }
-
-    /// Whether the local send side has finished.
-    pub fn local_finished(&self) -> bool {
-        self.local_finished
-    }
-
-    /// Records trailers after initial headers have been sent.
-    pub fn mark_trailers_sent(&mut self) -> Result<()> {
-        match self.send_phase() {
-            HttpSendPhase::Uninitialized => {
-                debug_assert!(false, "Trailers require initial headers");
-                return Err(Error::InternalError);
-            },
-            HttpSendPhase::Headers => self.send_phase = HttpSendPhase::Trailers,
-            HttpSendPhase::Trailers => {
-                debug_assert!(false, "Trailers cannot be recorded twice");
-                return Err(Error::InternalError);
-            },
         }
 
         Ok(())
@@ -809,7 +918,7 @@ impl Stream {
     pub fn try_consume_frame(&mut self) -> Result<(frame::Frame, u64)> {
         debug_assert_eq!(self.state, State::FramePayload);
         // Processing a frame other than DATA, so re-arm the Data event.
-        self.reset_data_event();
+        self.kind.reset_data_event();
 
         let payload_len = self.state_len as u64;
 
@@ -832,7 +941,7 @@ impl Stream {
         self.try_skip_data(conn)?;
 
         // Processing a frame other than DATA, so re-arm the Data event.
-        self.reset_data_event();
+        self.kind.reset_data_event();
 
         self.state_transition(State::FrameType, 1, true)?;
 
@@ -852,7 +961,7 @@ impl Stream {
             Err(e) => {
                 // The stream is not readable anymore, so re-arm the Data event.
                 if e == crate::Error::Done {
-                    self.reset_data_event();
+                    self.kind.reset_data_event();
                 }
 
                 return Err(e.into());
@@ -864,7 +973,7 @@ impl Stream {
 
         // The stream is not readable anymore, so re-arm the Data event.
         if !conn.stream_readable(self.id) {
-            self.reset_data_event();
+            self.kind.reset_data_event();
         }
 
         if self.state_buffer_complete() {
@@ -898,50 +1007,6 @@ impl Stream {
         }
 
         Ok(len)
-    }
-
-    /// Tries to update the data triggered state for the stream.
-    ///
-    /// This returns `true` if a Data event was not already triggered before
-    /// the last reset, and updates the state. Returns `false` otherwise.
-    pub fn try_trigger_data_event(&mut self) -> bool {
-        if self.data_event_triggered {
-            return false;
-        }
-
-        self.data_event_triggered = true;
-
-        true
-    }
-
-    /// Resets the data triggered state.
-    fn reset_data_event(&mut self) {
-        self.data_event_triggered = false;
-    }
-
-    /// Set the last priority update for the stream.
-    pub fn set_last_priority_update(&mut self, priority_update: Option<Vec<u8>>) {
-        self.last_priority_update = priority_update;
-    }
-
-    /// Take the last priority update and leave `None` in its place.
-    pub fn take_last_priority_update(&mut self) -> Option<Vec<u8>> {
-        self.last_priority_update.take()
-    }
-
-    /// Returns `true` if there is a priority update.
-    pub fn has_last_priority_update(&self) -> bool {
-        self.last_priority_update.is_some()
-    }
-
-    /// Returns whether the stream's identity is critical to the connection.
-    fn is_critical(&self) -> bool {
-        matches!(
-            self.ty,
-            Some(Type::Control) |
-                Some(Type::QpackEncoder) |
-                Some(Type::QpackDecoder)
-        )
     }
 
     /// Returns true if the state buffer has enough data to complete the state.
@@ -1014,8 +1079,11 @@ mod tests {
     #[cfg_attr(debug_assertions, should_panic(expected = "initial headers"))]
     fn trailers_require_initial_headers() {
         let mut stream = open_remote_request_stream();
-        assert_eq!(stream.mark_trailers_sent(), Err(Error::InternalError));
-        assert_eq!(stream.send_phase(), HttpSendPhase::Uninitialized);
+        let StreamKind::Request(state) = &mut stream.kind else {
+            panic!("expected a request stream");
+        };
+        assert_eq!(state.mark_trailers_sent(), Err(Error::InternalError));
+        assert_eq!(state.send_phase(), HttpSendPhase::Uninitialized);
     }
 
     #[test]
@@ -1025,11 +1093,14 @@ mod tests {
     )]
     fn local_initialization_cannot_follow_trailers() {
         let mut stream = open_remote_request_stream();
-        stream.initialize_local().unwrap();
-        stream.initialize_local().unwrap();
-        stream.mark_trailers_sent().unwrap();
-        assert_eq!(stream.initialize_local(), Err(Error::InternalError));
-        assert_eq!(stream.send_phase(), HttpSendPhase::Trailers);
+        let StreamKind::Request(state) = &mut stream.kind else {
+            panic!("expected a request stream");
+        };
+        state.initialize_local().unwrap();
+        state.initialize_local().unwrap();
+        state.mark_trailers_sent().unwrap();
+        assert_eq!(state.initialize_local(), Err(Error::InternalError));
+        assert_eq!(state.send_phase(), HttpSendPhase::Trailers);
     }
 
     #[test]
@@ -1039,10 +1110,13 @@ mod tests {
     )]
     fn trailers_cannot_be_recorded_twice() {
         let mut stream = open_remote_request_stream();
-        stream.initialize_local().unwrap();
-        stream.mark_trailers_sent().unwrap();
-        assert_eq!(stream.mark_trailers_sent(), Err(Error::InternalError));
-        assert_eq!(stream.send_phase(), HttpSendPhase::Trailers);
+        let StreamKind::Request(state) = &mut stream.kind else {
+            panic!("expected a request stream");
+        };
+        state.initialize_local().unwrap();
+        state.mark_trailers_sent().unwrap();
+        assert_eq!(state.mark_trailers_sent(), Err(Error::InternalError));
+        assert_eq!(state.send_phase(), HttpSendPhase::Trailers);
     }
 
     fn parse_uni(
@@ -1370,7 +1444,7 @@ mod tests {
     fn request_no_data() {
         let mut stream = open_remote_request_stream();
 
-        assert_eq!(stream.ty, Some(Type::Request));
+        assert!(matches!(stream.kind, StreamKind::Request(_)));
         assert_eq!(stream.state, State::FrameType);
 
         assert_eq!(stream.try_consume_varint(), Err(Error::Done));
@@ -1530,6 +1604,47 @@ mod tests {
         assert_eq!(payload, recv_buf);
 
         assert_eq!(stream.state, State::FrameType);
+    }
+
+    #[test]
+    fn push_data_event_rearms_after_headers() {
+        let mut d = vec![0; 32];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+        let mut stream = open_uni(&mut b, HTTP3_PUSH_STREAM_TYPE_ID).unwrap();
+        b.put_varint(0).unwrap();
+        Frame::Headers {
+            header_block: vec![1, 2],
+        }
+        .to_bytes(&mut b)
+        .unwrap();
+        let mut cursor = std::io::Cursor::new(d);
+        parse_uni(&mut stream, HTTP3_PUSH_STREAM_TYPE_ID, &mut cursor).unwrap();
+        stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+        let push_id = stream.try_consume_varint().unwrap();
+        stream.set_push_id(push_id).unwrap();
+        parse_skip_frame(&mut stream, &mut cursor).unwrap();
+
+        stream.set_frame_type(DATA_FRAME_TYPE_ID).unwrap();
+        stream.set_frame_payload_len(0).unwrap();
+        assert!(stream.kind.try_trigger_data_event());
+        assert!(!stream.kind.try_trigger_data_event());
+        stream
+            .try_consume_data_for_tests(&mut cursor, &mut [])
+            .unwrap();
+
+        // Parsing a non-DATA frame rearms the notification without changing
+        // the push stream's identity.
+        let hdrs = Frame::Headers {
+            header_block: vec![3, 4],
+        };
+        let mut d = vec![0; 32];
+        hdrs.to_bytes(&mut octets::OctetsMut::with_slice(&mut d))
+            .unwrap();
+        parse_skip_frame(&mut stream, &mut std::io::Cursor::new(d)).unwrap();
+        stream.set_frame_type(DATA_FRAME_TYPE_ID).unwrap();
+        stream.set_frame_payload_len(0).unwrap();
+        assert!(stream.kind.try_trigger_data_event());
+        assert!(!stream.kind.try_trigger_data_event());
     }
 
     #[test]
@@ -2097,7 +2212,7 @@ mod tests {
 
         let mut stream = open_remote_request_stream();
 
-        assert_eq!(stream.ty, Some(Type::Request));
+        assert!(matches!(stream.kind, StreamKind::Request(_)));
         assert_eq!(stream.state, State::FrameType);
 
         // Write a 0-length payload frame.

@@ -993,6 +993,22 @@ fn close_conn_if_critical_stream_finished<F: BufFactory>(
     Ok(())
 }
 
+fn process_qpack_stream<F: BufFactory>(
+    conn: &mut super::Connection<F>, stream_id: u64, recv_bytes: &mut u64,
+) -> Result<(u64, Event)> {
+    let mut d = [0; 4096];
+
+    // Read QPACK instructions from the stream and discard immediately.
+    loop {
+        let (recv, fin) = conn.stream_recv(stream_id, &mut d)?;
+        *recv_bytes += recv as u64;
+
+        if fin {
+            close_conn_critical_stream(conn)?;
+        }
+    }
+}
+
 /// An HTTP/3 connection.
 pub struct Connection {
     is_server: bool,
@@ -1316,8 +1332,12 @@ impl Connection {
     ) -> Result<()> {
         match self.streams.get(&stream_id) {
             Some(s) => {
+                let stream::StreamKind::Request(state) = &s.kind else {
+                    return Err(Error::FrameUnexpected);
+                };
+
                 // Only one initial HEADERS allowed.
-                match s.send_phase() {
+                match state.send_phase() {
                     stream::HttpSendPhase::Uninitialized => {},
                     stream::HttpSendPhase::Headers |
                     stream::HttpSendPhase::Trailers =>
@@ -1380,8 +1400,12 @@ impl Connection {
 
         match self.streams.get(&stream_id) {
             Some(s) => {
+                let stream::StreamKind::Request(state) = &s.kind else {
+                    return Err(Error::FrameUnexpected);
+                };
+
                 // Initial HEADERS are required and trailers end the message.
-                match s.send_phase() {
+                match state.send_phase() {
                     stream::HttpSendPhase::Headers => {},
                     stream::HttpSendPhase::Uninitialized |
                     stream::HttpSendPhase::Trailers =>
@@ -1400,7 +1424,10 @@ impl Connection {
             // send_headers() might have tidied the stream away, so we need to
             // check again.
             if let Some(s) = self.streams.get_mut(&stream_id) {
-                s.mark_trailers_sent()?;
+                let stream::StreamKind::Request(state) = &mut s.kind else {
+                    return Err(Error::InternalError);
+                };
+                state.mark_trailers_sent()?;
             }
         }
 
@@ -1556,7 +1583,10 @@ impl Connection {
         if fin {
             self.finish_local_stream(conn, stream_id, true)?;
         } else if let Some(s) = self.streams.get_mut(&stream_id) {
-            s.initialize_local()?;
+            let stream::StreamKind::Request(state) = &mut s.kind else {
+                return Err(Error::InternalError);
+            };
+            state.initialize_local()?;
         }
 
         Ok(())
@@ -1697,11 +1727,17 @@ impl Connection {
         }
 
         match self.streams.get_mut(&stream_id) {
-            Some(s) => match s.send_phase() {
-                stream::HttpSendPhase::Headers => {},
-                stream::HttpSendPhase::Uninitialized |
-                stream::HttpSendPhase::Trailers =>
-                    return Err(Error::FrameUnexpected),
+            Some(s) => {
+                let stream::StreamKind::Request(state) = &s.kind else {
+                    return Err(Error::FrameUnexpected);
+                };
+
+                match state.send_phase() {
+                    stream::HttpSendPhase::Headers => {},
+                    stream::HttpSendPhase::Uninitialized |
+                    stream::HttpSendPhase::Trailers =>
+                        return Err(Error::FrameUnexpected),
+                }
             },
 
             None => {
@@ -2062,7 +2098,9 @@ impl Connection {
         &mut self, prioritized_element_id: u64,
     ) -> Result<Vec<u8>> {
         if let Some(stream) = self.streams.get_mut(&prioritized_element_id) {
-            return stream.take_last_priority_update().ok_or(Error::Done);
+            if let stream::StreamKind::Request(state) = &mut stream.kind {
+                return state.take_last_priority_update().ok_or(Error::Done);
+            }
         }
 
         Err(Error::Done)
@@ -2608,6 +2646,28 @@ impl Connection {
         // of the loop, because we'll need to borrow it again in the
         // `State::FramePayload` case below.
         while let Some(stream) = self.streams.get_mut(&stream_id) {
+            match &stream.kind {
+                stream::StreamKind::QpackEncoder => {
+                    return process_qpack_stream(
+                        conn,
+                        stream_id,
+                        &mut self.peer_qpack_streams.encoder_stream_bytes,
+                    );
+                },
+                stream::StreamKind::QpackDecoder => {
+                    return process_qpack_stream(
+                        conn,
+                        stream_id,
+                        &mut self.peer_qpack_streams.decoder_stream_bytes,
+                    );
+                },
+                stream::StreamKind::Undetermined |
+                stream::StreamKind::Control(_) |
+                stream::StreamKind::Request(_) |
+                stream::StreamKind::Push(_) |
+                stream::StreamKind::Unknown => {},
+            }
+
             match stream.state() {
                 stream::State::StreamType => {
                     stream.try_fill_buffer(conn)?;
@@ -2644,7 +2704,7 @@ impl Connection {
                         q.add_event_data_now(ev_data).ok();
                     });
 
-                    match &ty {
+                    match ty {
                         stream::Type::Control => {
                             // Only one control stream allowed.
                             if self.peer_control_stream_id.is_some() {
@@ -2729,8 +2789,6 @@ impl Connection {
                             // Unknown stream types are ignored.
                             // TODO: we MAY send STOP_SENDING
                         },
-
-                        stream::Type::Request => unreachable!(),
                     }
                 },
 
@@ -2873,34 +2931,11 @@ impl Connection {
                         break;
                     }
 
-                    if !stream.try_trigger_data_event() {
+                    if !stream.kind.try_trigger_data_event() {
                         break;
                     }
 
                     return Ok((stream_id, Event::Data));
-                },
-
-                stream::State::QpackInstruction => {
-                    let mut d = [0; 4096];
-
-                    // Read data from the stream and discard immediately.
-                    loop {
-                        let (recv, fin) = conn.stream_recv(stream_id, &mut d)?;
-
-                        match stream.ty() {
-                            Some(stream::Type::QpackEncoder) =>
-                                self.peer_qpack_streams.encoder_stream_bytes +=
-                                    recv as u64,
-                            Some(stream::Type::QpackDecoder) =>
-                                self.peer_qpack_streams.decoder_stream_bytes +=
-                                    recv as u64,
-                            _ => unreachable!(),
-                        };
-
-                        if fin {
-                            close_conn_critical_stream(conn)?;
-                        }
-                    }
                 },
 
                 stream::State::SkipFramePayload => {
@@ -2942,20 +2977,20 @@ impl Connection {
             return;
         }
 
-        match stream.ty() {
-            Some(stream::Type::Request) | Some(stream::Type::Push) => {
+        match &stream.kind {
+            stream::StreamKind::Request(_) | stream::StreamKind::Push(_) => {
                 stream.finished();
 
                 self.finished_streams.push_back(stream_id);
             },
-            Some(stream::Type::Unknown) | None => {
+            stream::StreamKind::Unknown | stream::StreamKind::Undetermined => {
                 self.streams.remove(&stream_id);
             },
             // Closing any of the critical streams leads to connection close,
             // so there is no need for any cleanup actions here.
-            Some(stream::Type::Control) |
-            Some(stream::Type::QpackEncoder) |
-            Some(stream::Type::QpackDecoder) => (),
+            stream::StreamKind::Control(_) |
+            stream::StreamKind::QpackEncoder |
+            stream::StreamKind::QpackDecoder => (),
         };
     }
 
@@ -2970,12 +3005,15 @@ impl Connection {
 
         {
             let stream = stream.get_mut();
+            let stream::StreamKind::Request(state) = &mut stream.kind else {
+                return Err(Error::InternalError);
+            };
 
             if initialize_local {
-                stream.initialize_local()?;
+                state.initialize_local()?;
             }
 
-            stream.finish_local();
+            state.finish_local();
         }
 
         if conn.stream_finished(stream_id) {
@@ -2987,8 +3025,10 @@ impl Connection {
 
     fn remove_local_finished_stream(&mut self, stream_id: u64) {
         if let hash_map::Entry::Occupied(stream) = self.streams.entry(stream_id) {
-            if stream.get().local_finished() {
-                stream.remove();
+            if let stream::StreamKind::Request(state) = &stream.get().kind {
+                if state.local_finished() {
+                    stream.remove();
+                }
             }
         }
     }
@@ -3282,8 +3322,11 @@ impl Connection {
                         )
                     });
 
-                let had_priority_update = stream.has_last_priority_update();
-                stream.set_last_priority_update(Some(priority_field_value));
+                let stream::StreamKind::Request(state) = &mut stream.kind else {
+                    return Err(Error::InternalError);
+                };
+                let had_priority_update = state.has_last_priority_update();
+                state.set_last_priority_update(Some(priority_field_value));
 
                 // Only trigger the event when there wasn't already a stored
                 // PRIORITY_UPDATE.
@@ -6209,6 +6252,74 @@ mod tests {
         let stats = s.server.stats();
         assert_eq!(stats.qpack_encoder_stream_recv_bytes, 20);
         assert_eq!(stats.qpack_decoder_stream_recv_bytes, 20);
+    }
+
+    #[rstest::rstest]
+    fn qpack_fragmented_type_and_incremental_data(
+        #[values(false, true)] encoder: bool,
+    ) {
+        let (mut config, h3_config) = Session::default_configs().unwrap();
+        config.set_initial_max_data(16384);
+        config.set_initial_max_stream_data_uni(8192);
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        s.pipe.handshake().unwrap();
+
+        let ty = if encoder {
+            stream::QPACK_ENCODER_STREAM_TYPE_ID
+        } else {
+            stream::QPACK_DECODER_STREAM_TYPE_ID
+        };
+        let mut stream_type = [0; 2];
+        octets::OctetsMut::with_slice(&mut stream_type)
+            .put_varint_with_len(ty, 2)
+            .unwrap();
+
+        // A split stream-type varint must not be counted as QPACK instructions.
+        s.pipe
+            .client
+            .stream_send(2, &stream_type[..1], false)
+            .unwrap();
+        s.advance().unwrap();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.server.stats().qpack_encoder_stream_recv_bytes, 0);
+        assert_eq!(s.server.stats().qpack_decoder_stream_recv_bytes, 0);
+
+        // Discover the type with instructions already buffered, and exercise
+        // more than one read of the QPACK discard buffer.
+        s.pipe
+            .client
+            .stream_send(2, &stream_type[1..], false)
+            .unwrap();
+        s.pipe.client.stream_send(2, &[0xff; 4097], false).unwrap();
+        s.advance().unwrap();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        let stats = s.server.stats();
+        assert_eq!(
+            stats.qpack_encoder_stream_recv_bytes,
+            if encoder { 4097 } else { 0 }
+        );
+        assert_eq!(
+            stats.qpack_decoder_stream_recv_bytes,
+            if encoder { 0 } else { 4097 }
+        );
+
+        // Later polls resume by kind without rediscovering the stream type.
+        s.pipe.client.stream_send(2, &[0xff; 3], false).unwrap();
+        s.advance().unwrap();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        let stats = s.server.stats();
+        assert_eq!(
+            stats.qpack_encoder_stream_recv_bytes,
+            if encoder { 4100 } else { 0 }
+        );
+        assert_eq!(
+            stats.qpack_decoder_stream_recv_bytes,
+            if encoder { 0 } else { 4100 }
+        );
+
+        s.pipe.client.stream_send(2, &[], true).unwrap();
+        s.advance().unwrap();
+        assert_eq!(s.poll_server(), Err(Error::ClosedCriticalStream));
     }
 
     #[test]
