@@ -593,7 +593,7 @@ impl Stream {
                 Ok((read, fin)) => {
                     self.commit_state_buf_read(read);
 
-                    if self.critical_stream_closed(fin) {
+                    if fin && self.is_critical() {
                         super::close_conn_critical_stream(conn)?;
                     }
 
@@ -614,7 +614,7 @@ impl Stream {
                 },
 
                 Err(e @ crate::Error::StreamReset(_)) => {
-                    if self.critical_stream_closed(true) {
+                    if self.is_critical() {
                         super::close_conn_critical_stream(conn)?;
                     }
 
@@ -659,7 +659,7 @@ impl Stream {
 
         let read = match conn.stream_discard(self.id, len) {
             Ok((len, fin)) => {
-                if self.critical_stream_closed(fin) {
+                if fin && self.is_critical() {
                     super::close_conn_critical_stream(conn)?;
                 }
 
@@ -667,7 +667,7 @@ impl Stream {
             },
 
             Err(e @ crate::Error::StreamReset(_)) => {
-                if self.critical_stream_closed(true) {
+                if self.is_critical() {
                     super::close_conn_critical_stream(conn)?;
                 }
 
@@ -937,9 +937,9 @@ impl Stream {
         self.last_priority_update.is_some()
     }
 
-    /// Checks whether one of the critical streams was closed.
-    fn critical_stream_closed(&self, fin: bool) -> bool {
-        fin && matches!(
+    /// Returns whether the stream's identity is critical to the connection.
+    fn is_critical(&self) -> bool {
+        matches!(
             self.ty,
             Some(Type::Control) |
                 Some(Type::QpackEncoder) |
