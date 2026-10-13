@@ -3076,20 +3076,6 @@ impl Connection {
             },
 
             frame::Frame::Headers { header_block } => {
-                // Servers reject too many HEADERS frames.
-                if let Some(s) = self.streams.get_mut(&stream_id) {
-                    if self.is_server && s.headers_received_count() == 2 {
-                        conn.close(
-                            true,
-                            Error::FrameUnexpected.to_wire(),
-                            b"Too many HEADERS frames",
-                        )?;
-                        return Err(Error::FrameUnexpected);
-                    }
-
-                    s.increment_headers_received();
-                }
-
                 // Use "infinite" as default value for max_field_section_size if
                 // it is not configured by the application.
                 let max_size = self
@@ -4551,6 +4537,80 @@ mod tests {
     }
 
     #[test]
+    fn informational_responses_then_final_body_and_trailers() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+        let (stream, _) = s.send_request(true).unwrap();
+        assert!(matches!(s.poll_server(), Ok((_, Event::Headers { .. }))));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+        let info = vec![Header::new(b":status", b"103")];
+        let final_headers = vec![Header::new(b":status", b"200")];
+        let trailers = vec![Header::new(b"trailer", b"value")];
+        s.server
+            .send_response(&mut s.pipe.server, stream, &info, false)
+            .unwrap();
+        s.server
+            .send_additional_headers(
+                &mut s.pipe.server,
+                stream,
+                &info,
+                false,
+                false,
+            )
+            .unwrap();
+        s.server
+            .send_additional_headers(
+                &mut s.pipe.server,
+                stream,
+                &final_headers,
+                false,
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            s.server
+                .send_body(&mut s.pipe.server, stream, b"body", false),
+            Ok(4)
+        );
+        s.server
+            .send_additional_headers(
+                &mut s.pipe.server,
+                stream,
+                &trailers,
+                true,
+                true,
+            )
+            .unwrap();
+        s.advance().unwrap();
+        for headers in [info.clone(), info, final_headers] {
+            assert_eq!(
+                s.poll_client(),
+                Ok((stream, Event::Headers {
+                    list: headers,
+                    more_frames: true
+                }))
+            );
+        }
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        let mut body = [0; 4];
+        assert_eq!(
+            s.client.recv_body(&mut s.pipe.client, stream, &mut body),
+            Ok(4)
+        );
+        assert_eq!(&body, b"body");
+        assert_eq!(
+            s.poll_client(),
+            Ok((stream, Event::Headers {
+                list: trailers,
+                more_frames: false
+            }))
+        );
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert!(!s.client.streams.contains_key(&stream));
+    }
+
+    #[test]
     /// Server responds with a 103, then attempts to send a 200 using
     /// send_response again, which should fail.
     fn no_multiple_response() {
@@ -4727,6 +4787,302 @@ mod tests {
         assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(body.len()));
         assert_eq!(s.poll_server(), Ok((stream, ev_trailers)));
         assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
+    }
+
+    #[rstest::rstest]
+    fn receive_trailers_follow_frame_order(
+        #[values(false, true)] response: bool,
+        #[values(false, true)] with_body: bool,
+        #[values(false, true)] extra_headers: bool,
+    ) {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+        let (stream, req) = s.send_request(response).unwrap();
+        let initial = if response {
+            assert!(matches!(s.poll_server(), Ok((_, Event::Headers { .. }))));
+            assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+            s.send_response(stream, false).unwrap()
+        } else {
+            req
+        };
+        let trailers = vec![Header::new(b"trailer", b"value")];
+        let (h3, conn) = if response {
+            (&mut s.server, &mut s.pipe.server)
+        } else {
+            (&mut s.client, &mut s.pipe.client)
+        };
+        if with_body {
+            assert_eq!(h3.send_body(conn, stream, b"body", false), Ok(4));
+        }
+        h3.send_additional_headers(conn, stream, &trailers, true, false)
+            .unwrap();
+        s.advance().unwrap();
+
+        let (h3, conn) = if response {
+            (&mut s.client, &mut s.pipe.client)
+        } else {
+            (&mut s.server, &mut s.pipe.server)
+        };
+        assert_eq!(
+            h3.poll(conn),
+            Ok((stream, Event::Headers {
+                list: initial,
+                more_frames: true
+            }))
+        );
+        if with_body {
+            assert_eq!(h3.poll(conn), Ok((stream, Event::Data)));
+            let mut buf = [0; 4];
+            assert_eq!(h3.recv_body(conn, stream, &mut buf), Ok(4));
+            assert_eq!(&buf, b"body");
+        }
+        assert_eq!(
+            h3.poll(conn),
+            Ok((stream, Event::Headers {
+                list: trailers,
+                more_frames: true
+            }))
+        );
+        assert_eq!(h3.poll(conn), Err(Error::Done));
+
+        // Bypass send-phase validation to exercise the peer receive path.
+        let extra = if extra_headers {
+            frame::Frame::Headers {
+                header_block: vec![0, 0],
+            }
+        } else {
+            frame::Frame::Data {
+                payload: b"extra".to_vec(),
+            }
+        };
+        if response {
+            s.send_frame_server(extra, stream, true).unwrap();
+            if with_body {
+                assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+                assert_eq!(
+                    s.pipe.client.local_error().unwrap().error_code,
+                    Error::FrameUnexpected.to_wire()
+                );
+            } else {
+                // Without DATA, clients cannot distinguish informational,
+                // final or trailing sections without interpreting :status.
+                if extra_headers {
+                    assert_eq!(
+                        s.poll_client(),
+                        Ok((stream, Event::Headers {
+                            list: vec![],
+                            more_frames: false
+                        }))
+                    );
+                } else {
+                    assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+                    let mut buf = [0; 5];
+                    assert_eq!(
+                        s.client.recv_body(&mut s.pipe.client, stream, &mut buf),
+                        Ok(5)
+                    );
+                    assert_eq!(&buf, b"extra");
+                }
+                assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+                assert_eq!(s.poll_client(), Err(Error::Done));
+                assert!(s.pipe.client.local_error().is_none());
+            }
+        } else {
+            s.send_frame_client(extra, stream, true).unwrap();
+            assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
+            assert_eq!(
+                s.pipe.server.local_error().unwrap().error_code,
+                Error::FrameUnexpected.to_wire()
+            );
+        }
+    }
+
+    #[test]
+    fn data_after_informational_response_reaches_application() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+        let (stream, _) = s.send_request(true).unwrap();
+        assert!(matches!(s.poll_server(), Ok((_, Event::Headers { .. }))));
+        assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+        let info = vec![Header::new(b":status", b"103")];
+        s.server
+            .send_response(&mut s.pipe.server, stream, &info, false)
+            .unwrap();
+        s.advance().unwrap();
+        assert_eq!(
+            s.poll_client(),
+            Ok((stream, Event::Headers {
+                list: info,
+                more_frames: true
+            }))
+        );
+        s.send_frame_server(
+            frame::Frame::Data {
+                payload: b"body".to_vec(),
+            },
+            stream,
+            false,
+        )
+        .unwrap();
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        let mut body = [0; 4];
+        assert_eq!(
+            s.client.recv_body(&mut s.pipe.client, stream, &mut body),
+            Ok(4)
+        );
+        assert_eq!(&body, b"body");
+        assert!(s.pipe.client.local_error().is_none());
+    }
+
+    #[rstest::rstest]
+    #[case(&[])]
+    #[case(&[b"".as_slice()])]
+    #[case(&[b"20".as_slice()])]
+    #[case(&[b"2000".as_slice()])]
+    #[case(&[b"2xx".as_slice()])]
+    #[case(&[b"099".as_slice()])]
+    #[case(&[b"600".as_slice()])]
+    #[case(&[b"101".as_slice()])]
+    #[case(&[b"invalid".as_slice()])]
+    #[case(&[b"103".as_slice(), b"200".as_slice()])]
+    fn response_status_validation_is_left_to_application(
+        #[values(false, true)] fin: bool, #[case] statuses: &[&[u8]],
+    ) {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+        let (stream, _) = s.send_request(false).unwrap();
+        assert!(matches!(s.poll_server(), Ok((_, Event::Headers { .. }))));
+        let mut headers: Vec<_> = statuses
+            .iter()
+            .map(|status| Header::new(b":status", status))
+            .collect();
+        headers.push(Header::new(b"server", b"quiche-test"));
+        s.server
+            .send_response(&mut s.pipe.server, stream, &headers, fin)
+            .unwrap();
+        s.advance().unwrap();
+        assert_eq!(
+            s.poll_client(),
+            Ok((stream, Event::Headers {
+                list: headers,
+                more_frames: !fin
+            }))
+        );
+        if fin {
+            assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        }
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        assert!(s.pipe.client.local_error().is_none());
+        assert!(s.pipe.server.peer_error().is_none());
+    }
+
+    #[rstest::rstest]
+    #[case("D", Some(0), Some(0))]
+    #[case("H", None, None)]
+    #[case("HH", None, None)]
+    #[case("HHH", Some(2), None)]
+    #[case("HHD", Some(2), None)]
+    #[case("HHHDH", Some(2), None)]
+    #[case("HDH", None, None)]
+    #[case("HDHD", Some(3), Some(3))]
+    #[case("HDHH", Some(3), Some(3))]
+    #[case("HEH", None, None)]
+    #[case("HEHH", Some(3), Some(3))]
+    #[case("HHEH", Some(2), None)]
+    #[case("GHGDGHG", None, None)]
+    #[case("HDHGH", Some(4), Some(4))]
+    fn request_stream_receive_sequences(
+        #[values(false, true)] response: bool, #[case] sequence: &str,
+        #[case] request_error_at: Option<usize>,
+        #[case] response_error_at: Option<usize>,
+    ) {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+        let stream = if response {
+            let (stream, _) = s.send_request(true).unwrap();
+            assert!(matches!(s.poll_server(), Ok((_, Event::Headers { .. }))));
+            assert_eq!(s.poll_server(), Ok((stream, Event::Finished)));
+            stream
+        } else {
+            0
+        };
+        let error_at = if response {
+            response_error_at
+        } else {
+            request_error_at
+        };
+        // Empty QPACK sections and raw DATA avoid sender-side semantic
+        // checks, so every assertion exercises actual receive ordering.
+        let mut wire = Vec::new();
+        for kind in sequence.bytes() {
+            wire.extend_from_slice(match kind {
+                b'H' => &[1, 2, 0, 0],
+                b'D' => &[0, 1, 23],
+                b'E' => &[0, 0],
+                b'G' => &[0x21, 0],
+                _ => unreachable!(),
+            });
+        }
+        if response {
+            s.send_arbitrary_stream_data_server(&wire, stream, false)
+                .unwrap();
+        } else {
+            s.send_arbitrary_stream_data_client(&wire, stream, false)
+                .unwrap();
+        }
+        for (i, kind) in sequence.bytes().enumerate() {
+            let (h3, conn) = if response {
+                (&mut s.client, &mut s.pipe.client)
+            } else {
+                (&mut s.server, &mut s.pipe.server)
+            };
+            if error_at == Some(i) {
+                assert_eq!(
+                    h3.poll(conn),
+                    Err(Error::FrameUnexpected),
+                    "sequence={sequence} response={response}"
+                );
+                assert_eq!(
+                    conn.local_error().unwrap().error_code,
+                    Error::FrameUnexpected.to_wire()
+                );
+                return;
+            }
+            match kind {
+                b'H' => assert_eq!(
+                    h3.poll(conn),
+                    Ok((stream, Event::Headers {
+                        list: vec![],
+                        more_frames: true
+                    }))
+                ),
+                b'D' => {
+                    assert_eq!(h3.poll(conn), Ok((stream, Event::Data)));
+                    let mut body = [0; 1];
+                    assert_eq!(h3.recv_body(conn, stream, &mut body), Ok(1));
+                    assert_eq!(body, [23]);
+                },
+                b'E' => {
+                    assert_eq!(h3.poll(conn), Ok((stream, Event::Data)));
+                    assert_eq!(
+                        h3.recv_body(conn, stream, &mut [0; 1]),
+                        Err(Error::Done)
+                    );
+                },
+                b'G' => (),
+                _ => unreachable!(),
+            }
+            assert!(conn.local_error().is_none());
+        }
+        assert!(error_at.is_none());
+        assert_eq!(
+            if response {
+                s.poll_client()
+            } else {
+                s.poll_server()
+            },
+            Err(Error::Done)
+        );
     }
 
     #[test]

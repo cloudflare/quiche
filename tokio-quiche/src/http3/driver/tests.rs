@@ -278,6 +278,52 @@ mod conn_close_metrics {
 mod client_side_driver {
     use super::*;
 
+    #[rstest]
+    fn malformed_response_status_reaches_application(
+        #[values(false, true)] fin: bool,
+    ) {
+        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let stream_id = helper
+            .driver_send_request(make_request_headers("GET"), true)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(helper.peer_server_poll().unwrap(), (id, h3::Event::Headers { .. }) if id == stream_id);
+        let headers = vec![h3::Header::new(b":status", b"invalid")];
+        helper
+            .peer
+            .send_response(&mut helper.pipe.server, stream_id, &headers, fin)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let mut response = assert_matches!(helper.driver_recv_core_event().unwrap(), H3Event::IncomingHeaders(headers) => headers);
+        assert_eq!(response.stream_id, stream_id);
+        assert_eq!(response.headers, headers);
+        assert_eq!(response.read_fin, fin);
+        assert_eq!(helper.driver.hooks.pending_request_count(), 0);
+        if !fin {
+            assert_eq!(
+                helper.peer_server_send_body(stream_id, b"body", true),
+                Ok(4)
+            );
+            helper.advance_and_run_loop().unwrap();
+        }
+        let (body, fin, error) = helper.driver_try_recv_body(&mut response.recv);
+        assert_eq!(
+            body,
+            if response.read_fin {
+                b"".as_slice()
+            } else {
+                b"body".as_slice()
+            }
+        );
+        assert!(fin);
+        assert_matches!(error, TryRecvError::Disconnected);
+        assert!(!helper.driver.stream_map.contains_key(&stream_id));
+        assert!(helper.pipe.client.local_error().is_none());
+        assert!(helper.pipe.server.peer_error().is_none());
+    }
+
     #[derive(Clone, Copy)]
     enum PeerTermination {
         Fin,
