@@ -211,8 +211,11 @@ impl ClientHooks {
         };
 
         // log::info!("sent h3 request"; "stream_id" => stream_id);
-        let (mut stream_ctx, send, recv) =
-            StreamCtx::new(stream_id, STREAM_CAPACITY);
+        let (mut stream_ctx, send, recv) = StreamCtx::new(
+            stream_id,
+            STREAM_CAPACITY,
+            driver.ready_stream_sender.clone(),
+        );
 
         if body_finished {
             // `send_request()` already sent FIN for bodyless requests, so
@@ -235,9 +238,7 @@ impl ClientHooks {
 
         if let Some(body_writer) = request.body_writer {
             let _ = body_writer.send(send.clone());
-            driver
-                .waiting_streams
-                .push(stream_ctx.wait_for_recv(stream_id))?;
+            stream_ctx.wait_for_recv();
         }
 
         driver.insert_stream(stream_id, stream_ctx);
