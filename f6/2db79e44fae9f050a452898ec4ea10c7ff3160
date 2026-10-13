@@ -1,0 +1,40 @@
+quiche/include/quiche.h
+  s_9448dd68a0975d::t_a75f4db5782897 240-251
+quiche/src/lib.rs
+  s_9448dd68a0975d::t_0696b76c1864a4 9498-9500
+  s_9448dd68a0975d::t_9f831c06438528 9501-9503
+  s_9448dd68a0975d::t_db414b3408f699 498-506,622-625,704-707,939-970,1659-1666,2291-2294,2794-2841,3861,4215-4224,5701-5706,5717-5721,5730-5778,7260-7265,7271-7308,7415-7432,8328-8331,8368-8371,8687-8692,9504
+tokio-quiche/src/settings/quic.rs
+  s_9448dd68a0975d::t_ff7a8d8edd7679 304-330,502-511,558-580
+quiche/src/ffi.rs
+  s_9448dd68a0975d::t_cbbb00416b7871 371-384
+quiche/src/tests.rs
+  s_9448dd68a0975d::t_4ad9c4abee2920 7986-8536,10780-10781,10825-10836,10922-10930,12162-12387
+tokio-quiche/src/settings/config.rs
+  s_9448dd68a0975d::t_9213f15faece76 206
+  s_9448dd68a0975d::t_14f6c54ff1a329 207-218
+quiche/src/recovery/congestion/prr.rs
+  s_9448dd68a0975d::t_2f559f664913ad 76-83,180-198
+quiche/src/path.rs
+  s_9448dd68a0975d::t_c150a9001074e5 337
+  s_9448dd68a0975d::t_1c57d41e791635 336
+  s_9448dd68a0975d::t_75cd019cc8c879 255-266,335
+quiche/src/tls/mod.rs
+  s_9448dd68a0975d::t_071aaa032253cf 726-729
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f62db79e44fae9f050a452898ec4ea10c7ff3160",
+  "prompts": {},
+  "sessions": {
+    "s_9448dd68a0975d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d18329e-86e5-4839-8c87-5ef53da12261",
+        "model": "unknown"
+      },
+      "human_author": "Julien Rouviere <jrouviere@cloudflare.com>"
+    }
+  }
+}
