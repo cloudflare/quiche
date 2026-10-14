@@ -137,7 +137,7 @@ impl StreamCtx {
     }
 
     pub(crate) fn handle_recvd_reset(&mut self, wire_err_code: u64) {
-        debug_assert!(!self.fin_or_reset_recv);
+        // The body reader and HTTP/3 polling can report the same reset.
         // We received a RESET_STREAM frame, which closes the read direction
         // but not the write direction. If the peer wants to shut down write,
         // it must also send STOP_SENDING

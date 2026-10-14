@@ -1934,6 +1934,43 @@ mod server_side_driver {
         );
     }
 
+    /// A peer reset in the middle of a DATA frame must not fail the connection.
+    #[test]
+    fn client_sends_reset_stream_in_middle_of_data_frame() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Announce 100 DATA bytes, withholding the payload so HTTP/3 polling
+        // and the body reader can both observe the subsequent reset.
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("POST"), false)
+            .unwrap();
+        helper
+            .pipe
+            .client
+            .stream_send(stream_id, &[0x00, 0x40, 0x64], false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Keep both application channels alive until the reset is processed.
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        helper
+            .pipe
+            .client
+            .stream_shutdown(stream_id, quiche::Shutdown::Write, 4242)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(req.h3_audit_stats.recvd_reset_stream_error_code(), 4242);
+        assert!(req.recv.is_closed());
+        assert!(!req.send.get_ref().unwrap().is_closed());
+        assert!(!helper.pipe.server.is_closed());
+    }
+
     /// Test the case where the client sends a RESET_STREAM quiche frame while
     /// we're in the middle of reading data. We want to excercise the
     /// code-path where `upstream_ready` is called before `process_reads`.
