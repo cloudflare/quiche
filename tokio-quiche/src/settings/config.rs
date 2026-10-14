@@ -243,9 +243,9 @@ fn quiche_config_with_tls(
             // TODO: Gate this variant on the `rpk` feature.
             panic!("Can't use RPK when compiled without rpk feature");
         },
-        #[cfg(all(feature = "rpk", not(boring_v5)))]
+        #[cfg(all(feature = "rpk", boring_v4))]
         CertificateKind::RawPublicKey => {
-            // boring 4.x (the default) exposes a dedicated
+            // boring 4.x exposes a dedicated
             // `SslContextBuilder::new_rpk()` constructor plus
             // `set_rpk_certificate` / `set_null_chain_private_key`.
             let mut ssl_ctx_builder = boring::ssl::SslContextBuilder::new_rpk()?;
@@ -262,12 +262,13 @@ fn quiche_config_with_tls(
                 ssl_ctx_builder,
             )?)
         },
-        #[cfg(all(feature = "rpk", boring_v5))]
+        #[cfg(all(feature = "rpk", not(boring_v4)))]
         CertificateKind::RawPublicKey => {
-            // boring 5.x replaced the dedicated `SslContextBuilder::new_rpk()`
-            // entry point with a credential-based API: build an
-            // `SslCredential` configured for raw public keys and add it
-            // to a regular `SslContextBuilder` via `add_credential`.
+            // boring 5.x replaced the dedicated
+            // `SslContextBuilder::new_rpk()` entry point with a
+            // credential-based API: build an `SslCredential`
+            // configured for raw public keys and add it to a regular
+            // `SslContextBuilder` via `add_credential`.
             let raw_public_key = read_file(tls.cert)?;
             let raw_private_key = read_file(tls.private_key)?;
             let pkey =
