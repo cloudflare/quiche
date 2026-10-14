@@ -36,5 +36,8 @@ quiche = { workspace = true }
 ring = { workspace = true }
 url = { workspace = true }
 
+[dev-dependencies]
+quiche = { workspace = true, features = ["internal"] }
+
 [lib]
 crate-type = ["lib"]
