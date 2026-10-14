@@ -2162,9 +2162,14 @@ impl Connection {
 
                 Err(Error::Done) => None,
 
-                // Return early if the stream was reset, to avoid returning
-                // a Finished event later as well.
+                // Return early if the stream was reset, and mark it as
+                // finished, so that neither this loop nor a later
+                // `recv_body()` call queues a Finished event as well.
                 Err(Error::TransportError(crate::Error::StreamReset(e))) => {
+                    if let Some(stream) = self.streams.get_mut(&s) {
+                        stream.finished();
+                    }
+
                     self.remove_local_finished_stream(s);
 
                     return Ok((s, Event::Reset(e)));
@@ -2875,18 +2880,22 @@ impl Connection {
                         break;
                     }
 
-                    // Do a dummy read to check if the stream has been reset
-                    // while waiting to receive more data from a declared DATA
-                    // frame length. Doing this prevents an Event::Data frame
-                    // being triggered, which then might be followed by an
-                    // immediate Event::Finished if an application has already
-                    // read exactly the stream final size.
-                    if let Err(crate::Error::StreamReset(e)) =
-                        conn.stream_recv(stream_id, &mut [])
-                    {
-                        return Err(Error::TransportError(
-                            crate::Error::StreamReset(e),
-                        ));
+                    // A reset received while waiting for the rest of a DATA
+                    // frame makes the stream readable, with no payload left to
+                    // read. Use a dummy read to return the reset directly,
+                    // instead of an Event::Data after which `recv_body()`
+                    // returns `Done` and the stream looks finished, as if the
+                    // body were complete. The dummy read has side effects, such
+                    // as qlog events, so only do it for finished streams,
+                    // which include all reset streams.
+                    if conn.stream_finished(stream_id) {
+                        if let Err(crate::Error::StreamReset(e)) =
+                            conn.stream_recv(stream_id, &mut [])
+                        {
+                            return Err(Error::TransportError(
+                                crate::Error::StreamReset(e),
+                            ));
+                        }
                     }
 
                     if !stream.try_trigger_data_event() {
@@ -8138,6 +8147,12 @@ mod tests {
         s.advance().ok();
 
         assert_eq!(s.poll_client(), Ok((stream, Event::Reset(42))));
+
+        // Reading the body after the reset does not queue a Finished event.
+        assert_eq!(
+            s.client.recv_body(&mut s.pipe.client, 0, &mut read_buf),
+            Err(Error::Done)
+        );
         assert_eq!(s.poll_client(), Err(Error::Done));
     }
 

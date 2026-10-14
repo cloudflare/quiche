@@ -2180,6 +2180,82 @@ mod server_side_driver {
         assert_eq!(audit_stats.downstream_bytes_sent(), 0);
     }
 
+    /// Test the case where the client resets the stream in the middle of a
+    /// DATA frame, after the driver has read all of the payload received so
+    /// far. The driver must report the reset and must not deliver a fin for
+    /// the truncated body.
+    #[test]
+    fn client_sends_reset_stream_mid_data_frame() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // client (peer) sends a request
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), false)
+            .unwrap();
+
+        // server reads the request
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        assert_eq!(req.stream_id, stream_id);
+        assert!(!req.read_fin);
+        let mut from_client = req.recv;
+        let audit_stats = req.h3_audit_stats;
+
+        // The client sends a DATA frame header with a payload length of 10,
+        // followed by only 5 bytes of payload.
+        assert_eq!(
+            helper.pipe.client.stream_send(
+                stream_id,
+                &[0x00, 10, 1, 1, 1, 1, 1],
+                false
+            ),
+            Ok(7)
+        );
+
+        // The driver reads the received payload into the `from_client`
+        // channel.
+        helper.pipe.advance().unwrap();
+        helper.work_loop_iter().unwrap();
+        assert_matches!(from_client.try_recv(), Ok(InboundFrame::Body(buf, fin)) => {
+            assert_eq!(buf.to_vec(), &[1; 5]);
+            assert!(!fin);
+        });
+        assert_matches!(
+            helper.driver_recv_core_event(),
+            Ok(H3Event::BodyBytesReceived {
+                stream_id: 0,
+                num_bytes: 5,
+                fin: false
+            })
+        );
+
+        // The client resets the stream before sending the rest of the frame.
+        assert_eq!(
+            helper.pipe.client.stream_shutdown(
+                stream_id,
+                quiche::Shutdown::Write,
+                4242
+            ),
+            Ok(())
+        );
+        helper.advance_and_run_loop().unwrap();
+
+        // The driver reports the reset without delivering a fin for the
+        // truncated body.
+        assert_matches!(from_client.try_recv(), Err(TryRecvError::Disconnected));
+        assert_matches!(
+            helper.driver_recv_core_event(),
+            Ok(H3Event::ResetStream { stream_id: 0 })
+        );
+        assert_eq!(audit_stats.recvd_reset_stream_error_code(), 4242);
+        assert_eq!(audit_stats.recvd_stream_fin(), StreamClosureKind::None);
+    }
+
     #[test]
     fn server_driver_send_stop_sending_after_channel_drop() {
         const REQUEST_CANCELED_ERR: u64 =
