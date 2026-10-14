@@ -1903,6 +1903,14 @@ impl Connection {
 
                 Err(Error::Done) => break,
 
+                // The reset is consumed here, so the stream will not become
+                // readable again for poll() to handle it.
+                Err(e @ Error::TransportError(crate::Error::StreamReset(_))) => {
+                    self.process_reset_stream(stream_id);
+
+                    return Err(e);
+                },
+
                 Err(e) => return Err(e),
             };
 
@@ -2162,15 +2170,10 @@ impl Connection {
 
                 Err(Error::Done) => None,
 
-                // Return early if the stream was reset, and mark it as
-                // finished, so that neither this loop nor a later
-                // `recv_body()` call queues a Finished event as well.
+                // Return early if the stream was reset, to avoid returning
+                // a Finished event later as well.
                 Err(Error::TransportError(crate::Error::StreamReset(e))) => {
-                    if let Some(stream) = self.streams.get_mut(&s) {
-                        stream.finished();
-                    }
-
-                    self.remove_local_finished_stream(s);
+                    self.process_reset_stream(s);
 
                     return Ok((s, Event::Reset(e)));
                 },
@@ -3014,6 +3017,17 @@ impl Connection {
                 stream.remove();
             }
         }
+    }
+
+    // Marks a reset stream as finished, so that neither poll() nor a later
+    // recv_body() call queues a Finished event for it, and removes the stream
+    // if the local side is also finished.
+    fn process_reset_stream(&mut self, stream_id: u64) {
+        if let Some(stream) = self.streams.get_mut(&stream_id) {
+            stream.finished();
+        }
+
+        self.remove_local_finished_stream(stream_id);
     }
 
     fn pop_finished_stream<F: BufFactory>(
@@ -8466,10 +8480,14 @@ mod tests {
         assert_eq!(s.pipe.server.readable().len(), 0);
     }
 
-    #[test]
-    fn reset_finished_at_server_with_data_pending_2() {
+    #[rstest::rstest]
+    fn reset_finished_at_server_with_data_pending_2(
+        #[values(true, false)] local_fin: bool,
+    ) {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
+
+        let init_streams_server = s.server.streams.len();
 
         // Client sends HEADERS and doesn't fin.
         let (stream, req) = s.send_request(false).unwrap();
@@ -8486,6 +8504,8 @@ mod tests {
         // Server receives headers and data...
         assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_server(), Ok((stream, Event::Data)));
+
+        s.send_response(stream, local_fin).unwrap();
 
         // ..then Client sends RESET_STREAM.
         assert_eq!(
@@ -8507,6 +8527,18 @@ mod tests {
         // No more events and there are no more readable streams.
         assert_eq!(s.poll_server(), Err(Error::Done));
         assert_eq!(s.pipe.server.readable().len(), 0);
+
+        // Reading the body again does not queue a Finished event.
+        assert_eq!(s.recv_body_server(stream, &mut [0; 100]), Err(Error::Done));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        if !local_fin {
+            assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+            s.send_body_server(stream, true).unwrap();
+        }
+
+        assert_eq!(s.server.streams.len(), init_streams_server);
     }
 
     #[test]
