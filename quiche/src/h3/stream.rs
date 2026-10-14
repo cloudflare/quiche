@@ -84,8 +84,11 @@ pub enum State {
     /// Reading the push ID.
     PushId,
 
-    /// Reading a QPACK instruction.
-    QpackInstruction,
+    /// Reading a QPACK decoder instruction.
+    QpackDecoderInstruction,
+
+    /// Reading a QPACK encoder instruction.
+    QpackEncoderInstruction,
 
     /// Reading the stream's current frame's payload without buffering the data.
     SkipFramePayload,
@@ -271,10 +274,16 @@ impl Stream {
 
             Type::Push => State::PushId,
 
-            Type::QpackEncoder | Type::QpackDecoder => {
+            Type::QpackEncoder => {
                 self.remote_initialized = true;
 
-                State::QpackInstruction
+                State::QpackEncoderInstruction
+            },
+
+            Type::QpackDecoder => {
+                self.remote_initialized = true;
+
+                State::QpackDecoderInstruction
             },
 
             Type::Unknown => State::Drain,
