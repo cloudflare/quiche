@@ -7,7 +7,7 @@ permissions:
   pull-requests: write
 
 env:
-  DEFAULT_OPTIONS: "--features=async,ffi,qlog,rpk --workspace"
+  DEFAULT_OPTIONS: "--features=async,ffi,qlog,rpk,congestion_window_unchecked_available --workspace"
   # Used by `quiche_multiarch`, which can't link `boring` for foreign targets.
   NO_BORING_OPTIONS: "--features=ffi,qlog --workspace --exclude h3i --exclude tokio-quiche"
   RUSTFLAGS: "-D warnings"
@@ -61,6 +61,12 @@ jobs:
 
       - name: Run cargo test
         run: cargo test --verbose --all-targets ${{ env.DEFAULT_OPTIONS }}
+
+      - name: Run recovery and settings tests without unchecked congestion window
+        if: matrix.boring_version == 'latest'
+        run: |
+          cargo test --verbose --lib ${DEFAULT_OPTIONS/,congestion_window_unchecked_available/} 'recovery::'
+          cargo test --verbose --lib ${DEFAULT_OPTIONS/,congestion_window_unchecked_available/} 'settings::'
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)

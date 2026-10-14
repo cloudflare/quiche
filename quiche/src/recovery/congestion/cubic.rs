@@ -47,6 +47,7 @@ use crate::recovery::MINIMUM_WINDOW_PACKETS;
 
 pub(crate) static CUBIC: CongestionControlOps = CongestionControlOps {
     on_init,
+    on_mtu_update: |_| {},
     on_packet_sent,
     on_packets_acked,
     congestion_event,

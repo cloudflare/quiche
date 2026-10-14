@@ -237,6 +237,14 @@ int quiche_config_set_cc_algorithm_name(quiche_config *config, const char *algo)
 // Sets the initial cwnd for the connection in terms of packet count.
 void quiche_config_set_initial_congestion_window_packets(quiche_config *config, size_t packets);
 
+// Sets the fixed congestion window in bytes for congestion_window_unchecked.
+// Select the controller using quiche_config_set_cc_algorithm_name(config,
+// "congestion_window_unchecked") in builds with the
+// congestion_window_unchecked_available feature.
+// Defaults to SIZE_MAX. Other congestion control algorithms are unchanged.
+// Recovery probes can bypass the fixed window.
+void quiche_config_set_unchecked_congestion_window(quiche_config *config, size_t window);
+
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
     QUICHE_CC_CUBIC = 1,
