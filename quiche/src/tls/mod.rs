@@ -696,7 +696,6 @@ impl Handshake {
 // convey ownership. Handshake uniquely owns the underlying data, and its API
 // preserves Rust's borrowing guarantees.
 unsafe impl Send for Handshake {}
-unsafe impl Sync for Handshake {}
 
 impl Drop for Handshake {
     fn drop(&mut self) {
