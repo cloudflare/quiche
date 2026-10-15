@@ -218,10 +218,8 @@ impl ClientHooks {
         );
 
         if body_finished {
-            // `send_request()` already sent FIN for bodyless requests, so
-            // mark the send side complete and drop the outbound-frame receiver
-            // since no body will be sent.
-            H3Driver::<ClientHooks>::on_fin_sent(&mut stream_ctx)?;
+            // `send_request()` accepted FIN for this bodyless request.
+            stream_ctx.handle_sent_fin()?;
         }
 
         if let Some(quarter_stream_id) =
@@ -301,6 +299,9 @@ impl ClientHooks {
 impl DriverHooks for ClientHooks {
     type Command = ClientH3Command;
     type Event = ClientH3Event;
+
+    const STOP_SENDING_CODE_AFTER_LOCAL_FIN: h3::WireErrorCode =
+        h3::WireErrorCode::RequestCancelled;
 
     fn new(_settings: &Http3Settings) -> Self {
         Self {

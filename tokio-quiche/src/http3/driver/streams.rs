@@ -34,6 +34,7 @@ use std::task::Wake;
 use std::task::Waker;
 use std::time::Instant;
 
+use datagram_socket::StreamClosureKind;
 use quiche::h3;
 use tokio::sync::mpsc;
 use tokio_util::sync::PollSender;
@@ -156,13 +157,16 @@ impl RecvState {
     }
 }
 
-/// The transport write direction is closed by FIN, reset, or peer STOP.
+/// Local HTTP/3 write-side lifecycle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SendState {
-    /// Transport writes have not yet finished or been canceled.
+    /// No FIN-bearing write was accepted and the write side was not aborted.
     Open,
-    /// Transport writes ended through FIN, local reset, or peer STOP_SENDING.
-    Closed,
+    /// Quiche accepted a FIN-bearing HTTP/3 write.
+    Finished,
+    /// The write side ended via reset or peer STOP_SENDING without accepted
+    /// FIN.
+    Aborted,
 }
 
 /// Receives coalesced stream notifications and rearms their wake state.
@@ -250,7 +254,8 @@ pub(crate) struct StreamCtx {
     /// Receive-side lifecycle and the sender for local application delivery.
     pub(super) recv_state: RecvState,
     /// Transport write-side lifecycle.
-    pub(super) send_state: SendState,
+    /// Tracks local FIN acceptance or write-side abortion.
+    send_state: SendState,
     /// The flow ID for proxying datagrams over this stream. If `None`,
     /// the stream has no associated DATAGRAM flow.
     pub(crate) associated_dgram_flow_id: Option<u64>,
@@ -297,10 +302,14 @@ impl StreamCtx {
     /// Cleanup requires closed transport writes and closed app delivery.
     pub(super) fn fully_closed(&self) -> bool {
         match (&self.recv_state, self.send_state) {
-            (RecvState::Closed, SendState::Closed) => true,
+            (RecvState::Closed, SendState::Finished | SendState::Aborted) => true,
             (RecvState::Open(_) | RecvState::FinPending(_), _) |
             (RecvState::Closed, SendState::Open) => false,
         }
+    }
+
+    pub(super) fn send_state(&self) -> SendState {
+        self.send_state
     }
 
     /// Schedules the initial poll to register for upstream channel capacity.
@@ -327,6 +336,7 @@ impl StreamCtx {
         self.waiting_for_recv
     }
 
+    #[cfg(test)]
     pub(super) fn cancel_recv_wait(&mut self) {
         self.waiting_for_recv = false;
     }
@@ -365,22 +375,23 @@ impl StreamCtx {
         Ok((recv_ready, send_ready))
     }
 
-    /// Handle the case when we received a STOP_SENDING frame. Note, that
-    /// we'll only learn about a STOP_SENDING frame from the write path.
-    /// Also note, that quiche will automatically send a RESET_STREAM frame
-    /// in response when it receives a STOP_SENDING (as recommended by the
-    /// RFC)
+    /// Records a peer STOP_SENDING observed from the write path.
+    ///
+    /// Quiche automatically sends RESET_STREAM in response, as recommended by
+    /// the RFC.
     pub(crate) fn handle_recvd_stop_sending(&mut self, wire_err_code: u64) {
         // Update stats even if the stream is already closing.
         self.audit_stats
             .set_recvd_stop_sending_error_code(wire_err_code as i64);
 
         match self.send_state {
-            SendState::Closed => {
-                // STOP may arrive after FIN or reset has closed the write side.
+            SendState::Finished | SendState::Aborted => {
+                // A terminal send state stays terminal. In particular, a later
+                // peer STOP_SENDING does not undo quiche's prior acceptance of
+                // local FIN or imply that the peer received or acknowledged it.
                 return;
             },
-            SendState::Open => self.send_state = SendState::Closed,
+            SendState::Open => self.send_state = SendState::Aborted,
         }
 
         // We received a STOP_SENDING frame. This indicates that the
@@ -423,7 +434,7 @@ impl StreamCtx {
     ) -> H3ConnectionResult<()> {
         match self.send_state {
             SendState::Open => {},
-            SendState::Closed => {
+            SendState::Finished | SendState::Aborted => {
                 debug_assert!(
                     false,
                     "A local reset requires an open send direction"
@@ -433,8 +444,22 @@ impl StreamCtx {
         }
         self.audit_stats
             .set_sent_reset_stream_error_code(wire_err_code as i64);
-        self.send_state = SendState::Closed;
+        self.send_state = SendState::Aborted;
         self.waiting_for_recv = false;
+        Ok(())
+    }
+
+    pub(crate) fn handle_sent_fin(&mut self) -> h3::Result<()> {
+        // This records local submission to quiche, not peer receipt or ACK.
+        if self.send_state != SendState::Open {
+            debug_assert!(false, "accepted FIN requires an open send direction");
+            return Err(h3::Error::InternalError);
+        }
+        self.recv = None;
+        self.waiting_for_recv = false;
+        self.send_state = SendState::Finished;
+        self.audit_stats
+            .set_sent_stream_fin(StreamClosureKind::Explicit);
         Ok(())
     }
 
@@ -812,7 +837,7 @@ mod tests {
         let (mut ctx, _outbound, _inbound) = StreamCtx::new(4, 1, ready_tx);
         cancel(&mut ctx, 42).unwrap();
         assert_eq!(matches!(ctx.recv_state, RecvState::Closed), closes_receive);
-        assert_eq!(ctx.send_state == SendState::Closed, !closes_receive);
+        assert_eq!(ctx.send_state == SendState::Aborted, !closes_receive);
 
         // Only the second call is allowed to reject the closed direction.
         let result = catch_unwind(AssertUnwindSafe(|| cancel(&mut ctx, 43)));
