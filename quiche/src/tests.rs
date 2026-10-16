@@ -13133,6 +13133,117 @@ fn pmtud_probe_success(
 }
 
 #[rstest]
+fn pmtud_spacing_stops_idle_pto_loop(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(0, 32)] pkts_between_probes: usize,
+) {
+    let gated = pkts_between_probes > 0;
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_max_send_udp_payload_size(1400);
+    config.discover_pmtu(true);
+    config.set_pmtud_max_probes(u8::MAX);
+    config.set_pmtud_pkts_between_probes(pkts_between_probes);
+
+    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    pipe.handshake().unwrap();
+    let mut dropped = 0;
+
+    for round in 0..8 {
+        for exchange in 0..32 {
+            let mut progress = false;
+            match test_utils::emit_flight(&mut pipe.client) {
+                Ok(flight) => {
+                    progress = true;
+                    for (mut packet, _) in flight {
+                        if packet.len() > 1200 {
+                            assert_eq!(packet.len(), 1400);
+                            dropped += 1;
+                        } else {
+                            pipe.server_recv(&mut packet).unwrap();
+                        }
+                    }
+                },
+                Err(e) => assert_eq!(e, Error::Done),
+            }
+
+            match test_utils::emit_flight(&mut pipe.server) {
+                Ok(flight) => {
+                    progress = true;
+                    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+                },
+                Err(e) => assert_eq!(e, Error::Done),
+            }
+
+            if !progress {
+                if !pipe
+                    .client
+                    .paths
+                    .get_active()
+                    .unwrap()
+                    .pmtud
+                    .as_ref()
+                    .unwrap()
+                    .should_probe()
+                {
+                    break;
+                }
+            }
+            assert!(exchange < 31, "packet exchange did not become idle");
+        }
+
+        let Some(deadline) = pipe
+            .client
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .loss_detection_timer()
+        else {
+            break;
+        };
+
+        if round == 7 {
+            break;
+        }
+
+        let wait = deadline.saturating_duration_since(Instant::now());
+        assert!(wait < Duration::from_secs(1));
+        std::thread::sleep(wait + Duration::from_millis(1));
+        pipe.client.on_timeout();
+    }
+
+    if gated {
+        assert!(dropped >= 1, "the initial probe is attempted");
+    } else {
+        assert!(dropped >= 2, "exercise retries, not only the initial probe");
+    }
+    assert!(!pipe.client.is_closed());
+    let path = pipe.client.paths.get_active().unwrap();
+    assert_eq!(path.recovery.loss_detection_timer().is_none(), gated);
+    assert_eq!(path.pmtud.as_ref().unwrap().get_pmtu(), None);
+
+    if gated {
+        assert!(!path.pmtud.as_ref().unwrap().should_probe());
+
+        for _ in 0..32 {
+            pipe.client.send_ack_eliciting().unwrap();
+            pipe.advance().unwrap();
+        }
+        assert_eq!(
+            pipe.client
+                .paths
+                .get_active()
+                .unwrap()
+                .pmtud
+                .as_ref()
+                .unwrap()
+                .get_pmtu(),
+            Some(1400)
+        );
+    }
+}
+
+#[rstest]
 /// This test verifies that multiple send() calls after handshake completion
 /// only generate one PMTUD probe packet, not multiple identical probes.
 fn pmtud_no_duplicate_probes(
@@ -13336,6 +13447,8 @@ fn pmtud_probe_retry_after_loss(
 #[rstest]
 fn enable_pmtud_mid_handshake(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(0, 32)] pkts_between_probes: usize,
+    #[values(false, true)] initially_enabled: bool,
 ) {
     // Manually construct `SslContextBuilder` for the server so we can enable
     // PMTUD during the handshake.
@@ -13364,6 +13477,8 @@ fn enable_pmtud_mid_handshake(
         server_config.set_cc_algorithm_name(cc_algorithm_name),
         Ok(())
     );
+    server_config.set_pmtud_pkts_between_probes(pkts_between_probes);
+    server_config.discover_pmtu(initially_enabled);
 
     let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
     client_config
@@ -13396,7 +13511,7 @@ fn enable_pmtud_mid_handshake(
     .unwrap();
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
-    assert!(active_path.pmtud.is_none());
+    assert_eq!(active_path.pmtud.is_some(), initially_enabled);
 
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -13404,15 +13519,17 @@ fn enable_pmtud_mid_handshake(
     assert!(active_path.pmtud.is_some());
     assert_eq!(active_path.pmtud.as_mut().unwrap().get_current_mtu(), 1200);
 
-    let path_stats = pipe.server.path_stats().next().unwrap();
-    assert_eq!(
-        pipe.server.path_event_next(),
-        Some(PathEvent::PmtuUpdated {
-            local: path_stats.local_addr,
-            peer: path_stats.peer_addr,
-            pmtu: MIN_CLIENT_INITIAL_LEN,
-        })
-    );
+    if !initially_enabled {
+        let path_stats = pipe.server.path_stats().next().unwrap();
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::PmtuUpdated {
+                local: path_stats.local_addr,
+                peer: path_stats.peer_addr,
+                pmtu: MIN_CLIENT_INITIAL_LEN,
+            })
+        );
+    }
     assert_eq!(pipe.server.path_event_next(), None);
 
     assert_eq!(pipe.advance(), Ok(()));
@@ -13439,6 +13556,19 @@ fn enable_pmtud_mid_handshake(
         })
     );
     assert_eq!(pipe.server.path_event_next(), None);
+
+    let pmtud = pipe
+        .server
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap();
+    pmtud.revalidate_pmtu();
+    pmtud.set_in_flight(true);
+    pmtud.failed_probe(1350);
+    assert_eq!(pmtud.should_probe(), pkts_between_probes == 0);
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
