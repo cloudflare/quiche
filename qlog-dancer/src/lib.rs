@@ -339,37 +339,7 @@ pub fn qlog_seq_reader(
 pub fn netlog_with_reader<R: std::io::BufRead>(
     reader: &mut R,
 ) -> Result<netlog::constants::Constants, Box<dyn Error>> {
-    // Netlog format is sort of newline-delimited. It starts off creating a JSON
-    // object, within that is an object containing constants, followed by an
-    // array of line-delimited events. This franken-JSON needs a bit of molding
-    // to fit serde parsing.
-    let mut buf = Vec::<u8>::new();
-
-    // read the constants line
-    let len = reader.read_until(b'\n', &mut buf).unwrap();
-
-    // replace the trailing comma (,) with a brace (}) to close the object and
-    // make it parseable.
-    buf[len - 2] = b'}';
-
-    let res: Result<netlog::constants::ConstantsLine, serde_json::Error> =
-        serde_json::from_slice(&buf);
-
-    match res {
-        Ok(mut line) => {
-            line.constants.populate_id_keyed();
-
-            Ok(line.constants)
-        },
-
-        Err(e) => {
-            error!("Error deserializing: {}", e);
-
-            // Just swallow the failure and move on
-
-            Err(e.into())
-        },
-    }
+    netlog::read_netlog_constants(reader).map_err(Into::into)
 }
 
 pub fn stringify_last<T>(src: &[T]) -> String
