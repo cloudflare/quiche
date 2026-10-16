@@ -27,6 +27,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use quiche::h3;
 use tokio::sync::mpsc;
 
 use super::datagram;
@@ -266,6 +267,9 @@ impl ServerHooks {
 impl DriverHooks for ServerHooks {
     type Command = ServerH3Command;
     type Event = ServerH3Event;
+
+    const STOP_SENDING_CODE_AFTER_LOCAL_FIN: h3::WireErrorCode =
+        h3::WireErrorCode::NoError;
 
     fn new(settings: &Http3Settings) -> Self {
         Self {
