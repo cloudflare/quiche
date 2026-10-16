@@ -12046,6 +12046,7 @@ fn connection_migration(
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
     config.verify_peer(false);
+    config.set_disable_dcid_reuse(true);
     config.set_active_connection_id_limit(3);
     config.set_initial_max_data(30);
     config.set_initial_max_stream_data_bidi_local(15);
@@ -12090,9 +12091,17 @@ fn connection_migration(
         pipe.server.migrate(server_addr, client_addr_2),
         Err(Error::InvalidState)
     );
+
+    // Keep an old-path packet in flight until the client processes the CID
+    // retirement caused by migration.
+    pipe.server.send_ack_eliciting().unwrap();
+    let delayed = test_utils::emit_flight(&mut pipe.server).unwrap();
+
     assert_eq!(pipe.client.migrate(client_addr_2, server_addr), Ok(1));
     assert_eq!(pipe.client.stream_send(0, b"data", true), Ok(4));
     assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.client.retired_scid_next().is_some());
+    test_utils::process_flight(&mut pipe.client, delayed).unwrap();
     assert_eq!(
         pipe.client
             .paths
@@ -12136,6 +12145,7 @@ fn connection_migration(
     assert_eq!(pipe.client.migrate(client_addr_3, server_addr), Ok(2));
     assert_eq!(pipe.client.stream_send(4, b"data", true), Ok(4));
     assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.client.retired_scid_next().is_some());
     assert_eq!(
         pipe.client
             .paths
@@ -12244,6 +12254,114 @@ fn connection_migration(
             .peer_addr(),
         server_addr
     );
+
+    // Case 5: the peer returns to a released path without a spare DCID. With
+    // reuse disabled, migration stalls and the current path remains active.
+    pipe.client.send_ack_eliciting().unwrap();
+    let mut flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    flight
+        .iter_mut()
+        .for_each(|(_, si)| si.from = client_addr_2);
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    let active_path = pipe.server.paths.get_active().expect("no active");
+    assert_eq!(active_path.peer_addr(), client_addr_3);
+}
+
+#[rstest]
+fn repeated_passive_migration_reuses_path(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_active_connection_id_limit(2);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
+
+    let client_addr = test_utils::Pipe::client_addr();
+    let spoofed_client_addr = "127.0.0.1:6666".parse().unwrap();
+    let migrated_client_addrs = [
+        "127.0.0.1:5678".parse().unwrap(),
+        "127.0.0.1:9012".parse().unwrap(),
+    ];
+
+    // Return from an unvalidated spoofed path before rebinding again. The
+    // abandoned path must release its DCID so the next path can replace it.
+    pipe.client.send_ack_eliciting().unwrap();
+    let mut flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    flight
+        .iter_mut()
+        .for_each(|(_, si)| si.from = spoofed_client_addr);
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    pipe.client.send_ack_eliciting().unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // Hold an original-path packet until after the first migration.
+    pipe.client.send_ack_eliciting().unwrap();
+    let mut delayed = Some(test_utils::emit_flight(&mut pipe.client).unwrap());
+
+    for (stream_id, migrated_client_addr) in
+        [0, 4].into_iter().zip(migrated_client_addrs)
+    {
+        assert_eq!(pipe.client.stream_send(stream_id, b"data", true), Ok(4));
+
+        let mut client_done = false;
+        let mut server_done = false;
+
+        while !client_done || !server_done {
+            match test_utils::emit_flight(&mut pipe.client) {
+                Ok(mut flight) => {
+                    flight.iter_mut().for_each(|(_, si)| {
+                        si.from = migrated_client_addr;
+                    });
+                    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+                },
+
+                Err(Error::Done) => client_done = true,
+
+                Err(e) => panic!("failed to emit client flight: {e:?}"),
+            }
+
+            match test_utils::emit_flight(&mut pipe.server) {
+                Ok(mut flight) => {
+                    flight.iter_mut().for_each(|(_, si)| {
+                        si.to = client_addr;
+                    });
+                    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+                },
+
+                Err(Error::Done) => server_done = true,
+
+                Err(e) => panic!("failed to emit server flight: {e:?}"),
+            }
+        }
+
+        assert_eq!(
+            stream_recv_discard(&mut pipe.server, false, stream_id),
+            Ok((4, true))
+        );
+        let (active_pid, active_path) =
+            pipe.server.paths.get_active_with_pid().expect("no active");
+        assert_eq!(active_path.peer_addr(), migrated_client_addr);
+        let dcid_seq = active_path.active_dcid_seq.unwrap();
+        let scid_seq = active_path.active_scid_seq.unwrap();
+        let dcid_path_id = pipe.server.ids.get_dcid(dcid_seq).unwrap().path_id;
+        let scid_path_id = pipe.server.ids.get_scid(scid_seq).unwrap().path_id;
+        assert_eq!(dcid_path_id, Some(active_pid));
+        assert_eq!(scid_path_id, Some(active_pid));
+
+        if stream_id == 0 {
+            test_utils::process_flight(&mut pipe.server, delayed.take().unwrap())
+                .unwrap();
+
+            let (cid, reset_token) = test_utils::create_cid_and_reset_token(16);
+            assert_eq!(pipe.client.new_scid(&cid, reset_token, true), Ok(2));
+            let mut flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+            flight
+                .iter_mut()
+                .for_each(|(_, si)| si.from = migrated_client_addr);
+            test_utils::process_flight(&mut pipe.server, flight).unwrap();
+        }
+    }
 }
 
 #[rstest]

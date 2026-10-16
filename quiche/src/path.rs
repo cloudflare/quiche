@@ -246,9 +246,8 @@ pub struct Path {
     /// Whether the failure of this path was notified.
     failure_notified: bool,
 
-    /// Whether the connection tries to migrate to this path, but it still needs
-    /// to be validated.
-    migrating: bool,
+    /// The previous active path while migration to this path is pending.
+    migration_origin: Option<usize>,
 
     /// Whether or not we should force eliciting of an ACK (e.g. via PING frame)
     pub needs_ack_eliciting: bool,
@@ -318,7 +317,7 @@ impl Path {
             peer_verified_local_address: false,
             challenge_requested: false,
             failure_notified: false,
-            migrating: false,
+            migration_origin: None,
             needs_ack_eliciting: false,
         }
     }
@@ -874,9 +873,13 @@ impl PathMap {
             .map(|(pid, _)| pid)
     }
 
-    /// Handles incoming PATH_RESPONSE data.
-    pub fn on_response_received(&mut self, data: [u8; 8]) -> Result<()> {
+    /// Handles incoming PATH_RESPONSE data and returns a completed migration's
+    /// previous and current path identifiers.
+    pub fn on_response_received(
+        &mut self, data: [u8; 8],
+    ) -> Result<Option<(usize, usize)>> {
         let active_pid = self.get_active_path_id()?;
+        let mut completed_migration = None;
 
         let challenge_pending =
             self.iter_mut().find(|(_, p)| p.has_pending_challenge(data));
@@ -885,23 +888,24 @@ impl PathMap {
             if p.on_response_received(data) {
                 let local_addr = p.local_addr;
                 let peer_addr = p.peer_addr;
-                let was_migrating = p.migrating;
-
-                p.migrating = false;
+                let migration_origin = p.migration_origin.take();
 
                 // Notifies the application.
                 self.notify_event(PathEvent::Validated(local_addr, peer_addr));
 
                 // If this path was the candidate for migration, notifies the
                 // application.
-                if pid == active_pid && was_migrating {
-                    self.notify_event(PathEvent::PeerMigrated(
-                        local_addr, peer_addr,
-                    ));
+                if pid == active_pid {
+                    if let Some(previous_pid) = migration_origin {
+                        self.notify_event(PathEvent::PeerMigrated(
+                            local_addr, peer_addr,
+                        ));
+                        completed_migration = Some((previous_pid, pid));
+                    }
                 }
             }
         }
-        Ok(())
+        Ok(completed_migration)
     }
 
     /// Sets the path with identifier 'path_id' to be active.
@@ -916,6 +920,7 @@ impl PathMap {
     /// notification once it is actually validated.
     pub fn set_active_path(&mut self, path_id: usize) -> Result<()> {
         let is_server = self.is_server;
+        let previous_path_id = self.get_active_path_id().ok();
 
         if let Ok(old_active_path) = self.get_active_mut() {
             old_active_path.active = false;
@@ -931,7 +936,7 @@ impl PathMap {
 
                 self.notify_event(PathEvent::PeerMigrated(local_addr, peer_addr));
             } else {
-                new_active_path.migrating = true;
+                new_active_path.migration_origin = previous_path_id;
 
                 // Requests path validation if needed.
                 if !new_active_path.under_validation() {

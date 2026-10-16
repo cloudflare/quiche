@@ -3373,7 +3373,17 @@ impl<F: BufFactory> Connection<F> {
         // existing path.
         let recv_pid = if hdr.ty == Type::Short && self.got_peer_conn_id {
             let pkt_dcid = ConnectionId::from_ref(&hdr.dcid);
-            self.get_or_create_recv_path_id(recv_pid, &pkt_dcid, buf_len, info)?
+
+            let is_reordered =
+                pn < self.pkt_num_spaces[epoch].largest_rx_non_probing_pkt_num;
+
+            self.get_or_create_recv_path_id(
+                recv_pid,
+                &pkt_dcid,
+                buf_len,
+                info,
+                is_reordered,
+            )?
         } else {
             // During handshake, we are on the initial path.
             self.paths.get_active_path_id()?
@@ -3706,14 +3716,14 @@ impl<F: BufFactory> Connection<F> {
             }
         }
 
-        // Now that we processed all the frames, if there is a path that has no
-        // Destination CID, try to allocate one.
-        let no_dcid = self
-            .paths
-            .iter_mut()
-            .filter(|(_, p)| p.active_dcid_seq.is_none());
+        // Processing frames can make a Destination CID available. Assign it
+        // only to paths that still have an active Source CID. A path cleared
+        // after migration must remain unused so it can be evicted.
+        let paths_needing_dcid = self.paths.iter_mut().filter(|(_, p)| {
+            p.active_scid_seq.is_some() && p.active_dcid_seq.is_none()
+        });
 
-        for (pid, p) in no_dcid {
+        for (pid, p) in paths_needing_dcid {
             if self.ids.zero_length_dcid() {
                 p.active_dcid_seq = Some(0);
                 continue;
@@ -8915,7 +8925,11 @@ impl<F: BufFactory> Connection<F> {
             },
 
             frame::Frame::PathResponse { data } => {
-                self.paths.on_response_received(data)?;
+                if let Some((previous_pid, current_pid)) =
+                    self.paths.on_response_received(data)?
+                {
+                    self.complete_peer_migration(previous_pid, current_pid)?;
+                }
             },
 
             frame::Frame::ConnectionClose {
@@ -9116,12 +9130,15 @@ impl<F: BufFactory> Connection<F> {
     /// one if no existing path matches.
     fn get_or_create_recv_path_id(
         &mut self, recv_pid: Option<usize>, dcid: &ConnectionId, buf_len: usize,
-        info: &RecvInfo,
+        info: &RecvInfo, is_reordered: bool,
     ) -> Result<usize> {
         let ids = &mut self.ids;
 
+        // Packets sent before the peer processes RETIRE_CONNECTION_ID can
+        // arrive after the CID is retired. Drop them instead of making
+        // ordinary packet reordering fatal to the connection.
         let (in_scid_seq, mut in_scid_pid) =
-            ids.find_scid_seq(dcid).ok_or(Error::InvalidState)?;
+            ids.find_scid_seq(dcid).ok_or(Error::Done)?;
 
         if let Some(recv_pid) = recv_pid {
             // If the path observes a change of SCID used, note it.
@@ -9131,6 +9148,16 @@ impl<F: BufFactory> Connection<F> {
                 recv_path.active_scid_seq.and_then(|v| ids.get_scid(v).ok());
 
             if cid_entry.map(|e| &e.cid) != Some(dcid) {
+                // A reordered packet cannot trigger migration. Do not let it
+                // restore the SCID of a path released after migration, which
+                // would make that path consume the next available DCID.
+                if is_reordered &&
+                    recv_path.active_scid_seq.is_none() &&
+                    recv_path.active_dcid_seq.is_none()
+                {
+                    return Ok(recv_pid);
+                }
+
                 let incoming_cid_entry = ids.get_scid(in_scid_seq)?;
 
                 let prev_recv_pid =
@@ -9296,15 +9323,73 @@ impl<F: BufFactory> Connection<F> {
             return Ok(());
         }
 
+        let new_path_validated = self.paths.get(new_pid)?.validated();
+        let no_spare_dcid = self.paths.get(new_pid)?.active_dcid_seq.is_none();
+
+        if no_spare_dcid && disable_dcid_reuse {
+            // CID exhaustion with reuse disabled is documented to stall
+            // migration. Keep the existing usable path active rather than
+            // selecting a path that cannot send and failing its cleanup.
+            return Ok(());
+        }
+
         self.set_active_path(new_pid, now)?;
 
-        let no_spare_dcid =
-            self.paths.get_mut(new_pid)?.active_dcid_seq.is_none();
-
-        if no_spare_dcid && !disable_dcid_reuse {
+        if no_spare_dcid {
             self.paths.get_mut(new_pid)?.active_dcid_seq =
                 self.paths.get_mut(active_path_id)?.active_dcid_seq;
         }
+
+        if new_path_validated {
+            self.complete_peer_migration(active_path_id, new_pid)?;
+        }
+
+        Ok(())
+    }
+
+    /// Moves CID ownership to the current path and releases the previous path.
+    ///
+    /// The current path must have a Destination CID. A shared Destination CID
+    /// is relinked to that path, while a distinct previous Destination CID is
+    /// retired. Clearing both CIDs from the previous path makes it unused and
+    /// eligible for eviction.
+    fn complete_peer_migration(
+        &mut self, previous_pid: usize, current_pid: usize,
+    ) -> Result<()> {
+        let previous_dcid_seq = self.paths.get(previous_pid)?.active_dcid_seq;
+
+        let current_path = self.paths.get(current_pid)?;
+        let current_dcid_seq =
+            current_path.active_dcid_seq.ok_or(Error::InvalidState)?;
+        let current_scid_seq = current_path.active_scid_seq;
+
+        // Reused DCIDs remain active and only change path association. A DCID
+        // that is no longer used is retired so the peer can replace it.
+        match previous_dcid_seq {
+            Some(previous_dcid_seq) if previous_dcid_seq == current_dcid_seq => {
+                self.ids
+                    .link_dcid_to_path_id(current_dcid_seq, current_pid)?;
+            },
+
+            Some(previous_dcid_seq) => {
+                self.ids.retire_dcid(previous_dcid_seq)?;
+            },
+
+            None => (),
+        }
+
+        // Preserve the current path as the origin if the peer later reuses
+        // this SCID on another network path.
+        if let Some(current_scid_seq) = current_scid_seq {
+            self.ids
+                .link_scid_to_path_id(current_scid_seq, current_pid)?;
+        }
+
+        // Clearing the DCID makes the path evictable. Clearing the SCID keeps
+        // the allocation pass from assigning another DCID to it.
+        let previous_path = self.paths.get_mut(previous_pid)?;
+        previous_path.active_dcid_seq = None;
+        previous_path.active_scid_seq = None;
 
         Ok(())
     }
