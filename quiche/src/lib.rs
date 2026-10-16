@@ -3698,6 +3698,10 @@ impl<F: BufFactory> Connection<F> {
                     },
 
                     frame::Frame::ResetStream { stream_id, .. } => {
+                        if let Some(stream) = self.streams.get_mut(stream_id) {
+                            stream.send.ack_reset();
+                        }
+                        self.streams.remove_reset(stream_id);
                         self.streams.try_collect(stream_id);
                     },
 
@@ -5248,12 +5252,9 @@ impl<F: BufFactory> Connection<F> {
             while let Some(priority_key) = self.streams.peek_flushable() {
                 let stream_id = priority_key.id;
                 let stream = match self.streams.get_mut(stream_id) {
-                    // Avoid sending frames for streams that were already stopped.
-                    //
-                    // This might happen if stream data was buffered but not yet
-                    // flushed on the wire when a STOP_SENDING frame is received.
-                    Some(v) if !v.send.peer_stop_sending_state().is_stopped() =>
-                        v,
+                    // A reset can abandon queued data or FINs while the stream
+                    // remains alive waiting for the reset to be acknowledged.
+                    Some(stream) if !stream.send.is_reset() => stream,
                     _ => {
                         self.streams.remove_flushable(&priority_key);
                         continue;
@@ -6386,6 +6387,8 @@ impl<F: BufFactory> Connection<F> {
 
                 self.reset_stream_local_count =
                     self.reset_stream_local_count.saturating_add(1);
+
+                self.streams.try_collect(stream_id);
             },
         }
 
