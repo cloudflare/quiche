@@ -422,6 +422,25 @@ impl Path {
             frames_empty
     }
 
+    /// Feeds the packets recovery just settled to PMTUD. If they show a black
+    /// hole, lowers the max datagram size to the MTU PMTUD fell back to, and
+    /// returns the event reporting it.
+    pub fn on_packets_settled(&mut self, now: Instant) -> Option<PathEvent> {
+        let signals = self.recovery.take_pmtud_signals();
+
+        let pmtud = self.pmtud.as_mut()?;
+        let old_pmtu = pmtud.get_current_mtu();
+
+        if !pmtud.on_packets_settled(&signals, now) {
+            return None;
+        }
+
+        let new_pmtu = pmtud.get_current_mtu();
+        self.recovery.pmtud_update_max_datagram_size(new_pmtu);
+
+        pmtu_event(self.local_addr, self.peer_addr, old_pmtu, new_pmtu)
+    }
+
     pub fn on_challenge_sent(&mut self) {
         self.promote_to(PathState::Validating);
         self.challenge_requested = false;
