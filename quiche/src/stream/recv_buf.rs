@@ -320,6 +320,10 @@ impl RecvBuf {
             return Err(Error::FinalSize);
         }
 
+        if final_size > self.max_data() {
+            return Err(Error::FlowControl);
+        }
+
         if self.error.is_some() {
             // We already verified that the final size matches
             return Ok(RecvBufResetReturn::zero());
@@ -332,17 +336,23 @@ impl RecvBuf {
             consumed_flowcontrol: final_size - self.off,
         };
 
+        let notify = !self.drain && (!self.is_fin() || self.ready());
+
         self.error = Some(error_code);
+        self.fin_off = Some(final_size);
+        self.len = final_size;
 
         // Clear all data already buffered.
         self.off = final_size;
 
         self.data.clear();
 
-        // In order to ensure the application is notified when the stream is
-        // reset, enqueue a zero-length buffer at the final size offset.
-        let buf = RangeBuf::from(b"", final_size, true);
-        self.write(buf)?;
+        // Preserve an unread terminal notification even if FIN already
+        // established the final size, but do not notify again after EOF.
+        if notify {
+            let buf = RangeBuf::from(b"", final_size, true);
+            self.data.insert(final_size, buf);
+        }
 
         Ok(result)
     }
@@ -744,6 +754,53 @@ mod tests {
                 consumed_flowcontrol: 0,
             })
         );
+    }
+
+    #[rstest]
+    fn reset_after_fin(
+        #[values("unread", "partial", "gap", "empty", "consumed", "draining")]
+        state: &str,
+    ) {
+        let mut recv =
+            RecvBuf::new(15, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
+        let mut out = [0; 5];
+        let (data, offset) = if state == "gap" {
+            (b"llo".as_slice(), 2)
+        } else {
+            (b"hello".as_slice(), 0)
+        };
+        recv.write(RangeBuf::from(data, offset, state != "empty"))
+            .unwrap();
+
+        match state {
+            "partial" => assert_eq!(recv.emit(&mut out[..2]), Ok((2, false))),
+            "consumed" => assert_eq!(recv.emit(&mut out), Ok((5, true))),
+            "empty" => {
+                assert_eq!(recv.emit(&mut out), Ok((5, false)));
+                recv.write(RangeBuf::from(b"", 5, true)).unwrap();
+            },
+            "draining" => assert_eq!(recv.shutdown(), Ok(5)),
+            _ => (),
+        }
+
+        let consumed = 5 - recv.off_front();
+        assert_eq!(
+            recv.reset(42, 5),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 0,
+                consumed_flowcontrol: consumed,
+            })
+        );
+        assert!(recv.is_fin());
+        assert_eq!(recv.max_off(), 5);
+        assert_eq!(recv.ready(), state != "consumed" && state != "draining");
+        if recv.ready() {
+            assert_eq!(recv.emit(&mut out), Err(Error::StreamReset(42)));
+        }
+        assert_eq!(recv.emit(&mut out), Err(Error::Done));
+        assert_eq!(recv.reset(42, 5), Ok(RecvBufResetReturn::zero()));
+        recv.write(RangeBuf::from(b"hello", 0, true)).unwrap();
+        assert!(!recv.ready());
     }
 
     #[rstest]

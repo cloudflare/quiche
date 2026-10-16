@@ -887,11 +887,6 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn cwnd_available(&self) -> usize {
-        // Ignore cwnd when sending probe packets.
-        if self.epochs.iter().any(|e| e.loss_probes > 0) {
-            return usize::MAX;
-        }
-
         // Open more space (snd_cnt) for PRR when allowed.
         self.cwnd().saturating_sub(self.bytes_in_flight.get()) +
             self.congestion.prr.snd_cnt
@@ -958,6 +953,7 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         self.max_datagram_size = new_max_datagram_size;
+        (self.congestion.cc_ops.on_mtu_update)(&mut self.congestion);
     }
 
     fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {

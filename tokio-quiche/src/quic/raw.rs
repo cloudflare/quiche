@@ -120,6 +120,7 @@ where
     let conn_params = QuicConnectionParams {
         writer_cfg,
         initial_pkt: None,
+        dscp_handle: None,
         shutdown_tx,
         conn_map_cmd_tx,
         scid,

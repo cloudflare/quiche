@@ -104,6 +104,7 @@ use crate::QuicResultExt;
 
 mod addr_validation_token;
 pub(crate) mod connection;
+mod dscp;
 mod hooks;
 mod io;
 pub mod raw;
@@ -124,6 +125,8 @@ pub use self::connection::Incoming;
 pub use self::connection::QuicCommand;
 pub use self::connection::QuicConnectionStats;
 pub use self::connection::SimpleConnectionIdGenerator;
+pub use self::dscp::Dscp;
+pub use self::dscp::DscpHandle;
 pub use self::hooks::ConnectionHook;
 
 /// Alias of [quiche::Connection] used internally by the crate.
@@ -306,6 +309,7 @@ where
     let acceptor = ConnectionAcceptor::new(
         ConnectionAcceptorConfig {
             disable_client_ip_validation: config.disable_client_ip_validation,
+            enable_per_connection_dscp: params.enable_per_connection_dscp,
             qlog_dir: config.qlog_dir.clone(),
             qlog_compression: config.qlog_compression,
             keylog_file: config

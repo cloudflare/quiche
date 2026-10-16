@@ -1033,11 +1033,6 @@ impl RecoveryOps for GRecovery {
     }
 
     fn cwnd_available(&self) -> usize {
-        // Ignore cwnd when sending probe packets.
-        if self.epochs.iter().any(|e| e.loss_probes > 0) {
-            return usize::MAX;
-        }
-
         self.cwnd().saturating_sub(self.bytes_in_flight.get())
     }
 

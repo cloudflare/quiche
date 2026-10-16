@@ -46,6 +46,12 @@ default = ["boringssl-boring-crate"]
 # copy in the dep graph.
 boringssl-boring-crate = ["boring", "boring-sys", "foreign-types-shared"]
 
+# Exposes a congestion control algorithm that provides no congestion-window
+# protection. ACK processing, RTT estimation, loss detection, and recovery
+# remain enabled. Only enable this for deployments that constrain transmission
+# elsewhere.
+congestion_window_unchecked_available = []
+
 # Allow client connections to provide a custom DCID when initiating a
 # connection. Be aware that RFC 9000 places requirements for unpredictability and
 # length on the client DCID field. Enabling this feature can be dangerous if these
@@ -82,7 +88,12 @@ tag-prefix = ""
 
 [package.metadata.docs.rs]
 no-default-features = true
-features = ["boringssl-boring-crate", "qlog", "custom-client-dcid"]
+features = [
+  "boringssl-boring-crate",
+  "qlog",
+  "custom-client-dcid",
+  "congestion_window_unchecked_available",
+]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [build-dependencies]

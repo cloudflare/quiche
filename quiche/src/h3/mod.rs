@@ -2162,9 +2162,14 @@ impl Connection {
 
                 Err(Error::Done) => None,
 
-                // Return early if the stream was reset, to avoid returning
-                // a Finished event later as well.
+                // Return early if the stream was reset, and mark it as
+                // finished, so that neither this loop nor a later
+                // `recv_body()` call queues a Finished event as well.
                 Err(Error::TransportError(crate::Error::StreamReset(e))) => {
+                    if let Some(stream) = self.streams.get_mut(&s) {
+                        stream.finished();
+                    }
+
                     self.remove_local_finished_stream(s);
 
                     return Ok((s, Event::Reset(e)));
@@ -2873,6 +2878,24 @@ impl Connection {
                     // Do not emit events when not polling.
                     if !polling {
                         break;
+                    }
+
+                    // A reset received while waiting for the rest of a DATA
+                    // frame makes the stream readable, with no payload left to
+                    // read. Use a dummy read to return the reset directly,
+                    // instead of an Event::Data after which `recv_body()`
+                    // returns `Done` and the stream looks finished, as if the
+                    // body were complete. The dummy read has side effects, such
+                    // as qlog events, so only do it for finished streams,
+                    // which include all reset streams.
+                    if conn.stream_finished(stream_id) {
+                        if let Err(crate::Error::StreamReset(e)) =
+                            conn.stream_recv(stream_id, &mut [])
+                        {
+                            return Err(Error::TransportError(
+                                crate::Error::StreamReset(e),
+                            ));
+                        }
                     }
 
                     if !stream.try_trigger_data_event() {
@@ -6533,10 +6556,9 @@ mod tests {
         }];
 
         let pkt_type = crate::packet::Type::Short;
-        assert_eq!(
-            s.pipe.send_pkt_to_server(pkt_type, &frames, &mut buf),
-            Ok(39),
-        );
+        s.pipe
+            .send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
 
         let sent = s
             .server
@@ -8058,6 +8080,146 @@ mod tests {
         );
 
         assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    fn reset_mid_data_frame() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends request.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server sends response
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // We want to indicate a larger DATA frame than we will send, so
+        // sidestep quiche's h3 API and write H3 frame bytes directly to QUIC
+        // stream. Imagine a response body of 200 bytes, that would be sent
+        // across two DATA frames of 100 bytes, but quiche's stream write is
+        // limited to only emitting 95 bytes of the DATA frame before the stream
+        // is reset.
+        let mut d = [42; 10];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+        b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
+        b.put_varint(100).unwrap();
+        let off = b.off();
+        s.pipe.server.stream_send(0, &d[..off], false).unwrap();
+        let body = [42; 200];
+        let written = s.pipe.server.stream_send(0, &body[..200], false).unwrap();
+
+        assert_eq!(written, 95);
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        let mut read_buf = [0; 65535];
+        let read = s
+            .client
+            .recv_body(&mut s.pipe.client, 0, &mut read_buf)
+            .unwrap();
+        assert_eq!(read, 95);
+
+        s.pipe
+            .server
+            .stream_shutdown(0, crate::Shutdown::Write, 42)
+            .unwrap();
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Reset(42))));
+
+        // Reading the body after the reset does not queue a Finished event.
+        assert_eq!(
+            s.client.recv_body(&mut s.pipe.client, 0, &mut read_buf),
+            Err(Error::Done)
+        );
+        assert_eq!(s.poll_client(), Err(Error::Done));
+    }
+
+    #[test]
+    fn fin_mid_data_frame() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // Client sends request.
+        let (stream, req) = s.send_request(false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: req,
+            more_frames: true,
+        };
+
+        // Server sends response
+        assert_eq!(s.poll_server(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let resp = s.send_response(stream, false).unwrap();
+
+        let ev_headers = Event::Headers {
+            list: resp,
+            more_frames: true,
+        };
+
+        assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        // We want to indicate a larger DATA frame than we will send, so
+        // sidestep quiche's h3 API and write H3 frame bytes directly to QUIC
+        // stream. Imagine a response body of 200 bytes, that would be sent
+        // across two DATA frames of 100 bytes, but quiche's stream write is
+        // limited to only emitting 95 bytes of the DATA frame before the stream
+        // is Fin'd.
+        let mut d = [42; 10];
+        let mut b = octets::OctetsMut::with_slice(&mut d);
+        b.put_varint(frame::DATA_FRAME_TYPE_ID).unwrap();
+        b.put_varint(100).unwrap();
+        let off = b.off();
+        s.pipe.server.stream_send(0, &d[..off], false).unwrap();
+        let body = [42; 200];
+        let written = s.pipe.server.stream_send(0, &body[..200], false).unwrap();
+
+        assert_eq!(written, 95);
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
+
+        let mut read_buf = [0; 65535];
+        let read = s
+            .client
+            .recv_body(&mut s.pipe.client, 0, &mut read_buf)
+            .unwrap();
+        assert_eq!(read, 95);
+
+        let written = s.pipe.server.stream_send(0, &[], true).unwrap();
+
+        assert_eq!(written, 0);
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Ok((stream, Event::Data)));
+        assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
+        assert_eq!(s.poll_client(), Err(Error::Done));
     }
 
     /// The client shuts down the stream's write direction, the server
