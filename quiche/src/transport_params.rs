@@ -264,6 +264,10 @@ impl TransportParams {
                         return Err(Error::InvalidTransportParam);
                     }
 
+                    if val.cap() != 16 {
+                        return Err(Error::InvalidTransportParam);
+                    }
+
                     tp.stateless_reset_token = Some(u128::from_be_bytes(
                         val.get_bytes(16)?
                             .to_vec()
@@ -623,5 +627,39 @@ impl TransportParams {
                 ..Default::default()
             },
         ))
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stateless_reset_token_requires_exact_length() {
+        let mut underlong = vec![0x02, 0x0f];
+        underlong.extend_from_slice(&[0xba; 15]);
+
+        assert!(matches!(
+            TransportParams::decode(&underlong, false, None),
+            Err(Error::InvalidTransportParam)
+        ));
+
+        let mut overlong = vec![0x02, 0x11];
+        overlong.extend_from_slice(&[0xba; 17]);
+
+        assert!(matches!(
+            TransportParams::decode(&overlong, false, None),
+            Err(Error::InvalidTransportParam)
+        ));
+
+        let mut exact = vec![0x02, 0x10];
+        exact.extend_from_slice(&[0xba; 16]);
+
+        let decoded = TransportParams::decode(&exact, false, None).unwrap();
+        assert_eq!(
+            decoded.stateless_reset_token,
+            Some(u128::from_be_bytes([0xba; 16]))
+        );
     }
 }
