@@ -245,6 +245,20 @@ void quiche_config_set_initial_congestion_window_packets(quiche_config *config, 
 // Recovery probes can bypass the fixed window.
 void quiche_config_set_unchecked_congestion_window(quiche_config *config, size_t window);
 
+// Sets how long packets can remain in flight without the peer acknowledging any
+// new packet, while it keeps sending packets, in milliseconds, before the
+// connection is closed with a PROTOCOL_VIOLATION error. The timeout should be
+// much larger than the round-trip time. The value 0 disables this timeout,
+// default is 30000.
+void quiche_config_set_ack_progress_timeout_millis(quiche_config *config, uint64_t millis);
+
+// Sets the number of sent packets that can be tracked for loss detection
+// before the connection is closed with a PROTOCOL_VIOLATION error. The limit
+// should be much larger than the congestion window, in packets. The value 0
+// disables this limit, so the memory used to track sent packets is no longer
+// bounded, default is 40000.
+void quiche_config_set_max_outstanding_sent_packets(quiche_config *config, size_t max_packets);
+
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
     QUICHE_CC_CUBIC = 1,

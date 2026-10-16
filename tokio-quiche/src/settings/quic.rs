@@ -313,6 +313,32 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_amplification_factor")]
     pub max_amplification_factor: usize,
 
+    /// Configures how long packets can remain in flight without the peer
+    /// acknowledging any new packet, while it keeps sending packets, in
+    /// milliseconds, before the connection is closed. The timeout should be
+    /// much larger than the round-trip time. `None` disables this timeout.
+    ///
+    /// Defaults to 30 seconds. See [`set_ack_progress_timeout()`] for more.
+    ///
+    /// [`set_ack_progress_timeout()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_ack_progress_timeout
+    #[serde(
+        rename = "ack_progress_timeout_ms",
+        default = "QuicSettings::default_ack_progress_timeout"
+    )]
+    #[serde_as(as = "Option<DurationMilliSeconds>")]
+    pub ack_progress_timeout: Option<Duration>,
+
+    /// Sets the number of sent packets that can be tracked for loss detection
+    /// before the connection is closed. The limit should be much larger than
+    /// the congestion window, in packets. `0` disables this limit, so the
+    /// memory used to track sent packets is no longer bounded.
+    ///
+    /// Defaults to 40000. See [`set_max_outstanding_sent_packets()`] for more.
+    ///
+    /// [`set_max_outstanding_sent_packets()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.set_max_outstanding_sent_packets
+    #[serde(default = "QuicSettings::default_max_outstanding_sent_packets")]
+    pub max_outstanding_sent_packets: usize,
+
     /// Sets the send capacity factor.
     ///
     /// A factor greater than 1 allows the connection to buffer more outbound
@@ -490,6 +516,16 @@ impl QuicSettings {
     }
 
     #[inline]
+    fn default_ack_progress_timeout() -> Option<Duration> {
+        Some(Duration::from_secs(30))
+    }
+
+    #[inline]
+    fn default_max_outstanding_sent_packets() -> usize {
+        40_000
+    }
+
+    #[inline]
     fn default_send_capacity_factor() -> f64 {
         1.0
     }
@@ -572,5 +608,28 @@ mod test {
                 defaults.initial_congestion_window_packets,
             );
         }
+    }
+
+    #[test]
+    fn unacked_peer_limits() {
+        let quic = serde_json::from_str::<QuicSettings>("{}").unwrap();
+
+        assert_eq!(quic.ack_progress_timeout, Some(Duration::from_secs(30)));
+        assert_eq!(quic.max_outstanding_sent_packets, 40_000);
+
+        let quic = serde_json::from_str::<QuicSettings>(
+            r#"{ "ack_progress_timeout_ms": 5000, "max_outstanding_sent_packets": 1000 }"#,
+        )
+        .unwrap();
+
+        assert_eq!(quic.ack_progress_timeout, Some(Duration::from_secs(5)));
+        assert_eq!(quic.max_outstanding_sent_packets, 1000);
+
+        let quic = serde_json::from_str::<QuicSettings>(
+            r#"{ "ack_progress_timeout_ms": null }"#,
+        )
+        .unwrap();
+
+        assert_eq!(quic.ack_progress_timeout, None);
     }
 }

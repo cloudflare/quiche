@@ -276,8 +276,12 @@ pub trait RecoveryOps {
     #[cfg(any(test, feature = "qlog"))]
     fn app_limited(&self) -> bool;
 
-    #[cfg(test)]
     fn sent_packets_len(&self, epoch: packet::Epoch) -> usize;
+
+    /// Returns when the oldest ack-eliciting packet that is neither
+    /// acknowledged nor declared lost was sent, across all packet number
+    /// spaces.
+    fn oldest_ack_eliciting_time_sent(&self) -> Option<Instant>;
 
     fn bytes_in_flight(&self) -> usize;
 

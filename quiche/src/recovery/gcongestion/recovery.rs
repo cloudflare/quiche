@@ -1095,9 +1095,25 @@ impl RecoveryOps for GRecovery {
         self.pacer.on_app_limited(self.bytes_in_flight.get())
     }
 
-    #[cfg(test)]
     fn sent_packets_len(&self, epoch: packet::Epoch) -> usize {
         self.epochs[epoch].sent_packets.len()
+    }
+
+    fn oldest_ack_eliciting_time_sent(&self) -> Option<Instant> {
+        self.epochs
+            .iter()
+            .filter(|e| e.pkts_in_flight > 0)
+            .filter_map(|e| {
+                e.sent_packets.iter().find_map(|p| match p.status {
+                    SentStatus::Sent {
+                        time_sent,
+                        ack_eliciting: true,
+                        ..
+                    } => Some(time_sent),
+                    _ => None,
+                })
+            })
+            .min()
     }
 
     #[cfg(test)]

@@ -73,8 +73,14 @@ impl PRR {
         self.snd_cnt = if pipe > ssthresh {
             // Proportional Rate Reduction.
             if self.recoverfs > 0 {
-                (self.prr_delivered * ssthresh)
-                    .div_ceil(self.recoverfs)
+                // Use 64-bit arithmetic, as the product can overflow `usize`
+                // on 32-bit platforms.
+                let snd_cnt = (self.prr_delivered as u64)
+                    .saturating_mul(ssthresh as u64)
+                    .div_ceil(self.recoverfs as u64);
+
+                usize::try_from(snd_cnt)
+                    .unwrap_or(usize::MAX)
                     .saturating_sub(self.prr_out)
             } else {
                 0
@@ -169,6 +175,25 @@ mod tests {
         prr.on_packet_acked(acked, pipe, ssthresh, max_datagram_size);
 
         assert_eq!(prr.snd_cnt, 0);
+    }
+
+    #[test]
+    fn on_packet_acked_prr_large_window() {
+        let mut prr = PRR::default();
+        let max_datagram_size = 1200;
+        let bytes_in_flight = max_datagram_size * 200;
+        let ssthresh = bytes_in_flight * 7 / 10;
+        let acked = bytes_in_flight - max_datagram_size;
+
+        prr.congestion_event(bytes_in_flight);
+
+        // pipe > ssthresh uses PRR algorithm. The product of the delivered
+        // bytes and ssthresh doesn't fit in 32 bits.
+        let pipe = bytes_in_flight;
+
+        prr.on_packet_acked(acked, pipe, ssthresh, max_datagram_size);
+
+        assert_eq!(prr.snd_cnt, 167_160);
     }
 
     #[test]
