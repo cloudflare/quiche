@@ -168,6 +168,8 @@ pub fn connect(
 
     let mut app_proto_selected = false;
 
+    let mut early_data_rejection_handled = false;
+
     // Generate a random source connection ID for the connection.
     let rng = SystemRandom::new();
 
@@ -361,6 +363,14 @@ pub fn connect(
             }
 
             break;
+        }
+
+        if conn.early_data_rejected() && !early_data_rejection_handled {
+            // The server never processed the early request streams. Recreate
+            // the HTTP state and replay requests after the handshake.
+            http_conn = None;
+            app_proto_selected = false;
+            early_data_rejection_handled = true;
         }
 
         // Create a new application protocol session once the QUIC connection is
