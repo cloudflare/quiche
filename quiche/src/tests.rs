@@ -8005,6 +8005,177 @@ fn limit_ack_ranges(
 }
 
 #[rstest]
+/// The server closes the connection once it tracks more than the maximum
+/// number of outstanding sent packets.
+fn max_outstanding_sent_packets(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const MAX_OUTSTANDING_SENT_PACKETS: usize = 100;
+
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_max_outstanding_sent_packets(NonZeroUsize::new(
+        MAX_OUTSTANDING_SENT_PACKETS,
+    ));
+    config.set_initial_max_data(100_000);
+    config.set_initial_max_stream_data_bidi_local(100_000);
+    config.set_initial_max_stream_data_bidi_remote(100_000);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // The client sends a request, which the server answers with stream data
+    // that the client never receives, and so never acknowledges.
+    assert_eq!(pipe.client.stream_send(0, b"GET /", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let response = [42; 65535];
+    assert!(pipe.server.stream_send(0, &response, false).unwrap() > 0);
+    assert!(test_utils::emit_flight(&mut pipe.server).is_ok());
+
+    // The client drops all the packets sent by the server.
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+    let mut peer_pkts = 0;
+
+    while pipe.server.local_error().is_none() {
+        assert!(peer_pkts <= MAX_OUTSTANDING_SENT_PACKETS);
+
+        pipe.send_pkt_to_server(Type::Short, &frames, &mut buf)
+            .unwrap();
+
+        peer_pkts += 1;
+    }
+
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    let tracked_sent_packets: usize = packet::Epoch::epochs(
+        packet::Epoch::Initial..=packet::Epoch::Application,
+    )
+    .iter()
+    .map(|&e| recovery.sent_packets_len(e))
+    .sum();
+    assert_eq!(tracked_sent_packets, MAX_OUTSTANDING_SENT_PACKETS + 1);
+
+    let error = ConnectionError {
+        is_app: false,
+        error_code: WireErrorCode::ProtocolViolation as u64,
+        reason: b"too many outstanding sent packets".to_vec(),
+    };
+    assert_eq!(pipe.server.local_error(), Some(&error));
+
+    // The CONNECTION_CLOSE frame is sent right away, even though the
+    // congestion window is full of unacknowledged packets.
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    let cwnd_available = recovery.cwnd_available();
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    assert!(len > cwnd_available);
+    assert!(pipe.server.is_draining());
+
+    assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
+    assert_eq!(pipe.client.peer_error(), Some(&error));
+}
+
+#[rstest]
+/// The limit on outstanding sent packets applies to all the paths of the
+/// connection.
+fn max_outstanding_sent_packets_multiple_paths(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const MAX_OUTSTANDING_SENT_PACKETS: usize = 1000;
+
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(3);
+    config.set_max_outstanding_sent_packets(NonZeroUsize::new(
+        MAX_OUTSTANDING_SENT_PACKETS,
+    ));
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 2);
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let server_addr = test_utils::Pipe::server_addr();
+    let client_addr = test_utils::Pipe::client_addr();
+    let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+
+    // The client drops all the packets sent by the server, and sends packets
+    // from two addresses, so the server sends packets on two paths.
+    let frames = [
+        frame::Frame::Ping { mtu_probe: None },
+        frame::Frame::Padding { len: 100 },
+    ];
+
+    let mut peer_pkts = 0;
+
+    while pipe.server.local_error().is_none() {
+        assert!(peer_pkts <= MAX_OUTSTANDING_SENT_PACKETS * 2);
+
+        let from = if peer_pkts < MAX_OUTSTANDING_SENT_PACKETS * 2 / 3 {
+            client_addr
+        } else {
+            client_addr_2
+        };
+
+        let len = test_utils::encode_pkt(
+            &mut pipe.client,
+            Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        let info = RecvInfo {
+            from,
+            to: server_addr,
+        };
+        assert_eq!(pipe.server.recv(&mut buf[..len], info), Ok(len));
+
+        while pipe.server.send(&mut buf).is_ok() {}
+
+        peer_pkts += 1;
+    }
+
+    assert_eq!(
+        pipe.server.local_error(),
+        Some(&ConnectionError {
+            is_app: false,
+            error_code: WireErrorCode::ProtocolViolation as u64,
+            reason: b"too many outstanding sent packets".to_vec(),
+        })
+    );
+
+    // None of the paths exceeded the limit on its own.
+    let mut tracked_sent_packets = 0;
+
+    for (_, p) in pipe.server.paths.iter() {
+        let path_sent_packets: usize = packet::Epoch::epochs(
+            packet::Epoch::Initial..=packet::Epoch::Application,
+        )
+        .iter()
+        .map(|&e| p.recovery.sent_packets_len(e))
+        .sum();
+
+        assert!(path_sent_packets < MAX_OUTSTANDING_SENT_PACKETS);
+
+        tracked_sent_packets += path_sent_packets;
+    }
+
+    assert!(tracked_sent_packets > MAX_OUTSTANDING_SENT_PACKETS);
+}
+
+#[rstest]
 /// Tests that streams are correctly scheduled based on their priority.
 fn stream_priority(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
@@ -10301,6 +10472,7 @@ fn in_handshake_config(
     const CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 30;
     const CUSTOM_INITIAL_MAX_STREAMS_BIDI: u64 = 30;
     const CUSTOM_MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
+    const CUSTOM_MAX_OUTSTANDING_SENT_PACKETS: usize = 1000;
 
     let custom_cc_algorithm = if cc_algorithm_name == "cubic" {
         CongestionControlAlgorithm::Bbr2Gcongestion
@@ -10341,6 +10513,12 @@ fn in_handshake_config(
         <Connection>::set_initial_max_streams_bidi_in_handshake(
             hello.ssl_mut(),
             CUSTOM_INITIAL_MAX_STREAMS_BIDI,
+        )
+        .unwrap();
+
+        <Connection>::set_max_outstanding_sent_packets_in_handshake(
+            hello.ssl_mut(),
+            NonZeroUsize::new(CUSTOM_MAX_OUTSTANDING_SENT_PACKETS),
         )
         .unwrap();
 
@@ -10428,6 +10606,11 @@ fn in_handshake_config(
     );
 
     assert_eq!(pipe.server.idle_timeout(), Some(CUSTOM_MAX_IDLE_TIMEOUT));
+
+    assert_eq!(
+        pipe.server.max_outstanding_sent_packets,
+        NonZeroUsize::new(CUSTOM_MAX_OUTSTANDING_SENT_PACKETS)
+    );
 
     // Server sends initial flight.
     let (len, _) = pipe.server.send(&mut buf).unwrap();

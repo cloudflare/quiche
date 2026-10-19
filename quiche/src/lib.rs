@@ -395,6 +395,8 @@ use debug_panic::debug_panic;
 
 use std::net::SocketAddr;
 
+use std::num::NonZeroUsize;
+
 use std::str::FromStr;
 
 use std::sync::Arc;
@@ -497,6 +499,11 @@ const MAX_PROBING_TIMEOUTS: usize = 3;
 
 // The default initial congestion window size in terms of packet count.
 const DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 10;
+
+/// The default number of sent packets that can be tracked for loss detection
+/// before the connection is closed.
+pub const DEFAULT_MAX_OUTSTANDING_SENT_PACKETS: NonZeroUsize =
+    NonZeroUsize::new(22_000).unwrap();
 
 // The maximum data offset that can be stored in a crypto stream.
 const MAX_CRYPTO_STREAM_OFFSET: u64 = 1 << 16;
@@ -614,6 +621,8 @@ pub struct Config {
     track_unknown_transport_params: Option<usize>,
 
     initial_rtt: Duration,
+
+    max_outstanding_sent_packets: Option<NonZeroUsize>,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -693,6 +702,10 @@ impl Config {
 
             track_unknown_transport_params: None,
             initial_rtt: DEFAULT_INITIAL_RTT,
+
+            max_outstanding_sent_packets: Some(
+                DEFAULT_MAX_OUTSTANDING_SENT_PACKETS,
+            ),
         })
     }
 
@@ -922,6 +935,23 @@ impl Config {
     /// The default value is `333`.
     pub fn set_initial_rtt(&mut self, v: Duration) {
         self.initial_rtt = v;
+    }
+
+    /// Sets the number of sent packets that can be tracked for loss detection
+    /// before the connection is closed.
+    ///
+    /// This limits the memory used to track sent packets. Packets that only
+    /// carry ACK frames are counted too. The limit should be larger than the
+    /// expected maximum congestion window, in packets, otherwise connections
+    /// that make progress can be closed.
+    ///
+    /// The connection is closed with a `PROTOCOL_VIOLATION` transport error.
+    ///
+    /// `None` disables this limit. The default value is `22,000`.
+    pub fn set_max_outstanding_sent_packets(
+        &mut self, max_packets: Option<NonZeroUsize>,
+    ) {
+        self.max_outstanding_sent_packets = max_packets;
     }
 
     /// Sets the `max_idle_timeout` transport parameter, in milliseconds.
@@ -1629,6 +1659,10 @@ where
 
     /// The anti-amplification limit factor.
     max_amplification_factor: usize,
+
+    /// The number of tracked sent packets after which the connection is
+    /// closed.
+    max_outstanding_sent_packets: Option<NonZeroUsize>,
 }
 
 /// Creates a new server-side connection.
@@ -2253,6 +2287,8 @@ impl<F: BufFactory> Connection<F> {
             streams_blocked_uni_state: Default::default(),
 
             max_amplification_factor: config.max_amplification_factor,
+
+            max_outstanding_sent_packets: config.max_outstanding_sent_packets,
         };
         if let Some(retry_cids) = retry_cids {
             conn.local_transport_params
@@ -2750,6 +2786,26 @@ impl<F: BufFactory> Connection<F> {
             ex_data.is_server,
             ssl,
         )
+    }
+
+    /// Sets the number of sent packets that can be tracked for loss detection
+    /// before the connection is closed.
+    ///
+    /// This function can only be called inside one of BoringSSL's handshake
+    /// callbacks, before any packet has been sent. Calling this function any
+    /// other time will have no effect.
+    ///
+    /// See [`Config::set_max_outstanding_sent_packets()`].
+    #[cfg(feature = "boringssl-boring-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-boring-crate")))]
+    pub fn set_max_outstanding_sent_packets_in_handshake(
+        ssl: &mut boring::ssl::SslRef, max_packets: Option<NonZeroUsize>,
+    ) -> Result<()> {
+        let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
+
+        ex_data.max_outstanding_sent_packets = max_packets;
+
+        Ok(())
     }
 
     /// Sets the `initial_max_streams_bidi` transport parameter.
@@ -4096,16 +4152,6 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        let has_loss_probe = {
-            let send_path = self.paths.get(send_pid)?;
-
-            packet::Epoch::epochs(
-                packet::Epoch::Initial..=packet::Epoch::Application,
-            )
-            .iter()
-            .any(|&epoch| send_path.recovery.loss_probes(epoch) > 0)
-        };
-
         if self.local_error.is_none() {
             for &epoch in packet::Epoch::epochs(
                 packet::Epoch::Initial..=packet::Epoch::Application,
@@ -4134,9 +4180,16 @@ impl<F: BufFactory> Connection<F> {
 
         let pkt_type = self.write_pkt_type(send_pid)?;
         let epoch = pkt_type.to_epoch()?;
-        let bypass_cwnd = self.paths.get(send_pid)?.recovery.loss_probes(epoch) >
-            0 ||
-            (self.local_error.is_some() && has_loss_probe);
+        let send_path = self.paths.get(send_pid)?;
+
+        // A closing connection sends a single packet with a CONNECTION_CLOSE
+        // frame before draining, which must not be delayed when the congestion
+        // window is full of unacknowledged packets.
+        let sends_close = self.local_error.is_some() &&
+            (send_path.active() || self.paths.len() == 1);
+
+        let bypass_cwnd =
+            send_path.recovery.loss_probes(epoch) > 0 || sends_close;
 
         self.send_single_for_type(
             out,
@@ -5636,6 +5689,40 @@ impl<F: BufFactory> Connection<F> {
             now,
             &self.trace_id,
         );
+
+        // Bound recovery metadata when sent packet records accumulate.
+        if self.local_error.is_none() {
+            if let Some(max_outstanding_sent_packets) =
+                self.max_outstanding_sent_packets
+            {
+                let tracked_sent_packets: usize = self
+                    .paths
+                    .iter()
+                    .flat_map(|(_, p)| {
+                        packet::Epoch::epochs(
+                            packet::Epoch::Initial..=packet::Epoch::Application,
+                        )
+                        .iter()
+                        .map(|&e| p.recovery.sent_packets_len(e))
+                    })
+                    .sum();
+
+                if tracked_sent_packets > max_outstanding_sent_packets.get() {
+                    trace!(
+                        "{} too many outstanding sent packets: {}",
+                        self.trace_id,
+                        tracked_sent_packets
+                    );
+
+                    self.close(
+                        false,
+                        WireErrorCode::ProtocolViolation as u64,
+                        b"too many outstanding sent packets",
+                    )
+                    .ok();
+                }
+            }
+        }
 
         Ok(())
     }
@@ -8127,6 +8214,8 @@ impl<F: BufFactory> Connection<F> {
 
             tx_cap_factor: self.tx_cap_factor,
 
+            max_outstanding_sent_packets: self.max_outstanding_sent_packets,
+
             pmtud: None,
 
             is_server: self.is_server,
@@ -8162,6 +8251,9 @@ impl<F: BufFactory> Connection<F> {
             if ex_data.tx_cap_factor != self.tx_cap_factor {
                 self.tx_cap_factor = ex_data.tx_cap_factor;
             }
+
+            self.max_outstanding_sent_packets =
+                ex_data.max_outstanding_sent_packets;
 
             if let Some((discover, max_probes)) = ex_data.pmtud {
                 self.paths.set_discover_pmtu_on_existing_paths(
@@ -9237,8 +9329,9 @@ impl<F: BufFactory> Connection<F> {
         &self, from: Option<SocketAddr>, to: Option<SocketAddr>,
     ) -> Result<usize> {
         // A probing packet must be sent, but only if the connection is fully
-        // established.
-        if self.is_established() {
+        // established. A closing connection only sends the CONNECTION_CLOSE
+        // frame, on the active path.
+        if self.is_established() && self.local_error.is_none() {
             let mut probing = self
                 .paths
                 .iter()
