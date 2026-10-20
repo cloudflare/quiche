@@ -36,6 +36,7 @@ use std::sync::LazyLock;
 
 use libc::c_char;
 use libc::c_int;
+use libc::c_long;
 use libc::c_uint;
 use libc::c_void;
 
@@ -103,9 +104,20 @@ struct X509_STORE_CTX {
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
-#[cfg(windows)]
 struct X509 {
     _unused: c_void,
+}
+
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
+struct EVP_PKEY {
+    _unused: c_void,
+}
+
+#[repr(C)]
+struct CBS {
+    data: *const u8,
+    len: usize,
 }
 
 #[allow(non_camel_case_types)]
@@ -211,6 +223,44 @@ impl Context {
         })
     }
 
+    pub fn use_certificate_der(&mut self, cert: &[u8]) -> Result<()> {
+        let len = c_long::try_from(cert.len()).map_err(|_| Error::TlsFail)?;
+        let mut input = cert.as_ptr();
+
+        let x509 = unsafe { d2i_X509(ptr::null_mut(), &mut input, len) };
+        if x509.is_null() {
+            return Err(Error::TlsFail);
+        }
+
+        let res = map_result(unsafe {
+            SSL_CTX_use_certificate(self.as_mut_ptr(), x509)
+        });
+
+        unsafe { X509_free(x509) };
+
+        res
+    }
+
+    pub fn use_privkey_der(&mut self, key: &[u8]) -> Result<()> {
+        let mut cbs = CBS {
+            data: key.as_ptr(),
+            len: key.len(),
+        };
+
+        let pkey = unsafe { EVP_parse_private_key(&mut cbs) };
+        if pkey.is_null() {
+            return Err(Error::TlsFail);
+        }
+
+        let res = map_result(unsafe {
+            SSL_CTX_use_PrivateKey(self.as_mut_ptr(), pkey)
+        });
+
+        unsafe { EVP_PKEY_free(pkey) };
+
+        res
+    }
+
     #[cfg(not(windows))]
     fn load_ca_certs(&mut self) -> Result<()> {
         unsafe { map_result(SSL_CTX_set_default_verify_paths(self.as_mut_ptr())) }
@@ -240,12 +290,12 @@ impl Context {
             );
 
             while !ctx_p.is_null() {
-                let in_p = (*ctx_p).pbCertEncoded as *const u8;
+                let mut in_p = (*ctx_p).pbCertEncoded as *const u8;
 
                 let cert = d2i_X509(
                     ptr::null_mut(),
-                    &in_p,
-                    (*ctx_p).cbCertEncoded as i32,
+                    &mut in_p,
+                    (*ctx_p).cbCertEncoded as c_long,
                 );
                 if !cert.is_null() {
                     X509_STORE_add_cert(ctx_store, cert);
@@ -1108,6 +1158,10 @@ extern "C" {
         ctx: *mut SSL_CTX, file: *const c_char,
     ) -> c_int;
 
+    fn SSL_CTX_use_certificate(ctx: *mut SSL_CTX, x: *mut X509) -> c_int;
+
+    fn SSL_CTX_use_PrivateKey(ctx: *mut SSL_CTX, pkey: *mut EVP_PKEY) -> c_int;
+
     fn SSL_CTX_use_PrivateKey_file(
         ctx: *mut SSL_CTX, file: *const c_char, ty: c_int,
     ) -> c_int;
@@ -1244,10 +1298,14 @@ extern "C" {
     fn X509_STORE_add_cert(ctx: *mut X509_STORE, x: *mut X509) -> c_int;
 
     // X509
-    #[cfg(windows)]
     fn X509_free(x: *mut X509);
-    #[cfg(windows)]
-    fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
+    fn d2i_X509(
+        out: *mut *mut X509, input: *mut *const u8, len: c_long,
+    ) -> *mut X509;
+
+    // EVP_PKEY
+    fn EVP_parse_private_key(cbs: *mut CBS) -> *mut EVP_PKEY;
+    fn EVP_PKEY_free(pkey: *mut EVP_PKEY);
 
     // ERR
     fn ERR_peek_error() -> c_uint;
