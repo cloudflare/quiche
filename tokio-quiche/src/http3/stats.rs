@@ -31,6 +31,7 @@ use std::time::Duration;
 
 use crossbeam::atomic::AtomicCell;
 use datagram_socket::StreamClosureKind;
+use quiche::h3::HeaderFrameSizes;
 
 /// Stream-level HTTP/3 audit statistics recorded by
 /// [H3Driver](crate::http3::driver::H3Driver).
@@ -69,6 +70,7 @@ pub struct H3AuditStats {
     /// Measured across all HEADERS frames sent on the stream. A value of 0
     /// indicates there was no failed flushing.
     headers_flush_duration: AtomicCell<Duration>,
+    received_header_frame_sizes: AtomicCell<Option<HeaderFrameSizes>>,
 }
 
 impl H3AuditStats {
@@ -84,6 +86,7 @@ impl H3AuditStats {
             recvd_stream_fin: AtomicCell::new(StreamClosureKind::None),
             sent_stream_fin: AtomicCell::new(StreamClosureKind::None),
             headers_flush_duration: AtomicCell::new(Duration::from_secs(0)),
+            received_header_frame_sizes: AtomicCell::new(None),
         }
     }
 
@@ -158,6 +161,23 @@ impl H3AuditStats {
     #[inline]
     pub fn headers_flush_duration(&self) -> Duration {
         self.headers_flush_duration.load()
+    }
+
+    /// Cumulative wire sizes of HEADERS frames, including trailers.
+    /// Reports QPACK payload and full-frame bytes, not decoded text.
+    /// Sizes are recorded only when header decoding succeeds.
+    #[inline]
+    pub fn received_header_frame_sizes(&self) -> Option<HeaderFrameSizes> {
+        self.received_header_frame_sizes.load()
+    }
+
+    #[inline]
+    pub(crate) fn record_received_header_frame_sizes(
+        &self, sizes: Option<HeaderFrameSizes>,
+    ) {
+        if let Some(sizes) = sizes {
+            self.received_header_frame_sizes.store(Some(sizes));
+        }
     }
 
     #[inline]

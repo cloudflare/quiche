@@ -182,20 +182,18 @@ impl ServerHooks {
             stream_id,
             headers,
             has_body,
+            frame_sizes,
         } = headers;
-
-        // Multiple HEADERS frames can be received on a single stream, but only
-        // the first one is an actual request. For now ignore any additional
-        // HEADERS (e.g. "trailers").
-        if driver.stream_map.contains_key(&stream_id) {
-            return Ok(());
-        }
 
         let (mut stream_ctx, send, recv) = StreamCtx::new(
             stream_id,
             STREAM_CAPACITY,
             driver.ready_stream_sender.clone(),
         );
+
+        stream_ctx
+            .audit_stats
+            .record_received_header_frame_sizes(frame_sizes);
 
         // When Extended CONNECT is enabled, extract the datagram flow ID
         // from the request headers and register it in flow_map. This
@@ -310,6 +308,16 @@ impl DriverHooks for ServerHooks {
         driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         headers: InboundHeaders,
     ) -> H3ConnectionResult<()> {
+        // Only the first HEADERS frame creates a request. For later frames
+        // (e.g. trailers), update the per-stream byte totals without forwarding
+        // their header fields to the application.
+        if let Some(stream_ctx) = driver.stream_map.get(&headers.stream_id) {
+            stream_ctx
+                .audit_stats
+                .record_received_header_frame_sizes(headers.frame_sizes);
+            return Ok(());
+        }
+
         if driver
             .hooks
             .settings_enforcer
