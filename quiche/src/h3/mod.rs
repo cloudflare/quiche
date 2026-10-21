@@ -1540,14 +1540,14 @@ impl Connection {
 
             let frame = Http3Frame::Headers {
                 headers: qlog_headers,
-                raw: None,
+                raw: Some(qlog::events::RawInfo {
+                    length: Some(header_block.len() as u64),
+                    payload_length: None,
+                    data: None,
+                }),
             };
-            let ev_data = EventData::Http3FrameCreated(FrameCreated {
-                stream_id,
-                length: Some(header_block.len() as u64),
-                frame,
-                ..Default::default()
-            });
+            let ev_data =
+                EventData::Http3FrameCreated(FrameCreated { stream_id, frame });
 
             q.add_event_data_now(ev_data).ok();
         });
@@ -1774,13 +1774,15 @@ impl Connection {
         );
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-            let frame = Http3Frame::Data { raw: None };
-            let ev_data = EventData::Http3FrameCreated(FrameCreated {
-                stream_id,
-                length: Some(written as u64),
-                frame,
-                ..Default::default()
-            });
+            let frame = Http3Frame::Data {
+                raw: Some(qlog::events::RawInfo {
+                    length: Some(written as u64),
+                    payload_length: None,
+                    data: None,
+                }),
+            };
+            let ev_data =
+                EventData::Http3FrameCreated(FrameCreated { stream_id, frame });
 
             q.add_event_data_now(ev_data).ok();
         });
@@ -2038,15 +2040,15 @@ impl Connection {
                 stream_id: Some(stream_id),
                 push_id: None,
                 priority_field_value: field_value.clone(),
-                raw: None,
+                raw: Some(qlog::events::RawInfo {
+                    length: Some(priority_field_value.len() as u64),
+                    payload_length: None,
+                    data: None,
+                }),
             };
 
-            let ev_data = EventData::Http3FrameCreated(FrameCreated {
-                stream_id,
-                length: Some(priority_field_value.len() as u64),
-                frame,
-                ..Default::default()
-            });
+            let ev_data =
+                EventData::Http3FrameCreated(FrameCreated { stream_id, frame });
 
             q.add_event_data_now(ev_data).ok();
         });
@@ -2250,11 +2252,15 @@ impl Connection {
             trace!("{} tx frm {:?}", conn.trace_id(), frame);
 
             qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
+                let mut frame = frame.to_qlog();
+                frame.set_raw(qlog::events::RawInfo {
+                    length: Some(octets::varint_len(id) as u64),
+                    payload_length: None,
+                    data: None,
+                });
                 let ev_data = EventData::Http3FrameCreated(FrameCreated {
                     stream_id,
-                    length: Some(octets::varint_len(id) as u64),
-                    frame: frame.to_qlog(),
-                    ..Default::default()
+                    frame,
                 });
 
                 q.add_event_data_now(ev_data).ok();
@@ -2407,14 +2413,14 @@ impl Connection {
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::Reserved {
                 frame_type_bytes: grease_frame1,
-                raw: None,
+                raw: Some(qlog::events::RawInfo {
+                    length: Some(0),
+                    payload_length: None,
+                    data: None,
+                }),
             };
-            let ev_data = EventData::Http3FrameCreated(FrameCreated {
-                stream_id,
-                length: Some(0),
-                frame,
-                ..Default::default()
-            });
+            let ev_data =
+                EventData::Http3FrameCreated(FrameCreated { stream_id, frame });
 
             q.add_event_data_now(ev_data).ok();
         });
@@ -2438,14 +2444,14 @@ impl Connection {
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::Reserved {
                 frame_type_bytes: grease_frame2,
-                raw: None,
+                raw: Some(qlog::events::RawInfo {
+                    length: Some(grease_payload.len() as u64),
+                    payload_length: None,
+                    data: None,
+                }),
             };
-            let ev_data = EventData::Http3FrameCreated(FrameCreated {
-                stream_id,
-                length: Some(grease_payload.len() as u64),
-                frame,
-                ..Default::default()
-            });
+            let ev_data =
+                EventData::Http3FrameCreated(FrameCreated { stream_id, frame });
 
             q.add_event_data_now(ev_data).ok();
         });
@@ -2562,12 +2568,15 @@ impl Connection {
             );
 
             qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
-                let frame = frame.to_qlog();
+                let mut frame = frame.to_qlog();
+                frame.set_raw(qlog::events::RawInfo {
+                    length: Some(off as u64),
+                    payload_length: None,
+                    data: None,
+                });
                 let ev_data = EventData::Http3FrameCreated(FrameCreated {
                     stream_id: id,
-                    length: Some(off as u64),
                     frame,
-                    ..Default::default()
                 });
 
                 q.add_event_data_now(ev_data).ok();
@@ -2815,14 +2824,18 @@ impl Connection {
                         );
 
                         qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
-                            let frame = Http3Frame::Data { raw: None };
+                            let frame = Http3Frame::Data {
+                                raw: Some(qlog::events::RawInfo {
+                                    length: Some(payload_len),
+                                    payload_length: None,
+                                    data: None,
+                                }),
+                            };
 
                             let ev_data =
                                 EventData::Http3FrameParsed(FrameParsed {
                                     stream_id,
-                                    length: Some(payload_len),
                                     frame,
-                                    ..Default::default()
                                 });
 
                             q.add_event_data_now(ev_data).ok();
@@ -3065,13 +3078,14 @@ impl Connection {
         qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
             // HEADERS frames are special case and will be logged below.
             if !matches!(frame, frame::Frame::Headers { .. }) {
-                let frame = frame.to_qlog();
-                let ev_data = EventData::Http3FrameParsed(FrameParsed {
-                    stream_id,
+                let mut frame = frame.to_qlog();
+                frame.set_raw(qlog::events::RawInfo {
                     length: Some(payload_len),
-                    frame,
-                    ..Default::default()
+                    payload_length: None,
+                    data: None,
                 });
+                let ev_data =
+                    EventData::Http3FrameParsed(FrameParsed { stream_id, frame });
 
                 q.add_event_data_now(ev_data).ok();
             }
@@ -3171,14 +3185,16 @@ impl Connection {
 
                     let frame = Http3Frame::Headers {
                         headers: qlog_headers,
-                        raw: None,
+                        raw: Some(qlog::events::RawInfo {
+                            length: Some(payload_len),
+                            payload_length: None,
+                            data: None,
+                        }),
                     };
 
                     let ev_data = EventData::Http3FrameParsed(FrameParsed {
                         stream_id,
-                        length: Some(payload_len),
                         frame,
-                        ..Default::default()
                     });
 
                     q.add_event_data_now(ev_data).ok();
