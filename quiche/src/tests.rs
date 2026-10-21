@@ -13945,6 +13945,114 @@ fn stream_empty_fin_is_not_complete_until_fin_acked(
     )));
 }
 
+#[test]
+fn sending_on_probing_path_does_not_consume_active_path_pmtud_probe() {
+    const PROBE_SIZE: usize = 1400;
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+
+    config.set_application_protos(&[b"proto1"]).unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(2);
+    config.set_max_send_udp_payload_size(PROBE_SIZE);
+    config.discover_pmtu(true);
+
+    let mut pipe =
+        test_utils::Pipe::with_config_and_scid_lengths(&mut config, 16, 16)
+            .unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let (c_cid, c_reset_token) = test_utils::create_cid_and_reset_token(16);
+    assert_eq!(pipe.client.new_scid(&c_cid, c_reset_token, true), Ok(1));
+
+    let (s_cid, s_reset_token) = test_utils::create_cid_and_reset_token(16);
+    assert_eq!(pipe.server.new_scid(&s_cid, s_reset_token, true), Ok(1));
+
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.available_dcids(), 1);
+    assert_eq!(pipe.client.available_dcids(), 1);
+
+    while pipe.server.path_event_next().is_some() {}
+    while pipe.client.path_event_next().is_some() {}
+
+    // `old_path` is the current active path.
+    let old_path_id = pipe.server.paths.get_active_path_id().unwrap();
+
+    // PMTU revalidation is requested on `old_path`.
+    pipe.server.revalidate_pmtu();
+
+    // `old_path` now has a pending PMTUD probe.
+    assert!(
+        pipe.server
+            .paths
+            .get(old_path_id)
+            .unwrap()
+            .pmtud
+            .as_ref()
+            .unwrap()
+            .should_probe(),
+        "`old_path` should have a pending PMTUD probe"
+    );
+
+    let server_addr = test_utils::Pipe::server_addr();
+    let new_client_addr = "127.0.0.1:5678".parse().unwrap();
+    let mut out = vec![0; PROBE_SIZE];
+
+    // The client starts validating `new_path`.
+    pipe.client
+        .probe_path(new_client_addr, server_addr)
+        .unwrap();
+
+    // The client sends a PATH_CHALLENGE frame on `new_path`.
+    let (written, info) = pipe
+        .client
+        .send_on_path(&mut out, Some(new_client_addr), Some(server_addr))
+        .unwrap();
+
+    assert_eq!(info.from, new_client_addr);
+    assert_eq!(info.to, server_addr);
+
+    // The server receives the PATH_CHALLENGE, creates `new_path`, and
+    // queues a PATH_RESPONSE frame.
+    pipe.server
+        .recv(&mut out[..written], RecvInfo {
+            from: info.from,
+            to: info.to,
+        })
+        .unwrap();
+
+    // `new_path` is being validated, but `old_path` remains active.
+    assert_eq!(pipe.server.paths.get_active_path_id().unwrap(), old_path_id);
+
+    // The next server packet is sent on `new_path`.
+    let (_, info) = pipe.server.send(&mut out).unwrap();
+
+    assert_eq!(info.from, server_addr);
+    assert_eq!(info.to, new_client_addr);
+
+    // Sending on `new_path` must not consume the pending PMTUD probe
+    // associated with `old_path`.
+    assert!(
+        pipe.server
+            .paths
+            .get(old_path_id)
+            .unwrap()
+            .pmtud
+            .as_ref()
+            .unwrap()
+            .should_probe(),
+        "sending on `new_path` consumed `old_path`'s PMTUD probe"
+    );
+}
+
 #[rstest]
 /// Tests that a lost zero-length FIN is retransmitted after all stream data has
 /// already been acknowledged.
