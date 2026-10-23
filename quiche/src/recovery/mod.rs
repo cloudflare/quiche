@@ -163,6 +163,11 @@ impl RecoveryConfig {
             enable_cubic_idle_restart_fix: config.enable_cubic_idle_restart_fix,
         }
     }
+
+    pub(crate) fn update_max_send_udp_payload_size(&mut self, peer_max: usize) {
+        self.max_send_udp_payload_size =
+            self.max_send_udp_payload_size.min(peer_max);
+    }
 }
 
 #[enum_dispatch::enum_dispatch(RecoveryOps)]

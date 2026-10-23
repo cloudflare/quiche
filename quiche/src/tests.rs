@@ -12397,6 +12397,58 @@ fn connection_migration_reordered_non_probing(
 }
 
 #[rstest]
+fn connection_migration_max_udp_payload_size(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(1200, 1800)] max_recv_udp_payload_size: usize,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config.set_application_protos(&[b"proto1"]).unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(2);
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(15);
+    config.set_initial_max_stream_data_bidi_remote(15);
+    config.set_initial_max_stream_data_uni(10);
+    config.set_initial_max_streams_bidi(3);
+    config.set_max_send_udp_payload_size(1500);
+    config.set_max_recv_udp_payload_size(max_recv_udp_payload_size);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
+    let expected_size = 1500.min(max_recv_udp_payload_size);
+
+    assert_eq!(pipe.client.max_send_udp_payload_size(), expected_size);
+    assert_eq!(pipe.server.max_send_udp_payload_size(), expected_size);
+
+    let server_addr = test_utils::Pipe::server_addr();
+    let client_addr = "127.0.0.1:5678".parse().unwrap();
+
+    // Migrate directly so the client creates a path and the server discovers
+    // it.
+    assert_eq!(pipe.client.migrate(client_addr, server_addr), Ok(1));
+    assert_eq!(pipe.client.max_send_udp_payload_size(), expected_size);
+    assert_eq!(pipe.client.stream_send(0, b"data", true), Ok(4));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(
+        pipe.server.paths.get_active().unwrap().peer_addr(),
+        client_addr
+    );
+    assert_eq!(
+        pipe.server.is_path_validated(server_addr, client_addr),
+        Ok(true)
+    );
+    assert_eq!(pipe.client.max_send_udp_payload_size(), expected_size);
+    assert_eq!(pipe.server.max_send_udp_payload_size(), expected_size);
+}
+
+#[rstest]
 fn resilience_against_migration_attack(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
