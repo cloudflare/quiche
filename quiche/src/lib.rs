@@ -8070,6 +8070,9 @@ impl<F: BufFactory> Connection<F> {
         let max_ack_delay = Duration::from_millis(peer_params.max_ack_delay);
 
         self.recovery_config.max_ack_delay = max_ack_delay;
+        self.recovery_config.update_max_send_udp_payload_size(
+            peer_params.max_udp_payload_size as usize,
+        );
 
         let active_path = self.paths.get_active_mut()?;
 
