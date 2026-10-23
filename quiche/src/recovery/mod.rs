@@ -163,6 +163,15 @@ impl RecoveryConfig {
             enable_cubic_idle_restart_fix: config.enable_cubic_idle_restart_fix,
         }
     }
+
+    pub(crate) fn update_max_send_udp_payload_size(&mut self, peer_max: usize) {
+        // Max payload size can never grow, only shrink in response to peer
+        // transport parameters. It must also never fall below 1200 bytes per
+        // RFC 9000 §18.2.
+        let new_max = peer_max.max(crate::MAX_SEND_UDP_PAYLOAD_SIZE);
+        self.max_send_udp_payload_size =
+            self.max_send_udp_payload_size.min(new_max);
+    }
 }
 
 #[enum_dispatch::enum_dispatch(RecoveryOps)]
