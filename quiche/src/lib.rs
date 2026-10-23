@@ -5248,10 +5248,12 @@ impl<F: BufFactory> Connection<F> {
             while let Some(priority_key) = self.streams.peek_flushable() {
                 let stream_id = priority_key.id;
                 let stream = match self.streams.get_mut(stream_id) {
-                    // Avoid sending frames for streams that were already stopped.
+                    // Avoid sending frames for streams that were already
+                    // stopped.
                     //
                     // This might happen if stream data was buffered but not yet
-                    // flushed on the wire when a STOP_SENDING frame is received.
+                    // flushed on the wire when a STOP_SENDING frame is
+                    // received.
                     Some(v) if !v.send.peer_stop_sending_state().is_stopped() =>
                         v,
                     _ => {
