@@ -282,8 +282,9 @@ impl FrameParser {
         match qframe {
             QFrame::Headers { ref header_block } => {
                 let mut qpack_decoder = quiche::h3::qpack::Decoder::new();
-                let headers =
-                    qpack_decoder.decode(header_block, u64::MAX).unwrap();
+                let headers = qpack_decoder
+                    .decode(header_block, u64::MAX)
+                    .map_err(|_| H3Error::QpackDecompressionFailed)?;
 
                 Ok(H3iFrame::Headers(headers.into()))
             },
@@ -764,6 +765,24 @@ mod tests {
         assert_eq!(
             parser.try_parse_frame(&mut s.pipe.server),
             Ok(FrameParseResult::Interrupted(InterruptCause::FinBit))
+        );
+    }
+
+    #[test]
+    fn headers_decode_error() {
+        let mut s = session().unwrap();
+        s.handshake().unwrap();
+
+        let mut parser = FrameParser::default();
+
+        // HEADERS frame whose field section references the QPACK dynamic
+        // table, which is not supported.
+        s.send_arbitrary_stream_data_client(&[1, 3, 0, 0, 0x80], 0, true)
+            .expect("send");
+
+        assert_eq!(
+            parser.try_parse_frame(&mut s.pipe.server),
+            Err(H3Error::QpackDecompressionFailed)
         );
     }
 
