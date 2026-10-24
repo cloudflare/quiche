@@ -250,8 +250,7 @@ impl TryFrom<QFrame> for EnrichedHeaders {
         match value {
             QFrame::Headers { header_block } => {
                 let mut qpack_decoder = quiche::h3::qpack::Decoder::new();
-                let headers =
-                    qpack_decoder.decode(&header_block, u64::MAX).unwrap();
+                let headers = qpack_decoder.decode(&header_block, u64::MAX)?;
 
                 Ok(EnrichedHeaders::from(headers))
             },
@@ -598,6 +597,17 @@ impl PartialEq for CloseTriggerFrame {
 mod tests {
     use super::*;
     use quiche::h3::frame::Frame;
+
+    #[test]
+    fn enriched_headers_decode_error() {
+        // Field section that references the QPACK dynamic table, which is not
+        // supported.
+        let frame = QFrame::Headers {
+            header_block: vec![0, 0, 0x80],
+        };
+
+        assert!(EnrichedHeaders::try_from(frame).is_err());
+    }
 
     #[test]
     fn test_header_equivalence() {
