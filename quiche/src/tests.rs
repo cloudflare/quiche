@@ -386,6 +386,47 @@ fn verify_client_anonymous() {
     assert!(pipe.server.peer_cert().is_none());
 }
 
+#[test]
+#[cfg(feature = "boringssl-boring-crate")]
+fn load_cert_and_priv_key_from_der() {
+    let cert = boring::x509::X509::from_pem(
+        &std::fs::read("examples/cert.crt").unwrap(),
+    )
+    .unwrap()
+    .to_der()
+    .unwrap();
+    let key = boring::pkey::PKey::private_key_from_pem(
+        &std::fs::read("examples/cert.key").unwrap(),
+    )
+    .unwrap()
+    .private_key_to_der_pkcs8()
+    .unwrap();
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config.load_cert_from_der(&cert).unwrap();
+    config.load_priv_key_from_der(&key).unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(15);
+    config.set_initial_max_stream_data_bidi_remote(15);
+    config.set_initial_max_streams_bidi(3);
+
+    let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.client.peer_cert(), Some(cert.as_slice()));
+
+    assert_eq!(
+        config.load_cert_from_der(b"not a certificate"),
+        Err(Error::TlsFail)
+    );
+    assert_eq!(
+        config.load_priv_key_from_der(b"not a key"),
+        Err(Error::TlsFail)
+    );
+}
+
 #[rstest]
 fn missing_initial_source_connection_id(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
