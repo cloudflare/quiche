@@ -272,8 +272,9 @@ impl Path {
         let pmtud = config.and_then(|c| {
             if c.pmtud {
                 let maximum_supported_mtu: usize = std::cmp::min(
-                    // if the max_udp_payload_size doesn't fit into a usize, then
-                    // max_send_udp_payload_size must be smaller so use that
+                    // if the max_udp_payload_size doesn't fit into a usize,
+                    // then max_send_udp_payload_size must be smaller so use
+                    // that
                     c.local_transport_params
                         .max_udp_payload_size
                         .try_into()
