@@ -245,6 +245,13 @@ void quiche_config_set_initial_congestion_window_packets(quiche_config *config, 
 // Recovery probes can bypass the fixed window.
 void quiche_config_set_unchecked_congestion_window(quiche_config *config, size_t window);
 
+// Sets the number of sent packets that can be tracked for loss detection
+// before the connection is closed with a PROTOCOL_VIOLATION error. The limit
+// should be larger than the expected maximum congestion window, in packets.
+// The value 0 disables this limit, so the memory used to track sent packets is
+// no longer bounded. The default is 22000.
+void quiche_config_set_max_outstanding_sent_packets(quiche_config *config, size_t max_packets);
+
 enum quiche_cc_algorithm {
     QUICHE_CC_RENO = 0,
     QUICHE_CC_CUBIC = 1,

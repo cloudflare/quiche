@@ -25,11 +25,22 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use foundations::settings::settings;
+use serde::Deserialize;
+use serde::Deserializer;
 use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
 use std::time::Duration;
 
 pub use qlog::writer::QlogCompression;
+
+fn deserialize_optional_nonzero_usize<'de, D>(
+    deserializer: D,
+) -> Result<Option<usize>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<usize>::deserialize(deserializer)?.filter(|value| *value != 0))
+}
 
 /// QUIC configuration parameters.
 #[serde_as]
@@ -313,6 +324,20 @@ pub struct QuicSettings {
     #[serde(default = "QuicSettings::default_amplification_factor")]
     pub max_amplification_factor: usize,
 
+    /// Sets the number of sent packets that can be tracked for loss detection
+    /// before the connection is closed. The limit should be larger than the
+    /// expected maximum congestion window, in packets. `None` or `0` disables
+    /// this limit, so the memory used to track sent packets is no longer
+    /// bounded.
+    ///
+    /// Defaults to 22,000. See
+    /// [`quiche::Config::set_max_outstanding_sent_packets()`] for more.
+    #[serde(
+        default = "QuicSettings::default_max_outstanding_sent_packets",
+        deserialize_with = "deserialize_optional_nonzero_usize"
+    )]
+    pub max_outstanding_sent_packets: Option<usize>,
+
     /// Sets the send capacity factor.
     ///
     /// A factor greater than 1 allows the connection to buffer more outbound
@@ -490,6 +515,11 @@ impl QuicSettings {
     }
 
     #[inline]
+    fn default_max_outstanding_sent_packets() -> Option<usize> {
+        Some(quiche::DEFAULT_MAX_OUTSTANDING_SENT_PACKETS.get())
+    }
+
+    #[inline]
     fn default_send_capacity_factor() -> f64 {
         1.0
     }
@@ -572,5 +602,33 @@ mod test {
                 defaults.initial_congestion_window_packets,
             );
         }
+    }
+
+    #[test]
+    fn max_outstanding_sent_packets() {
+        let quic = serde_json::from_str::<QuicSettings>("{}").unwrap();
+
+        assert_eq!(quic.max_outstanding_sent_packets, Some(22_000));
+
+        let quic = serde_json::from_str::<QuicSettings>(
+            r#"{ "max_outstanding_sent_packets": 1000 }"#,
+        )
+        .unwrap();
+
+        assert_eq!(quic.max_outstanding_sent_packets, Some(1000));
+
+        let quic = serde_json::from_str::<QuicSettings>(
+            r#"{ "max_outstanding_sent_packets": null }"#,
+        )
+        .unwrap();
+
+        assert_eq!(quic.max_outstanding_sent_packets, None);
+
+        let quic = serde_json::from_str::<QuicSettings>(
+            r#"{ "max_outstanding_sent_packets": 0 }"#,
+        )
+        .unwrap();
+
+        assert_eq!(quic.max_outstanding_sent_packets, None);
     }
 }

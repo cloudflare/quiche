@@ -27,6 +27,7 @@
 use foundations::telemetry::log;
 use std::borrow::Cow;
 use std::fs::File;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -206,6 +207,11 @@ fn make_quiche_config(
     );
     config.grease(quic_settings.grease);
     config.set_max_amplification_factor(quic_settings.max_amplification_factor);
+    config.set_max_outstanding_sent_packets(
+        quic_settings
+            .max_outstanding_sent_packets
+            .and_then(NonZeroUsize::new),
+    );
     config.set_send_capacity_factor(quic_settings.send_capacity_factor);
     config.set_ack_delay_exponent(quic_settings.ack_delay_exponent);
     config.set_max_ack_delay(quic_settings.max_ack_delay);
