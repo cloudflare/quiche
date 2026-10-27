@@ -262,6 +262,12 @@ pub struct QuicSettings {
     /// [`verify_peer()`]: https://docs.rs/quiche/latest/quiche/struct.Config.html#method.verify_peer
     pub verify_peer: bool,
 
+    /// Path to a PEM CA bundle used to verify the peer certificate.
+    ///
+    /// Only loaded when [`verify_peer`](Self::verify_peer) is enabled.
+    /// Defaults to `None`, using the default trust store.
+    pub verify_locations_file: Option<String>,
+
     /// The maximum size of the receiver connection flow control window.
     ///
     /// Defaults to 24MB.

@@ -325,6 +325,9 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
 /// As a shortcut, you may call `apply_all_and_get_compatibility` to apply the
 /// maxmimum set of capabilities supported by this crate. The result will
 /// indicate which options were actually enabled.
+/// Set `TOKIO_QUICHE_DISABLE_GSO` to `1`, `true`, `TRUE`, or `True`
+/// (ignoring surrounding whitespace) to disable automatic GSO configuration
+/// and its use by connections, including with explicitly supplied capabilities.
 #[derive(Debug, Default)]
 pub struct SocketCapabilities {
     /// Indicates if the socket has `UDP_SEGMENT` enabled.
@@ -380,6 +383,15 @@ pub struct SocketCapabilities {
 }
 
 impl SocketCapabilities {
+    pub(crate) fn gso_disabled_by_env() -> bool {
+        matches!(
+            std::env::var("TOKIO_QUICHE_DISABLE_GSO")
+                .as_deref()
+                .map(str::trim),
+            Ok("1") | Ok("true") | Ok("TRUE") | Ok("True")
+        )
+    }
+
     /// Tries to enable all supported sockopts and returns indicators
     /// of which settings were successfully applied.
     #[cfg(target_os = "linux")]
@@ -388,7 +400,9 @@ impl SocketCapabilities {
         S: AsFd,
     {
         let mut b = SocketCapabilitiesBuilder::new(socket);
-        let _ = b.gso();
+        if !Self::gso_disabled_by_env() {
+            let _ = b.gso();
+        }
         let _ = b.check_udp_drop();
         let _ = b.txtime();
         #[cfg(feature = "perf-quic-listener-metrics")]

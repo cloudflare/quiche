@@ -182,7 +182,7 @@ where
                     to,
                     from,
                     send_buf,
-                    Some(send_buf.len()),
+                    None,
                     None,
                     None,
                     would_block_metric,

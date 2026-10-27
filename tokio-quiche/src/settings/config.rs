@@ -96,6 +96,8 @@ impl Config {
             ..
         } = socket_capabilities;
 
+        let has_gso = has_gso && !SocketCapabilities::gso_disabled_by_env();
+
         #[cfg(feature = "gcongestion")]
         let pacing_offload = quic_settings.enable_pacing && pacing_offload;
 
@@ -194,6 +196,9 @@ fn make_quiche_config(
 
     if quic_settings.verify_peer {
         config.verify_peer(quic_settings.verify_peer);
+        if let Some(file) = quic_settings.verify_locations_file.as_deref() {
+            config.load_verify_locations_from_file(file)?;
+        }
     }
 
     config.set_max_connection_window(quic_settings.max_connection_window);
@@ -305,4 +310,51 @@ fn read_file(path: &str) -> QuicResult<Vec<u8>> {
     std::fs::read(path)
         .with_context(|| format!("read {path}"))
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_locations_file_loading() {
+        let mut params = ConnectionParams::default();
+        assert!(params.settings.verify_locations_file.is_none());
+        params.settings.verify_peer = true;
+        params.settings.verify_locations_file = Some(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../quiche/examples/rootca.crt")
+                .into(),
+        );
+        assert!(make_quiche_config(&params, false).is_ok());
+
+        let dir = tempfile::tempdir().unwrap();
+        params.settings.verify_locations_file =
+            Some(dir.path().join("missing.pem").to_str().unwrap().into());
+        assert!(make_quiche_config(&params, false).is_err());
+
+        params.settings.verify_peer = false;
+        assert!(make_quiche_config(&params, false).is_ok());
+    }
+
+    #[test]
+    fn gso_env_override() {
+        let config =
+            Config::new(&ConnectionParams::default(), SocketCapabilities {
+                has_gso: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let value = std::env::var("TOKIO_QUICHE_DISABLE_GSO").ok();
+        let disabled = value.as_deref().is_some_and(|value| {
+            ["1", "true", "TRUE", "True"].contains(&value.trim())
+        });
+        assert_eq!(config.has_gso, !disabled);
+
+        let config = Config::new(
+            &ConnectionParams::default(),
+            SocketCapabilities::default(),
+        )
+        .unwrap();
+        assert!(!config.has_gso);
+    }
 }
