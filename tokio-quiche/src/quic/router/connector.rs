@@ -38,6 +38,7 @@ use datagram_socket::MAX_DATAGRAM_SIZE;
 use foundations::telemetry::log;
 use quiche::ConnectionId;
 use quiche::Header;
+use tokio_util::task::AbortOnDropHandle;
 use tokio_util::time::delay_queue::Key;
 use tokio_util::time::DelayQueue;
 
@@ -53,6 +54,10 @@ pub(crate) struct ClientConnector<Tx> {
     socket_tx: MaybeConnectedSocket<Arc<Tx>>,
     connection: ConnectionState,
     timeout_queue: DelayQueue<ConnectionId<'static>>,
+    /// The most recently spawned send task. Each new one waits for it to
+    /// finish, so only one task sends on the socket at a time. Dropping the
+    /// connector aborts every unfinished send task.
+    send_task: Option<AbortOnDropHandle<()>>,
 }
 
 /// State the connecting connection is in.
@@ -110,6 +115,7 @@ where
             socket_tx: MaybeConnectedSocket::new(socket_tx),
             connection: ConnectionState::Queued(connection),
             timeout_queue: Default::default(),
+            send_task: None,
         }
     }
 
@@ -119,7 +125,7 @@ where
     fn set_connection_to_pending(
         &mut self, mut conn: Box<QuicheConnection>,
     ) -> io::Result<()> {
-        simple_conn_send(&self.socket_tx, &mut conn)?;
+        simple_conn_send(&self.socket_tx, &mut conn, &mut self.send_task)?;
 
         let timeout_key = conn.timeout_instant().map(|instant| {
             self.timeout_queue
@@ -263,34 +269,174 @@ where
 /// This does not have to be efficent, since once a connection is established
 /// the [`crate::quic::io::worker::IoWorker`] will take over sending and
 /// receiving.
+///
+/// The packets are sent in order from a task that first waits for
+/// `prev_send_task`: the socket's `poll_send` only wakes the most recent
+/// caller, so concurrent senders can hang forever.
 fn simple_conn_send<Tx: DatagramSocketSend + Send + Sync + 'static>(
     socket_tx: &MaybeConnectedSocket<Arc<Tx>>, conn: &mut QuicheConnection,
+    prev_send_task: &mut Option<AbortOnDropHandle<()>>,
 ) -> io::Result<()> {
     let scid = conn.source_id().into_owned();
     log::debug!("sending client Initials to peer"; "scid" => ?scid);
 
-    loop {
-        let scid = scid.clone();
+    let mut packets = Vec::new();
+    let result = loop {
         let mut buf = [0; MAX_DATAGRAM_SIZE];
         let send_res = conn.send(&mut buf);
 
-        let socket_clone = socket_tx.clone();
         match send_res {
-            Ok((n, send_info)) => {
-                tokio::spawn({
-                    let buf = buf[0..n].to_vec();
-                    async move {
-                        socket_clone.send_to(&buf, send_info.to).await.inspect_err(|error| {
-                        log::error!("error sending client Initial packets to peer"; "scid" => ?scid, "peer_addr" => send_info.to, "error" => error.to_string());
-                    })
-                    }
-                });
-            },
+            Ok((n, send_info)) =>
+                packets.push((buf[0..n].to_vec(), send_info.to)),
             Err(quiche::Error::Done) => break Ok(()),
             Err(error) => {
                 log::error!("error writing packets to quiche's internal buffer"; "scid" => ?scid, "error" => error.to_string());
                 break Err(std::io::Error::other(error));
             },
         }
+    };
+
+    if !packets.is_empty() {
+        let socket = socket_tx.clone();
+        let prev = prev_send_task.take();
+        *prev_send_task = Some(AbortOnDropHandle::new(tokio::spawn(
+            async move {
+                if let Some(prev) = prev {
+                    let _ = prev.await;
+                }
+                for (buf, to) in packets {
+                    if let Err(error) = socket.send_to(&buf, to).await {
+                        log::error!("error sending client Initial packets to peer"; "scid" => ?scid, "peer_addr" => to, "error" => error.to_string());
+                    }
+                }
+            },
+        )));
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::future::poll_fn;
+    use std::net::SocketAddr;
+    use std::sync::Mutex;
+    use std::task::Waker;
+    use std::time::Duration;
+
+    /// A socket that isn't writable until the test says so and, like
+    /// `tokio::net::UdpSocket::poll_send`, only wakes the most recent caller.
+    #[derive(Default)]
+    struct LatestWakerSocket(Mutex<SocketState>);
+
+    #[derive(Default)]
+    struct SocketState {
+        writable: bool,
+        waker: Option<Waker>,
+        sent: usize,
+    }
+
+    impl DatagramSocketSend for LatestWakerSocket {
+        fn poll_send(
+            &self, cx: &mut Context, buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            let mut state = self.0.lock().unwrap();
+            if !state.writable {
+                state.waker = Some(cx.waker().clone());
+                return Poll::Pending;
+            }
+            state.sent += 1;
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_send_to(
+            &self, cx: &mut Context, buf: &[u8], _addr: SocketAddr,
+        ) -> Poll<io::Result<usize>> {
+            self.poll_send(cx, buf)
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn sends_every_initial_when_socket_wakes_only_latest_sender() {
+        // A long ALPN list makes the ClientHello span more than one Initial.
+        let mut config = quiche::Config::new(quiche::PROTOCOL_VERSION).unwrap();
+        let alpn: Vec<Vec<u8>> = (0..10u8).map(|i| vec![b'a' + i; 200]).collect();
+        let alpn: Vec<&[u8]> = alpn.iter().map(Vec::as_slice).collect();
+        config.set_application_protos(&alpn).unwrap();
+        config.set_initial_rtt(Duration::from_millis(1));
+        let conn = quiche::connect_with_buffer_factory(
+            Some("test.com"),
+            &ConnectionId::from_ref(&[0xba; 16]),
+            "127.0.0.1:1".parse().unwrap(),
+            "127.0.0.1:2".parse().unwrap(),
+            &mut config,
+        )
+        .unwrap();
+
+        let socket = Arc::new(LatestWakerSocket::default());
+        let mut connector =
+            ClientConnector::new(Arc::clone(&socket), Box::new(conn));
+        poll_fn(|cx| Poll::Ready(connector.update(cx)))
+            .await
+            .unwrap();
+        assert!(
+            pending_conn(&connector).stats().sent > 1,
+            "ClientHello fit in one Initial"
+        );
+
+        // The PTO fires while the first flight is still waiting, so a
+        // retransmission is queued behind it.
+        fire_pto(&mut connector).await;
+        let waker = {
+            let mut state = socket.0.lock().unwrap();
+            state.writable = true;
+            state.waker.take().expect("no sender waiting on the socket")
+        };
+        waker.wake();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        assert_eq!(
+            socket.0.lock().unwrap().sent,
+            pending_conn(&connector).stats().sent,
+            "a send task never finished"
+        );
+
+        // Dropping the connector aborts a send that is still waiting.
+        socket.0.lock().unwrap().writable = false;
+        fire_pto(&mut connector).await;
+        drop(connector);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        assert_eq!(
+            Arc::strong_count(&socket),
+            1,
+            "a send task outlived the connector"
+        );
+    }
+
+    fn pending_conn(
+        connector: &ClientConnector<LatestWakerSocket>,
+    ) -> &QuicheConnection {
+        match &connector.connection {
+            ConnectionState::Pending(pending) => &pending.conn,
+            _ => panic!("connection isn't pending"),
+        }
+    }
+
+    /// Runs the connector's timeout, checks that it queued a retransmission
+    /// and lets the send task reach the socket.
+    async fn fire_pto(connector: &mut ClientConnector<LatestWakerSocket>) {
+        // quiche's loss timer reads the real clock, which pausing doesn't stop.
+        std::thread::sleep(Duration::from_millis(50));
+        let before = pending_conn(connector).stats().sent;
+        let scid = pending_conn(connector).source_id().into_owned();
+        connector.on_timeout(scid).unwrap();
+        assert!(
+            pending_conn(connector).stats().sent > before,
+            "PTO didn't queue a retransmission"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
