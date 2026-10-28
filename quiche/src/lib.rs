@@ -8157,8 +8157,13 @@ impl<F: BufFactory> Connection<F> {
             .update_peer_max_streams_uni(peer_params.initial_max_streams_uni);
 
         let max_ack_delay = Duration::from_millis(peer_params.max_ack_delay);
+        let max_udp_payload_size =
+            usize::try_from(peer_params.max_udp_payload_size)
+                .unwrap_or(usize::MAX);
 
         self.recovery_config.max_ack_delay = max_ack_delay;
+        self.recovery_config
+            .update_max_send_udp_payload_size(max_udp_payload_size);
 
         let active_path = self.paths.get_active_mut()?;
 
@@ -8176,12 +8181,12 @@ impl<F: BufFactory> Connection<F> {
                     .as_mut()
                     .expect("PMTUD existence verified above")
                     .get_probe_size()
-                    .min(peer_params.max_udp_payload_size as usize),
+                    .min(max_udp_payload_size),
             );
         } else {
-            active_path.recovery.update_max_datagram_size(
-                peer_params.max_udp_payload_size as usize,
-            );
+            active_path
+                .recovery
+                .update_max_datagram_size(max_udp_payload_size);
         }
 
         // Record the max_active_conn_id parameter advertised by the peer.
@@ -8244,6 +8249,18 @@ impl<F: BufFactory> Connection<F> {
             .unwrap_or(false)
         {
             if ex_data.recovery_config != self.recovery_config {
+                // If we received peer transport parameters already, respect the
+                // peer's `max_udp_payload_size`.
+                if self.parsed_peer_transport_params {
+                    let max_udp_payload_size = usize::try_from(
+                        self.peer_transport_params.max_udp_payload_size,
+                    )
+                    .unwrap_or(usize::MAX);
+                    ex_data
+                        .recovery_config
+                        .update_max_send_udp_payload_size(max_udp_payload_size);
+                }
+
                 if let Ok(path) = self.paths.get_active_mut() {
                     self.recovery_config = ex_data.recovery_config;
                     path.reinit_recovery(&self.recovery_config);
