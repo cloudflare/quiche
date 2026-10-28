@@ -77,7 +77,6 @@ fn handle_qlog(
         let ev_data = EventData::Http3FrameParsed(FrameParsed {
             stream_id,
             frame: qlog_frame,
-            ..Default::default()
         });
 
         s.add_event_data_now(ev_data).ok();
