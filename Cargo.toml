@@ -78,7 +78,7 @@ mio = { version = "1" }
 nix = { version = "0.31.3", features = ["net", "uio", "socket"] }
 netlog = { version = "0.1", path="./netlog" }
 octets = { version = "0.3.7", path = "./octets" }
-parking_lot = { version = "0.12.1", default-features = false }
+parking_lot = { version = "0.13.0", default-features = false }
 pin-project = { version = "1.0.12" }
 qlog = { version = "0.18.2", path = "./qlog" }
 quiche = { version = "0.30.0", path = "./quiche" }
