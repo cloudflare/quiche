@@ -55,6 +55,21 @@ macro_rules! by_boring {
     }};
 }
 
+/// Returns the congestion window `conn` is expected to have after exchanging
+/// a handshake and nothing else, without hardcoding the handshake size
+/// (which depends on the TLS stack and on the certificate in use).
+///
+/// Cubic leaves the initial window (10 packets of 1200 bytes) untouched,
+/// while BBR2 in STARTUP grows it by exactly the number of bytes acked.
+fn cwnd_after_handshake(conn: &Connection, cc_algorithm_name: &str) -> usize {
+    const INITIAL_CWND: usize = 10 * 1200;
+
+    match cc_algorithm_name {
+        "cubic" => INITIAL_CWND,
+        _ => INITIAL_CWND + conn.stats().acked_bytes as usize,
+    }
+}
+
 #[test]
 fn transport_params() {
     // Server encodes, client decodes.
@@ -7150,13 +7165,15 @@ fn client_rst_stream_while_bytes_in_flight(
 
     // Server sends stream data bigger than cwnd.
     let send_buf = [0; 50000];
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let initial_cwnd = cwnd_after_handshake(&pipe.server, cc_algorithm_name);
+    assert_eq!(recovery.cwnd(), initial_cwnd);
+    assert_eq!(pipe.server.tx_cap, initial_cwnd);
+    assert!(initial_cwnd < send_buf.len());
     assert_eq!(
         pipe.server.stream_send(4, &send_buf, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(by_boring!(b4: 13878, b5: 15030))
-        }
+        Ok(initial_cwnd)
     );
     let server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -7175,26 +7192,17 @@ fn client_rst_stream_while_bytes_in_flight(
 
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
-    let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 27756, b5: 30060),
-        _ => 24000,
-    };
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let cwnd = recovery.cwnd();
+    // The whole initial window was acked while in slow start (cubic) or
+    // STARTUP (BBR2), so cwnd doubled.
+    assert_eq!(cwnd, 2 * initial_cwnd);
+    assert_eq!(pipe.server.tx_cap, cwnd);
 
     assert_eq!(pipe.server.streams.tx_buffered(), 0);
-    assert_eq!(
-        pipe.server.stream_send(8, &send_buf, false),
-        Ok(expected_cwnd)
-    );
-    assert_eq!(pipe.server.streams.tx_buffered(), expected_cwnd);
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .cwnd(),
-        expected_cwnd
-    );
+    assert_eq!(pipe.server.stream_send(8, &send_buf, false), Ok(cwnd));
+    assert_eq!(pipe.server.streams.tx_buffered(), cwnd);
     assert_eq!(pipe.advance(), Ok(()));
 }
 
@@ -7239,13 +7247,15 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
 
     // Server sends stream data bigger than cwnd.
     let send_buf = [0; 50000];
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let initial_cwnd = cwnd_after_handshake(&pipe.server, cc_algorithm_name);
+    assert_eq!(recovery.cwnd(), initial_cwnd);
+    assert_eq!(pipe.server.tx_cap, initial_cwnd);
+    assert!(initial_cwnd < send_buf.len());
     assert_eq!(
         pipe.server.stream_send(4, &send_buf, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(by_boring!(b4: 13878, b5: 15030))
-        }
+        Ok(initial_cwnd)
     );
     let mut server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -7254,7 +7264,7 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
     let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Lose the first packet of the server flight.
-    server_flight.remove(0);
+    let (lost_pkt, _) = server_flight.remove(0);
 
     test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
     test_utils::process_flight(&mut pipe.client, server_flight).unwrap();
@@ -7264,8 +7274,11 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 26556, b5: 28860),
-        _ => 8400,
+        // BBR2 in STARTUP ignores a single loss and grows by bytes acked,
+        // i.e. everything except the lost packet.
+        "bbr2" | "bbr2_gcongestion" => 2 * initial_cwnd - lost_pkt.len(),
+        // Cubic reduces cwnd by its multiplicative decrease factor (0.7).
+        _ => initial_cwnd * 7 / 10,
     };
 
     assert_eq!(pipe.server.streams.tx_buffered(), 0);
@@ -7320,14 +7333,12 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
     // Client sends stream data bigger than cwnd (it will never arrive to the
     // server).
     let send_buf1 = [0; 20000];
-    assert_eq!(
-        pipe.client.stream_send(0, &send_buf1, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(by_boring!(b4: 12299, b5: 13587))
-        }
-    );
+    let recovery = &pipe.client.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let cwnd = cwnd_after_handshake(&pipe.client, cc_algorithm_name);
+    assert_eq!(recovery.cwnd(), cwnd);
+    assert!(cwnd < send_buf1.len());
+    assert_eq!(pipe.client.stream_send(0, &send_buf1, false), Ok(cwnd));
 
     test_utils::emit_flight(&mut pipe.client).ok();
 
@@ -7395,14 +7406,12 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
     // Client sends stream data bigger than cwnd (it will never arrive to the
     // server). This exhausts the congestion window.
     let send_buf1 = [0; 20000];
-    assert_eq!(
-        pipe.client.stream_send(0, &send_buf1, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(by_boring!(b4: 12299, b5: 13587))
-        }
-    );
+    let recovery = &pipe.client.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let cwnd = cwnd_after_handshake(&pipe.client, cc_algorithm_name);
+    assert_eq!(recovery.cwnd(), cwnd);
+    assert!(cwnd < send_buf1.len());
+    assert_eq!(pipe.client.stream_send(0, &send_buf1, false), Ok(cwnd));
 
     test_utils::emit_flight(&mut pipe.client).ok();
 
@@ -10272,42 +10281,26 @@ fn update_max_datagram_size(
     };
 
     // Before handshake
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .max_datagram_size(),
-        1500,
-    );
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.max_datagram_size(), 1500);
+    assert_eq!(recovery.cwnd(), 10 * 1500);
 
-    assert_eq!(pipe.handshake(), Ok(()));
+    // Deliver the client's first flight, carrying its transport parameters.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
-    // After handshake, max_datagram_size should match to client's
-    // max_recv_udp_payload_size which is smaller
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .max_datagram_size(),
-        1200,
-    );
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .cwnd(),
-        if cc_algorithm_name == "cubic" {
-            12000
-        } else {
-            by_boring!(b4: 13421, b5: 14573)
-        },
-    );
+    // max_datagram_size should match to client's max_recv_udp_payload_size
+    // which is smaller, and since nothing the server sent has been acked
+    // yet, cwnd is exactly the initial window rescaled to the new size.
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.max_datagram_size(), 1200);
+    assert_eq!(recovery.cwnd(), 10 * 1200);
+
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.server.is_established());
+
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.max_datagram_size(), 1200);
 }
 
 #[rstest]
@@ -10375,28 +10368,21 @@ fn send_capacity(
         Ok((6, true))
     );
 
-    assert_eq!(
-        pipe.server.tx_cap,
-        if cc_algorithm_name == "cubic" {
-            12000
-        } else {
-            by_boring!(b4: 13873, b5: 15025)
-        }
-    );
+    // Send capacity is bounded by the congestion window (connection flow
+    // control is not the binding limit here).
+    let cap = cwnd_after_handshake(&pipe.server, cc_algorithm_name);
+    assert_eq!(pipe.server.tx_cap, cap);
+    // Two 5000 byte writes fit, and the remainder fits in a third stream's
+    // flow control window (10000), so it is tx_cap that runs out.
+    assert!(cap > 10000 && cap < 20000);
 
     assert_eq!(pipe.server.stream_send(0, &buf[..5000], false), Ok(5000));
+    assert_eq!(pipe.server.tx_cap, cap - 5000);
     assert_eq!(pipe.server.stream_send(4, &buf[..5000], false), Ok(5000));
-    // Offer enough bytes on the third stream that the connection-level
-    // `tx_cap` is the binding constraint rather than the input buffer;
-    // this keeps the test invariant "no connection send capacity left after
-    // three sends" true across backends with different handshake sizes.
+    assert_eq!(pipe.server.tx_cap, cap - 10000);
     assert_eq!(
-        pipe.server.stream_send(8, &buf[..6000], false),
-        if cc_algorithm_name == "cubic" {
-            Ok(2000)
-        } else {
-            Ok(by_boring!(b4: 3873, b5: 5025))
-        }
+        pipe.server.stream_send(8, &buf[..10000], false),
+        Ok(cap - 10000)
     );
 
     // No more connection send capacity.
@@ -10839,46 +10825,29 @@ fn initial_cwnd(
     config.set_ack_delay_exponent(8);
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    // Before anything is sent or acked, cwnd is exactly the configured
+    // initial window.
+    assert_eq!(
+        pipe.server.paths.get_active().unwrap().recovery.cwnd(),
+        CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
+    );
+
     assert_eq!(pipe.handshake(), Ok(()));
 
+    // After the handshake, cubic's window is untouched, while BBR2 in
+    // STARTUP grows cwnd by exactly the bytes acked (the handshake size, and
+    // thus the amount acked, depends on the TLS stack and certificate).
+    let initial_cwnd = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200;
+    let cwnd = pipe.server.paths.get_active().unwrap().recovery.cwnd();
     if cc_algorithm_name == "cubic" {
-        assert_eq!(
-            pipe.server.tx_cap,
-            CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
-        );
+        assert_eq!(cwnd, initial_cwnd);
+        assert_eq!(pipe.server.tx_cap, initial_cwnd);
     } else {
-        // For BBR2 in Startup mode the cwnd grows by exactly
-        // `bytes_acked` per ACK (see `BBRv2::update_congestion_window`),
-        // so `tx_cap` here equals `initial_cwnd` plus the bytes the
-        // server sent during the handshake that have already been
-        // acknowledged. That total varies a byte or two across architectures,
-        // primarily because the ACK frame's `ack_delay` field is a VarInt
-        // of microseconds since receipt and the elapsed time differs by a
-        // tick or two between platforms.
-        //
-        // Pin the lower bound (catches gross regressions like initial
-        // cwnd not being honored) and allow a small upper-bound
-        // tolerance, well below a packet so any meaningful regression
-        // would still trip the assertion.
-        // Handshake size (and hence the extra acked bytes on top of
-        // `initial_cwnd`) is larger under boring 5 because the
-        // ClientHello carries a post-quantum key share by default.
-        let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 +
-            by_boring!(b4: 1447, b5: 2598);
-        const TOLERANCE: usize = 4;
-
-        assert!(
-            pipe.server.tx_cap >= expected,
-            "{} vs {}",
-            pipe.server.tx_cap,
-            expected
-        );
-        assert!(
-            pipe.server.tx_cap <= expected + TOLERANCE,
-            "{} vs {}",
-            pipe.server.tx_cap,
-            expected + TOLERANCE
-        );
+        let acked_bytes = pipe.server.stats().acked_bytes as usize;
+        assert!(acked_bytes > 0);
+        assert_eq!(cwnd, initial_cwnd + acked_bytes);
+        assert_eq!(pipe.server.tx_cap, cwnd);
     }
 
     Ok(())
@@ -12662,11 +12631,17 @@ fn resilience_against_migration_attack(
     const DATA_BYTES: usize = 24000;
     let buf = [42; DATA_BYTES];
     let mut recv_buf = [0; DATA_BYTES];
+    // The first write is limited by the congestion window, so the rest of
+    // the data is sent after the (spoofed) migration.
+    //
+    // The window also depends on the (TLS-dependent) amount of data acked
+    // while exchanging CIDs, so read it back instead of hardcoding it.
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let cwnd = recovery.cwnd();
+    assert!(cwnd < DATA_BYTES);
     let send1_bytes = pipe.server.stream_send(1, &buf, true).unwrap();
-    assert_eq!(send1_bytes, match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => by_boring!(b4: 13880, b5: 15032),
-        _ => 12000,
-    });
+    assert_eq!(send1_bytes, cwnd);
     assert_eq!(
         test_utils::process_flight(
             &mut pipe.client,
