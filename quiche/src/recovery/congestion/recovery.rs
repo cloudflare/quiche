@@ -351,6 +351,39 @@ impl RecoveryEpoch {
         self.lost_frames_ack.clear();
         self.lost_frames_pto.clear();
     }
+
+    /// Stops tracking sent packets, schedules the frames of unacknowledged
+    /// ones for retransmission and returns the number of bytes they had in
+    /// flight.
+    fn abandon(&mut self) -> usize {
+        let mut unacked_bytes = 0;
+
+        for p in self.sent_packets.drain(..) {
+            if p.time_acked.is_some() || p.time_lost.is_some() {
+                continue;
+            }
+
+            if p.in_flight {
+                unacked_bytes += p.size;
+            }
+
+            // Datagrams are never retransmitted, so requeueing them would only
+            // count them as lost. MTU probes are still requeued, as PMTUD does
+            // not probe again until the previous probe is acked or lost.
+            self.lost_frames_ack.extend(
+                p.frames.into_iter().filter(|f| {
+                    !matches!(f, frame::Frame::DatagramHeader { .. })
+                }),
+            );
+        }
+
+        self.time_of_last_ack_eliciting_packet = None;
+        self.loss_time = None;
+        self.loss_probes = 0;
+        self.in_flight_count = 0;
+
+        unacked_bytes
+    }
 }
 
 pub struct LegacyRecovery {
@@ -849,24 +882,12 @@ impl RecoveryOps for LegacyRecovery {
     ) {
         let epoch = &mut self.epochs[epoch];
 
-        let unacked_bytes = epoch
-            .sent_packets
-            .iter()
-            .filter(|p| {
-                p.in_flight && p.time_acked.is_none() && p.time_lost.is_none()
-            })
-            .fold(0, |acc, p| acc + p.size);
+        let unacked_bytes = epoch.abandon();
 
         self.bytes_in_flight.saturating_subtract(unacked_bytes, now);
 
-        epoch.sent_packets.clear();
         epoch.clear_lost_frames();
         epoch.acked_frames.clear();
-
-        epoch.time_of_last_ack_eliciting_packet = None;
-        epoch.loss_time = None;
-        epoch.loss_probes = 0;
-        epoch.in_flight_count = 0;
 
         self.set_loss_detection_timer(handshake_status, now);
     }
@@ -876,6 +897,16 @@ impl RecoveryOps for LegacyRecovery {
     ) -> (usize, usize) {
         // Time threshold loss detection.
         self.detect_lost_packets(epoch, now, trace_id)
+    }
+
+    fn on_path_abandoned(
+        &mut self, epoch: Epoch, handshake_status: HandshakeStatus, now: Instant,
+    ) {
+        let unacked_bytes = self.epochs[epoch].abandon();
+
+        self.bytes_in_flight.saturating_subtract(unacked_bytes, now);
+
+        self.set_loss_detection_timer(handshake_status, now);
     }
 
     fn loss_detection_timer(&self) -> Option<Instant> {
