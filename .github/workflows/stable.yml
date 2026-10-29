@@ -52,7 +52,7 @@ jobs:
           # Pinning to the floor (rather than the latest 4.x) catches
           # accidental use of APIs added in later 4.x point releases.
           # `quiche/src/build.rs` and `tokio-quiche/build.rs` then read
-          # the lockfile and leave `cfg(boring_v5)` off (the default).
+          # the lockfile and set `cfg(boring_v4)`.
           cargo generate-lockfile
           cargo update -p boring --precise 4.19.0
 
