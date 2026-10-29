@@ -201,6 +201,12 @@ pub struct BbrParams {
     /// Controls the BBR loss threshold.
     pub loss_threshold: Option<f32>,
 
+    /// Loss rate per round trip above which BBRv2 lowers `bandwidth_lo` and
+    /// `inflight_lo` while it is not probing. Unset (or 0) keeps the spec
+    /// behaviour of lowering them on any loss, which random (non-congestion)
+    /// loss turns into a collapsing congestion window.
+    pub lower_bounds_loss_threshold: Option<f32>,
+
     /// Controls if BBR should use bytes delievered as an estimate for
     /// inflight_hi.
     pub use_bytes_delivered_for_inflight_hi: Option<bool>,
