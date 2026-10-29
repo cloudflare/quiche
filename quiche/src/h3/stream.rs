@@ -29,6 +29,7 @@ use std::mem::MaybeUninit;
 use crate::buffers::BufFactory;
 
 use super::Error;
+use super::HeaderFrameSizes;
 use super::Result;
 
 use super::frame;
@@ -149,6 +150,10 @@ pub struct Stream {
     /// The type of the frame currently being parsed.
     frame_type: Option<u64>,
 
+    frame_header_len: u8,
+
+    received_header_frame_sizes: HeaderFrameSizes,
+
     /// Whether the stream was created locally, or by the peer.
     is_local: bool,
 
@@ -228,6 +233,8 @@ impl Stream {
             state_off: 0,
 
             frame_type: None,
+            frame_header_len: 0,
+            received_header_frame_sizes: HeaderFrameSizes::default(),
 
             is_local,
 
@@ -364,6 +371,9 @@ impl Stream {
             _ => return Err(Error::FrameUnexpected),
         }
 
+        if ty == frame::HEADERS_FRAME_TYPE_ID {
+            self.frame_header_len = self.state_len as u8;
+        }
         self.frame_type = Some(ty);
 
         self.state_transition(State::FramePayloadLen, 1, true)?;
@@ -521,9 +531,34 @@ impl Stream {
             },
         };
 
+        let frame_header_len = (self.frame_type ==
+            Some(frame::HEADERS_FRAME_TYPE_ID))
+        .then(|| self.frame_header_len + self.state_len as u8);
         self.state_transition(state, len as usize, resize)?;
+        if let Some(frame_header_len) = frame_header_len {
+            self.frame_header_len = frame_header_len;
+        }
 
         Ok(())
+    }
+
+    pub fn frame_header_len(&self) -> u8 {
+        self.frame_header_len
+    }
+
+    pub fn add_received_header_frame_sizes(
+        &mut self, qpack_block_bytes: u64, frame_bytes: u64,
+    ) -> HeaderFrameSizes {
+        self.received_header_frame_sizes.qpack_block_bytes = self
+            .received_header_frame_sizes
+            .qpack_block_bytes
+            .saturating_add(qpack_block_bytes);
+        self.received_header_frame_sizes.frame_bytes = self
+            .received_header_frame_sizes
+            .frame_bytes
+            .saturating_add(frame_bytes);
+
+        self.received_header_frame_sizes
     }
 
     /// Returns a mutable slice over the state buffer's spare capacity,
@@ -1011,6 +1046,59 @@ mod tests {
             SETTINGS_MAX_FIELD_SECTION_SIZE_DEFAULT,
             PRIORITY_UPDATE_FRAME_PAYLOAD_MAX_SIZE_DEFAULT,
         )
+    }
+
+    #[test]
+    fn headers_frame_header_len_uses_received_varint_widths() {
+        fn consume_varint(
+            stream: &mut Stream, cursor: &mut std::io::Cursor<Vec<u8>>,
+        ) -> u64 {
+            loop {
+                stream.try_fill_buffer_for_tests(cursor).unwrap();
+                match stream.try_consume_varint() {
+                    Ok(value) => return value,
+                    Err(Error::Done) => (),
+                    Err(error) => panic!("unexpected varint error: {error:?}"),
+                }
+            }
+        }
+
+        for type_len in [1, 2, 4, 8] {
+            for length_len in [1, 2, 4, 8] {
+                let mut bytes = [0; 18];
+                let mut writer = octets::OctetsMut::with_slice(&mut bytes);
+                writer
+                    .put_varint_with_len(HEADERS_FRAME_TYPE_ID, type_len)
+                    .unwrap();
+                writer.put_varint_with_len(2, length_len).unwrap();
+                writer.put_bytes(&[0, 0]).unwrap();
+                let frame_len = writer.off();
+                let mut cursor =
+                    std::io::Cursor::new(bytes[..frame_len].to_vec());
+                let mut stream = open_remote_request_stream();
+
+                let frame_type = consume_varint(&mut stream, &mut cursor);
+                stream.set_frame_type(frame_type).unwrap();
+
+                let payload_len = consume_varint(&mut stream, &mut cursor);
+                stream.set_frame_payload_len(payload_len).unwrap();
+
+                assert_eq!(
+                    stream.frame_header_len() as usize,
+                    type_len + length_len
+                );
+                stream.try_fill_buffer_for_tests(&mut cursor).unwrap();
+                assert_eq!(
+                    stream.try_consume_frame(),
+                    Ok((
+                        Frame::Headers {
+                            header_block: vec![0, 0]
+                        },
+                        2
+                    ))
+                );
+            }
+        }
     }
 
     fn parse_uni(

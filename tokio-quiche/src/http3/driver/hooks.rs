@@ -41,6 +41,7 @@ pub(crate) struct InboundHeaders {
     pub(crate) stream_id: u64,
     pub(crate) headers: Vec<h3::Header>,
     pub(crate) has_body: bool,
+    pub(crate) frame_sizes: Option<h3::HeaderFrameSizes>,
 }
 
 /// Private trait to customize [H3Driver] for server or client operations.

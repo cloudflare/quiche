@@ -269,6 +269,7 @@ impl ClientHooks {
             stream_id,
             headers,
             has_body,
+            ..
         } = headers;
 
         let Some(stream_ctx) = driver.stream_map.get(&stream_id) else {
@@ -326,6 +327,12 @@ impl DriverHooks for ClientHooks {
         driver: &mut H3Driver<Self>, _qconn: &mut QuicheConnection,
         headers: InboundHeaders,
     ) -> H3ConnectionResult<()> {
+        if let Some(stream_ctx) = driver.stream_map.get(&headers.stream_id) {
+            stream_ctx
+                .audit_stats
+                .record_received_header_frame_sizes(headers.frame_sizes);
+        }
+
         let Some(pending_request) =
             driver.hooks.pending_requests.remove(&headers.stream_id)
         else {

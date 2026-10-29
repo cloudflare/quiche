@@ -11,6 +11,171 @@ use crate::http3::driver::server::ServerHooks;
 use super::test_utils::*;
 use super::*;
 
+#[test]
+fn received_header_sizes_include_trailers_without_body_bytes() {
+    let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+    helper.complete_handshake().unwrap();
+    helper.advance_and_run_loop().unwrap();
+
+    let stream_id = helper
+        .peer_client_send_request(make_request_headers("POST"), false)
+        .unwrap();
+    helper.advance_and_run_loop().unwrap();
+    let request = assert_matches!(
+        helper.driver_recv_server_event().unwrap(),
+        ServerH3Event::Headers { incoming_headers, .. } => incoming_headers
+    );
+    let stats = request.h3_audit_stats;
+    let initial = stats.received_header_frame_sizes().unwrap();
+    assert!(initial.qpack_block_bytes > 0);
+    assert!(initial.frame_bytes > initial.qpack_block_bytes);
+
+    helper
+        .peer_client_send_body(stream_id, b"body", false)
+        .unwrap();
+    helper.advance_and_run_loop().unwrap();
+    assert_eq!(stats.received_header_frame_sizes(), Some(initial));
+
+    helper
+        .peer
+        .send_additional_headers(
+            &mut helper.pipe.client,
+            stream_id,
+            &make_response_trailers(),
+            true,
+            true,
+        )
+        .unwrap();
+    helper.advance_and_run_loop().unwrap();
+    let total = stats.received_header_frame_sizes().unwrap();
+    assert!(total.qpack_block_bytes > initial.qpack_block_bytes);
+    assert_eq!(
+        total.frame_bytes - initial.frame_bytes,
+        total.qpack_block_bytes - initial.qpack_block_bytes + 2
+    );
+}
+
+#[test]
+fn received_header_sizes_include_trailers_at_request_limit() {
+    let mut helper =
+        DriverTestHelper::<ServerHooks>::with_pipe_and_http3_settings(
+            quiche::test_utils::Pipe::with_config_and_buf(
+                &mut default_quiche_config(),
+            )
+            .unwrap(),
+            Http3Settings {
+                max_requests_per_connection: Some(3),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    helper.complete_handshake().unwrap();
+    helper.advance_and_run_loop().unwrap();
+
+    for _ in 0..2 {
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let request = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers { incoming_headers, .. } => incoming_headers
+        );
+        assert_eq!(request.stream_id, stream_id);
+        assert!(helper.pipe.server.local_error().is_none());
+    }
+
+    let stream_id = helper
+        .peer_client_send_request(make_request_headers("POST"), false)
+        .unwrap();
+    helper.advance_and_run_loop().unwrap();
+    let request = assert_matches!(
+        helper.driver_recv_server_event().unwrap(),
+        ServerH3Event::Headers { incoming_headers, .. } => incoming_headers
+    );
+    let stats = request.h3_audit_stats;
+    let initial = stats.received_header_frame_sizes().unwrap();
+
+    helper
+        .peer
+        .send_additional_headers(
+            &mut helper.pipe.client,
+            stream_id,
+            &make_response_trailers(),
+            true,
+            true,
+        )
+        .unwrap();
+    helper.advance_and_run_loop().unwrap();
+    let total = stats.received_header_frame_sizes().unwrap();
+    assert!(total.qpack_block_bytes > initial.qpack_block_bytes);
+    assert_eq!(
+        total.frame_bytes - initial.frame_bytes,
+        total.qpack_block_bytes - initial.qpack_block_bytes + 2
+    );
+    assert!(helper.pipe.server.local_error().is_none());
+
+    helper
+        .peer_client_send_request(make_request_headers("GET"), true)
+        .unwrap();
+    helper.advance_and_run_loop().unwrap();
+    assert_eq!(
+        helper.pipe.server.local_error().unwrap().error_code,
+        h3::WireErrorCode::NoError as u64
+    );
+}
+
+#[test]
+fn client_received_header_sizes_include_response_trailers() {
+    let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+    helper.complete_handshake().unwrap();
+    helper.advance_and_run_loop().unwrap();
+
+    let stream_id = helper
+        .driver_send_request(make_request_headers("GET"), true)
+        .unwrap();
+    helper.advance_and_run_loop().unwrap();
+    assert_matches!(
+        helper.peer_server_poll(),
+        Ok((_, h3::Event::Headers { .. }))
+    );
+    helper.peer_server_send_response(stream_id, false).unwrap();
+    helper.advance_and_run_loop().unwrap();
+    let response = assert_matches!(
+        helper.driver_recv_core_event().unwrap(),
+        H3Event::IncomingHeaders(headers) => headers
+    );
+    let stats = response.h3_audit_stats;
+    let initial = stats.received_header_frame_sizes().unwrap();
+
+    helper
+        .peer_server_send_body(stream_id, b"body", false)
+        .unwrap();
+    helper.advance_and_run_loop().unwrap();
+    assert_eq!(stats.received_header_frame_sizes(), Some(initial));
+    let mut from_server = response.recv;
+    let (body, ..) = helper.driver_try_recv_body(&mut from_server);
+    assert_eq!(body, b"body");
+
+    helper
+        .peer
+        .send_additional_headers(
+            &mut helper.pipe.server,
+            stream_id,
+            &make_response_trailers(),
+            true,
+            true,
+        )
+        .unwrap();
+    helper.advance_and_run_loop().unwrap();
+    let total = stats.received_header_frame_sizes().unwrap();
+    assert!(total.qpack_block_bytes > initial.qpack_block_bytes);
+    assert_eq!(
+        total.frame_bytes - initial.frame_bytes,
+        total.qpack_block_bytes - initial.qpack_block_bytes + 2
+    );
+}
+
 #[rstest]
 #[case::data(Some(OutboundFrame::Body(Bytes::from_static(b"new"), false)))]
 #[case::closed(None)]
@@ -384,6 +549,13 @@ mod client_side_driver {
         );
         assert_eq!(resp.stream_id, stream_id);
         assert!(!resp.read_fin);
+        assert!(
+            resp.h3_audit_stats
+                .received_header_frame_sizes()
+                .unwrap()
+                .frame_bytes >
+                0
+        );
         let to_server = resp.send.get_ref().unwrap().clone();
         let mut from_server = resp.recv;
         // client sends body

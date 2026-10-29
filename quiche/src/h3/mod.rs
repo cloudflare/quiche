@@ -788,6 +788,17 @@ impl NameValue for HeaderRef<'_> {
     }
 }
 
+/// Cumulative sizes of successfully decoded HTTP/3 HEADERS frames on a stream.
+/// Successive values are snapshots, not deltas to add together.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeaderFrameSizes {
+    /// Sum of QPACK-encoded field-section bytes.
+    pub qpack_block_bytes: u64,
+
+    /// Sum of complete HEADERS frame bytes, including each type and length.
+    pub frame_bytes: u64,
+}
+
 /// An HTTP/3 connection event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -1925,7 +1936,8 @@ impl Connection {
             // DATA frame was consumed, and another one is queued behind it,
             // this will ensure the additional data will also be returned to
             // the application.
-            match self.process_readable_stream(conn, stream_id, false) {
+            match self.process_readable_stream(conn, stream_id, false, &mut None)
+            {
                 Ok(_) => unreachable!(),
 
                 Err(Error::Done) => (),
@@ -2118,6 +2130,21 @@ impl Connection {
     pub fn poll<F: BufFactory>(
         &mut self, conn: &mut super::Connection<F>,
     ) -> Result<(u64, Event)> {
+        self.poll_with_header_frame_sizes(conn)
+            .map(|(stream_id, event, _)| (stream_id, event))
+    }
+
+    /// Polls for an HTTP/3 event and returns cumulative HEADERS sizes, if any.
+    ///
+    /// Successfully decoded [`Event::Headers`] events include the QPACK
+    /// field-section bytes and complete HEADERS frame bytes received so far on
+    /// that stream, including trailers. Successive values are snapshots, not
+    /// deltas. Other frames, including DATA, are not counted. Other events have
+    /// no sizes. The existing [`Self::poll()`] API and its events are
+    /// unchanged.
+    pub fn poll_with_header_frame_sizes<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>,
+    ) -> Result<(u64, Event, Option<HeaderFrameSizes>)> {
         // When connection close is initiated by the local application (e.g. due
         // to a protocol error), the connection itself might be in a broken
         // state, so return early.
@@ -2128,7 +2155,7 @@ impl Connection {
         // Process control streams first.
         if let Some(stream_id) = self.peer_control_stream_id {
             match self.process_control_stream(conn, stream_id) {
-                Ok(ev) => return Ok(ev),
+                Ok((stream_id, event)) => return Ok((stream_id, event, None)),
 
                 Err(Error::Done) => (),
 
@@ -2138,7 +2165,7 @@ impl Connection {
 
         if let Some(stream_id) = self.peer_qpack_streams.encoder_stream_id {
             match self.process_control_stream(conn, stream_id) {
-                Ok(ev) => return Ok(ev),
+                Ok((stream_id, event)) => return Ok((stream_id, event, None)),
 
                 Err(Error::Done) => (),
 
@@ -2148,7 +2175,7 @@ impl Connection {
 
         if let Some(stream_id) = self.peer_qpack_streams.decoder_stream_id {
             match self.process_control_stream(conn, stream_id) {
-                Ok(ev) => return Ok(ev),
+                Ok((stream_id, event)) => return Ok((stream_id, event, None)),
 
                 Err(Error::Done) => (),
 
@@ -2157,15 +2184,17 @@ impl Connection {
         }
 
         // Process finished streams list.
-        if let Some(ev) = self.pop_finished_stream(conn) {
-            return Ok(ev);
+        if let Some((stream_id, event)) = self.pop_finished_stream(conn) {
+            return Ok((stream_id, event, None));
         }
 
         // Process HTTP/3 data from readable streams.
         for s in conn.readable() {
             trace!("{} stream id {} is readable", conn.trace_id(), s);
 
-            let ev = match self.process_readable_stream(conn, s, true) {
+            let mut sizes = None;
+            let ev = match self.process_readable_stream(conn, s, true, &mut sizes)
+            {
                 Ok(v) => Some(v),
 
                 Err(Error::Done) => None,
@@ -2175,7 +2204,7 @@ impl Connection {
                 Err(Error::TransportError(crate::Error::StreamReset(e))) => {
                     self.process_reset_stream(s);
 
-                    return Ok((s, Event::Reset(e)));
+                    return Ok((s, Event::Reset(e), None));
                 },
 
                 Err(e) => return Err(e),
@@ -2186,16 +2215,16 @@ impl Connection {
             }
 
             // TODO: check if stream is completed so it can be freed
-            if let Some(ev) = ev {
-                return Ok(ev);
+            if let Some((stream_id, event)) = ev {
+                return Ok((stream_id, event, sizes));
             }
         }
 
         // Process finished streams list once again, to make sure `Finished`
         // events are returned when receiving empty stream frames with the fin
         // flag set.
-        if let Some(ev) = self.pop_finished_stream(conn) {
-            return Ok(ev);
+        if let Some((stream_id, event)) = self.pop_finished_stream(conn) {
+            return Ok((stream_id, event, None));
         }
 
         Err(Error::Done)
@@ -2586,7 +2615,7 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        match self.process_readable_stream(conn, stream_id, true) {
+        match self.process_readable_stream(conn, stream_id, true, &mut None) {
             Ok(ev) => return Ok(ev),
 
             Err(Error::Done) => (),
@@ -2600,7 +2629,8 @@ impl Connection {
     }
 
     fn process_readable_stream<F: BufFactory>(
-        &mut self, conn: &mut super::Connection<F>, stream_id: u64, polling: bool,
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        polling: bool, header_frame_sizes: &mut Option<HeaderFrameSizes>,
     ) -> Result<(u64, Event)> {
         self.streams.entry(stream_id).or_insert_with(|| {
             <stream::Stream>::new(
@@ -2845,6 +2875,8 @@ impl Connection {
 
                     stream.try_fill_buffer(conn)?;
 
+                    let frame_header_len = stream.frame_header_len();
+
                     let (frame, payload_len) = match stream.try_consume_frame() {
                         Ok(frame) => frame,
 
@@ -2861,8 +2893,14 @@ impl Connection {
                         },
                     };
 
-                    match self.process_frame(conn, stream_id, frame, payload_len)
-                    {
+                    match self.process_frame(
+                        conn,
+                        stream_id,
+                        frame,
+                        payload_len,
+                        frame_header_len,
+                        header_frame_sizes,
+                    ) {
                         Ok(ev) => return Ok(ev),
 
                         Err(Error::Done) => {
@@ -3052,7 +3090,8 @@ impl Connection {
 
     fn process_frame<F: BufFactory>(
         &mut self, conn: &mut super::Connection<F>, stream_id: u64,
-        frame: frame::Frame, payload_len: u64,
+        frame: frame::Frame, payload_len: u64, frame_header_len: u8,
+        header_frame_sizes: &mut Option<HeaderFrameSizes>,
     ) -> Result<(u64, Event)> {
         trace!(
             "{} rx frm {:?} stream={} payload_len={}",
@@ -3153,6 +3192,14 @@ impl Connection {
                         return Err(e);
                     },
                 };
+
+                if let Some(stream) = self.streams.get_mut(&stream_id) {
+                    *header_frame_sizes =
+                        Some(stream.add_received_header_frame_sizes(
+                            payload_len,
+                            payload_len + frame_header_len as u64,
+                        ));
+                }
 
                 qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
                     let qlog_headers = headers
@@ -4528,6 +4575,208 @@ mod tests {
     }
 
     #[test]
+    fn received_header_frame_sizes_for_request_and_trailers() {
+        let mut session = Session::new().unwrap();
+        session.handshake().unwrap();
+
+        let (stream_id, request_headers) = session.send_request(false).unwrap();
+        let request_block_bytes = session
+            .client
+            .encode_header_block(&request_headers)
+            .unwrap()
+            .len() as u64;
+
+        assert_eq!(
+            session
+                .server
+                .poll_with_header_frame_sizes(&mut session.pipe.server),
+            Ok((
+                stream_id,
+                Event::Headers {
+                    list: request_headers,
+                    more_frames: true,
+                },
+                Some(HeaderFrameSizes {
+                    qpack_block_bytes: request_block_bytes,
+                    frame_bytes: request_block_bytes +
+                        1 +
+                        octets::varint_len(request_block_bytes) as u64,
+                })
+            ))
+        );
+
+        let body = session.send_body_client(stream_id, false).unwrap();
+        let trailers = vec![Header::new(b"foo", b"bar")];
+        let trailer_block_bytes =
+            session.client.encode_header_block(&trailers).unwrap().len() as u64;
+        session
+            .client
+            .send_additional_headers(
+                &mut session.pipe.client,
+                stream_id,
+                &trailers,
+                true,
+                true,
+            )
+            .unwrap();
+        session.advance().ok();
+
+        assert_eq!(
+            session
+                .server
+                .poll_with_header_frame_sizes(&mut session.pipe.server),
+            Ok((stream_id, Event::Data, None))
+        );
+        assert_eq!(
+            session.recv_body_server(stream_id, &mut [0; 10]),
+            Ok(body.len())
+        );
+        assert_eq!(
+            session
+                .server
+                .poll_with_header_frame_sizes(&mut session.pipe.server),
+            Ok((
+                stream_id,
+                Event::Headers {
+                    list: trailers,
+                    more_frames: false,
+                },
+                Some(HeaderFrameSizes {
+                    qpack_block_bytes: request_block_bytes + trailer_block_bytes,
+                    frame_bytes: request_block_bytes +
+                        1 +
+                        octets::varint_len(request_block_bytes) as u64 +
+                        trailer_block_bytes +
+                        1 +
+                        octets::varint_len(trailer_block_bytes) as u64,
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn received_header_frame_sizes_preserve_fragmented_varint_widths() {
+        let mut session = Session::new().unwrap();
+        session.handshake().unwrap();
+
+        let request_headers = vec![
+            Header::new(b":method", b"GET"),
+            Header::new(b":scheme", b"https"),
+            Header::new(b":authority", b"quic.tech"),
+            Header::new(b":path", b"/test"),
+        ];
+        let header_block = session
+            .client
+            .encode_header_block(&request_headers)
+            .unwrap();
+        let mut bytes = vec![0; header_block.len() + 6];
+        let mut writer = octets::OctetsMut::with_slice(&mut bytes);
+        writer
+            .put_varint_with_len(frame::HEADERS_FRAME_TYPE_ID, 2)
+            .unwrap();
+        writer
+            .put_varint_with_len(header_block.len() as u64, 4)
+            .unwrap();
+        writer.put_bytes(&header_block).unwrap();
+
+        session
+            .pipe
+            .client
+            .stream_send(0, &bytes[..1], false)
+            .unwrap();
+        session.advance().ok();
+        assert_eq!(session.poll_server(), Err(Error::Done));
+
+        session
+            .pipe
+            .client
+            .stream_send(0, &bytes[1..3], false)
+            .unwrap();
+        session.advance().ok();
+        assert_eq!(session.poll_server(), Err(Error::Done));
+
+        session
+            .pipe
+            .client
+            .stream_send(0, &bytes[3..], true)
+            .unwrap();
+        session.advance().ok();
+        assert_eq!(
+            session
+                .server
+                .poll_with_header_frame_sizes(&mut session.pipe.server),
+            Ok((
+                0,
+                Event::Headers {
+                    list: request_headers,
+                    more_frames: false,
+                },
+                Some(HeaderFrameSizes {
+                    qpack_block_bytes: header_block.len() as u64,
+                    frame_bytes: bytes.len() as u64,
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn received_header_frame_sizes_for_response() {
+        let mut session = Session::new().unwrap();
+        session.handshake().unwrap();
+
+        let (stream_id, _) = session.send_request(true).unwrap();
+        assert!(matches!(
+            session.poll_server(),
+            Ok((_, Event::Headers { .. }))
+        ));
+
+        let response_headers = session.send_response(stream_id, true).unwrap();
+        let block_bytes = session
+            .server
+            .encode_header_block(&response_headers)
+            .unwrap()
+            .len() as u64;
+        assert_eq!(
+            session
+                .client
+                .poll_with_header_frame_sizes(&mut session.pipe.client),
+            Ok((
+                stream_id,
+                Event::Headers {
+                    list: response_headers,
+                    more_frames: false,
+                },
+                Some(HeaderFrameSizes {
+                    qpack_block_bytes: block_bytes,
+                    frame_bytes: block_bytes +
+                        1 +
+                        octets::varint_len(block_bytes) as u64,
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn invalid_header_block_does_not_report_frame_sizes() {
+        let mut session = Session::new().unwrap();
+        session.handshake().unwrap();
+
+        session
+            .pipe
+            .client
+            .stream_send(0, &[1, 1, 0], true)
+            .unwrap();
+        session.advance().ok();
+
+        assert_eq!(
+            session
+                .server
+                .poll_with_header_frame_sizes(&mut session.pipe.server),
+            Err(Error::QpackDecompressionFailed)
+        );
+    }
+
+    #[test]
     /// Server responds with a 103, then a 200 with no body.
     fn informational_response() {
         let mut s = Session::new().unwrap();
@@ -4683,8 +4932,12 @@ mod tests {
         s.handshake().unwrap();
 
         let (stream, req) = s.send_request(false).unwrap();
+        let request_block_bytes =
+            s.client.encode_header_block(&req).unwrap().len() as u64;
 
         let req_trailer = vec![Header::new(b"goodbye", b"world")];
+        let trailer_block_bytes =
+            s.client.encode_header_block(&req_trailer).unwrap().len() as u64;
 
         assert_eq!(
             s.client.send_additional_headers(
@@ -4709,9 +4962,112 @@ mod tests {
             more_frames: true,
         };
 
-        assert_eq!(s.poll_server(), Ok((stream, ev_initial_headers)));
-        assert_eq!(s.poll_server(), Ok((stream, ev_trailing_headers)));
+        assert_eq!(
+            s.server.poll_with_header_frame_sizes(&mut s.pipe.server),
+            Ok((
+                stream,
+                ev_initial_headers,
+                Some(HeaderFrameSizes {
+                    qpack_block_bytes: request_block_bytes,
+                    frame_bytes: request_block_bytes +
+                        1 +
+                        octets::varint_len(request_block_bytes) as u64,
+                })
+            ))
+        );
+        assert_eq!(
+            s.server.poll_with_header_frame_sizes(&mut s.pipe.server),
+            Ok((
+                stream,
+                ev_trailing_headers,
+                Some(HeaderFrameSizes {
+                    qpack_block_bytes: request_block_bytes + trailer_block_bytes,
+                    frame_bytes: request_block_bytes +
+                        1 +
+                        octets::varint_len(request_block_bytes) as u64 +
+                        trailer_block_bytes +
+                        1 +
+                        octets::varint_len(trailer_block_bytes) as u64,
+                })
+            ))
+        );
         assert_eq!(s.poll_server(), Err(Error::Done));
+    }
+
+    #[test]
+    fn header_frame_sizes_stay_with_back_to_back_events() {
+        let mut session = Session::new().unwrap();
+        session.handshake().unwrap();
+
+        let (stream_id, request_headers) = session.send_request(false).unwrap();
+        let request_block_bytes = session
+            .client
+            .encode_header_block(&request_headers)
+            .unwrap()
+            .len() as u64;
+        let trailers = vec![Header::new(b"foo", b"bar")];
+        let trailer_block_bytes =
+            session.client.encode_header_block(&trailers).unwrap().len() as u64;
+        session
+            .client
+            .send_additional_headers(
+                &mut session.pipe.client,
+                stream_id,
+                &trailers,
+                true,
+                false,
+            )
+            .unwrap();
+        session.advance().ok();
+
+        let first = session
+            .server
+            .poll_with_header_frame_sizes(&mut session.pipe.server);
+        let second = session
+            .server
+            .poll_with_header_frame_sizes(&mut session.pipe.server);
+
+        assert_eq!(
+            first,
+            Ok((
+                stream_id,
+                Event::Headers {
+                    list: request_headers,
+                    more_frames: true,
+                },
+                Some(HeaderFrameSizes {
+                    qpack_block_bytes: request_block_bytes,
+                    frame_bytes: request_block_bytes +
+                        1 +
+                        octets::varint_len(request_block_bytes) as u64,
+                })
+            ))
+        );
+        assert_eq!(
+            second,
+            Ok((
+                stream_id,
+                Event::Headers {
+                    list: trailers,
+                    more_frames: true,
+                },
+                Some(HeaderFrameSizes {
+                    qpack_block_bytes: request_block_bytes + trailer_block_bytes,
+                    frame_bytes: request_block_bytes +
+                        1 +
+                        octets::varint_len(request_block_bytes) as u64 +
+                        trailer_block_bytes +
+                        1 +
+                        octets::varint_len(trailer_block_bytes) as u64,
+                })
+            ))
+        );
+        assert_eq!(
+            session
+                .server
+                .poll_with_header_frame_sizes(&mut session.pipe.server),
+            Err(Error::Done)
+        );
     }
 
     #[test]

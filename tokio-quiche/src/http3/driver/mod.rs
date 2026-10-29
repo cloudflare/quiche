@@ -729,7 +729,8 @@ impl<H: DriverHooks> H3Driver<H> {
     /// [`quiche::h3::Connection`]. Some events are dispatched to helper
     /// methods.
     fn process_read_event(
-        &mut self, qconn: &mut QuicheConnection, stream_id: u64, event: h3::Event,
+        &mut self, qconn: &mut QuicheConnection, stream_id: u64,
+        event: h3::Event, frame_sizes: Option<h3::HeaderFrameSizes>,
     ) -> H3ConnectionResult<()> {
         self.forward_settings()?;
 
@@ -740,6 +741,7 @@ impl<H: DriverHooks> H3Driver<H> {
                     stream_id,
                     headers: list,
                     has_body: more_frames,
+                    frame_sizes,
                 }),
 
             h3::Event::Data => self.process_h3_data(qconn, stream_id),
@@ -1350,9 +1352,9 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
     /// If a DATAGRAM is found, it is sent to the receiver on its channel.
     fn process_reads(&mut self, qconn: &mut QuicheConnection) -> QuicResult<()> {
         loop {
-            match self.conn_mut()?.poll(qconn) {
-                Ok((stream_id, event)) =>
-                    self.process_read_event(qconn, stream_id, event)?,
+            match self.conn_mut()?.poll_with_header_frame_sizes(qconn) {
+                Ok((stream_id, event, frame_sizes)) =>
+                    self.process_read_event(qconn, stream_id, event, frame_sizes)?,
                 Err(h3::Error::Done) => break,
                 Err(err) => {
                     // Don't bubble error up, instead keep the worker loop going
