@@ -55,12 +55,16 @@ macro_rules! by_boring {
     }};
 }
 
-/// Returns the congestion window `conn` is expected to have after exchanging
-/// a handshake and nothing else, without hardcoding the handshake size
-/// (which depends on the TLS stack and on the certificate in use).
+/// Returns the congestion window `conn` is expected to have after the
+/// handshake, without hardcoding the handshake size (which depends on the TLS
+/// stack and on the certificate in use).
 ///
 /// Cubic leaves the initial window (10 packets of 1200 bytes) untouched,
-/// while BBR2 in STARTUP grows it by exactly the number of bytes acked.
+/// while BBR2 in STARTUP grows it by the number of bytes acked. This assumes
+/// that every acked in-flight packet carried CRYPTO, STREAM or DATAGRAM
+/// frames. BBR2 ignores other packets, such as one carrying only
+/// HANDSHAKE_DONE, when growing cwnd, but `Stats::acked_bytes` still counts
+/// them.
 fn cwnd_after_handshake(conn: &Connection, cc_algorithm_name: &str) -> usize {
     const INITIAL_CWND: usize = 10 * 1200;
 
@@ -7227,6 +7231,8 @@ fn client_rst_stream_while_bytes_in_flight(
         Ok(initial_cwnd)
     );
     let server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let flight_bytes: usize =
+        server_flight.iter().map(|(pkt, _)| pkt.len()).sum();
 
     // And generate a stop sending or reset at the client.
     assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
@@ -7246,9 +7252,9 @@ fn client_rst_stream_while_bytes_in_flight(
     let recovery = &pipe.server.paths.get_active().unwrap().recovery;
     assert_eq!(recovery.bytes_in_flight(), 0);
     let cwnd = recovery.cwnd();
-    // The whole initial window was acked while in slow start (cubic) or
-    // STARTUP (BBR2), so cwnd doubled.
-    assert_eq!(cwnd, 2 * initial_cwnd);
+    // The whole flight was acked while in slow start (cubic) or STARTUP
+    // (BBR2), so cwnd grew by the number of bytes sent.
+    assert_eq!(cwnd, initial_cwnd + flight_bytes);
     assert_eq!(pipe.server.tx_cap, cwnd);
 
     assert_eq!(pipe.server.streams.tx_buffered(), 0);
@@ -7309,6 +7315,8 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
         Ok(initial_cwnd)
     );
     let mut server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let flight_bytes: usize =
+        server_flight.iter().map(|(pkt, _)| pkt.len()).sum();
 
     // And generate a STOP_SENDING at the client.
     assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
@@ -7327,7 +7335,8 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
     let expected_cwnd = match cc_algorithm_name {
         // BBR2 in STARTUP ignores a single loss and grows by bytes acked,
         // i.e. everything except the lost packet.
-        "bbr2" | "bbr2_gcongestion" => 2 * initial_cwnd - lost_pkt.len(),
+        "bbr2" | "bbr2_gcongestion" =>
+            initial_cwnd + flight_bytes - lost_pkt.len(),
         // Cubic reduces cwnd by its multiplicative decrease factor (0.7).
         _ => initial_cwnd * 7 / 10,
     };
