@@ -243,6 +243,9 @@ pub struct ConnectionIdentifiers {
     /// Largest sequence number we received from the peer.
     largest_destination_seq: u64,
 
+    /// Largest sequence number of a Destination Connection ID we retired.
+    largest_retired_dcid_seq: Option<u64>,
+
     /// Next sequence number to use.
     next_scid_seq: u64,
 
@@ -485,8 +488,12 @@ impl ConnectionIdentifiers {
         // number smaller than the Retire Prior To field of a previously
         // received NEW_CONNECTION_ID frame MUST send a corresponding
         // RETIRE_CONNECTION_ID frame that retires the newly received connection
-        // ID, unless it has already done so for that sequence number.
-        if seq < self.largest_peer_retire_prior_to {
+        // ID, unless it has already done so for that sequence number. Do the
+        // same up to the largest sequence number we retired, as the frame
+        // might repeat a connection ID that is no longer tracked.
+        if seq < self.largest_peer_retire_prior_to ||
+            Some(seq) <= self.largest_retired_dcid_seq
+        {
             self.mark_retire_dcid_seq(seq, true)?;
             return Ok(());
         }
@@ -610,6 +617,8 @@ impl ConnectionIdentifiers {
         let e = self.dcids.remove(seq)?.ok_or(Error::InvalidState)?;
 
         self.mark_retire_dcid_seq(seq, true)?;
+        self.largest_retired_dcid_seq =
+            self.largest_retired_dcid_seq.max(Some(seq));
 
         Ok(e.path_id)
     }
@@ -1048,8 +1057,13 @@ mod tests {
         assert!(ids.new_dcid(dcid, 4, rt, 0, &mut retired_path_ids).is_ok());
         assert_eq!(ids.dcids.len(), 5);
 
-        // Retire a DCID from the middle of the list
+        // Retire a DCID from the middle of the list, which a retransmission of
+        // its NEW_CONNECTION_ID frame must not add back.
         assert!(ids.retire_dcid(3).is_ok());
+
+        let (dcid, rt) = create_cid_and_reset_token(16);
+        assert!(ids.new_dcid(dcid, 3, rt, 0, &mut retired_path_ids).is_ok());
+        assert!(ids.get_dcid(3).is_err());
 
         // Retire prior to DCID that was just retired.
         //

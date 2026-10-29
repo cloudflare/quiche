@@ -3768,13 +3768,21 @@ impl<F: BufFactory> Connection<F> {
         }
 
         // Now that we processed all the frames, if there is a path that has no
-        // Destination CID, try to allocate one.
-        let no_dcid = self
-            .paths
-            .iter_mut()
-            .filter(|(_, p)| p.active_dcid_seq.is_none());
+        // Destination CID, try to allocate one. Skip the paths the peer
+        // migrated away from so that they can be evicted, unless they need to
+        // respond to a PATH_CHALLENGE or this packet makes the peer migrate
+        // back to them.
+        let migrating_back = !probing &&
+            pn >= self.pkt_num_spaces[epoch].largest_rx_non_probing_pkt_num;
 
-        for (pid, p) in no_dcid {
+        let paths_needing_dcid = self.paths.iter_mut().filter(|(pid, p)| {
+            p.active_dcid_seq.is_none() &&
+                (!p.migrated_away() ||
+                    p.has_received_challenges() ||
+                    (migrating_back && *pid == recv_pid))
+        });
+
+        for (pid, p) in paths_needing_dcid {
             if self.ids.zero_length_dcid() {
                 p.active_dcid_seq = Some(0);
                 continue;
@@ -4812,6 +4820,13 @@ impl<F: BufFactory> Connection<F> {
         if pkt_type == Type::Short && !is_closing {
             // Create NEW_CONNECTION_ID frames as needed.
             while let Some(seq_num) = self.ids.next_advertise_new_scid_seq() {
+                // The peer can retire a CID while a retransmission of the frame
+                // advertising it is still queued, so skip it.
+                if self.ids.get_scid(seq_num).is_err() {
+                    self.ids.mark_advertise_new_scid_seq(seq_num, false);
+                    continue;
+                }
+
                 let frame = self.ids.get_new_connection_id_frame_for(seq_num)?;
 
                 if push_frame_to_pkt!(b, frames, frame, left) {
@@ -9032,7 +9047,9 @@ impl<F: BufFactory> Connection<F> {
             },
 
             frame::Frame::PathResponse { data } => {
-                self.paths.on_response_received(data)?;
+                if self.paths.on_response_received(data)? {
+                    self.complete_peer_migration(now)?;
+                }
             },
 
             frame::Frame::ConnectionClose {
@@ -9237,8 +9254,11 @@ impl<F: BufFactory> Connection<F> {
     ) -> Result<usize> {
         let ids = &mut self.ids;
 
+        // Packets that the peer sent before retiring the CID they use can
+        // arrive after the retirement. Drop them rather than closing the
+        // connection.
         let (in_scid_seq, mut in_scid_pid) =
-            ids.find_scid_seq(dcid).ok_or(Error::InvalidState)?;
+            ids.find_scid_seq(dcid).ok_or(Error::Done)?;
 
         if let Some(recv_pid) = recv_pid {
             // If the path observes a change of SCID used, note it.
@@ -9414,14 +9434,83 @@ impl<F: BufFactory> Connection<F> {
             return Ok(());
         }
 
+        let no_spare_dcid = self.paths.get(new_pid)?.active_dcid_seq.is_none();
+
+        // The new path cannot be used without a DCID, so stay on the current
+        // path until the peer provides a new one.
+        if no_spare_dcid && disable_dcid_reuse {
+            return Ok(());
+        }
+
         self.set_active_path(new_pid, now)?;
 
-        let no_spare_dcid =
-            self.paths.get_mut(new_pid)?.active_dcid_seq.is_none();
-
-        if no_spare_dcid && !disable_dcid_reuse {
+        if no_spare_dcid {
             self.paths.get_mut(new_pid)?.active_dcid_seq =
                 self.paths.get_mut(active_path_id)?.active_dcid_seq;
+        }
+
+        // A migration to a path that still needs validation completes when
+        // its PATH_RESPONSE is received instead.
+        if self.paths.get(new_pid)?.validated() {
+            self.complete_peer_migration(now)?;
+        }
+
+        Ok(())
+    }
+
+    /// Completes the peer migration to the active path once it is validated.
+    ///
+    /// The paths that the peer migrated away from remain a fallback until
+    /// then. They are now released, so that they can be evicted when the peer
+    /// migrates again.
+    fn complete_peer_migration(&mut self, now: Instant) -> Result<()> {
+        let handshake_status = self.handshake_status();
+
+        let (active_pid, active_path) = self
+            .paths
+            .get_active_with_pid()
+            .ok_or(Error::InvalidState)?;
+
+        let active_dcid_seq = active_path.active_dcid_seq;
+        let active_scid_seq = active_path.active_scid_seq;
+
+        let migrated_away =
+            self.paths.iter_mut().filter(|(_, p)| p.migrated_away());
+
+        for (_, path) in migrated_away {
+            // Packets are only declared lost when later packets sent on the
+            // same path are acknowledged, so those still outstanding on a
+            // released path might never be. Retransmit their frames instead.
+            path.recovery.on_path_abandoned(
+                packet::Epoch::Application,
+                handshake_status,
+                now,
+            );
+
+            // Abandoning the path's packets disarms its loss detection timer,
+            // which resends PATH_CHALLENGE and expires the challenges in
+            // flight. Discard them and request a new one, so that it is sent
+            // if the peer migrates back to the path.
+            if path.under_validation() {
+                path.restart_validation();
+            }
+
+            // A DCID that the active path reused, such as a zero-length one,
+            // remains in use. Otherwise retire it, unless another released
+            // path that shared it already did.
+            if let Some(dcid_seq) = path.active_dcid_seq.take() {
+                if Some(dcid_seq) == active_dcid_seq {
+                    self.ids.link_dcid_to_path_id(dcid_seq, active_pid)?;
+                } else if self.ids.get_dcid(dcid_seq).is_ok() {
+                    self.ids.retire_dcid(dcid_seq)?;
+                }
+            }
+        }
+
+        // The active path may use a SCID that was linked to a released path,
+        // if the peer did not change it when migrating.
+        if let Some(scid_seq) = active_scid_seq {
+            self.ids.link_scid_to_path_id(scid_seq, active_pid)?;
         }
 
         Ok(())

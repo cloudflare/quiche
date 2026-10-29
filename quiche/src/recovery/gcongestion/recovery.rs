@@ -133,9 +133,10 @@ struct LossDetectionResult {
 }
 
 impl RecoveryEpoch {
-    /// Discard the Epoch state and return the total size of unacked packets
-    /// that were discarded
-    fn discard(&mut self, cc: &mut Pacer) -> usize {
+    /// Stops tracking sent packets, schedules the frames of unacknowledged
+    /// ones for retransmission and returns the number of bytes they had in
+    /// flight.
+    fn abandon(&mut self, cc: &mut Pacer) -> usize {
         let unacked_bytes = self
             .sent_packets
             .drain(..)
@@ -145,12 +146,22 @@ impl RecoveryEpoch {
                         SentStatus::Sent {
                             in_flight,
                             sent_bytes,
+                            frames,
                             ..
                         },
                     pkt_num,
                 } = p
                 {
                     cc.on_packet_neutered(pkt_num);
+
+                    // Datagrams are never retransmitted, so requeueing them
+                    // would only count them as lost. MTU probes are still
+                    // requeued, as PMTUD does not probe again until the
+                    // previous probe is acked or lost.
+                    self.lost_frames_ack.extend(frames.into_iter().filter(|f| {
+                        !matches!(f, frame::Frame::DatagramHeader { .. })
+                    }));
+
                     if in_flight {
                         return sent_bytes;
                     }
@@ -159,13 +170,22 @@ impl RecoveryEpoch {
             })
             .sum();
 
-        std::mem::take(&mut self.sent_packets);
-        self.clear_lost_frames();
-        std::mem::take(&mut self.acked_frames);
         self.time_of_last_ack_eliciting_packet = None;
         self.loss_time = None;
         self.loss_probes = 0;
         self.pkts_in_flight = 0;
+
+        unacked_bytes
+    }
+
+    /// Discard the Epoch state and return the total size of unacked packets
+    /// that were discarded
+    fn discard(&mut self, cc: &mut Pacer) -> usize {
+        let unacked_bytes = self.abandon(cc);
+
+        std::mem::take(&mut self.sent_packets);
+        self.clear_lost_frames();
+        std::mem::take(&mut self.acked_frames);
 
         unacked_bytes
     }
@@ -1022,6 +1042,16 @@ impl RecoveryOps for GRecovery {
             self.detect_and_remove_lost_packets(epoch, now);
 
         (lost_packets, lost_bytes)
+    }
+
+    fn on_path_abandoned(
+        &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
+        now: Instant,
+    ) {
+        let epoch = &mut self.epochs[epoch];
+        self.bytes_in_flight
+            .saturating_subtract(epoch.abandon(&mut self.pacer), now);
+        self.set_loss_detection_timer(handshake_status, now);
     }
 
     fn loss_detection_timer(&self) -> Option<Instant> {
