@@ -14533,3 +14533,23 @@ fn server_qlog() {
         panic!("expected Qlog event");
     }
 }
+
+#[rstest]
+fn set_brutal_bandwidth_needs_gcongestion(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let res = pipe.client.set_brutal_bandwidth(12_500_000);
+    if cc_algorithm_name == "bbr2_gcongestion" {
+        assert_eq!(res, Ok(()));
+        // The connection keeps working after the switch.
+        assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+        assert_eq!(pipe.advance(), Ok(()));
+        let mut b = [0; 8];
+        assert_eq!(pipe.server.stream_recv(0, &mut b), Ok((5, true)));
+    } else {
+        assert_eq!(res, Err(Error::CongestionControl));
+    }
+}
