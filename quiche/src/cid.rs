@@ -629,6 +629,16 @@ impl ConnectionIdentifiers {
         Ok(())
     }
 
+    /// Updates all the Source Connection ID entries linked to the provided
+    /// path ID to indicate that they are not linked to any path anymore.
+    pub fn unlink_scids_from_path_id(&mut self, path_id: usize) {
+        for e in self.scids.inner.iter_mut() {
+            if e.path_id == Some(path_id) {
+                e.path_id = None;
+            }
+        }
+    }
+
     /// Updates the Destination Connection ID entry with the provided sequence
     /// number to indicate that it is now linked to the provided path ID.
     pub fn link_dcid_to_path_id(

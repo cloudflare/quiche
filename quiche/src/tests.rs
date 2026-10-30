@@ -12264,6 +12264,7 @@ fn connection_migration(
     config.set_initial_max_stream_data_bidi_remote(15);
     config.set_initial_max_stream_data_uni(10);
     config.set_initial_max_streams_bidi(3);
+    config.enable_dgram(true, 10, 10);
 
     let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 2);
 
@@ -12302,9 +12303,26 @@ fn connection_migration(
         pipe.server.migrate(server_addr, client_addr_2),
         Err(Error::InvalidState)
     );
+
+    // Hold back a server flight sent on the original path, so that it arrives
+    // after the client processed the retirement of the CID it uses.
+    assert_eq!(pipe.server.dgram_send(b"dgram"), Ok(()));
+    let delayed = test_utils::emit_flight(&mut pipe.server).unwrap();
+
     assert_eq!(pipe.client.migrate(client_addr_2, server_addr), Ok(1));
     assert_eq!(pipe.client.stream_send(0, b"data", true), Ok(4));
     assert_eq!(pipe.advance(), Ok(()));
+
+    // The server released the original path, retiring its DCID and unlinking
+    // its SCID without counting its datagram as lost. The client drops the
+    // packets still in flight on it.
+    assert!(pipe.client.retired_scid_next().is_some());
+    assert_eq!(pipe.server.ids.get_scid(0).unwrap().path_id, None);
+    assert!(pipe.server.path_stats().all(|s| s.dgram_lost == 0));
+    assert_eq!(
+        test_utils::process_flight(&mut pipe.client, delayed),
+        Ok(())
+    );
     assert_eq!(
         pipe.client
             .paths
@@ -12348,6 +12366,7 @@ fn connection_migration(
     assert_eq!(pipe.client.migrate(client_addr_3, server_addr), Ok(2));
     assert_eq!(pipe.client.stream_send(4, b"data", true), Ok(4));
     assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.client.retired_scid_next().is_some());
     assert_eq!(
         pipe.client
             .paths
@@ -12455,6 +12474,164 @@ fn connection_migration(
             .expect("no active")
             .peer_addr(),
         server_addr
+    );
+
+    // Case 5: the client returns to a released path, but the server has no
+    // spare DCID and cannot reuse one. The server stays on the current path.
+    pipe.server.disable_dcid_reuse = true;
+    pipe.client.send_ack_eliciting().unwrap();
+    let mut flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    flight
+        .iter_mut()
+        .for_each(|(_, si)| si.from = client_addr_2);
+    assert_eq!(test_utils::process_flight(&mut pipe.server, flight), Ok(()));
+    assert_eq!(
+        pipe.server
+            .paths
+            .get_active()
+            .expect("no active")
+            .peer_addr(),
+        client_addr_3
+    );
+
+    // Case 6: with new spare DCIDs, the server follows the client back to a
+    // released path, and responds to probes on another one.
+    for seq in [3, 4] {
+        let (cid, reset_token) = test_utils::create_cid_and_reset_token(16);
+        assert_eq!(pipe.client.new_scid(&cid, reset_token, true), Ok(seq));
+    }
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.client.migrate(client_addr_2, server_addr), Ok(1));
+    pipe.client.send_ack_eliciting().unwrap();
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(
+        pipe.server
+            .paths
+            .get_active()
+            .expect("no active")
+            .peer_addr(),
+        client_addr_2
+    );
+
+    assert_eq!(pipe.client.probe_path(client_addr_3, server_addr), Ok(2));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(test_utils::process_flight(&mut pipe.server, flight), Ok(()));
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    assert!(flight.iter().any(|(_, si)| si.to == client_addr_3));
+}
+
+#[rstest]
+fn repeated_passive_migration_reuses_path(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_active_connection_id_limit(2);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
+
+    let client_addr = test_utils::Pipe::client_addr();
+    let spoofed_client_addr = "127.0.0.1:6666".parse().unwrap();
+    let rebound_client_addrs: [SocketAddr; 3] = [
+        "127.0.0.1:5678".parse().unwrap(),
+        "127.0.0.1:9012".parse().unwrap(),
+        "127.0.0.1:8908".parse().unwrap(),
+    ];
+
+    // A flight from a spoofed address moves the server to an unvalidated path,
+    // and the stream data sent on it is lost.
+    pipe.client.send_ack_eliciting().unwrap();
+    let mut flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    flight
+        .iter_mut()
+        .for_each(|(_, si)| si.from = spoofed_client_addr);
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    assert_eq!(pipe.server.stream_send(1, b"data", true), Ok(4));
+    test_utils::emit_flight(&mut pipe.server).unwrap();
+
+    // The next flight from the client moves the server back, which releases
+    // the spoofed path. A flight from a new address must not evict that path
+    // before the server retransmits the lost data.
+    for addr in [client_addr, rebound_client_addrs[0]] {
+        pipe.client.send_ack_eliciting().unwrap();
+        let mut flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        flight.iter_mut().for_each(|(_, si)| si.from = addr);
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    }
+
+    // Hold back a flight from the original address until it is released.
+    pipe.client.send_ack_eliciting().unwrap();
+    let mut delayed = Some(test_utils::emit_flight(&mut pipe.client).unwrap());
+
+    for (stream_id, rebound_client_addr) in
+        [0, 4, 8].into_iter().zip(rebound_client_addrs)
+    {
+        assert_eq!(pipe.client.stream_send(stream_id, b"data", true), Ok(4));
+
+        let mut client_done = false;
+        let mut server_done = false;
+
+        while !client_done || !server_done {
+            match test_utils::emit_flight(&mut pipe.client) {
+                Ok(mut flight) => {
+                    flight
+                        .iter_mut()
+                        .for_each(|(_, si)| si.from = rebound_client_addr);
+                    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+                },
+
+                Err(Error::Done) => client_done = true,
+
+                Err(e) => panic!("failed to emit client flight: {e:?}"),
+            }
+
+            match test_utils::emit_flight(&mut pipe.server) {
+                Ok(mut flight) => {
+                    flight.iter_mut().for_each(|(_, si)| si.to = client_addr);
+                    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+                },
+
+                Err(Error::Done) => server_done = true,
+
+                Err(e) => panic!("failed to emit server flight: {e:?}"),
+            }
+        }
+
+        assert_eq!(
+            stream_recv_discard(&mut pipe.server, false, stream_id),
+            Ok((4, true))
+        );
+
+        let (active_pid, active_path) =
+            pipe.server.paths.get_active_with_pid().expect("no active");
+        assert_eq!(active_path.peer_addr(), rebound_client_addr);
+
+        // The CIDs used on the active path are linked to it, including those
+        // shared with the released path.
+        let dcid_seq = active_path.active_dcid_seq.unwrap();
+        let scid_seq = active_path.active_scid_seq.unwrap();
+        let dcid_path_id = pipe.server.ids.get_dcid(dcid_seq).unwrap().path_id;
+        let scid_path_id = pipe.server.ids.get_scid(scid_seq).unwrap().path_id;
+        assert_eq!(dcid_path_id, Some(active_pid));
+        assert_eq!(scid_path_id, Some(active_pid));
+
+        // The late flight from the original address must not make its
+        // released path take the spare DCID provided by the client.
+        if let Some(delayed) = delayed.take() {
+            let (cid, reset_token) = test_utils::create_cid_and_reset_token(16);
+            assert_eq!(pipe.client.new_scid(&cid, reset_token, true), Ok(2));
+            let mut flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+            flight
+                .iter_mut()
+                .for_each(|(_, si)| si.from = rebound_client_addr);
+            test_utils::process_flight(&mut pipe.server, flight).unwrap();
+            test_utils::process_flight(&mut pipe.server, delayed).unwrap();
+        }
+    }
+
+    assert_eq!(
+        stream_recv_discard(&mut pipe.client, false, 1),
+        Ok((4, true))
     );
 }
 

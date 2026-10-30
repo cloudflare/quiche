@@ -244,6 +244,15 @@ pub trait RecoveryOps {
     fn on_path_change(
         &mut self, epoch: packet::Epoch, now: Instant, _trace_id: &str,
     ) -> (usize, usize);
+
+    /// Stops tracking the packets sent on a path that is no longer used, and
+    /// schedules their frames for retransmission without declaring the
+    /// packets lost.
+    fn on_path_abandoned(
+        &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
+        now: Instant,
+    );
+
     fn loss_detection_timer(&self) -> Option<Instant>;
     fn cwnd(&self) -> usize;
     fn cwnd_available(&self) -> usize;
