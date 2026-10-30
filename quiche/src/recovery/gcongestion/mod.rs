@@ -26,6 +26,7 @@
 
 mod bbr;
 mod bbr2;
+mod brutal;
 pub mod pacer;
 mod recovery;
 

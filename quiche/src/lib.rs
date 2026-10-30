@@ -6846,6 +6846,26 @@ impl<F: BufFactory> Connection<F> {
         self.streams.writable()
     }
 
+    /// Switches congestion control to Brutal (Hysteria 2) with a fixed target
+    /// send rate in bytes per second.
+    ///
+    /// Brutal does not back off on loss: it paces at the target rate divided by
+    /// the observed ACK rate (floored at 0.8), so the application must honor
+    /// the `at` pacing hint of [`SendInfo`] and the connection must use
+    /// `CongestionControlAlgorithm::Bbr2Gcongestion`. Returns
+    /// [`Error::CongestionControl`] otherwise.
+    pub fn set_brutal_bandwidth(&mut self, bytes_per_second: u64) -> Result<()> {
+        if self
+            .paths
+            .iter_mut()
+            .any(|(_, p)| !p.recovery.use_brutal(bytes_per_second))
+        {
+            return Err(Error::CongestionControl);
+        }
+
+        Ok(())
+    }
+
     /// Returns the maximum possible size of egress UDP payloads.
     ///
     /// This is the maximum size of UDP payloads that can be sent, and depends

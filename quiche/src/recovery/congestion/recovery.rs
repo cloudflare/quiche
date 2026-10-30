@@ -1017,6 +1017,10 @@ impl RecoveryOps for LegacyRecovery {
         // delivery_rate_update_app_limited used instead.
     }
 
+    fn use_brutal(&mut self, _bytes_per_second: u64) -> bool {
+        false
+    }
+
     #[cfg(test)]
     fn largest_sent_pkt_num_on_path(&self, epoch: Epoch) -> Option<u64> {
         self.epochs[epoch].test_largest_sent_pkt_num_on_path
