@@ -89,7 +89,7 @@ impl RecvBuf {
     /// This also takes care of enforcing stream flow control limits, as well
     /// as handling incoming data that overlaps data that is already in the
     /// buffer.
-    pub fn write(&mut self, buf: RangeBuf) -> Result<()> {
+    pub fn write(&mut self, mut buf: RangeBuf) -> Result<()> {
         if buf.max_off() > self.max_data() {
             return Err(Error::FlowControl);
         }
@@ -117,7 +117,9 @@ impl RecvBuf {
             return Ok(());
         }
 
-        if buf.fin() {
+        let new_fin = buf.fin() && self.fin_off.is_none();
+
+        if new_fin {
             self.fin_off = Some(buf.max_off());
         }
 
@@ -135,17 +137,16 @@ impl RecvBuf {
             return Ok(());
         }
 
-        // Check if data is fully duplicate, that is the buffer's max offset is
-        // lower or equal to the offset already stored in the recv buffer.
-        if self.off >= buf.max_off() {
-            // An exception is applied to empty range buffers, because an empty
-            // buffer's max offset matches the max offset of the recv buffer.
-            //
-            // By this point all spurious empty buffers should have already been
-            // discarded, so allowing empty buffers here should be safe.
-            if !buf.is_empty() {
+        // Discard consumed data unless it carries the first FIN. Such data is
+        // replaced with an empty buffer at the final size, so the application
+        // reads the FIN without receiving duplicate data and the queued buffer
+        // does not keep the duplicate payload alive.
+        if self.off >= buf.max_off() && !buf.is_empty() {
+            if !new_fin {
                 return Ok(());
             }
+
+            buf = RangeBuf::from(b"", buf.max_off(), true);
         }
 
         let mut tmp_bufs = VecDeque::with_capacity(2);
@@ -804,6 +805,33 @@ mod tests {
     }
 
     #[rstest]
+    fn duplicate_data_first_fin(#[values(true, false)] drain: bool) {
+        let mut recv =
+            RecvBuf::new(15, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
+        let mut out = [0; 5];
+        recv.write(RangeBuf::from(b"hello", 0, false)).unwrap();
+        assert_eq!(recv.emit(&mut out), Ok((5, false)));
+        if drain {
+            assert_eq!(recv.shutdown(), Ok(0));
+        }
+
+        recv.write(RangeBuf::from(b"hello", 0, false)).unwrap();
+        assert!(!recv.ready());
+        recv.write(RangeBuf::from(b"hello", 0, true)).unwrap();
+        assert!(recv.is_fin());
+        assert_eq!(recv.ready(), !drain);
+        assert!(recv.data.values().all(|buf| buf.data.as_ref().is_empty()));
+        if !drain {
+            assert_eq!(recv.emit(&mut out), Ok((0, true)));
+        }
+
+        recv.write(RangeBuf::from(b"hello", 0, true)).unwrap();
+        recv.write(RangeBuf::from(b"", 5, true)).unwrap();
+        assert!(!recv.ready());
+        assert_eq!(recv.emit(&mut out), Err(Error::Done));
+    }
+
+    #[rstest]
     fn split_read(#[values(true, false)] emit: bool) {
         let mut recv =
             RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
@@ -975,8 +1003,9 @@ mod tests {
         assert!(recv.write(fourth).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
-        assert_eq!(recv.data.len(), 0);
+        assert_eq!(recv.data.len(), 1);
 
+        assert_emit_discard(&mut recv, emit, 32, 0, true, Some(b""));
         assert_emit_discard_done(&mut recv, emit);
     }
 

@@ -2124,6 +2124,8 @@ mod server_side_driver {
         quiche::test_utils::process_flight(&mut helper.pipe.client, flight)
             .unwrap();
 
+        assert_eq!(helper.pipe.client.peer_streams_left_bidi(), 0);
+        helper.pipe.advance().unwrap();
         assert_eq!(helper.pipe.client.peer_streams_left_bidi(), 1);
     }
 

@@ -68,7 +68,7 @@ env_logger = "0.11"
 foundations = { version = ">=4,<6", default-features = false }
 futures = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false }
-h3i = { version = "0.7", path = "./h3i" }
+h3i = { version = "0.7", path = "./h3i", default-features = false }
 ipnetwork = { version = "0.21" }
 # Temporarily cap libc below 0.2.190, which breaks `backtrace` on iOS.
 # See https://github.com/rust-lang/libc/issues/5601.
@@ -80,7 +80,7 @@ netlog = { version = "0.1", path="./netlog" }
 octets = { version = "0.3.7", path = "./octets" }
 parking_lot = { version = "0.12.1", default-features = false }
 pin-project = { version = "1.0.12" }
-qlog = { version = "0.18.1", path = "./qlog" }
+qlog = { version = "0.18.2", path = "./qlog" }
 quiche = { version = "0.30.0", path = "./quiche" }
 regex = { version = "1.4.2" }
 ring = { version = "0.17.8" }
