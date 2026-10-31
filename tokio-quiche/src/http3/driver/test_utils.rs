@@ -521,6 +521,7 @@ impl Metrics for TestMetrics {
         Histogram::new(std::iter::empty())
     }
 
+    #[cfg(target_os = "linux")]
     fn udp_drop_count(&self) -> Counter {
         Counter::default()
     }

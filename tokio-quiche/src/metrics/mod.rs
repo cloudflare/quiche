@@ -97,6 +97,7 @@ pub trait Metrics: Send + Sync + Clone + Unpin + 'static {
     fn max_loss_pct(&self) -> Histogram;
 
     /// Number of UDP packets dropped when receiving
+    #[cfg(target_os = "linux")]
     fn udp_drop_count(&self) -> Counter;
 
     /// Number of failed quic handshakes
@@ -207,6 +208,7 @@ impl Metrics for DefaultMetrics {
         quic::max_loss_pct()
     }
 
+    #[cfg(target_os = "linux")]
     fn udp_drop_count(&self) -> Counter {
         quic::udp_drop_count()
     }
@@ -338,6 +340,7 @@ pub(crate) mod quic {
     pub fn max_loss_pct() -> Histogram;
 
     /// Number of UDP packets dropped when receiving
+    #[cfg(target_os = "linux")]
     pub fn udp_drop_count() -> Counter;
 
     /// Number of failed quic handshakes
@@ -390,5 +393,24 @@ pub(crate) fn quic_expensive_metrics_ip_reduce(ip: IpAddr) -> Option<IpAddr> {
         Some(ip_net.network())
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use foundations::telemetry::settings::MetricsSettings;
+
+    #[test]
+    fn udp_drop_count_is_exported_only_on_linux() {
+        let _ = quic::connections_in_memory();
+        let metrics =
+            foundations::telemetry::metrics::collect(&MetricsSettings::default())
+                .expect("failed to collect metrics");
+
+        assert_eq!(
+            metrics.contains("quic_udp_drop_count"),
+            cfg!(target_os = "linux")
+        );
     }
 }
