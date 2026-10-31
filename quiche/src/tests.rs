@@ -6756,6 +6756,77 @@ fn retry_invalid_source_connection_id(
 }
 
 #[rstest]
+fn retry_validation_checks(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+
+    let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+
+    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let hdr = Header::from_slice(&mut buf[..len], MAX_CONN_ID_LEN).unwrap();
+    let (scid, _) = test_utils::create_cid_and_reset_token(MAX_CONN_ID_LEN);
+    let token = b"quiche test retry token";
+
+    // 1. Zero-length Retry Token MUST be discarded (RFC 9000 §17.2.5.2).
+    let retry_len =
+        packet::retry(&hdr.scid, &hdr.dcid, &scid, b"", hdr.version, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.client_recv(&mut buf[..retry_len]), Ok(retry_len));
+    assert!(!pipe.client.did_retry);
+    assert_eq!(pipe.client.destination_id(), hdr.dcid);
+
+    // 2. Retry SCID equal to client Initial DCID MUST be discarded (RFC 9000 §17.2.5.2).
+    let retry_len = packet::retry(
+        &hdr.scid,
+        &hdr.dcid,
+        &hdr.dcid,
+        token,
+        hdr.version,
+        &mut buf,
+    )
+    .unwrap();
+    assert_eq!(pipe.client_recv(&mut buf[..retry_len]), Ok(retry_len));
+    assert!(!pipe.client.did_retry);
+    assert_eq!(pipe.client.destination_id(), hdr.dcid);
+
+    // 3. Retry DCID not matching client SCID MUST be discarded.
+    let bogus_dcid = ConnectionId::from_ref(b"bogus_dcid_12345");
+    let retry_len = packet::retry(
+        &bogus_dcid,
+        &hdr.dcid,
+        &scid,
+        token,
+        hdr.version,
+        &mut buf,
+    )
+    .unwrap();
+    assert_eq!(pipe.client_recv(&mut buf[..retry_len]), Ok(retry_len));
+    assert!(!pipe.client.did_retry);
+    assert_eq!(pipe.client.destination_id(), hdr.dcid);
+
+    // 4. Valid Retry is accepted and updates client destination_id.
+    let retry_len =
+        packet::retry(&hdr.scid, &hdr.dcid, &scid, token, hdr.version, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.client_recv(&mut buf[..retry_len]), Ok(retry_len));
+    assert!(pipe.client.did_retry);
+    assert_eq!(pipe.client.destination_id(), scid);
+}
+
+#[rstest]
 /// Tests that a zero-length NEW_TOKEN frame is detected as an error.
 fn zero_length_new_token(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
