@@ -47,8 +47,8 @@ fn main() {
             stream_id: STREAM_ID,
             fin_stream: true,
             frame: Frame::Data {
-                // ...but, in actuality, we only send 4 bytes. This should yield a
-                // 400 Bad Request response from an RFC-compliant
+                // ...but, in actuality, we only send 4 bytes. This should yield
+                // a 400 Bad Request response from an RFC-compliant
                 // server: https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3
                 payload: b"test".to_vec(),
             },

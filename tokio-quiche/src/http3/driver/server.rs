@@ -191,8 +191,11 @@ impl ServerHooks {
             return Ok(());
         }
 
-        let (mut stream_ctx, send, recv) =
-            StreamCtx::new(stream_id, STREAM_CAPACITY);
+        let (mut stream_ctx, send, recv) = StreamCtx::new(
+            stream_id,
+            STREAM_CAPACITY,
+            driver.ready_stream_sender.clone(),
+        );
 
         // When Extended CONNECT is enabled, extract the datagram flow ID
         // from the request headers and register it in flow_map. This
@@ -235,9 +238,7 @@ impl ServerHooks {
             h3_audit_stats: Arc::clone(&stream_ctx.audit_stats),
         };
 
-        driver
-            .waiting_streams
-            .push(stream_ctx.wait_for_recv(stream_id))?;
+        stream_ctx.wait_for_recv();
         driver.insert_stream(stream_id, stream_ctx);
 
         // A STOP_SENDING received before HEADERS had no stream context for

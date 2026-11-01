@@ -29,7 +29,6 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
-use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
 use quiche::h3;
 use tokio::sync::mpsc;
@@ -212,18 +211,17 @@ impl ClientHooks {
         };
 
         // log::info!("sent h3 request"; "stream_id" => stream_id);
-        let (mut stream_ctx, send, recv) =
-            StreamCtx::new(stream_id, STREAM_CAPACITY);
+        let (mut stream_ctx, send, recv) = StreamCtx::new(
+            stream_id,
+            STREAM_CAPACITY,
+            driver.ready_stream_sender.clone(),
+        );
 
         if body_finished {
             // `send_request()` already sent FIN for bodyless requests, so
             // mark the send side complete and drop the outbound-frame receiver
             // since no body will be sent.
-            stream_ctx.fin_or_reset_sent = true;
-            stream_ctx.recv = None;
-            stream_ctx
-                .audit_stats
-                .set_sent_stream_fin(StreamClosureKind::Explicit);
+            H3Driver::<ClientHooks>::on_fin_sent(&mut stream_ctx)?;
         }
 
         if let Some(quarter_stream_id) =
@@ -240,9 +238,7 @@ impl ClientHooks {
 
         if let Some(body_writer) = request.body_writer {
             let _ = body_writer.send(send.clone());
-            driver
-                .waiting_streams
-                .push(stream_ctx.wait_for_recv(stream_id))?;
+            stream_ctx.wait_for_recv();
         }
 
         driver.insert_stream(stream_id, stream_ctx);

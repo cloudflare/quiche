@@ -189,11 +189,13 @@ pub const QPACK_ENCODER_STREAM_TYPE_ID: u64 = 0x2;
 /// See <https://datatracker.ietf.org/doc/html/rfc9204#section-4.2-2.2>.
 pub const QPACK_DECODER_STREAM_TYPE_ID: u64 = 0x3;
 
+#[cfg(feature = "cli")]
 #[derive(Default)]
 struct StreamIdAllocator {
     id: u64,
 }
 
+#[cfg(feature = "cli")]
 impl StreamIdAllocator {
     pub fn take_next_id(&mut self) -> u64 {
         let old = self.id;
@@ -282,5 +284,6 @@ pub mod client;
 pub mod config;
 pub mod frame;
 pub mod frame_parser;
+#[cfg(feature = "cli")]
 pub mod prompts;
 pub mod recordreplay;

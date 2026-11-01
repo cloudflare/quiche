@@ -17,12 +17,16 @@ readme = "README.md"
 workspace = true
 
 [features]
+default = ["cli"]
 async = ["dep:tokio", "dep:tokio-quiche"]
+cli = ["dep:clap", "dep:env_logger", "dep:inquire"]
+
+[[bin]]
+name = "h3i"
+path = "src/main.rs"
+required-features = ["cli"]
 
 [dependencies]
-clap = { workspace = true }
-env_logger = { workspace = true }
-inquire = "0.9.1"
 log = { workspace = true, features = ["std"] }
 mio = { workspace = true, features = ["net", "os-poll"] }
 multimap = "0.10"
@@ -35,6 +39,11 @@ serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["macros", "std"] }
 url = { workspace = true }
 
+# Dependencies for the CLI
+clap = { workspace = true, optional = true }
+env_logger = { workspace = true, optional = true }
+inquire = { version = "0.9.1", optional = true }
+
 # Dependencies for async client
-tokio = { version = "1.44", features = ["net", "sync", "time"], optional = true }
+tokio = { version = "1.44", features = ["net", "rt", "sync", "time"], optional = true }
 tokio-quiche = { features = ["capture_keylogs", "quiche_internal"], optional = true, workspace = true }

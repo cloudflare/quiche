@@ -723,7 +723,8 @@ impl Datastore {
             },
 
             // TODO: this is reception of headers frame, before the field
-            // section is decoded. Ignore for now and just use the decoded event.
+            // section is decoded. Ignore for now and just use the decoded
+            // event.
             Http3HeadersReceived(_) => (),
 
             Http3HeadersDecoded(e) => {

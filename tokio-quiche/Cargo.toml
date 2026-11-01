@@ -1,6 +1,6 @@
 [package]
 name = "tokio-quiche"
-version = "0.20.0"
+version = "0.20.1"
 description = "Asynchronous wrapper around quiche"
 repository = { workspace = true }
 edition = { workspace = true }
@@ -15,6 +15,7 @@ build = "build.rs"
 default = ["qlog-gzip", "qlog-zstd"]
 
 # Forwarded quiche features for re-exports
+congestion_window_unchecked_available = ["quiche/congestion_window_unchecked_available"]
 fuzzing = ["quiche/fuzzing"]
 quiche_internal = ["quiche/internal"]
 
