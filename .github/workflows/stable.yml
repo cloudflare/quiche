@@ -247,7 +247,7 @@ jobs:
         run: cargo test --target=${{ matrix.target }} --verbose --all-targets ${{ env.DEFAULT_OPTIONS }} --exclude qlog-dancer
 
   quiche_multiarch:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         target: ["aarch64-unknown-linux-gnu","armv7-unknown-linux-gnueabihf","i686-unknown-linux-gnu"]
