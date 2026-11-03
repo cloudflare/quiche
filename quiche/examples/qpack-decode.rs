@@ -72,7 +72,8 @@ fn main() {
         debug!("Got stream={stream_id} len={len}");
 
         if stream_id == 0 {
-            dec.control(&mut data[..len]).unwrap();
+            // TODO: pass encoder stream data to the decoder once a Decoder can
+            // be created with a non-zero maximum table capacity.
             continue;
         }
 

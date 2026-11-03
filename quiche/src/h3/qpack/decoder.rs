@@ -27,6 +27,10 @@
 use super::Error;
 use super::Result;
 
+use super::dynamic_table::DynamicTable;
+use super::encoder_instructions::EncoderInstruction;
+use super::encoder_instructions::ParseError;
+
 use crate::h3::Header;
 
 use super::INDEXED;
@@ -121,30 +125,78 @@ impl FieldListSizeTracker {
 }
 
 /// A QPACK decoder.
-#[derive(Default)]
 pub struct Decoder {
-    // TODO: hold a dynamic table whose maximum capacity is the
-    // SETTINGS_QPACK_MAX_TABLE_CAPACITY value advertised to the peer.
-    //
+    /// The dynamic table, which the peer's encoder updates with encoder
+    /// instructions.
+    table: DynamicTable,
+
+    /// The start of an encoder instruction whose remaining bytes haven't
+    /// arrived yet.
+    partial_instruction: Vec<u8>,
     // TODO: queue decoder instructions (RFC 9204, Section 4.4) for the
     // connection to send on the decoder stream.
+}
+
+impl Default for Decoder {
+    fn default() -> Decoder {
+        Decoder::new()
+    }
 }
 
 impl Decoder {
     /// Creates a new QPACK decoder.
     pub fn new() -> Decoder {
-        Decoder::default()
+        Decoder {
+            // TODO: make the maximum capacity the
+            // SETTINGS_QPACK_MAX_TABLE_CAPACITY value advertised to the peer,
+            // instead of zero.
+            table: DynamicTable::new(0),
+            partial_instruction: Vec::new(),
+        }
     }
 
-    /// Processes control instructions from the encoder.
-    pub fn control(&mut self, _buf: &mut [u8]) -> Result<()> {
-        // TODO: parse encoder instructions (RFC 9204, Section 4.3), including
-        // ones split across calls, and apply them to the dynamic table. Their
-        // errors are connection errors of type QPACK_ENCODER_STREAM_ERROR.
-        // TODO: if the advertised maximum table capacity is zero, reject
-        // all encoder instructions (even Set Dynamic Table Capacity 0) before
-        // dispatching them to the table (RFC 9204, Section 3.2.3).
-        Ok(())
+    /// Processes encoder instructions (RFC 9204, Section 4.3) from the peer's
+    /// encoder stream, applying them to the dynamic table.
+    ///
+    /// `buf` must hold the next bytes of the stream. It may end partway through
+    /// an instruction, which is kept until the rest arrives in a later call.
+    ///
+    /// An error is a connection error of type QPACK_ENCODER_STREAM_ERROR, and
+    /// the decoder must not be used afterwards: instructions before the invalid
+    /// one may already have been applied.
+    pub fn control(&mut self, buf: &mut [u8]) -> Result<()> {
+        // With a maximum capacity of zero, the encoder must not send any
+        // instructions (RFC 9204, Section 3.2.3), but some encoders still send
+        // Set Dynamic Table Capacity 0 when a maximum of zero is advertised
+        // explicitly. As it changes nothing, it's accepted, and the table
+        // rejects every other instruction.
+        self.partial_instruction.extend_from_slice(buf);
+
+        let mut b = octets::Octets::with_slice(&self.partial_instruction);
+
+        loop {
+            let start = b.off();
+
+            // No string longer than the table's capacity fits in an entry, so
+            // strings whose length alone shows that they're too long are
+            // rejected without waiting for their bytes.
+            match EncoderInstruction::from_bytes(&mut b, self.table.capacity()) {
+                Ok(instruction) => self
+                    .table
+                    .apply(instruction)
+                    .map_err(|_| Error::InvalidEncoderInstruction)?,
+
+                Err(ParseError::Incomplete) => {
+                    // Keep the incomplete instruction for the next call.
+                    self.partial_instruction.drain(..start);
+
+                    return Ok(());
+                },
+
+                Err(ParseError::Malformed) =>
+                    return Err(Error::InvalidEncoderInstruction),
+            }
+        }
     }
 
     /// Decodes a QPACK header block into a list of headers.
@@ -507,5 +559,140 @@ mod tests {
             Decoder::new().decode(&encoded_literal, 57),
             Err(Error::HeaderListTooLarge),
         );
+    }
+
+    /// The encoder stream in RFC 9204, Appendix B.
+    fn rfc_encoder_stream() -> Vec<u8> {
+        let instructions: [&[u8]; 6] = [
+            // B.2: Set Dynamic Table Capacity=220.
+            b"\x3f\xbd\x01",
+            // B.2: Insert With Name Reference, Static Table, Index=0.
+            b"\xc0\x0fwww.example.com",
+            // B.2: Insert With Name Reference, Static Table, Index=1.
+            b"\xc1\x0c/sample/path",
+            // B.3: Insert With Literal Name.
+            b"\x4acustom-key\x0ccustom-value",
+            // B.4: Duplicate (Relative Index = 2).
+            b"\x02",
+            // B.5: Insert With Name Reference, Dynamic Table, Relative Index
+            // = 1.
+            b"\x81\x0dcustom-value2",
+        ];
+
+        instructions.concat()
+    }
+
+    /// The dynamic table at the end of RFC 9204, Appendix B.5, by absolute
+    /// index.
+    const RFC_TABLE: [Option<(&str, &str)>; 6] = [
+        None,
+        Some((":path", "/sample/path")),
+        Some(("custom-key", "custom-value")),
+        Some((":authority", "www.example.com")),
+        Some(("custom-key", "custom-value2")),
+        None,
+    ];
+
+    /// Returns a decoder whose dynamic table has the given maximum capacity.
+    fn decoder_with_max_capacity(max_capacity: usize) -> Decoder {
+        Decoder {
+            table: DynamicTable::new(max_capacity),
+            ..Decoder::new()
+        }
+    }
+
+    /// Returns the name and value of each dynamic table entry with an absolute
+    /// index in `indices`, or `None` for those not in the table.
+    fn table_entries(
+        dec: &Decoder, indices: std::ops::Range<u64>,
+    ) -> Vec<Option<(&str, &str)>> {
+        indices
+            .map(|index| {
+                dec.table.get_by_absolute_index(index).map(|entry| {
+                    (
+                        std::str::from_utf8(entry.name()).unwrap(),
+                        std::str::from_utf8(entry.value()).unwrap(),
+                    )
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn control_applies_rfc_examples() {
+        let mut dec = decoder_with_max_capacity(220);
+
+        assert_eq!(dec.control(&mut rfc_encoder_stream()), Ok(()));
+        assert_eq!(table_entries(&dec, 0..6), RFC_TABLE);
+        assert!(dec.partial_instruction.is_empty());
+    }
+
+    #[test]
+    fn control_buffers_split_instructions() {
+        let mut stream = rfc_encoder_stream();
+
+        // Split in two at every position, so that every instruction is split
+        // at every byte, and some calls end with part of an instruction after
+        // complete ones.
+        for i in 0..=stream.len() {
+            let mut dec = decoder_with_max_capacity(220);
+            assert_eq!(dec.control(&mut stream[..i]), Ok(()));
+            assert_eq!(dec.control(&mut stream[i..]), Ok(()));
+            assert_eq!(table_entries(&dec, 0..6), RFC_TABLE);
+            assert!(dec.partial_instruction.is_empty());
+        }
+
+        // One byte at a time, so that instructions arrive over many calls.
+        let mut dec = decoder_with_max_capacity(220);
+        for byte in stream {
+            assert_eq!(dec.control(&mut [byte]), Ok(()));
+        }
+        assert_eq!(table_entries(&dec, 0..6), RFC_TABLE);
+    }
+
+    #[test]
+    fn control_rejects_invalid_instructions() {
+        // A capacity of 221, above the maximum.
+        let mut dec = decoder_with_max_capacity(220);
+        assert_eq!(
+            dec.control(&mut [0x3f, 0xbe, 0x01]),
+            Err(Error::InvalidEncoderInstruction)
+        );
+
+        // A duplicate of an entry that doesn't exist.
+        let mut dec = decoder_with_max_capacity(220);
+        assert_eq!(
+            dec.control(&mut [0x00]),
+            Err(Error::InvalidEncoderInstruction)
+        );
+
+        // A name longer than the table's capacity, which is still zero,
+        // rejected before the name arrives.
+        let mut dec = decoder_with_max_capacity(220);
+        assert_eq!(
+            dec.control(&mut [0x41]),
+            Err(Error::InvalidEncoderInstruction)
+        );
+    }
+
+    #[test]
+    fn zero_max_capacity_allows_only_zero_capacity() {
+        // Setting the capacity to zero changes nothing, so it's accepted.
+        assert_eq!(Decoder::new().control(&mut [0x20]), Ok(()));
+
+        // Every other instruction is rejected: a capacity of 1, each type of
+        // insert, and a duplicate.
+        for mut instruction in [
+            vec![0x21],
+            vec![0xc0, 0x00],
+            vec![0x80, 0x00],
+            vec![0x40, 0x00],
+            vec![0x00],
+        ] {
+            assert_eq!(
+                Decoder::new().control(&mut instruction),
+                Err(Error::InvalidEncoderInstruction)
+            );
+        }
     }
 }

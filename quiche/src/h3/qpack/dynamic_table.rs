@@ -28,11 +28,13 @@
 //!
 //! See <https://www.rfc-editor.org/rfc/rfc9204.html#section-3.2>.
 
-// TODO: the decoder doesn't use this table yet; see the TODOs in decoder.rs.
+// TODO: field lines can't reference this table yet; see the TODOs in
+// decoder.rs.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use super::encoder_instructions::EncoderInstruction;
 use super::static_table::STATIC_DECODE_TABLE;
 
 /// The overhead, in bytes, added to the lengths of an entry's name and value
@@ -152,7 +154,7 @@ impl DynamicTable {
     }
 
     /// Returns the table's capacity.
-    fn capacity(&self) -> usize {
+    pub(crate) fn capacity(&self) -> usize {
         self.capacity
     }
 
@@ -183,6 +185,36 @@ impl DynamicTable {
         let pos = absolute_index.checked_sub(oldest)?;
 
         self.entries.get(usize::try_from(pos).ok()?)
+    }
+
+    /// Applies an encoder instruction (RFC 9204, Section 4.3).
+    pub(crate) fn apply(
+        &mut self, instruction: EncoderInstruction,
+    ) -> Result<(), TableError> {
+        match instruction {
+            EncoderInstruction::SetDynamicTableCapacity { capacity } =>
+                self.set_dynamic_table_capacity(capacity),
+
+            EncoderInstruction::InsertWithStaticNameReference {
+                static_index,
+                value,
+            } => self.insert_with_static_name_reference(static_index, value),
+
+            EncoderInstruction::InsertWithDynamicNameReference {
+                encoder_relative_index,
+                value,
+            } => self.insert_with_dynamic_name_reference(
+                encoder_relative_index,
+                value,
+            ),
+
+            EncoderInstruction::InsertWithLiteralName { name, value } =>
+                self.insert_with_literal_name(name, value),
+
+            EncoderInstruction::Duplicate {
+                encoder_relative_index,
+            } => self.duplicate(encoder_relative_index),
+        }
     }
 
     /// Sets the table's capacity, evicting the oldest entries that no longer
@@ -867,5 +899,80 @@ mod tests {
         assert_eq!(entry.value(), b"val1");
         assert_eq!(Arc::strong_count(&name), 2);
         assert_eq!(Arc::strong_count(&value), 1);
+    }
+
+    #[test]
+    fn apply_rfc_examples() {
+        // The encoder stream in RFC 9204, Appendix B, with the table's size
+        // after each instruction.
+        let instructions = [
+            // B.2.
+            (
+                EncoderInstruction::SetDynamicTableCapacity { capacity: 220 },
+                0,
+            ),
+            (
+                EncoderInstruction::InsertWithStaticNameReference {
+                    static_index: 0,
+                    value: bytes("www.example.com"),
+                },
+                57,
+            ),
+            (
+                EncoderInstruction::InsertWithStaticNameReference {
+                    static_index: 1,
+                    value: bytes("/sample/path"),
+                },
+                106,
+            ),
+            // B.3.
+            (
+                EncoderInstruction::InsertWithLiteralName {
+                    name: bytes("custom-key"),
+                    value: bytes("custom-value"),
+                },
+                160,
+            ),
+            // B.4: duplicates :authority (absolute index 0).
+            (
+                EncoderInstruction::Duplicate {
+                    encoder_relative_index: 2,
+                },
+                217,
+            ),
+            // B.5: takes its name from custom-key (absolute index 2), and
+            // evicts the oldest entry to make room.
+            (
+                EncoderInstruction::InsertWithDynamicNameReference {
+                    encoder_relative_index: 1,
+                    value: bytes("custom-value2"),
+                },
+                215,
+            ),
+        ];
+
+        let mut table = DynamicTable::new(220);
+
+        for (instruction, size) in instructions {
+            assert_eq!(table.apply(instruction), Ok(()));
+            assert_eq!(table.size(), size);
+        }
+
+        // The table at the end of B.5, with absolute indices 1 to 4.
+        assert_eq!(table.insert_count(), 5);
+        assert_eq!(contents(&table), [
+            (":path", "/sample/path"),
+            ("custom-key", "custom-value"),
+            (":authority", "www.example.com"),
+            ("custom-key", "custom-value2"),
+        ]);
+
+        // Errors are passed through.
+        assert_eq!(
+            table.apply(EncoderInstruction::SetDynamicTableCapacity {
+                capacity: 221,
+            }),
+            Err(TableError::CapacityExceedsMaximum)
+        );
     }
 }

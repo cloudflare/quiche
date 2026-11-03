@@ -2913,7 +2913,10 @@ impl Connection {
 
                     // Read data from the stream and discard immediately.
                     //
-                    // TODO: pass encoder stream data to the QPACK decoder.
+                    // TODO: pass encoder stream data to the QPACK decoder. If
+                    // it fails, close the connection with a new Error variant
+                    // whose wire code is QPACK_ENCODER_STREAM_ERROR, 0x201
+                    // (RFC 9204, Section 6).
                     loop {
                         let (recv, fin) = conn.stream_recv(stream_id, &mut d)?;
 
