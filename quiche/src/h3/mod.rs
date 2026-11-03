@@ -2912,6 +2912,8 @@ impl Connection {
                     let mut d = [0; 4096];
 
                     // Read data from the stream and discard immediately.
+                    //
+                    // TODO: pass encoder stream data to the QPACK decoder.
                     loop {
                         let (recv, fin) = conn.stream_recv(stream_id, &mut d)?;
 
