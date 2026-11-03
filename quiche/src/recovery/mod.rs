@@ -277,6 +277,10 @@ pub trait RecoveryOps {
 
     fn on_app_limited(&mut self);
 
+    /// Switches the sender to Brutal at `bytes_per_second`. Returns `false`
+    /// if this recovery implementation has no pacer to host it.
+    fn use_brutal(&mut self, bytes_per_second: u64) -> bool;
+
     // Since a recovery module is path specific, this tracks the largest packet
     // sent per path.
     #[cfg(test)]
