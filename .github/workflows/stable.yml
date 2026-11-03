@@ -270,6 +270,12 @@ jobs:
         run: cargo-binstall -y cross
 
       - name: Run cargo test using cross
+        # Docker 29.4.2 on ubuntu-26.04 makes socketcall(2) fail with ENOSYS,
+        # and i386 glibc uses it for every socket call. Docker 29.4.3 reverted
+        # this, so drop the option once the runner image updates
+        # (https://github.com/actions/runner-images/issues/14790).
+        env:
+          CROSS_CONTAINER_OPTS: --security-opt seccomp=unconfined
         run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer
 
   http3_test:
