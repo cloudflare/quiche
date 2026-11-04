@@ -1713,7 +1713,7 @@ mod http09_request_tests {
         Http09Request {
             url: url::Url::parse("https://example.com/unrelenting-cool-pirate").unwrap(),
             cardinal: 1,
-            request_line: "GET /unrelenting-cool-pirate\\r\\n".to_string(),
+            request_line: "GET /unrelenting-cool-pirate\r\n".to_string(),
             stream_id: None,
             sent_bytes: 0,
             response_writer: None,
@@ -1770,6 +1770,6 @@ mod http09_request_tests {
     }
 
     fn req_line() -> &'static [u8] {
-        b"GET /unrelenting-cool-pirate\\r\\n"
+        b"GET /unrelenting-cool-pirate\r\n"
     }
 }
