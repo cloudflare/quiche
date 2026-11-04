@@ -58,11 +58,11 @@ fn downstream_readiness_does_not_overwrite_queued_frame(
 }
 
 #[test]
-fn fin_completion_requires_open_send_direction() {
+fn fin_acceptance_requires_open_send_direction() {
     let (ready_tx, _ready_rx) = ReadyStreams::new();
     let (mut ctx, _outbound, _inbound) = StreamCtx::new(0, 1, ready_tx);
-    H3Driver::<ServerHooks>::on_fin_sent(&mut ctx).unwrap();
-    assert_eq!(ctx.send_state, SendState::Closed);
+    ctx.handle_sent_fin().unwrap();
+    assert_eq!(ctx.send_state(), SendState::Finished);
     assert!(ctx.recv.is_none());
     assert_eq!(
         ctx.audit_stats.sent_stream_fin(),
@@ -70,9 +70,7 @@ fn fin_completion_requires_open_send_direction() {
     );
 
     // Only the repeated transition may panic; the first call must succeed.
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        H3Driver::<ServerHooks>::on_fin_sent(&mut ctx)
-    }));
+    let result = catch_unwind(AssertUnwindSafe(|| ctx.handle_sent_fin()));
     if cfg!(debug_assertions) {
         let panic = result.expect_err("repeated FIN completion must assert");
         let message = panic
@@ -81,12 +79,30 @@ fn fin_completion_requires_open_send_direction() {
             .or_else(|| panic.downcast_ref::<&str>().copied())
             .expect("the assertion must have a string panic message");
         assert!(
-            message.contains("requires an open send direction"),
+            message.contains("accepted FIN requires an open send direction"),
             "{message}"
         );
     } else {
-        assert_matches!(result, Ok(Err(h3::Error::InternalError)));
+        assert_eq!(result.unwrap(), Err(h3::Error::InternalError));
+        assert_eq!(ctx.send_state(), SendState::Finished);
     }
+}
+
+#[rstest]
+#[case::open(false, SendState::Aborted)]
+#[case::fin_accepted(true, SendState::Finished)]
+fn peer_stop_only_aborts_an_open_send_direction(
+    #[case] fin_accepted: bool, #[case] expected: SendState,
+) {
+    let (ready_tx, _ready_rx) = ReadyStreams::new();
+    let (mut ctx, _outbound, _inbound) = StreamCtx::new(0, 1, ready_tx);
+    if fin_accepted {
+        ctx.handle_sent_fin().unwrap();
+    }
+
+    ctx.handle_recvd_stop_sending(42);
+    assert_eq!(ctx.send_state(), expected);
+    assert_eq!(ctx.audit_stats.recvd_stop_sending_error_code(), 42);
 }
 
 /// Tests for the body receive buffer sizing helper.
@@ -1049,6 +1065,58 @@ mod client_side_driver {
         assert_eq!(audit_stats.downstream_bytes_sent(), 0);
     }
 
+    /// Pin the client policy for `STOP_SENDING_CODE_AFTER_LOCAL_FIN`.
+    #[test]
+    fn client_stop_sending_after_request_fin_uses_request_cancelled() {
+        const REQUEST_CANCELLED: u64 = h3::WireErrorCode::RequestCancelled as u64;
+        let mut helper = DriverTestHelper::<ClientHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .driver_send_request(make_request_headers("GET"), true)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_server_poll(),
+            Ok((0, h3::Event::Headers { .. }))
+        );
+        helper.peer_server_send_response(stream_id, false).unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let resp = assert_matches!(
+            helper.driver_recv_core_event().unwrap(),
+            H3Event::IncomingHeaders(headers) => { headers }
+        );
+        let audit_stats = resp.h3_audit_stats.clone();
+        assert_eq!(
+            helper
+                .driver
+                .stream_map
+                .get(&stream_id)
+                .unwrap()
+                .send_state(),
+            SendState::Finished
+        );
+
+        assert_eq!(helper.peer_server_send_body(stream_id, &[1], false), Ok(1));
+        helper.pipe.advance().unwrap();
+        drop(resp.recv);
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(
+            helper.peer_server_send_body(stream_id, &[1], false),
+            Err(h3::Error::TransportError(quiche::Error::StreamStopped(
+                REQUEST_CANCELLED
+            )))
+        );
+        assert_eq!(
+            audit_stats.sent_stop_sending_error_code(),
+            REQUEST_CANCELLED as i64
+        );
+        assert_eq!(audit_stats.sent_reset_stream_error_code(), -1);
+    }
+
     /// Verify that a GOAWAY received mid-stream does not kill in-flight
     /// request streams. The server sends GOAWAY with an ID above the
     /// active stream, indicating the stream was accepted. The client
@@ -1418,7 +1486,11 @@ mod server_side_driver {
         // Closing the write side must retain the pending peer FIN.
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
         assert_matches!(&ctx.recv_state, RecvState::FinPending(_));
-        assert_eq!(ctx.send_state, SendState::Closed);
+        let expected_send_state = match &write_close {
+            WriteClose::Fin => SendState::Finished,
+            WriteClose::DropSender | WriteClose::PeerStop => SendState::Aborted,
+        };
+        assert_eq!(ctx.send_state(), expected_send_state);
         assert_eq!(from_client.len(), STREAM_CAPACITY);
         assert!(ctx.waiting_for_send());
         assert!(!ctx.waiting_for_recv());
@@ -1471,7 +1543,7 @@ mod server_side_driver {
         helper.work_loop_iter().unwrap();
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
         assert_matches!(&ctx.recv_state, RecvState::FinPending(_));
-        assert_eq!(ctx.send_state, SendState::Closed);
+        assert_eq!(ctx.send_state(), SendState::Finished);
         assert!(ctx.waiting_for_send());
         assert_eq!(from_client.len(), STREAM_CAPACITY);
         assert!(helper.driver.ready_streams.try_recv().is_err());
@@ -2755,6 +2827,424 @@ mod server_side_driver {
         assert_eq!(audit_stats.downstream_bytes_recvd(), 5);
         assert_eq!(audit_stats.downstream_bytes_sent(), 1);
         assert_eq!(helper.driver.stream_map.len(), 0);
+    }
+
+    /// A FIN in the application channel is not locally submitted until quiche
+    /// accepts the corresponding H3 write.
+    #[test]
+    fn queued_fin_does_not_select_post_fin_stop_sending_code() {
+        const REQUEST_CANCELLED: u64 = h3::WireErrorCode::RequestCancelled as u64;
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("POST"), false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        let audit_stats = req.h3_audit_stats.clone();
+        req.send
+            .get_ref()
+            .unwrap()
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_client_poll(),
+            Ok((0, h3::Event::Headers { .. }))
+        );
+
+        // Queue final response DATA+FIN, but do not run the write path that
+        // submits it to quiche.
+        req.send
+            .get_ref()
+            .unwrap()
+            .try_send(OutboundFrame::Body(Bytes::from_static(&[42]), true))
+            .unwrap();
+        assert_eq!(
+            helper
+                .driver
+                .stream_map
+                .get(&stream_id)
+                .unwrap()
+                .send_state(),
+            SendState::Open
+        );
+
+        // Deliver request DATA and drop its application receiver in the same
+        // read turn. The queued response FIN must not affect STOP_SENDING.
+        helper
+            .peer_client_send_body(stream_id, &[1], false)
+            .unwrap();
+        let flight =
+            quiche::test_utils::emit_flight(&mut helper.pipe.client).unwrap();
+        quiche::test_utils::process_flight(&mut helper.pipe.server, flight)
+            .unwrap();
+        drop(req.recv);
+        helper
+            .driver
+            .process_reads(&mut helper.pipe.server)
+            .unwrap();
+
+        assert_eq!(
+            helper
+                .driver
+                .stream_map
+                .get(&stream_id)
+                .unwrap()
+                .send_state(),
+            SendState::Open
+        );
+        assert_eq!(
+            audit_stats.sent_stop_sending_error_code(),
+            REQUEST_CANCELLED as i64
+        );
+        helper.pipe.advance().unwrap();
+        assert_eq!(
+            helper.peer_client_send_body(stream_id, &[1], false),
+            Err(h3::Error::TransportError(quiche::Error::StreamStopped(
+                REQUEST_CANCELLED
+            )))
+        );
+
+        // The queued response can still be submitted. Because the request read
+        // side is already closed, accepting its FIN also removes the context.
+        helper.advance_and_run_loop().unwrap();
+        assert!(!helper.driver.stream_map.contains_key(&stream_id));
+        assert_eq!(helper.peer_client_poll(), Ok((stream_id, h3::Event::Data)));
+        assert_eq!(
+            helper.peer_client_recv_body_vec(stream_id, 1024),
+            Ok(vec![42])
+        );
+        assert_eq!(
+            helper.peer_client_poll(),
+            Ok((stream_id, h3::Event::Finished))
+        );
+    }
+
+    /// A partially accepted FIN-bearing body remains open until quiche accepts
+    /// the complete write.
+    #[test]
+    fn blocked_fin_does_not_select_post_fin_stop_sending_code() {
+        const REQUEST_CANCELLED: u64 = h3::WireErrorCode::RequestCancelled as u64;
+        let mut config = default_quiche_config();
+        config.set_initial_max_stream_data_bidi_local(30);
+        config.set_initial_max_stream_data_bidi_remote(30);
+        let mut helper = DriverTestHelper::<ServerHooks>::with_pipe(
+            quiche::test_utils::Pipe::with_config_and_buf(&mut config).unwrap(),
+        )
+        .unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("POST"), false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        let audit_stats = req.h3_audit_stats.clone();
+        req.send
+            .get_ref()
+            .unwrap()
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_client_poll(),
+            Ok((0, h3::Event::Headers { .. }))
+        );
+
+        req.send
+            .get_ref()
+            .unwrap()
+            .try_send(OutboundFrame::Body(Bytes::from(vec![42; 50]), true))
+            .unwrap();
+        helper.work_loop_iter().unwrap();
+        let bytes_sent = audit_stats.downstream_bytes_sent();
+        assert!(0 < bytes_sent && bytes_sent < 50);
+        let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+        assert_eq!(ctx.send_state(), SendState::Open);
+        assert_matches!(
+            ctx.queued_frame.as_ref(),
+            Some(OutboundFrame::Body(body, true))
+                if body.len() == 50 - bytes_sent as usize
+        );
+
+        helper
+            .peer_client_send_body(stream_id, &[1], false)
+            .unwrap();
+        helper.pipe.advance().unwrap();
+        drop(req.recv);
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(
+            audit_stats.sent_stop_sending_error_code(),
+            REQUEST_CANCELLED as i64
+        );
+        assert_eq!(
+            helper
+                .driver
+                .stream_map
+                .get(&stream_id)
+                .unwrap()
+                .send_state(),
+            SendState::Open
+        );
+        assert_eq!(
+            helper.peer_client_send_body(stream_id, &[1], false),
+            Err(h3::Error::TransportError(quiche::Error::StreamStopped(
+                REQUEST_CANCELLED
+            )))
+        );
+    }
+
+    #[derive(Clone, Copy)]
+    enum ResponseEnd {
+        BodyFin,
+        EmptyBodyFin,
+        BodyFinThenPeerStop,
+        Trailers,
+        Reset,
+        PeerStop,
+    }
+
+    /// Verify `STOP_SENDING_CODE_AFTER_LOCAL_FIN` is only used after quiche
+    /// accepts FIN, including FIN carried by trailers.
+    #[rstest]
+    #[case::body_fin(ResponseEnd::BodyFin)]
+    #[case::empty_body_fin(ResponseEnd::EmptyBodyFin)]
+    #[case::body_fin_then_peer_stop(ResponseEnd::BodyFinThenPeerStop)]
+    #[case::trailers(ResponseEnd::Trailers)]
+    #[case::aborted(ResponseEnd::Reset)]
+    #[case::peer_stop(ResponseEnd::PeerStop)]
+    fn server_stop_sending_code_follows_response_completion(
+        #[case] response_end: ResponseEnd,
+    ) {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("POST"), false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        let audit_stats = req.h3_audit_stats.clone();
+        req.send
+            .get_ref()
+            .unwrap()
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_matches!(
+            helper.peer_client_poll(),
+            Ok((0, h3::Event::Headers { .. }))
+        );
+
+        let (send_state, stop_code, reset_code) = match response_end {
+            ResponseEnd::BodyFin => {
+                req.send
+                    .get_ref()
+                    .unwrap()
+                    .try_send(OutboundFrame::Body(
+                        Bytes::from_static(&[42]),
+                        true,
+                    ))
+                    .unwrap();
+                helper.advance_and_run_loop().unwrap();
+
+                assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
+                assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+                assert_eq!(
+                    helper.peer_client_recv_body_vec(stream_id, 1024),
+                    Ok(vec![42])
+                );
+                assert_eq!(
+                    helper.peer_client_recv_body_vec(stream_id, 1024),
+                    Err(h3::Error::Done)
+                );
+                assert_eq!(
+                    helper.peer_client_poll(),
+                    Ok((0, h3::Event::Finished))
+                );
+                (SendState::Finished, h3::WireErrorCode::NoError, -1)
+            },
+            ResponseEnd::EmptyBodyFin => {
+                req.send
+                    .get_ref()
+                    .unwrap()
+                    .try_send(OutboundFrame::Body(Bytes::new(), true))
+                    .unwrap();
+                helper.advance_and_run_loop().unwrap();
+                assert_eq!(
+                    helper.peer_client_poll(),
+                    Ok((stream_id, h3::Event::Data))
+                );
+                assert_eq!(
+                    helper.peer_client_recv_body_vec(stream_id, 1024),
+                    Err(h3::Error::Done)
+                );
+                assert_eq!(
+                    helper.peer_client_poll(),
+                    Ok((stream_id, h3::Event::Finished))
+                );
+                (SendState::Finished, h3::WireErrorCode::NoError, -1)
+            },
+            ResponseEnd::BodyFinThenPeerStop => {
+                req.send
+                    .get_ref()
+                    .unwrap()
+                    .try_send(OutboundFrame::Body(
+                        Bytes::from_static(&[42]),
+                        true,
+                    ))
+                    .unwrap();
+                // Submit FIN locally without delivering it to the peer yet.
+                helper.work_loop_iter().unwrap();
+                assert_eq!(
+                    helper
+                        .driver
+                        .stream_map
+                        .get(&stream_id)
+                        .unwrap()
+                        .send_state(),
+                    SendState::Finished
+                );
+                helper
+                    .pipe
+                    .client
+                    .stream_shutdown(stream_id, quiche::Shutdown::Read, 4242)
+                    .unwrap();
+                helper.advance_and_run_loop().unwrap();
+                assert_eq!(audit_stats.recvd_stop_sending_error_code(), 4242);
+                (SendState::Finished, h3::WireErrorCode::NoError, -1)
+            },
+            ResponseEnd::Trailers => {
+                req.send
+                    .get_ref()
+                    .unwrap()
+                    .try_send(OutboundFrame::Trailers(
+                        make_response_trailers(),
+                        None,
+                    ))
+                    .unwrap();
+                helper.advance_and_run_loop().unwrap();
+                assert_matches!(
+                    helper.peer_client_poll(),
+                    Ok((0, h3::Event::Headers { .. }))
+                );
+                assert_eq!(
+                    helper.peer_client_poll(),
+                    Ok((0, h3::Event::Finished))
+                );
+                (SendState::Finished, h3::WireErrorCode::NoError, -1)
+            },
+            ResponseEnd::Reset => {
+                drop(req.send);
+                helper.advance_and_run_loop().unwrap();
+                let code = h3::WireErrorCode::RequestCancelled;
+                assert_eq!(
+                    helper.peer_client_poll(),
+                    Ok((stream_id, h3::Event::Reset(code as u64)))
+                );
+                (SendState::Aborted, code, code as i64)
+            },
+            ResponseEnd::PeerStop => {
+                helper
+                    .pipe
+                    .client
+                    .stream_shutdown(stream_id, quiche::Shutdown::Read, 4242)
+                    .unwrap();
+                helper.advance_and_run_loop().unwrap();
+                assert_eq!(audit_stats.recvd_stop_sending_error_code(), 4242);
+                (SendState::Aborted, h3::WireErrorCode::RequestCancelled, -1)
+            },
+        };
+        let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
+        assert_eq!(ctx.send_state(), send_state);
+        assert_matches!(&ctx.recv_state, RecvState::Open(_));
+
+        assert_eq!(helper.peer_client_send_body(stream_id, &[1], false), Ok(1));
+        helper.pipe.advance().unwrap();
+        drop(req.recv);
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(
+            helper.peer_client_send_body(stream_id, &[1], false),
+            Err(h3::Error::TransportError(quiche::Error::StreamStopped(
+                stop_code as u64
+            )))
+        );
+        assert_eq!(audit_stats.sent_stop_sending_error_code(), stop_code as i64);
+        assert_eq!(audit_stats.sent_reset_stream_error_code(), reset_code);
+    }
+
+    /// The driver selects the STOP_SENDING code when later request data makes
+    /// an already-closed application receiver observable, not when the
+    /// receiver was originally dropped.
+    #[test]
+    fn receiver_drop_detected_after_response_fin_uses_no_error() {
+        const NO_ERROR: u64 = h3::WireErrorCode::NoError as u64;
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("POST"), false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        let req = assert_matches!(
+            helper.driver_recv_server_event().unwrap(),
+            ServerH3Event::Headers{incoming_headers, ..} => { incoming_headers }
+        );
+        let audit_stats = req.h3_audit_stats.clone();
+
+        // No request DATA is pending, so the driver cannot observe this close.
+        drop(req.recv);
+        req.send
+            .get_ref()
+            .unwrap()
+            .try_send(OutboundFrame::Headers(make_response_headers(), None))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        req.send
+            .get_ref()
+            .unwrap()
+            .try_send(OutboundFrame::Body(Bytes::from_static(&[42]), true))
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+        assert_eq!(
+            helper
+                .driver
+                .stream_map
+                .get(&stream_id)
+                .unwrap()
+                .send_state(),
+            SendState::Finished
+        );
+
+        helper
+            .peer_client_send_body(stream_id, &[1], false)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(audit_stats.sent_stop_sending_error_code(), NO_ERROR as i64);
+        assert_eq!(
+            helper.peer_client_send_body(stream_id, &[1], false),
+            Err(h3::Error::TransportError(quiche::Error::StreamStopped(
+                NO_ERROR
+            )))
+        );
     }
 
     // Verify we don't send a STOP_SENDING frame if we've already processed a

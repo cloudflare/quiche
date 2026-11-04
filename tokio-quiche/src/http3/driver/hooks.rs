@@ -57,6 +57,11 @@ pub trait DriverHooks: Sized + Send + 'static {
     /// The concrete type is expected to wrap [`H3Command`].
     type Command: From<H3Command> + Send;
 
+    /// Error code used when the driver detects that the application dropped
+    /// its inbound-body receiver before the peer's send direction ended, after
+    /// quiche accepted a FIN-bearing HTTP/3 write on the local send direction.
+    const STOP_SENDING_CODE_AFTER_LOCAL_FIN: h3::WireErrorCode;
+
     /// Initializes the storage for these hooks.
     fn new(settings: &Http3Settings) -> Self;
 

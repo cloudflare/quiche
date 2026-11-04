@@ -535,7 +535,11 @@ impl<H: DriverHooks> H3Driver<H> {
                 Ok(permit) => permit,
                 Err(TrySendError::Closed(())) => {
                     // The channel has closed before we delivered a fin or reset
-                    // to the application.
+                    // to the application. Choose the code from the send state
+                    // when the driver detects the closure: quiche may have
+                    // accepted local FIN after the application dropped this
+                    // receiver. A FIN still queued or blocked leaves the send
+                    // side open.
                     // Release the channel borrow before updating the context.
                     drop(try_reserve_result);
                     match ctx.recv_state {
@@ -544,8 +548,13 @@ impl<H: DriverHooks> H3Driver<H> {
                             // An associated DATAGRAM flow can outlive its body
                             // channel.
                             {
-                                let err =
-                                    h3::WireErrorCode::RequestCancelled as u64;
+                                let wire_err_code = match ctx.send_state() {
+                                    SendState::Finished =>
+                                        H::STOP_SENDING_CODE_AFTER_LOCAL_FIN,
+                                    SendState::Open | SendState::Aborted =>
+                                        h3::WireErrorCode::RequestCancelled,
+                                };
+                                let err = wire_err_code as u64;
                                 let _ = qconn.stream_shutdown(
                                     stream_id,
                                     quiche::Shutdown::Read,
@@ -866,7 +875,9 @@ impl<H: DriverHooks> H3Driver<H> {
                 let len = body.len();
 
                 if *fin {
-                    // Drop the receiver on FIN to prevent more frames.
+                    // Drop the receiver while FIN is pending to prevent more
+                    // frames. SendState remains Open until quiche accepts the
+                    // entire FIN-bearing write.
                     // We cannot use `mpsc::Receiver::close()` because of a
                     // Tokio inconsistency when reading a closed channel.
                     // See https://github.com/tokio-rs/tokio/issues/7631.
@@ -889,7 +900,7 @@ impl<H: DriverHooks> H3Driver<H> {
                     Err(h3::Error::StreamBlocked)
                 } else {
                     if *fin {
-                        Self::on_fin_sent(ctx)?;
+                        Self::on_fin_accepted(ctx)?;
                     }
 
                     Ok(())
@@ -909,7 +920,7 @@ impl<H: DriverHooks> H3Driver<H> {
                 );
 
                 if res.is_ok() {
-                    Self::on_fin_sent(ctx)?;
+                    Self::on_fin_accepted(ctx)?;
                 }
 
                 return res;
@@ -935,22 +946,8 @@ impl<H: DriverHooks> H3Driver<H> {
         Ok(())
     }
 
-    fn on_fin_sent(ctx: &mut StreamCtx) -> h3::Result<()> {
-        match ctx.send_state {
-            SendState::Open => {},
-            SendState::Closed => {
-                debug_assert!(
-                    false,
-                    "FIN completion requires an open send direction"
-                );
-                return Err(h3::Error::InternalError);
-            },
-        }
-        ctx.cancel_recv_wait();
-        ctx.recv = None;
-        ctx.send_state = SendState::Closed;
-        ctx.audit_stats
-            .set_sent_stream_fin(StreamClosureKind::Explicit);
+    fn on_fin_accepted(ctx: &mut StreamCtx) -> h3::Result<()> {
+        ctx.handle_sent_fin()?;
         if ctx.fully_closed() {
             // Return a TransportError to trigger stream cleanup
             // instead of h3::Error::Done.
@@ -1216,6 +1213,9 @@ impl<H: DriverHooks> H3Driver<H> {
                         },
                     );
                 },
+                Err(error @ h3::Error::InternalError) => {
+                    return Err(error.into());
+                },
                 Err(h3::Error::TransportError(quiche::Error::StreamStopped(
                     e,
                 ))) => {
@@ -1269,14 +1269,15 @@ impl<H: DriverHooks> H3Driver<H> {
             match recv.try_recv() {
                 Ok(frame) => ctx.queued_frame = Some(frame),
                 Err(TryRecvError::Disconnected) => {
-                    match ctx.send_state {
+                    match ctx.send_state() {
                         SendState::Open => {
                             if ctx.associated_dgram_flow_id.is_none()
                             // An associated DATAGRAM flow can outlive its body
                             // channel.
                             {
-                                // No FIN was written before channel closure.
-                                // Reset because no more data will follow.
+                                // No FIN-bearing write was accepted before
+                                // channel closure. Reset because no more data
+                                // will follow.
                                 let err =
                                     h3::WireErrorCode::RequestCancelled as u64;
                                 let _ = qconn.stream_shutdown(
@@ -1290,7 +1291,7 @@ impl<H: DriverHooks> H3Driver<H> {
                                 }
                             }
                         },
-                        SendState::Closed => {},
+                        SendState::Finished | SendState::Aborted => {},
                     }
                     break;
                 },
