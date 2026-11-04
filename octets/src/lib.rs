@@ -24,9 +24,10 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#![forbid(unsafe_code)]
+
 /// Zero-copy abstraction for parsing and constructing network packets.
 use std::mem;
-use std::ptr;
 
 /// Maximum value that can be encoded via varint.
 pub const MAX_VAR_INT: u64 = 4_611_686_018_427_387_903;
@@ -103,15 +104,10 @@ macro_rules! peek_u {
         }
 
         static_assert!($len <= mem::size_of::<$ty>());
-        let mut out: $ty = 0;
-        unsafe {
-            let dst = &mut out as *mut $ty as *mut u8;
-            let off = (mem::size_of::<$ty>() - len) as isize;
+        let mut out = [0; mem::size_of::<$ty>()];
+        out[mem::size_of::<$ty>() - len..].copy_from_slice(&src[..len]);
 
-            ptr::copy_nonoverlapping(src.as_ptr(), dst.offset(off), len);
-        };
-
-        Ok(<$ty>::from_be(out))
+        Ok(<$ty>::from_be_bytes(out))
     }};
 }
 
@@ -138,12 +134,8 @@ macro_rules! put_u {
         let dst = &mut $b.buf[$b.off..($b.off + len)];
 
         static_assert!($len <= mem::size_of::<$ty>());
-        unsafe {
-            let src = &<$ty>::to_be(v) as *const $ty as *const u8;
-            let off = (mem::size_of::<$ty>() - len) as isize;
-
-            ptr::copy_nonoverlapping(src.offset(off), dst.as_mut_ptr(), len);
-        }
+        let src = <$ty>::to_be_bytes(v);
+        dst.copy_from_slice(&src[mem::size_of::<$ty>() - len..]);
 
         $b.off += $len;
 
