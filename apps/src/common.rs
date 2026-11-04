@@ -1704,7 +1704,6 @@ impl HttpConn for Http3Conn {
     }
 }
 
-
 #[cfg(test)]
 mod http09_request_tests {
     use super::*;
