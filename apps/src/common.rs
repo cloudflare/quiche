@@ -1747,7 +1747,19 @@ mod http09_request_tests {
     #[test]
     fn blocked_http09_request_retries_without_losing_stream_or_offset() {
         let mut req = request();
+        let request_line = req.request_line.clone();
 
+        let complete = send_http09_request(&mut req, 0, |stream_id, data, fin| {
+            assert_eq!(stream_id, 0);
+            assert_eq!(data, request_line.as_bytes());
+            assert!(fin);
+            Ok(8)
+        })
+        .unwrap();
+        assert!(!complete);
+        assert_eq!(req.sent_bytes, 8);
+
+        let remaining = &request_line.as_bytes()[8..];
         assert!(matches!(
             send_http09_request(&mut req, 0, |_stream_id, _data, _fin| {
                 Err(quiche::Error::Done)
@@ -1755,11 +1767,11 @@ mod http09_request_tests {
             Err(quiche::Error::Done)
         ));
         assert_eq!(req.stream_id, Some(0));
-        assert_eq!(req.sent_bytes, 0);
+        assert_eq!(req.sent_bytes, 8);
 
         let complete = send_http09_request(&mut req, 0, |stream_id, data, fin| {
             assert_eq!(stream_id, 0);
-            assert_eq!(data, req_line());
+            assert_eq!(data, remaining);
             assert!(fin);
             Ok(data.len())
         })
@@ -1767,9 +1779,5 @@ mod http09_request_tests {
 
         assert!(complete);
         assert_eq!(req.sent_bytes, req.request_line.len());
-    }
-
-    fn req_line() -> &'static [u8] {
-        b"GET /unrelenting-cool-pirate\r\n"
     }
 }
