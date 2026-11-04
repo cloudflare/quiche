@@ -53,7 +53,7 @@ impl Default for AddrValidationTokenManager {
 }
 
 impl AddrValidationTokenManager {
-    pub(super) fn gen(
+    pub(super) fn generate(
         &self, original_dcid: &[u8], client_addr: SocketAddr,
     ) -> Vec<u8> {
         let ip_bytes = match client_addr.ip() {
@@ -126,13 +126,13 @@ mod tests {
             assert!(!all_nulls);
         };
 
-        let token = manager.gen(b"foo", "127.0.0.1:1337".parse().unwrap());
+        let token = manager.generate(b"foo", "127.0.0.1:1337".parse().unwrap());
 
         assert_tag_generated(&token);
         assert_eq!(token[HMAC_TAG_LEN..HMAC_TAG_LEN + 4], [127, 0, 0, 1]);
         assert_eq!(&token[HMAC_TAG_LEN + 4..], b"foo");
 
-        let token = manager.gen(b"bar", "[::1]:1338".parse().unwrap());
+        let token = manager.generate(b"bar", "[::1]:1338".parse().unwrap());
 
         assert_tag_generated(&token);
 
@@ -148,7 +148,7 @@ mod tests {
         let manager = AddrValidationTokenManager::default();
 
         let addr = "127.0.0.1:1337".parse().unwrap();
-        let token = manager.gen(b"foo", addr);
+        let token = manager.generate(b"foo", addr);
 
         assert_eq!(
             manager
@@ -158,7 +158,7 @@ mod tests {
         );
 
         let addr = "[::1]:1338".parse().unwrap();
-        let token = manager.gen(b"barbaz", addr);
+        let token = manager.generate(b"barbaz", addr);
 
         assert_eq!(
             manager
@@ -175,20 +175,29 @@ mod tests {
         let v6_addr = "[::1]:1338".parse().unwrap();
 
         for addr in &[v4_addr, v6_addr] {
-            assert!(manager
-                .validate_and_extract_original_dcid(b"", *addr)
-                .is_err());
+            assert!(
+                manager
+                    .validate_and_extract_original_dcid(b"", *addr)
+                    .is_err()
+            );
 
-            assert!(manager
-                .validate_and_extract_original_dcid(&[1u8; HMAC_TAG_LEN], *addr)
-                .is_err());
+            assert!(
+                manager
+                    .validate_and_extract_original_dcid(
+                        &[1u8; HMAC_TAG_LEN],
+                        *addr
+                    )
+                    .is_err()
+            );
 
-            assert!(manager
-                .validate_and_extract_original_dcid(
-                    &[1u8; HMAC_TAG_LEN + 1],
-                    *addr
-                )
-                .is_err());
+            assert!(
+                manager
+                    .validate_and_extract_original_dcid(
+                        &[1u8; HMAC_TAG_LEN + 1],
+                        *addr
+                    )
+                    .is_err()
+            );
         }
     }
 
@@ -196,23 +205,27 @@ mod tests {
     fn validate_err_ips_mismatch() {
         let manager = AddrValidationTokenManager::default();
 
-        let token = manager.gen(b"foo", "127.0.0.1:1337".parse().unwrap());
+        let token = manager.generate(b"foo", "127.0.0.1:1337".parse().unwrap());
 
-        assert!(manager
-            .validate_and_extract_original_dcid(
-                &token,
-                "127.0.0.2:1337".parse().unwrap()
-            )
-            .is_err());
+        assert!(
+            manager
+                .validate_and_extract_original_dcid(
+                    &token,
+                    "127.0.0.2:1337".parse().unwrap()
+                )
+                .is_err()
+        );
 
-        let token = manager.gen(b"barbaz", "[::1]:1338".parse().unwrap());
+        let token = manager.generate(b"barbaz", "[::1]:1338".parse().unwrap());
 
-        assert!(manager
-            .validate_and_extract_original_dcid(
-                &token,
-                "[::2]:1338".parse().unwrap()
-            )
-            .is_err());
+        assert!(
+            manager
+                .validate_and_extract_original_dcid(
+                    &token,
+                    "[::2]:1338".parse().unwrap()
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -220,12 +233,14 @@ mod tests {
         let manager = AddrValidationTokenManager::default();
 
         let addr = "127.0.0.1:1337".parse().unwrap();
-        let mut token = manager.gen(b"foo", addr);
+        let mut token = manager.generate(b"foo", addr);
 
         token[..HMAC_TAG_LEN].copy_from_slice(&[1u8; HMAC_TAG_LEN]);
 
-        assert!(manager
-            .validate_and_extract_original_dcid(&token, addr)
-            .is_err());
+        assert!(
+            manager
+                .validate_and_extract_original_dcid(&token, addr)
+                .is_err()
+        );
     }
 }

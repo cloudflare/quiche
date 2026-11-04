@@ -27,8 +27,8 @@
 use foundations::settings::settings;
 use serde::Deserialize;
 use serde::Deserializer;
-use serde_with::serde_as;
 use serde_with::DurationMilliSeconds;
+use serde_with::serde_as;
 use std::time::Duration;
 
 pub use qlog::writer::QlogCompression;

@@ -36,13 +36,13 @@ use std::cmp;
 use std::time::Duration;
 use std::time::Instant;
 
-use super::rtt::RttStats;
 use super::Acked;
 use super::Sent;
+use super::rtt::RttStats;
 
-use super::reno;
 use super::Congestion;
 use super::CongestionControlOps;
+use super::reno;
 use crate::recovery::MINIMUM_WINDOW_PACKETS;
 
 pub(crate) static CUBIC: CongestionControlOps = CongestionControlOps {
@@ -172,26 +172,25 @@ fn on_packet_sent(
     // Shift epoch start to keep cwnd growth on the cubic curve.
     let cubic = &mut r.cubic_state;
 
-    if bytes_in_flight == 0 {
-        if let Some(recovery_start_time) = r.congestion_recovery_start_time {
-            // Measure idle from the most recent activity: either the
-            // last ACK (approximating when bif hit 0) or the last data
-            // send, whichever is later. Using last_sent_time alone
-            // would inflate the delta by a full RTT when cwnd is small
-            // and bif transiently hits 0 between ACK and send.
-            let idle_start = if r.enable_cubic_idle_restart_fix {
-                cmp::max(cubic.last_ack_time, cubic.last_sent_time)
-            } else {
-                cubic.last_sent_time
-            };
+    if bytes_in_flight == 0 &&
+        let Some(recovery_start_time) = r.congestion_recovery_start_time
+    {
+        // Measure idle from the most recent activity: either the
+        // last ACK (approximating when bif hit 0) or the last data
+        // send, whichever is later. Using last_sent_time alone
+        // would inflate the delta by a full RTT when cwnd is small
+        // and bif transiently hits 0 between ACK and send.
+        let idle_start = if r.enable_cubic_idle_restart_fix {
+            cmp::max(cubic.last_ack_time, cubic.last_sent_time)
+        } else {
+            cubic.last_sent_time
+        };
 
-            if let Some(idle_start) = idle_start {
-                if idle_start < now {
-                    let delta = now - idle_start;
-                    r.congestion_recovery_start_time =
-                        Some(recovery_start_time + delta);
-                }
-            }
+        if let Some(idle_start) = idle_start &&
+            idle_start < now
+        {
+            let delta = now - idle_start;
+            r.congestion_recovery_start_time = Some(recovery_start_time + delta);
         }
     }
 
@@ -447,10 +446,10 @@ mod tests {
 
     use crate::CongestionControlAlgorithm;
 
+    use crate::recovery::RecoveryOps;
     use crate::recovery::congestion::hystart;
     use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::congestion::test_sender::TestSender;
-    use crate::recovery::RecoveryOps;
 
     fn test_sender() -> TestSender {
         TestSender::new(CongestionControlAlgorithm::CUBIC, false)
@@ -549,6 +548,7 @@ mod tests {
 
         // Shift current time by 1 RTT.
         sender.update_rtt(rtt);
+
         // Exit from the recovery.
         sender.advance_time(rtt);
 
@@ -559,6 +559,7 @@ mod tests {
         for _ in 0..8 {
             sender.send_packet(size);
         }
+
         sender.advance_time(rtt);
 
         sender.ack_n_packets(1, size);
@@ -587,10 +588,12 @@ mod tests {
 
         let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
         sender.hystart.start_round(next_rnd);
+
         // Send 1st round packets.
         for _ in 0..n_rtt_sample {
             sender.send_packet(size);
         }
+
         sender.update_app_limited(false);
 
         // Receiving Acks.
@@ -608,10 +611,12 @@ mod tests {
 
         let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
         sender.hystart.start_round(next_rnd);
+
         // Send 2nd round packets.
         for _ in 0..n_rtt_sample {
             sender.send_packet(size);
         }
+
         sender.update_app_limited(false);
 
         // Receiving Acks.
@@ -622,6 +627,7 @@ mod tests {
             cwnd_prev = sender.congestion_window();
             sender.update_rtt(rtt_2nd);
             sender.ack_n_packets(1, size);
+
             // Keep increasing RTT so that hystart exits to CSS.
             rtt_2nd += rtt_2nd.saturating_add(Duration::from_millis(4));
         }
@@ -638,10 +644,12 @@ mod tests {
 
         let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
         sender.hystart.start_round(next_rnd);
+
         // Send 3nd round packets.
         for _ in 0..n_rtt_sample {
             sender.send_packet(size);
         }
+
         sender.update_app_limited(false);
 
         // Receiving Acks.
@@ -670,10 +678,12 @@ mod tests {
 
         let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
         sender.hystart.start_round(next_rnd);
+
         // Send 1st round packets.
         for _ in 0..n_rtt_sample {
             sender.send_packet(size);
         }
+
         sender.update_app_limited(false);
 
         // Receiving Acks.
@@ -687,12 +697,14 @@ mod tests {
         // 2nd round.
         let mut rtt_2nd = Duration::from_millis(100);
         sender.advance_time(rtt_2nd);
+
         // Send 2nd round packets.
         let next_rnd = sender.next_pkt + n_rtt_sample as u64 - 1;
         sender.hystart.start_round(next_rnd);
         for _ in 0..n_rtt_sample {
             sender.send_packet(size);
         }
+
         sender.update_app_limited(false);
 
         // Receiving Acks.
@@ -703,6 +715,7 @@ mod tests {
             cwnd_prev = sender.congestion_window();
             sender.update_rtt(rtt_2nd);
             sender.ack_n_packets(1, size);
+
             // Keep increasing RTT so that hystart exits to CSS.
             rtt_2nd += rtt_2nd.saturating_add(Duration::from_millis(4));
         }
@@ -722,12 +735,14 @@ mod tests {
             for _ in 0..n_rtt_sample {
                 sender.send_packet(size);
             }
+
             sender.update_app_limited(false);
 
             // Receiving Acks.
             sender.update_rtt(rtt_css);
             sender.ack_n_packets(n_rtt_sample, size);
         }
+
         // Now we are in congestion avoidance.
         assert_eq!(sender.congestion_window(), sender.ssthresh.get());
     }
@@ -743,6 +758,7 @@ mod tests {
         for _ in 0..sender.initial_congestion_window_packets {
             sender.send_packet(size);
         }
+
         sender.lose_n_packets(1, size, None);
 
         // After congestion event, cwnd will be reduced.
@@ -824,6 +840,7 @@ mod tests {
         // Shift current time by 1 RTT.
         let rtt = Duration::from_millis(100);
         sender.update_rtt(rtt);
+
         // Exit from the recovery.
         sender.advance_time(rtt);
 
@@ -837,6 +854,7 @@ mod tests {
         for _ in 0..7 {
             sender.send_packet(size);
         }
+
         // ACK the packet that was sent before the loss event.
         sender.ack_n_packets(1, size);
         sender.advance_time(rtt);
@@ -918,6 +936,7 @@ mod tests {
             sender.congestion_window,
             post_loss_cwnd,
         );
+
         // Recovery start hasn't changed.
         assert_eq!(
             sender.congestion_recovery_start_time.unwrap() -
@@ -941,6 +960,7 @@ mod tests {
         for _ in 0..sender.initial_congestion_window_packets {
             sender.send_packet(size);
         }
+
         sender.update_rtt(rtt);
         sender.advance_time(rtt);
         sender.lose_n_packets(1, size, None);
@@ -969,6 +989,7 @@ mod tests {
         for _ in 0..packets_per_burst {
             sender.send_packet(size);
         }
+
         sender.advance_time(rtt);
         sender.ack_n_packets(packets_per_burst, size);
 
@@ -1008,6 +1029,7 @@ mod tests {
         for _ in 0..sender.initial_congestion_window_packets {
             sender.send_packet(size);
         }
+
         sender.update_rtt(rtt);
         sender.advance_time(rtt);
         sender.lose_n_packets(1, size, None);

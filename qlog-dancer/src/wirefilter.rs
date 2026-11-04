@@ -24,8 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use qlog::events::quic::QuicFrame;
 use qlog::events::EventData;
+use qlog::events::quic::QuicFrame;
 use qlog::reader::Event;
 use std::iter::FromIterator;
 use std::vec;
@@ -165,12 +165,12 @@ pub fn filter_sqlog_events(mut events: Vec<Event>, filter: &str) -> Vec<Event> {
 #[cfg(test)]
 mod tests {
     use crate::wirefilter::filter_sqlog_events;
+    use qlog::events::EventData::QuicPacketSent;
+    use qlog::events::RawInfo;
     use qlog::events::quic::PacketHeader;
     use qlog::events::quic::PacketSent;
     use qlog::events::quic::PacketType::Initial;
     use qlog::events::quic::QuicFrame;
-    use qlog::events::EventData::QuicPacketSent;
-    use qlog::events::RawInfo;
     use qlog::reader::Event;
 
     fn stream_frame(stream_id: u64) -> QuicFrame {

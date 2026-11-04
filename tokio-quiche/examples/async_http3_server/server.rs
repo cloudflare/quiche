@@ -27,19 +27,21 @@
 use crate::body::ExampleBody;
 use futures_util::Future;
 use futures_util::SinkExt;
-use http::request;
-use http::uri::PathAndQuery;
-use http::uri::{
-    self,
-};
 use http::HeaderName;
 use http::HeaderValue;
 use http::Request;
 use http::Response;
 use http::Uri;
+use http::request;
+use http::uri::PathAndQuery;
+use http::uri::{
+    self,
+};
 use quiche::h3::Header;
 use quiche::h3::NameValue;
 use std::sync::Arc;
+use tokio_quiche::BoxError;
+use tokio_quiche::QuicResult;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::http3::driver::OutboundFrame;
@@ -47,8 +49,6 @@ use tokio_quiche::http3::driver::OutboundFrameSender;
 use tokio_quiche::http3::driver::RawPriorityValue;
 use tokio_quiche::http3::driver::ServerEventStream;
 use tokio_quiche::http3::driver::ServerH3Event;
-use tokio_quiche::BoxError;
-use tokio_quiche::QuicResult;
 
 /// A simple [service function].
 ///

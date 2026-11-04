@@ -29,8 +29,8 @@
 use serde::Serialize;
 use serde::Serializer;
 
-use crate::quic;
 use crate::BoxError;
+use crate::quic;
 
 /// Type of handshake latency that was measured by a metric.
 #[derive(Clone, Eq, Hash, PartialEq, Serialize)]
@@ -189,6 +189,7 @@ impl Serialize for H3Error {
                 _ => "H3_UNKNOWN",
             }
         };
+
         serializer.serialize_str(v)
     }
 }
@@ -229,6 +230,7 @@ impl Serialize for QuicError {
 
             _ => "QUIC_UNKNOWN",
         };
+
         serializer.serialize_str(v)
     }
 }

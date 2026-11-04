@@ -201,6 +201,7 @@ fn main() {
 
                         panic!("send() failed: {e:?}");
                     }
+
                     continue 'read;
                 }
 
@@ -238,6 +239,7 @@ fn main() {
 
                         panic!("send() failed: {e:?}");
                     }
+
                     continue 'read;
                 }
 

@@ -27,14 +27,14 @@
 use std::time::Instant;
 
 use self::recovery::Acked;
-use super::bandwidth::Bandwidth;
 use super::RecoveryConfig;
 use super::Sent;
-use crate::recovery::rtt;
-use crate::recovery::rtt::RttStats;
-use crate::recovery::CongestionControlAlgorithm;
+use super::bandwidth::Bandwidth;
 use crate::StartupExit;
 use crate::StartupExitReason;
+use crate::recovery::CongestionControlAlgorithm;
+use crate::recovery::rtt;
+use crate::recovery::rtt::RttStats;
 
 pub struct SsThresh {
     // Current slow start threshold.  Defaults to usize::MAX which
@@ -74,8 +74,10 @@ impl SsThresh {
                 // In normal slow start, attribute the exit to loss.
                 StartupExitReason::Loss
             };
+
             self.startup_exit = Some(StartupExit::new(ssthresh, None, reason));
         }
+
         self.ssthresh = ssthresh;
     }
 }
@@ -342,9 +344,9 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
 mod tests {
     use super::*;
     #[cfg(feature = "congestion_window_unchecked_available")]
-    use crate::test_utils;
-    #[cfg(feature = "congestion_window_unchecked_available")]
     use crate::Config;
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    use crate::test_utils;
     #[cfg(feature = "congestion_window_unchecked_available")]
     use rstest::rstest;
     #[cfg(feature = "congestion_window_unchecked_available")]

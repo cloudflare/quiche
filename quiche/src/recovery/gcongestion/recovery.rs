@@ -1,9 +1,9 @@
-use crate::packet;
-use crate::recovery::OnLossDetectionTimeoutOutcome;
-use crate::recovery::INITIAL_TIME_THRESHOLD_OVERHEAD;
-use crate::recovery::TIME_THRESHOLD_OVERHEAD_MULTIPLIER;
 use crate::Error;
 use crate::Result;
+use crate::packet;
+use crate::recovery::INITIAL_TIME_THRESHOLD_OVERHEAD;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
+use crate::recovery::TIME_THRESHOLD_OVERHEAD_MULTIPLIER;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -19,13 +19,17 @@ use crate::recovery::QlogMetrics;
 
 use crate::frame;
 
-use crate::recovery::bytes_in_flight::BytesInFlight;
-use crate::recovery::gcongestion::Bandwidth;
-use crate::recovery::rtt::RttStats;
 use crate::recovery::CongestionControlAlgorithm;
+use crate::recovery::GRANULARITY;
 use crate::recovery::HandshakeStatus;
+use crate::recovery::INITIAL_PACKET_THRESHOLD;
+use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::LossDetectionTimer;
+use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
+use crate::recovery::MAX_PACKET_THRESHOLD;
+use crate::recovery::MAX_PTO_PROBES_COUNT;
 use crate::recovery::OnAckReceivedOutcome;
+use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 use crate::recovery::RangeSet;
 use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryOps;
@@ -33,18 +37,14 @@ use crate::recovery::RecoveryStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::Sent;
 use crate::recovery::StartupExit;
-use crate::recovery::GRANULARITY;
-use crate::recovery::INITIAL_PACKET_THRESHOLD;
-use crate::recovery::INITIAL_TIME_THRESHOLD;
-use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
-use crate::recovery::MAX_PACKET_THRESHOLD;
-use crate::recovery::MAX_PTO_PROBES_COUNT;
-use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
+use crate::recovery::bytes_in_flight::BytesInFlight;
+use crate::recovery::gcongestion::Bandwidth;
+use crate::recovery::rtt::RttStats;
 
-use super::bbr2::BBRv2;
-use super::pacer::Pacer;
 use super::Acked;
 use super::Lost;
+use super::bbr2::BBRv2;
+use super::pacer::Pacer;
 
 // Congestion Control
 const MAX_WINDOW_PACKETS: usize = 20_000;
@@ -155,6 +155,7 @@ impl RecoveryEpoch {
                         return sent_bytes;
                     }
                 }
+
                 0
             })
             .sum();
@@ -230,6 +231,7 @@ impl RecoveryEpoch {
                                 self.pkts_in_flight -= 1;
                                 acked_bytes += sent_bytes;
                             }
+
                             newly_acked.push(Acked {
                                 pkt_num: *pkt_num,
                                 time_sent,
@@ -1302,9 +1304,11 @@ mod tests {
             } else {
                 MAX_PACKET_THRESHOLD
             };
+
             assert_eq!(loss_thresh.pkt_thresh().unwrap(), new_packet_threshold);
             assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
         }
+
         // Packet threshold is capped at MAX_PACKET_THRESHOLD
         assert_eq!(loss_thresh.pkt_thresh().unwrap(), MAX_PACKET_THRESHOLD);
         assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
@@ -1355,6 +1359,7 @@ mod tests {
             assert_eq!(loss_thresh.pkt_thresh(), None);
             assert_eq!(loss_thresh.time_thresh(), new_time_threshold);
         }
+
         // Time threshold is capped at 2.0.
         assert_eq!(loss_thresh.pkt_thresh(), None);
         assert_eq!(loss_thresh.time_thresh(), MAX_TIME_THRESHOLD);

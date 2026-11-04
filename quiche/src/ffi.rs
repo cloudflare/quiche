@@ -92,15 +92,15 @@ use libc::c_int as socklen_t;
 use libc::socklen_t;
 
 #[cfg(windows)]
-use windows_sys::Win32::Networking::WinSock::IN6_ADDR_0;
-#[cfg(windows)]
 use windows_sys::Win32::Networking::WinSock::IN_ADDR_0;
+#[cfg(windows)]
+use windows_sys::Win32::Networking::WinSock::IN6_ADDR_0;
 #[cfg(windows)]
 use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN6_0;
 
 use crate::*;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_version() -> *const u8 {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
     VERSION.as_ptr()
@@ -124,7 +124,7 @@ impl log::Log for Logger {
     fn flush(&self) {}
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_enable_debug_logging(
     cb: extern "C" fn(line: *const u8, argp: *mut c_void), argp: *mut c_void,
 ) -> c_int {
@@ -140,7 +140,7 @@ pub extern "C" fn quiche_enable_debug_logging(
     0
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_new(version: u32) -> *mut Config {
     match Config::new(version) {
         Ok(c) => Box::into_raw(Box::new(c)),
@@ -149,7 +149,7 @@ pub extern "C" fn quiche_config_new(version: u32) -> *mut Config {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_load_cert_chain_from_pem_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
@@ -162,7 +162,7 @@ pub extern "C" fn quiche_config_load_cert_chain_from_pem_file(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_load_priv_key_from_pem_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
@@ -175,7 +175,7 @@ pub extern "C" fn quiche_config_load_priv_key_from_pem_file(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_load_verify_locations_from_file(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
@@ -188,7 +188,7 @@ pub extern "C" fn quiche_config_load_verify_locations_from_file(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_load_verify_locations_from_directory(
     config: &mut Config, path: *const c_char,
 ) -> c_int {
@@ -201,7 +201,7 @@ pub extern "C" fn quiche_config_load_verify_locations_from_directory(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_curves_list(
     config: &mut Config, curves: *const c_char,
 ) -> c_int {
@@ -214,39 +214,39 @@ pub extern "C" fn quiche_config_set_curves_list(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_verify_peer(config: &mut Config, v: bool) {
     config.verify_peer(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_grease(config: &mut Config, v: bool) {
     config.grease(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_discover_pmtu(config: &mut Config, v: bool) {
     config.discover_pmtu(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_pmtud_max_probes(
     config: &mut Config, max_probes: u8,
 ) {
     config.set_pmtud_max_probes(max_probes);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_log_keys(config: &mut Config) {
     config.log_keys();
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_enable_early_data(config: &mut Config) {
     config.enable_early_data();
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 /// Corresponds to the `Config::set_application_protos_wire_format` Rust
 /// function.
 pub extern "C" fn quiche_config_set_application_protos(
@@ -261,89 +261,89 @@ pub extern "C" fn quiche_config_set_application_protos(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_max_amplification_factor(
     config: &mut Config, v: usize,
 ) {
     config.set_max_amplification_factor(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_max_idle_timeout(
     config: &mut Config, v: u64,
 ) {
     config.set_max_idle_timeout(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_max_recv_udp_payload_size(
     config: &mut Config, v: size_t,
 ) {
     config.set_max_recv_udp_payload_size(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_initial_max_data(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_data(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_initial_max_stream_data_bidi_local(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_stream_data_bidi_local(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_initial_max_stream_data_bidi_remote(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_stream_data_bidi_remote(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_initial_max_stream_data_uni(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_stream_data_uni(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_initial_max_streams_bidi(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_streams_bidi(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_initial_max_streams_uni(
     config: &mut Config, v: u64,
 ) {
     config.set_initial_max_streams_uni(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_ack_delay_exponent(
     config: &mut Config, v: u64,
 ) {
     config.set_ack_delay_exponent(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_max_ack_delay(config: &mut Config, v: u64) {
     config.set_max_ack_delay(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_disable_active_migration(
     config: &mut Config, v: bool,
 ) {
     config.set_disable_active_migration(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_cc_algorithm_name(
     config: &mut Config, name: *const c_char,
 ) -> c_int {
@@ -355,14 +355,14 @@ pub extern "C" fn quiche_config_set_cc_algorithm_name(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_cc_algorithm(
     config: &mut Config, algo: CongestionControlAlgorithm,
 ) {
     config.set_cc_algorithm(algo);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_initial_congestion_window_packets(
     config: &mut Config, packets: size_t,
 ) {
@@ -373,31 +373,31 @@ pub extern "C" fn quiche_config_set_initial_congestion_window_packets(
 ///
 /// Defaults to `usize::MAX`. Other congestion control algorithms are unchanged.
 /// Recovery probes can bypass the fixed window.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_unchecked_congestion_window(
     config: &mut Config, window: size_t,
 ) {
     config.set_unchecked_congestion_window(window);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_max_outstanding_sent_packets(
     config: &mut Config, max_packets: size_t,
 ) {
     config.set_max_outstanding_sent_packets(NonZeroUsize::new(max_packets));
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_enable_hystart(config: &mut Config, v: bool) {
     config.enable_hystart(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_enable_pacing(config: &mut Config, v: bool) {
     config.enable_pacing(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_enable_cubic_idle_restart_fix(
     config: &mut Config, v: bool,
 ) {
@@ -405,18 +405,18 @@ pub extern "C" fn quiche_config_set_enable_cubic_idle_restart_fix(
 }
 
 /// Deprecated: this is now always enabled and this function is a no-op.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_use_initial_max_data_as_flow_control_win(
     _config: &mut Config, _v: bool,
 ) {
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_max_pacing_rate(config: &mut Config, v: u64) {
     config.set_max_pacing_rate(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_enable_dgram(
     config: &mut Config, enabled: bool, recv_queue_len: size_t,
     send_queue_len: size_t,
@@ -424,35 +424,35 @@ pub extern "C" fn quiche_config_enable_dgram(
     config.enable_dgram(enabled, recv_queue_len, send_queue_len);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_max_send_udp_payload_size(
     config: &mut Config, v: size_t,
 ) {
     config.set_max_send_udp_payload_size(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_max_connection_window(
     config: &mut Config, v: u64,
 ) {
     config.set_max_connection_window(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_max_stream_window(
     config: &mut Config, v: u64,
 ) {
     config.set_max_stream_window(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_active_connection_id_limit(
     config: &mut Config, v: u64,
 ) {
     config.set_active_connection_id_limit(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_stateless_reset_token(
     config: &mut Config, v: *const u8,
 ) {
@@ -461,18 +461,19 @@ pub extern "C" fn quiche_config_set_stateless_reset_token(
         Ok(rt) => rt,
         Err(_) => unreachable!(),
     };
+
     let reset_token = u128::from_be_bytes(reset_token);
     config.set_stateless_reset_token(Some(reset_token));
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_disable_dcid_reuse(
     config: &mut Config, v: bool,
 ) {
     config.set_disable_dcid_reuse(v);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_set_ticket_key(
     config: &mut Config, key: *const u8, key_len: size_t,
 ) -> c_int {
@@ -485,14 +486,14 @@ pub extern "C" fn quiche_config_set_ticket_key(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_config_free(config: *mut Config) {
     if !config.is_null() {
         drop(unsafe { Box::from_raw(config) });
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_header_info(
     buf: *mut u8, buf_len: size_t, dcil: size_t, version: *mut u32, ty: *mut u8,
     scid: *mut u8, scid_len: *mut size_t, dcid: *mut u8, dcid_len: *mut size_t,
@@ -557,7 +558,7 @@ pub extern "C" fn quiche_header_info(
     0
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_accept(
     scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
@@ -584,7 +585,7 @@ pub extern "C" fn quiche_accept(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_connect(
     server_name: *const c_char, scid: *const u8, scid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
@@ -609,7 +610,7 @@ pub extern "C" fn quiche_connect(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_negotiate_version(
     scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
     out: *mut u8, out_len: size_t,
@@ -629,12 +630,12 @@ pub extern "C" fn quiche_negotiate_version(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_version_is_supported(version: u32) -> bool {
     version_is_supported(version)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_retry(
     scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
     new_scid: *const u8, new_scid_len: size_t, token: *const u8,
@@ -659,7 +660,7 @@ pub extern "C" fn quiche_retry(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(feature = "custom-client-dcid")]
 pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
     scid: *const u8, scid_len: size_t, dcid: *const u8, dcid_len: size_t,
@@ -704,7 +705,7 @@ pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(not(feature = "custom-client-dcid"))]
 #[allow(unused_variables)]
 pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
@@ -717,7 +718,7 @@ pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
     ptr::null_mut()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_new_with_tls(
     scid: *const u8, scid_len: size_t, odcid: *const u8, odcid_len: size_t,
     local: &sockaddr, local_len: socklen_t, peer: &sockaddr, peer_len: socklen_t,
@@ -757,7 +758,7 @@ pub extern "C" fn quiche_conn_new_with_tls(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_set_keylog_path(
     conn: &mut Connection, path: *const c_char,
 ) -> bool {
@@ -779,7 +780,7 @@ pub extern "C" fn quiche_conn_set_keylog_path(
     true
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(unix)]
 pub extern "C" fn quiche_conn_set_keylog_fd(conn: &mut Connection, fd: c_int) {
     let f = unsafe { std::fs::File::from_raw_fd(fd) };
@@ -788,7 +789,7 @@ pub extern "C" fn quiche_conn_set_keylog_fd(conn: &mut Connection, fd: c_int) {
     conn.set_keylog(Box::new(writer));
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(feature = "qlog")]
 pub extern "C" fn quiche_conn_set_qlog_path(
     conn: &mut Connection, path: *const c_char, log_title: *const c_char,
@@ -819,7 +820,7 @@ pub extern "C" fn quiche_conn_set_qlog_path(
     true
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(all(unix, feature = "qlog"))]
 pub extern "C" fn quiche_conn_set_qlog_fd(
     conn: &mut Connection, fd: c_int, log_title: *const c_char,
@@ -838,7 +839,7 @@ pub extern "C" fn quiche_conn_set_qlog_fd(
     );
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_set_session(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> c_int {
@@ -851,7 +852,7 @@ pub extern "C" fn quiche_conn_set_session(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_set_max_idle_timeout(
     conn: &mut Connection, v: u64,
 ) -> c_int {
@@ -879,7 +880,7 @@ impl From<&RecvInfo<'_>> for crate::RecvInfo {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_recv(
     conn: &mut Connection, buf: *mut u8, buf_len: size_t, info: &RecvInfo,
 ) -> ssize_t {
@@ -906,7 +907,7 @@ pub struct SendInfo {
     at: timespec,
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_send(
     conn: &mut Connection, out: *mut u8, out_len: size_t, out_info: &mut SendInfo,
 ) -> ssize_t {
@@ -930,7 +931,7 @@ pub extern "C" fn quiche_conn_send(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_send_on_path(
     conn: &mut Connection, out: *mut u8, out_len: size_t, from: *const sockaddr,
     from_len: socklen_t, to: *const sockaddr, to_len: socklen_t,
@@ -958,7 +959,7 @@ pub extern "C" fn quiche_conn_send_on_path(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
     fin: &mut bool, out_error_code: &mut u64,
@@ -978,6 +979,7 @@ pub extern "C" fn quiche_conn_stream_recv(
                 Error::StreamStopped(error) => *out_error_code = error,
                 _ => {},
             }
+
             return e.to_c();
         },
     };
@@ -987,7 +989,7 @@ pub extern "C" fn quiche_conn_stream_recv(
     out_len as ssize_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_send(
     conn: &mut Connection, stream_id: u64, buf: *const u8, buf_len: size_t,
     fin: bool, out_error_code: &mut u64,
@@ -1012,12 +1014,13 @@ pub extern "C" fn quiche_conn_stream_send(
                 Error::StreamStopped(error) => *out_error_code = error,
                 _ => {},
             }
+
             e.to_c()
         },
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_priority(
     conn: &mut Connection, stream_id: u64, urgency: u8, incremental: bool,
 ) -> c_int {
@@ -1028,7 +1031,7 @@ pub extern "C" fn quiche_conn_stream_priority(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_shutdown(
     conn: &mut Connection, stream_id: u64, direction: Shutdown, err: u64,
 ) -> c_int {
@@ -1039,7 +1042,7 @@ pub extern "C" fn quiche_conn_stream_shutdown(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_capacity(
     conn: &mut Connection, stream_id: u64,
 ) -> ssize_t {
@@ -1050,19 +1053,19 @@ pub extern "C" fn quiche_conn_stream_capacity(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_readable(
     conn: &Connection, stream_id: u64,
 ) -> bool {
     conn.stream_readable(stream_id)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_readable_next(conn: &mut Connection) -> i64 {
     conn.stream_readable_next().map(|v| v as i64).unwrap_or(-1)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_writable(
     conn: &mut Connection, stream_id: u64, len: usize,
 ) -> c_int {
@@ -1075,41 +1078,41 @@ pub extern "C" fn quiche_conn_stream_writable(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_writable_next(conn: &mut Connection) -> i64 {
     conn.stream_writable_next().map(|v| v as i64).unwrap_or(-1)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stream_finished(
     conn: &Connection, stream_id: u64,
 ) -> bool {
     conn.stream_finished(stream_id)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_readable(conn: &Connection) -> *mut StreamIter {
     Box::into_raw(Box::new(conn.readable()))
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
     Box::into_raw(Box::new(conn.writable()))
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_max_send_udp_payload_size(
     conn: &Connection,
 ) -> usize {
     conn.max_send_udp_payload_size()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_readable(conn: &Connection) -> bool {
     conn.is_readable()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_close(
     conn: &mut Connection, app: bool, err: u64, reason: *const u8,
     reason_len: size_t,
@@ -1128,7 +1131,7 @@ pub extern "C" fn quiche_conn_close(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_timeout_as_nanos(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_nanos() as u64,
@@ -1137,7 +1140,7 @@ pub extern "C" fn quiche_conn_timeout_as_nanos(conn: &Connection) -> u64 {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_timeout_as_millis(conn: &Connection) -> u64 {
     match conn.timeout() {
         Some(timeout) => timeout.as_millis() as u64,
@@ -1146,12 +1149,12 @@ pub extern "C" fn quiche_conn_timeout_as_millis(conn: &Connection) -> u64 {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_on_timeout(conn: &mut Connection) {
     conn.on_timeout()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_trace_id(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
@@ -1168,7 +1171,7 @@ pub struct ConnectionIdIter<'a> {
     index: usize,
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_source_ids(
     conn: &Connection,
 ) -> *mut ConnectionIdIter<'_> {
@@ -1179,7 +1182,7 @@ pub extern "C" fn quiche_conn_source_ids(
     }))
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_connection_id_iter_next(
     iter: &mut ConnectionIdIter, out: &mut *const u8, out_len: &mut size_t,
 ) -> bool {
@@ -1194,14 +1197,14 @@ pub extern "C" fn quiche_connection_id_iter_next(
     false
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_connection_id_iter_free(iter: *mut ConnectionIdIter) {
     if !iter.is_null() {
         drop(unsafe { Box::from_raw(iter) });
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_source_id(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
@@ -1211,7 +1214,7 @@ pub extern "C" fn quiche_conn_source_id(
     *out_len = id.len();
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_destination_id(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
@@ -1222,7 +1225,7 @@ pub extern "C" fn quiche_conn_destination_id(
     *out_len = id.len();
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_application_proto(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
@@ -1232,7 +1235,7 @@ pub extern "C" fn quiche_conn_application_proto(
     *out_len = proto.len();
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_peer_cert(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
@@ -1246,7 +1249,7 @@ pub extern "C" fn quiche_conn_peer_cert(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_session(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
@@ -1260,7 +1263,7 @@ pub extern "C" fn quiche_conn_session(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_server_name(
     conn: &Connection, out: &mut *const u8, out_len: &mut size_t,
 ) {
@@ -1274,37 +1277,37 @@ pub extern "C" fn quiche_conn_server_name(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_established(conn: &Connection) -> bool {
     conn.is_established()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_resumed(conn: &Connection) -> bool {
     conn.is_resumed()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_in_early_data(conn: &Connection) -> bool {
     conn.is_in_early_data()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_draining(conn: &Connection) -> bool {
     conn.is_draining()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_closed(conn: &Connection) -> bool {
     conn.is_closed()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_timed_out(conn: &Connection) -> bool {
     conn.is_timed_out()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_peer_error(
     conn: &Connection, is_app: *mut bool, error_code: *mut u64,
     reason: &mut *const u8, reason_len: &mut size_t,
@@ -1323,7 +1326,7 @@ pub extern "C" fn quiche_conn_peer_error(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_local_error(
     conn: &Connection, is_app: *mut bool, error_code: *mut u64,
     reason: &mut *const u8, reason_len: &mut size_t,
@@ -1342,7 +1345,7 @@ pub extern "C" fn quiche_conn_local_error(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_stream_iter_next(
     iter: &mut StreamIter, stream_id: *mut u64,
 ) -> bool {
@@ -1354,7 +1357,7 @@ pub extern "C" fn quiche_stream_iter_next(
     false
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_stream_iter_free(iter: *mut StreamIter) {
     if !iter.is_null() {
         drop(unsafe { Box::from_raw(iter) });
@@ -1407,7 +1410,7 @@ pub struct TransportParams {
     max_datagram_frame_size: ssize_t,
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     let stats = conn.stats();
 
@@ -1441,7 +1444,7 @@ pub extern "C" fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
         stats.tx_buffered_state != TxBufferTrackingState::Ok;
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_peer_transport_params(
     conn: &Connection, out: &mut TransportParams,
 ) -> bool {
@@ -1503,7 +1506,7 @@ pub struct PathStats {
     startup_exit_cwnd: u64,
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_path_stats(
     conn: &Connection, idx: usize, out: &mut PathStats,
 ) -> c_int {
@@ -1541,12 +1544,12 @@ pub extern "C" fn quiche_conn_path_stats(
     0
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_server(conn: &Connection) -> bool {
     conn.is_server()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_dgram_max_writable_len(
     conn: &Connection,
 ) -> ssize_t {
@@ -1557,7 +1560,7 @@ pub extern "C" fn quiche_conn_dgram_max_writable_len(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_dgram_recv_front_len(conn: &Connection) -> ssize_t {
     match conn.dgram_recv_front_len() {
         None => Error::Done.to_c(),
@@ -1566,31 +1569,31 @@ pub extern "C" fn quiche_conn_dgram_recv_front_len(conn: &Connection) -> ssize_t
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_dgram_recv_queue_len(conn: &Connection) -> ssize_t {
     conn.dgram_recv_queue_len() as ssize_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_dgram_recv_queue_byte_size(
     conn: &Connection,
 ) -> ssize_t {
     conn.dgram_recv_queue_byte_size() as ssize_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_dgram_send_queue_len(conn: &Connection) -> ssize_t {
     conn.dgram_send_queue_len() as ssize_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_dgram_send_queue_byte_size(
     conn: &Connection,
 ) -> ssize_t {
     conn.dgram_send_queue_byte_size() as ssize_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_dgram_send(
     conn: &mut Connection, buf: *const u8, buf_len: size_t,
 ) -> ssize_t {
@@ -1607,7 +1610,7 @@ pub extern "C" fn quiche_conn_dgram_send(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_dgram_recv(
     conn: &mut Connection, out: *mut u8, out_len: size_t,
 ) -> ssize_t {
@@ -1626,7 +1629,7 @@ pub extern "C" fn quiche_conn_dgram_recv(
     out_len as ssize_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_dgram_purge_outgoing(
     conn: &mut Connection, f: extern "C" fn(*const u8, size_t) -> bool,
 ) {
@@ -1638,21 +1641,21 @@ pub extern "C" fn quiche_conn_dgram_purge_outgoing(
     });
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_dgram_send_queue_full(
     conn: &Connection,
 ) -> bool {
     conn.is_dgram_send_queue_full()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_dgram_recv_queue_full(
     conn: &Connection,
 ) -> bool {
     conn.is_dgram_recv_queue_full()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_send_ack_eliciting(
     conn: &mut Connection,
 ) -> ssize_t {
@@ -1662,7 +1665,7 @@ pub extern "C" fn quiche_conn_send_ack_eliciting(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_send_ack_eliciting_on_path(
     conn: &mut Connection, local: &sockaddr, local_len: socklen_t,
     peer: &sockaddr, peer_len: socklen_t,
@@ -1675,39 +1678,39 @@ pub extern "C" fn quiche_conn_send_ack_eliciting_on_path(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_free(conn: *mut Connection) {
     if !conn.is_null() {
         drop(unsafe { Box::from_raw(conn) });
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_peer_streams_left_bidi(conn: &Connection) -> u64 {
     conn.peer_streams_left_bidi()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_peer_streams_left_uni(conn: &Connection) -> u64 {
     conn.peer_streams_left_uni()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
     conn.send_quantum() as size_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_active_scids(conn: &Connection) -> size_t {
     conn.active_scids() as size_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_scids_left(conn: &Connection) -> size_t {
     conn.scids_left() as size_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_new_scid(
     conn: &mut Connection, scid: *const u8, scid_len: size_t,
     reset_token: *const u8, retire_if_needed: bool, scid_seq: *mut u64,
@@ -1720,6 +1723,7 @@ pub extern "C" fn quiche_conn_new_scid(
         Ok(rt) => rt,
         Err(_) => unreachable!(),
     };
+
     let reset_token = u128::from_be_bytes(reset_token);
 
     match conn.new_scid(&scid, reset_token, retire_if_needed) {
@@ -1731,7 +1735,7 @@ pub extern "C" fn quiche_conn_new_scid(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_retire_dcid(
     conn: &mut Connection, dcid_seq: u64,
 ) -> c_int {
@@ -1741,17 +1745,17 @@ pub extern "C" fn quiche_conn_retire_dcid(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_available_dcids(conn: &Connection) -> size_t {
     conn.available_dcids() as size_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_retired_scids(conn: &Connection) -> size_t {
     conn.retired_scids() as size_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_retired_scid_iter(
     conn: &mut Connection,
 ) -> *mut ConnectionIdIter<'_> {
@@ -1759,10 +1763,11 @@ pub extern "C" fn quiche_conn_retired_scid_iter(
     while let Some(cid) = conn.retired_scid_next() {
         cids.push(cid);
     }
+
     Box::into_raw(Box::new(ConnectionIdIter { cids, index: 0 }))
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_send_quantum_on_path(
     conn: &Connection, local: &sockaddr, local_len: socklen_t, peer: &sockaddr,
     peer_len: socklen_t,
@@ -1773,7 +1778,7 @@ pub extern "C" fn quiche_conn_send_quantum_on_path(
     conn.send_quantum_on_path(local, peer) as size_t
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_paths_iter(
     conn: &Connection, from: &sockaddr, from_len: socklen_t,
 ) -> *mut SocketAddrIter {
@@ -1782,7 +1787,7 @@ pub extern "C" fn quiche_conn_paths_iter(
     Box::into_raw(Box::new(conn.paths_iter(addr)))
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_socket_addr_iter_next(
     iter: &mut SocketAddrIter, peer: &mut sockaddr_storage,
     peer_len: *mut socklen_t,
@@ -1795,14 +1800,14 @@ pub extern "C" fn quiche_socket_addr_iter_next(
     false
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_socket_addr_iter_free(iter: *mut SocketAddrIter) {
     if !iter.is_null() {
         drop(unsafe { Box::from_raw(iter) });
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_is_path_validated(
     conn: &Connection, from: &sockaddr, from_len: socklen_t, to: &sockaddr,
     to_len: socklen_t,
@@ -1815,7 +1820,7 @@ pub extern "C" fn quiche_conn_is_path_validated(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_probe_path(
     conn: &mut Connection, local: &sockaddr, local_len: socklen_t,
     peer: &sockaddr, peer_len: socklen_t, seq: *mut u64,
@@ -1831,7 +1836,7 @@ pub extern "C" fn quiche_conn_probe_path(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_migrate_source(
     conn: &mut Connection, local: &sockaddr, local_len: socklen_t, seq: *mut u64,
 ) -> c_int {
@@ -1845,7 +1850,7 @@ pub extern "C" fn quiche_conn_migrate_source(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_migrate(
     conn: &mut Connection, local: &sockaddr, local_len: socklen_t,
     peer: &sockaddr, peer_len: socklen_t, seq: *mut u64,
@@ -1861,7 +1866,7 @@ pub extern "C" fn quiche_conn_migrate(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_conn_path_event_next(
     conn: &mut Connection,
 ) -> *mut PathEvent {
@@ -1871,7 +1876,7 @@ pub extern "C" fn quiche_conn_path_event_next(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_path_event_type(ev: &PathEvent) -> u32 {
     match ev {
         PathEvent::New { .. } => 0,
@@ -1890,7 +1895,7 @@ pub extern "C" fn quiche_path_event_type(ev: &PathEvent) -> u32 {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_path_event_new(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
@@ -1906,7 +1911,7 @@ pub extern "C" fn quiche_path_event_new(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_path_event_validated(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
@@ -1922,7 +1927,7 @@ pub extern "C" fn quiche_path_event_validated(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_path_event_failed_validation(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
@@ -1938,7 +1943,7 @@ pub extern "C" fn quiche_path_event_failed_validation(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_path_event_closed(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
@@ -1954,7 +1959,7 @@ pub extern "C" fn quiche_path_event_closed(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_path_event_reused_source_connection_id(
     ev: &PathEvent, cid_sequence_number: &mut u64,
     old_local_addr: &mut sockaddr_storage, old_local_addr_len: &mut socklen_t,
@@ -1976,7 +1981,7 @@ pub extern "C" fn quiche_path_event_reused_source_connection_id(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_path_event_peer_migrated(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
@@ -1992,7 +1997,7 @@ pub extern "C" fn quiche_path_event_peer_migrated(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_path_event_pmtu_updated(
     ev: &PathEvent, local_addr: &mut sockaddr_storage,
     local_addr_len: &mut socklen_t, peer_addr: &mut sockaddr_storage,
@@ -2013,14 +2018,14 @@ pub extern "C" fn quiche_path_event_pmtu_updated(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_path_event_free(ev: *mut PathEvent) {
     if !ev.is_null() {
         drop(unsafe { Box::from_raw(ev) });
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_put_varint(
     buf: *mut u8, buf_len: size_t, val: u64,
 ) -> c_int {
@@ -2037,7 +2042,7 @@ pub extern "C" fn quiche_put_varint(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn quiche_get_varint(
     buf: *const u8, buf_len: size_t, val: *mut u64,
 ) -> ssize_t {
@@ -2470,7 +2475,7 @@ mod tests {
     }
 
     #[cfg(not(windows))]
-    extern "C" {
+    unsafe extern "C" {
         fn inet_ntop(
             af: c_int, src: *const c_void, dst: *mut c_char, size: socklen_t,
         ) -> *mut c_char;

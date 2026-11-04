@@ -167,19 +167,20 @@ impl Hystart {
         }
 
         // Check if we reached the end of the round.
-        if let Some(end_pkt_num) = self.window_end {
-            if packet.pkt_num >= end_pkt_num {
-                // Start of a new round.
-                self.window_end = None;
+        if self
+            .window_end
+            .is_some_and(|end_pkt_num| packet.pkt_num >= end_pkt_num)
+        {
+            // Start of a new round.
+            self.window_end = None;
 
-                if self.css_start_time().is_some() {
-                    self.css_round_count += 1;
+            if self.css_start_time().is_some() {
+                self.css_round_count += 1;
 
-                    // End of CSS - exit to congestion avoidance.
-                    if self.css_round_count >= CSS_ROUNDS {
-                        self.css_round_count = 0;
-                        return true;
-                    }
+                // End of CSS - exit to congestion avoidance.
+                if self.css_round_count >= CSS_ROUNDS {
+                    self.css_round_count = 0;
+                    return true;
                 }
             }
         }

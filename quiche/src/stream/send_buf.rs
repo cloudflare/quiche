@@ -28,11 +28,11 @@ use std::cmp;
 
 use std::collections::VecDeque;
 
-use crate::buffers::BufSplit;
-use crate::range_buf::RangeBuf;
 use crate::BufFactory;
 use crate::Error;
 use crate::Result;
+use crate::buffers::BufSplit;
+use crate::range_buf::RangeBuf;
 
 use crate::buffers::DefaultBufFactory;
 use crate::ranges;
@@ -610,10 +610,11 @@ impl<F: BufFactory> SendBuf<F> {
             return self.reset_acked;
         }
 
-        if let Some(fin_off) = self.fin_off {
-            if self.fin_acked && self.acked == (0..fin_off) {
-                return true;
-            }
+        if let Some(fin_off) = self.fin_off &&
+            self.fin_acked &&
+            self.acked == (0..fin_off)
+        {
+            return true;
         }
 
         false
@@ -708,6 +709,7 @@ mod tests {
         } else {
             send.stop(42)
         };
+
         assert_eq!(result, Ok((5, 0)));
         assert_eq!(send.is_complete(), acked_before_reset);
 
@@ -1038,6 +1040,7 @@ mod tests {
             send.peer_stop_sending_state(),
             PeerStopSendingState::Reported(0)
         );
+
         // Reporting preserves the code for subsequent writes and duplicate
         // STOP_SENDING must not replace it or create another notification.
         assert_eq!(send.stop(42), Err(Error::Done));

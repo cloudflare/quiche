@@ -27,8 +27,8 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use crate::buffer_pool::consume_buffer_total_bytes;
 use crate::Reuse;
+use crate::buffer_pool::consume_buffer_total_bytes;
 
 /// A convinience wrapper around Vec that allows to "consume" data from the
 /// front *without* shifting.
@@ -103,6 +103,7 @@ impl ConsumeBuffer {
         let old_capacity = self.inner.capacity();
         self.inner.reserve_exact(count);
         self.update_metrics_after_resize(old_capacity);
+
         // SAFETY: u8 is always initialized and we reserved the capacity.
         unsafe { self.inner.set_len(count) };
     }
@@ -159,6 +160,7 @@ mod tests {
                 buf.inner.capacity() as u64
             );
         }
+
         // drop buf
         assert_eq!(consume_buffer_total_bytes().get(), 0);
 

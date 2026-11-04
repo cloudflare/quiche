@@ -25,14 +25,14 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::*;
-use crate::events::quic::PacketSent;
-use crate::events::quic::PacketType;
-use crate::events::quic::QuicFrame;
-use crate::events::EventData;
-use crate::events::RawInfo;
 use crate::Event;
 use crate::Trace;
 use crate::TraceSeq;
+use crate::events::EventData;
+use crate::events::RawInfo;
+use crate::events::quic::PacketSent;
+use crate::events::quic::PacketType;
+use crate::events::quic::QuicFrame;
 
 #[test]
 fn trace_no_events() {

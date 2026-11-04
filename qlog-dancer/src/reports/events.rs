@@ -24,9 +24,9 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use qlog::events::EventData;
 use qlog::events::http3::Http3Frame;
 use qlog::events::quic::QuicFrame;
-use qlog::events::EventData;
 use tabled::Table;
 use tabled::Tabled;
 
@@ -95,6 +95,7 @@ pub fn frames_to_string(frames: &[QuicFrame]) -> String {
                         s += &format!("{}, ", range);
                     }
                 }
+
                 s += "}";
             },
             QuicFrame::ResetStream { stream_id, error, error_code, final_size, .. } => {
@@ -117,6 +118,7 @@ pub fn frames_to_string(frames: &[QuicFrame]) -> String {
                 if let Some(f) = fin {
                     s += &format!(", fin={f}")
                 }
+
                 s += "}";
             },
             QuicFrame::MaxData { maximum, .. } => {
@@ -154,6 +156,7 @@ pub fn frames_to_string(frames: &[QuicFrame]) -> String {
                if let Some(es) = error_space {
                     s += &format!(" ty={es:?},");
                }
+
                printyo!(" code", error_code, s);
                printyo!(" reason", reason, s);
                s += "}";
@@ -396,6 +399,7 @@ pub fn sqlog_event_list(
                         if let Some(raw) = &v.raw {
                             printyo!("len", raw.length, p.details);
                         }
+
                         printyo_json!("from", &v.from, p.details);
                         printyo_json!("to", &v.to, p.details);
                     },

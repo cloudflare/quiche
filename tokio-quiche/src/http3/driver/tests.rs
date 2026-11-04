@@ -1,5 +1,5 @@
-use std::panic::catch_unwind;
 use std::panic::AssertUnwindSafe;
+use std::panic::catch_unwind;
 
 use assert_matches::assert_matches;
 use rstest::rstest;
@@ -25,6 +25,7 @@ fn downstream_readiness_does_not_overwrite_queued_frame(
     } else {
         drop(outbound);
     }
+
     ctx.queued_frame =
         Some(OutboundFrame::Body(Bytes::from_static(b"queued"), false));
     // Deliberately violate the invariant: receiving channel readiness must
@@ -49,6 +50,7 @@ fn downstream_readiness_does_not_overwrite_queued_frame(
             Ok(Err(H3ConnectionError::H3(h3::Error::InternalError)))
         );
     }
+
     // Verify retained output after either the debug panic or the runtime error.
     let ctx = helper.driver.stream_map.get(&0).unwrap();
     assert_matches!(
@@ -348,6 +350,7 @@ mod client_side_driver {
                 );
             },
         }
+
         assert_eq!(helper.driver.hooks.pending_request_count(), 0);
         assert!(helper.driver.stream_map.contains_key(&stream_id));
 
@@ -386,6 +389,7 @@ mod client_side_driver {
         assert!(!resp.read_fin);
         let to_server = resp.send.get_ref().unwrap().clone();
         let mut from_server = resp.recv;
+
         // client sends body
         to_server
             .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[1; 5]), false))
@@ -467,19 +471,24 @@ mod client_side_driver {
 
         // Set the buffer size.
         helper.driver_set_body_buf_size(30);
+
         // The server sends an initial 10-byte body.
         helper.peer_server_send_body(0, &[2; 10], false).unwrap();
         helper.advance_and_run_loop().unwrap();
+
         // The client receives the server body.
         assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![2; 10]);
+
         // Receive another ten bytes.
         helper.peer_server_send_body(0, &[3; 10], false).unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![3; 10]);
+
         // Receive another ten bytes using the initial buffer.
         helper.peer_server_send_body(0, &[4; 10], false).unwrap();
         helper.advance_and_run_loop().unwrap();
         assert_eq!(helper.driver_try_recv_body(&mut from_server).0, vec![4; 10]);
+
         // Receive another ten bytes using a new buffer transparently.
         helper.peer_server_send_body(0, &[5; 10], true).unwrap();
         helper.advance_and_run_loop().unwrap();
@@ -488,6 +497,7 @@ mod client_side_driver {
         assert_eq!(body, vec![5; 10]);
         // The client receives the server FIN.
         assert!(fin);
+
         // The client should clean up the stream after both directions close.
         assert_eq!(helper.driver.stream_map.len(), 0);
     }
@@ -749,10 +759,12 @@ mod client_side_driver {
         );
         assert_eq!(resp.stream_id, stream_id);
         assert!(!resp.read_fin);
+
         // the stream is waiting for the application to write data
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
         assert!(!ctx.waiting_for_send());
         assert!(ctx.waiting_for_recv());
+
         // take the InboundFrame receiver and stats
         let mut from_server = resp.recv;
         let audit_stats = resp.h3_audit_stats.clone();
@@ -827,6 +839,7 @@ mod client_side_driver {
         );
         assert_eq!(resp.stream_id, stream_id);
         assert!(!resp.read_fin);
+
         // take the InboundFrame receiver and stats
         let mut from_server = resp.recv;
         let audit_stats = resp.h3_audit_stats.clone();
@@ -903,6 +916,7 @@ mod client_side_driver {
         assert_eq!(resp.stream_id, stream_id);
         assert!(resp.read_fin);
         let audit_stats = resp.h3_audit_stats.clone();
+
         // send a body the to server, but not enough flow control for the full
         // body
         resp.send
@@ -916,11 +930,13 @@ mod client_side_driver {
         let ctx = helper.driver.stream_map.get(&stream_id).unwrap();
         assert!(!ctx.waiting_for_send());
         assert!(ctx.waiting_for_recv());
+
         // run `work_loop_iter()` to write the body into quiche
         helper.work_loop_iter().unwrap();
         // make sure we couldn't write the full body
         assert!(audit_stats.downstream_bytes_sent() < 50);
         let written = audit_stats.downstream_bytes_sent();
+
         // advance the pipe, the stream is writable again, but
         // don't advance the work_loop yet.
         helper.pipe.advance().unwrap();
@@ -934,13 +950,15 @@ mod client_side_driver {
         assert!(!ctx.waiting_for_send());
         assert!(!ctx.waiting_for_recv());
         assert!(helper.driver.stream_map.get(&0).unwrap().recv.is_some());
-        assert!(helper
-            .driver
-            .stream_map
-            .get(&0)
-            .unwrap()
-            .queued_frame
-            .is_some());
+        assert!(
+            helper
+                .driver
+                .stream_map
+                .get(&0)
+                .unwrap()
+                .queued_frame
+                .is_some()
+        );
 
         // clsoe the channel.
         drop(resp.send);
@@ -1004,6 +1022,7 @@ mod client_side_driver {
         );
         assert_eq!(resp.stream_id, stream_id);
         assert!(!resp.read_fin);
+
         // take the InboundFrame receiver and stats
         let mut from_server = resp.recv;
         let audit_stats = resp.h3_audit_stats.clone();
@@ -1299,6 +1318,7 @@ mod server_side_driver {
             );
             helper.advance_and_run_loop().unwrap();
         }
+
         assert_eq!(from_client.len(), STREAM_CAPACITY);
         assert_eq!(helper.peer_client_send_body(stream_id, &[], true), Ok(0));
         helper.advance_and_run_loop().unwrap();
@@ -1413,6 +1433,7 @@ mod server_side_driver {
                 Some(to_client)
             },
         };
+
         helper.work_loop_iter().unwrap();
 
         // Closing the write side must retain the pending peer FIN.
@@ -1510,6 +1531,7 @@ mod server_side_driver {
             .try_send(OutboundFrame::Headers(make_response_headers(), None))
             .unwrap();
         helper.work_loop_iter().unwrap();
+
         // server sends body and fin. This caused an infinite loop before #2162
         to_client
             .try_send(OutboundFrame::Body(Bytes::copy_from_slice(&[42]), true))
@@ -1672,6 +1694,7 @@ mod server_side_driver {
         } else {
             (body, OutboundFrame::PeerStreamError)
         };
+
         let ctx = helper.driver.stream_map.get_mut(&stream_id).unwrap();
         // Model output blocked on transport: receiving from the channel is
         // no longer parked while a frame is queued.
@@ -1751,6 +1774,7 @@ mod server_side_driver {
             .process_writes(&mut helper.pipe.server)
             .unwrap();
         assert!(helper.driver.ready_streams.try_recv().is_err());
+
         // Sending data invokes the waker registered by poll_recv, leaving a
         // ready ID in the queue when cleanup drops the stream context.
         req.send
@@ -2160,12 +2184,14 @@ mod server_side_driver {
 
         // client sends a RESET_STREAM frame
         helper.advance_and_run_loop().unwrap();
-        assert!(helper
-            .driver
-            .stream_map
-            .get(&stream_id)
-            .unwrap()
-            .waiting_for_recv());
+        assert!(
+            helper
+                .driver
+                .stream_map
+                .get(&stream_id)
+                .unwrap()
+                .waiting_for_recv()
+        );
         assert_matches!(
             helper.peer_client_poll(),
             Ok((0, h3::Event::Headers { .. }))
@@ -2179,12 +2205,14 @@ mod server_side_driver {
             Ok(())
         );
         helper.advance_and_run_loop().unwrap();
-        assert!(helper
-            .driver
-            .stream_map
-            .get(&stream_id)
-            .unwrap()
-            .waiting_for_recv());
+        assert!(
+            helper
+                .driver
+                .stream_map
+                .get(&stream_id)
+                .unwrap()
+                .waiting_for_recv()
+        );
 
         // The channel is closed because the peer send us the reset.
         assert!(from_client.is_closed());
@@ -2383,6 +2411,7 @@ mod server_side_driver {
         );
         assert_matches!(helper.peer_client_poll(), Ok((0, h3::Event::Data)));
         assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+
         // The client sends the first half of the body.
         assert_eq!(helper.peer_client_send_body(0, &[1; 5], false), Ok(5));
 
@@ -2509,6 +2538,7 @@ mod server_side_driver {
             Ok((0, h3::Event::Headers { .. }))
         );
         assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+
         // The client sends the first half of the body.
         assert_eq!(helper.peer_client_send_body(0, &[1; 5], false), Ok(5));
 
@@ -2701,8 +2731,10 @@ mod server_side_driver {
 
         // peer (client) sends more data
         assert_eq!(helper.peer_client_send_body(0, &[1; 6], false), Ok(6));
+
         // advance the pipe only
         helper.pipe.advance().unwrap();
+
         // we drop the channel.
         drop(from_client);
         helper.advance_and_run_loop().unwrap();
@@ -2801,6 +2833,7 @@ mod server_side_driver {
         assert!(fin);
 
         helper.advance_and_run_loop().unwrap();
+
         // we drop the channel.
         drop(from_client);
         helper.advance_and_run_loop().unwrap();
@@ -2872,6 +2905,7 @@ mod server_side_driver {
         // peer (client) sends more data and fin
         assert_eq!(helper.peer_client_send_body(0, &[1; 6], true), Ok(6));
         helper.advance_and_run_loop().unwrap();
+
         // we drop the channel.
         drop(req.recv);
         helper.advance_and_run_loop().unwrap();
@@ -3457,6 +3491,7 @@ mod server_side_driver {
                 .send_body(&mut helper.pipe.client, 0, b"done", true,),
             Ok(4)
         );
+
         // One IO worker iteration: deliver client fin, process it,
         // and close the connection.
         helper.pipe.advance().unwrap();
@@ -3521,6 +3556,7 @@ mod server_side_driver {
             enc.put_varint(flow_id).unwrap();
             enc.put_bytes(payload).unwrap();
         }
+
         helper.pipe.client.dgram_send(&wire).unwrap();
 
         // process_available_dgrams creates an autonomous flow and
@@ -3612,6 +3648,7 @@ mod server_side_driver {
             enc.put_varint(flow_id).unwrap();
             enc.put_bytes(payload).unwrap();
         }
+
         helper.pipe.client.dgram_send(&wire).unwrap();
 
         helper.advance_and_run_loop().unwrap();

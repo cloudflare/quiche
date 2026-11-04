@@ -24,8 +24,8 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use plotters::style::RGBColor;
 use plotters::style::BLACK;
+use plotters::style::RGBColor;
 use plotters::style::WHITE;
 
 pub const FOREST_GREEN: RGBColor = RGBColor(15, 122, 27);

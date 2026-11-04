@@ -26,18 +26,18 @@
 
 //! Reporting (tables etc.)
 
+use table_to_html::HtmlTable;
 use table_to_html::html::Attribute;
 use table_to_html::html::HtmlElement;
 use table_to_html::html::HtmlValue;
 use table_to_html::html::HtmlVisitorMut;
-use table_to_html::HtmlTable;
 use tabled::Table;
 
+use crate::AppConfig;
+use crate::LogFileParseResult;
 use crate::create_file_recursive;
 use crate::reports::events::sqlog_event_list;
 use crate::reports::text::request_timing_table;
-use crate::AppConfig;
-use crate::LogFileParseResult;
 use std::io::Write;
 
 const HTML_INCLUDES: &str = r#"
@@ -132,11 +132,13 @@ fn inject_table_id_class(
     } else {
         "".to_string()
     };
+
     let class = if let Some(c) = class {
         format!("class='{c}'")
     } else {
         "".to_string()
     };
+
     let replaced = format!("<table {id} {class}>");
 
     input.to_string().replace("<table>", &replaced)
@@ -451,21 +453,15 @@ pub fn event_list(log_file: &LogFileParseResult, config: &AppConfig) {
 }
 
 fn table_cell_value(cell: &HtmlElement) -> Option<String> {
-    if cell.tag() == "td" {
-        if let Some(HtmlValue::Elements(elems)) = cell.value() {
-            if let Some(val) = elems.first() {
-                if let Some(HtmlValue::Elements(p)) = val.value() {
-                    if let Some(p_val) = p.first() {
-                        if let Some(HtmlValue::Content(inner)) = p_val.value() {
-                            return Some(inner.clone());
-                        }
-                    }
-                }
-            }
-        }
+    if cell.tag() == "td" &&
+        let Some(HtmlValue::Elements(elems)) = cell.value() &&
+        let Some(HtmlValue::Elements(p)) = elems.first()?.value() &&
+        let Some(HtmlValue::Content(inner)) = p.first()?.value()
+    {
+        Some(inner.clone())
+    } else {
+        None
     }
-
-    None
 }
 
 struct H2ClosureTableDecorator {
@@ -484,20 +480,18 @@ impl HtmlVisitorMut for H2ClosureTableDecorator {
             let mut mark_yellow = false;
             let mut mark_green = false;
 
-            if let Some(HtmlValue::Elements(kids)) = e.value() {
-                if let Some(error) = kids.get(2) {
-                    if let Some(err) = table_cell_value(error) {
-                        if let Ok(val) = err.parse::<i32>() {
-                            // Aborted
-                            if val == -3 {
-                                mark_yellow = true;
-                            } else if val < 0 {
-                                mark_red = true;
-                            } else if val == 0 {
-                                mark_green = true;
-                            }
-                        }
-                    }
+            if let Some(HtmlValue::Elements(kids)) = e.value() &&
+                let Some(error) = kids.get(2) &&
+                let Some(err) = table_cell_value(error) &&
+                let Ok(val) = err.parse::<i32>()
+            {
+                // Aborted
+                if val == -3 {
+                    mark_yellow = true;
+                } else if val < 0 {
+                    mark_red = true;
+                } else if val == 0 {
+                    mark_green = true;
                 }
             }
 
@@ -536,20 +530,18 @@ impl HtmlVisitorMut for QUICClosureTableDecorator {
             let mut mark_yellow = false;
             let mut mark_green = false;
 
-            if let Some(HtmlValue::Elements(kids)) = e.value() {
-                if let Some(error) = kids.get(2) {
-                    if let Some(err) = table_cell_value(error) {
-                        if let Ok(val) = err.parse::<i32>() {
-                            // Aborted
-                            if val == 25 {
-                                mark_green = true;
-                            } else if val == 70 {
-                                mark_yellow = true;
-                            } else if val == 199 {
-                                mark_red = true;
-                            }
-                        }
-                    }
+            if let Some(HtmlValue::Elements(kids)) = e.value() &&
+                let Some(error) = kids.get(2) &&
+                let Some(err) = table_cell_value(error) &&
+                let Ok(val) = err.parse::<i32>()
+            {
+                // Aborted
+                if val == 25 {
+                    mark_green = true;
+                } else if val == 70 {
+                    mark_yellow = true;
+                } else if val == 199 {
+                    mark_red = true;
                 }
             }
 
@@ -589,35 +581,35 @@ impl HtmlVisitorMut for RequestTableDecorator {
             let mut mark_green = false;
 
             if let Some(HtmlValue::Elements(kids)) = e.value() {
-                if let Some(reset_sent) = kids.get(24) {
-                    if table_cell_value(reset_sent) != Some("n/a".to_string()) {
-                        mark_yellow = true;
-                    }
+                if kids.get(24).is_some_and(|reset_sent| {
+                    table_cell_value(reset_sent) != Some("n/a".to_string())
+                }) {
+                    mark_yellow = true;
                 }
 
-                if let Some(reset_received) = kids.get(25) {
-                    if table_cell_value(reset_received) != Some("n/a".to_string())
-                    {
+                if kids.get(25).is_some_and(|reset_received| {
+                    table_cell_value(reset_received) != Some("n/a".to_string())
+                }) {
+                    mark_red = true;
+                }
+
+                if let Some(status_code) = kids.get(4) &&
+                    let Some(val) = table_cell_value(status_code)
+                {
+                    // if the status code is unknown, we probably got no
+                    // response
+
+                    if let Ok(val) = val.parse::<u16>() {
+                        if val >= 400 {
+                            mark_red = true;
+                        }
+                    } else {
+                        // if the status code is unknown or mangled, we
+                        // probably got no response
                         mark_red = true;
                     }
                 }
 
-                if let Some(status_code) = kids.get(4) {
-                    if let Some(val) = table_cell_value(status_code) {
-                        // if the status code is unknown, we probably got no
-                        // response
-
-                        if let Ok(val) = val.parse::<u16>() {
-                            if val >= 400 {
-                                mark_red = true;
-                            }
-                        } else {
-                            // if the status code is unknown or mangled, we
-                            // probably got no response
-                            mark_red = true;
-                        }
-                    }
-                }
                 let response_content_length = kids.get(5);
                 let response_content_transferred = kids.get(6);
 

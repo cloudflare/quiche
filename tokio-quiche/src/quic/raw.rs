@@ -37,9 +37,9 @@
 
 use datagram_socket::DatagramSocketSend;
 use std::sync::Arc;
-use std::task::ready;
 use std::task::Context;
 use std::task::Poll;
+use std::task::ready;
 use std::time::Instant;
 use tokio::sync::mpsc;
 

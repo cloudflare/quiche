@@ -201,6 +201,7 @@ impl tabled::Tabled for HttpRequestStub {
             RequestActor::Client => self.time_first_headers_tx,
             RequestActor::Server => self.time_first_headers_rx,
         };
+
         let req_start = NaOption::new(req_start);
 
         // This one is tricky, we might never receive anything, so do a few

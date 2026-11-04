@@ -113,10 +113,10 @@ impl FlowControl {
     /// within RTT x 2, bump the window x 2, capped by
     /// max_window.
     pub fn autotune_window(&mut self, now: Instant, rtt: Duration) {
-        if let Some(last_update) = self.last_update {
-            if now - last_update < rtt * WINDOW_TRIGGER_FACTOR {
-                self.set_window(self.window * WINDOW_INCREASE_FACTOR);
-            }
+        if self.last_update.is_some_and(|last_update| {
+            now - last_update < rtt * WINDOW_TRIGGER_FACTOR
+        }) {
+            self.set_window(self.window * WINDOW_INCREASE_FACTOR);
         }
     }
 

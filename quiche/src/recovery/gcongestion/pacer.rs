@@ -30,13 +30,13 @@
 
 use std::time::Instant;
 
-use crate::recovery::gcongestion::bbr2::BBRv2;
-use crate::recovery::gcongestion::Bandwidth;
-use crate::recovery::gcongestion::CongestionControl;
-use crate::recovery::rtt::RttStats;
 use crate::recovery::RecoveryStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
+use crate::recovery::gcongestion::Bandwidth;
+use crate::recovery::gcongestion::CongestionControl;
+use crate::recovery::gcongestion::bbr2::BBRv2;
+use crate::recovery::rtt::RttStats;
 
 use super::Acked;
 use super::Lost;
@@ -188,6 +188,7 @@ impl Pacer {
         self.lumpy_tokens -= 1;
         self.ideal_next_packet_send_time.set_max(sent_time);
         self.ideal_next_packet_send_time.inc(delay);
+
         // Stop making up for lost time if underlying sender prevents sending.
         self.pacing_limited = self.sender.can_send(bytes_in_flight + bytes);
     }
@@ -221,13 +222,12 @@ impl Pacer {
             self.burst_tokens = 0;
         }
 
-        if let Some(max_pacing_rate) = self.max_pacing_rate {
-            if rtt_updated {
-                let max_rate = max_pacing_rate * 1.25f32;
-                let max_cwnd =
-                    max_rate.to_bytes_per_period(rtt_stats.smoothed_rtt);
-                self.sender.limit_cwnd(max_cwnd as usize);
-            }
+        if let Some(max_pacing_rate) = self.max_pacing_rate &&
+            rtt_updated
+        {
+            let max_rate = max_pacing_rate * 1.25f32;
+            let max_cwnd = max_rate.to_bytes_per_period(rtt_stats.smoothed_rtt);
+            self.sender.limit_cwnd(max_cwnd as usize);
         }
     }
 

@@ -40,12 +40,12 @@
 //!
 //! ```
 //! use futures::stream::StreamExt;
+//! use tokio_quiche::ConnectionParams;
+//! use tokio_quiche::ServerH3Driver;
 //! use tokio_quiche::http3::settings::Http3Settings;
 //! use tokio_quiche::listen;
 //! use tokio_quiche::metrics::DefaultMetrics;
 //! use tokio_quiche::quic::SimpleConnectionIdGenerator;
-//! use tokio_quiche::ConnectionParams;
-//! use tokio_quiche::ServerH3Driver;
 //!
 //! # async fn example() -> tokio_quiche::QuicResult<()> {
 //! let socket = tokio::net::UdpSocket::bind("0.0.0.0:443").await?;
@@ -135,12 +135,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::metrics::Metrics;
 use crate::socket::QuicListener;
 
+pub use crate::http3::ClientH3Connection;
+pub use crate::http3::ServerH3Connection;
 pub use crate::http3::driver::ClientH3Controller;
 pub use crate::http3::driver::ClientH3Driver;
 pub use crate::http3::driver::ServerH3Controller;
 pub use crate::http3::driver::ServerH3Driver;
-pub use crate::http3::ClientH3Connection;
-pub use crate::http3::ServerH3Connection;
 pub use crate::quic::connection::ApplicationOverQuic;
 pub use crate::quic::connection::ConnectionIdGenerator;
 pub use crate::quic::connection::InitialQuicConnection;

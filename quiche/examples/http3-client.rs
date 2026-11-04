@@ -223,14 +223,14 @@ fn main() {
 
         // Send HTTP requests once the QUIC connection is established, and until
         // all requests have been sent.
-        if let Some(h3_conn) = &mut http3_conn {
-            if !req_sent {
-                info!("sending HTTP request {req:?}");
+        if let Some(h3_conn) = &mut http3_conn &&
+            !req_sent
+        {
+            info!("sending HTTP request {req:?}");
 
-                h3_conn.send_request(&mut conn, &req, true).unwrap();
+            h3_conn.send_request(&mut conn, &req, true).unwrap();
 
-                req_sent = true;
-            }
+            req_sent = true;
         }
 
         if let Some(http3_conn) = &mut http3_conn {

@@ -30,17 +30,17 @@
 
 use std::time::Instant;
 
-use crate::recovery::gcongestion::bbr2::Params;
+use crate::recovery::RecoveryStats;
 use crate::recovery::gcongestion::Acked;
 use crate::recovery::gcongestion::Lost;
-use crate::recovery::RecoveryStats;
+use crate::recovery::gcongestion::bbr2::Params;
 
+use super::BBRv2CongestionEvent;
+use super::Limits;
 use super::mode::Cycle;
 use super::mode::Mode;
 use super::mode::ModeImpl;
 use super::network_model::BBRv2NetworkModel;
-use super::BBRv2CongestionEvent;
-use super::Limits;
 
 #[derive(Debug)]
 pub(super) struct Drain {

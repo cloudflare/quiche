@@ -41,13 +41,12 @@ use std::time::Instant;
 
 use network_model::BBRv2NetworkModel;
 
-use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::RecoveryStats;
+use crate::recovery::gcongestion::Bandwidth;
 
 use self::mode::Mode;
 use self::mode::ModeImpl;
 
-use super::bbr::SendTimeState;
 use super::Acked;
 use super::BbrBwLoReductionStrategy;
 use super::BbrParams;
@@ -55,6 +54,7 @@ use super::BbrRttJumpDetector;
 use super::CongestionControl;
 use super::Lost;
 use super::RttStats;
+use super::bbr::SendTimeState;
 
 const MAX_MODE_CHANGES_PER_CONGESTION_EVENT: usize = 4;
 
@@ -757,6 +757,7 @@ impl CongestionControl for BBRv2 {
         if !self.last_sample_is_app_limited {
             self.has_non_app_limited_sample = true;
         }
+
         if congestion_event.bytes_in_flight == 0 &&
             self.params.avoid_unnecessary_probe_rtt
         {
@@ -810,6 +811,7 @@ impl CongestionControl for BBRv2 {
             self.pacing_rate =
                 self.pacing_rate * (new_mss as f64 / self.mss as f64);
         }
+
         self.mss = new_mss;
     }
 
@@ -876,6 +878,7 @@ mod tests {
         } else {
             INIT_CWND
         };
+
         assert_eq!(
             bbr2.pacing_rate.to_bytes_per_period(initial_rtt),
             (2.88499 * pacing_cwnd as f64) as u64

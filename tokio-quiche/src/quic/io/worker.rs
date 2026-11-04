@@ -41,8 +41,11 @@ use super::connection_stage::RunningApplication;
 use super::gso::*;
 use super::utilization_estimator::BandwidthReporter;
 
-use crate::metrics::labels;
+use crate::QuicResult;
 use crate::metrics::Metrics;
+use crate::metrics::labels;
+use crate::quic::DscpHandle;
+use crate::quic::QuicheConnection;
 use crate::quic::connection::ApplicationOverQuic;
 use crate::quic::connection::HandshakeError;
 use crate::quic::connection::HandshakeInfo;
@@ -51,9 +54,6 @@ use crate::quic::connection::QuicConnectionStats;
 use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::quic::hooks::ConnectionHook;
 use crate::quic::router::ConnectionMapCommand;
-use crate::quic::DscpHandle;
-use crate::quic::QuicheConnection;
-use crate::QuicResult;
 
 use boring::ssl::SslRef;
 use datagram_socket::DatagramSocketSend;
@@ -353,6 +353,7 @@ where
         if qconn.scids_left() == 0 {
             return;
         }
+
         let Some(cid_generator) = self.cid_generator.as_deref() else {
             return;
         };
@@ -571,14 +572,14 @@ where
 
     #[cfg(feature = "perf-quic-listener-metrics")]
     fn measure_complete_handshake_time(&mut self) {
-        if let Some(init_rx_time) = self.init_rx_time.take() {
-            if let Ok(delta) = init_rx_time.elapsed() {
-                self.metrics
-                    .handshake_time_seconds(
-                        labels::QuicHandshakeStage::HandshakeResponse,
-                    )
-                    .observe(delta.as_nanos() as u64);
-            }
+        if let Some(init_rx_time) = self.init_rx_time.take() &&
+            let Ok(delta) = init_rx_time.elapsed()
+        {
+            self.metrics
+                .handshake_time_seconds(
+                    labels::QuicHandshakeStage::HandshakeResponse,
+                )
+                .observe(delta.as_nanos() as u64);
         }
     }
 
@@ -728,20 +729,17 @@ where
         self.write_state.segment_size =
             segment_size.unwrap_or(self.write_state.bytes_written);
 
-        if !gcongestion_enabled {
-            if let Some(time) = tx_time {
-                const DEFAULT_MAX_INTO_FUTURE: Duration =
-                    Duration::from_millis(1);
-                if time
-                    .checked_duration_since(now)
-                    .map(|d| d > DEFAULT_MAX_INTO_FUTURE)
-                    .unwrap_or(false)
-                {
-                    self.write_state.next_release_time =
-                        Some(now + DEFAULT_MAX_INTO_FUTURE.mul_f32(0.8));
-                    self.write_state.has_pending_data = false;
-                    return Ok(0);
-                }
+        if !gcongestion_enabled && let Some(time) = tx_time {
+            const DEFAULT_MAX_INTO_FUTURE: Duration = Duration::from_millis(1);
+            if time
+                .checked_duration_since(now)
+                .map(|d| d > DEFAULT_MAX_INTO_FUTURE)
+                .unwrap_or(false)
+            {
+                self.write_state.next_release_time =
+                    Some(now + DEFAULT_MAX_INTO_FUTURE.mul_f32(0.8));
+                self.write_state.has_pending_data = false;
+                return Ok(0);
             }
         }
 
@@ -887,6 +885,7 @@ where
                 } else {
                     (None, None)
                 };
+
                 send_to(
                     udp_socket,
                     to,
@@ -1351,9 +1350,11 @@ where
         if let Some(cid) = self.cfg.pending_cid.take() {
             self.unmap_cid(cid);
         }
+
         while let Some(retired_cid) = qconn.retired_scid_next() {
             self.unmap_cid(retired_cid);
         }
+
         for cid in qconn.source_ids().cloned() {
             self.unmap_cid(cid.into_owned());
         }

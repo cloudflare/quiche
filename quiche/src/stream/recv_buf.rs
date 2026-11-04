@@ -32,10 +32,10 @@ use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::stream::RecvAction;
-use crate::stream::RecvBufResetReturn;
 use crate::Error;
 use crate::Result;
+use crate::stream::RecvAction;
+use crate::stream::RecvBufResetReturn;
 
 use crate::flowcontrol;
 
@@ -310,10 +310,8 @@ impl RecvBuf {
         &mut self, error_code: u64, final_size: u64,
     ) -> Result<RecvBufResetReturn> {
         // Stream's size is already known, forbid changing it.
-        if let Some(fin_off) = self.fin_off {
-            if fin_off != final_size {
-                return Err(Error::FinalSize);
-            }
+        if self.fin_off.is_some_and(|fin_off| fin_off != final_size) {
+            return Err(Error::FinalSize);
         }
 
         // Stream's known size is lower than data already received.
@@ -540,6 +538,7 @@ mod tests {
         } else {
             RecvAction::Discard { len: 32 }
         };
+
         assert_eq!(recv.emit_or_discard(action), Err(Error::Done));
     }
 
@@ -770,6 +769,7 @@ mod tests {
         } else {
             (b"hello".as_slice(), 0)
         };
+
         recv.write(RangeBuf::from(data, offset, state != "empty"))
             .unwrap();
 
@@ -798,6 +798,7 @@ mod tests {
         if recv.ready() {
             assert_eq!(recv.emit(&mut out), Err(Error::StreamReset(42)));
         }
+
         assert_eq!(recv.emit(&mut out), Err(Error::Done));
         assert_eq!(recv.reset(42, 5), Ok(RecvBufResetReturn::zero()));
         recv.write(RangeBuf::from(b"hello", 0, true)).unwrap();
@@ -931,6 +932,7 @@ mod tests {
         } else {
             RecvAction::Discard { len: 32 }
         };
+
         assert_eq!(recv.emit_or_discard(action), Err(Error::Done));
 
         assert!(recv.write(first).is_ok());

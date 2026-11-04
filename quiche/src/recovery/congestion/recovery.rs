@@ -34,6 +34,8 @@ use std::collections::VecDeque;
 use super::RecoveryConfig;
 use super::Sent;
 
+use crate::Error;
+use crate::Result;
 use crate::packet::Epoch;
 use crate::ranges::RangeSet;
 use crate::recovery::Bandwidth;
@@ -41,8 +43,6 @@ use crate::recovery::HandshakeStatus;
 use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
 use crate::recovery::StartupExit;
-use crate::Error;
-use crate::Result;
 
 #[cfg(feature = "qlog")]
 use crate::recovery::QlogMetrics;
@@ -53,19 +53,19 @@ use crate::frame;
 use qlog::events::EventData;
 
 use super::Congestion;
-use crate::recovery::bytes_in_flight::BytesInFlight;
-use crate::recovery::rtt::RttStats;
-use crate::recovery::LossDetectionTimer;
-use crate::recovery::OnAckReceivedOutcome;
-use crate::recovery::ReleaseDecision;
-use crate::recovery::ReleaseTime;
 use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
+use crate::recovery::LossDetectionTimer;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
+use crate::recovery::OnAckReceivedOutcome;
 use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
+use crate::recovery::ReleaseDecision;
+use crate::recovery::ReleaseTime;
+use crate::recovery::bytes_in_flight::BytesInFlight;
+use crate::recovery::rtt::RttStats;
 
 #[derive(Default)]
 struct RecoveryEpoch {
@@ -275,9 +275,7 @@ impl RecoveryEpoch {
 
                     trace!(
                         "{} packet {} lost on epoch {}",
-                        trace_id,
-                        unacked.pkt_num,
-                        epoch
+                        trace_id, unacked.pkt_num, epoch
                     );
                 }
 
@@ -313,10 +311,11 @@ impl RecoveryEpoch {
         // be removed at this point, but their removal is delayed for a later
         // time, once the gaps have been filled.
         while let Some(pkt) = self.sent_packets.front() {
-            if let Some(time_lost) = pkt.time_lost {
-                if time_lost > loss_thresh {
-                    break;
-                }
+            if pkt
+                .time_lost
+                .is_some_and(|time_lost| time_lost > loss_thresh)
+            {
+                break;
             }
 
             if pkt.time_acked.is_none() && pkt.time_lost.is_none() {

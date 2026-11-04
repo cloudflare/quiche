@@ -32,18 +32,18 @@ use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery::gcongestion::bbr2::Params;
-use crate::recovery::gcongestion::Lost;
 use crate::recovery::RecoveryStats;
+use crate::recovery::gcongestion::Lost;
+use crate::recovery::gcongestion::bbr2::Params;
 
+use super::Acked;
+use super::BBRv2CongestionEvent;
+use super::Limits;
 use super::drain::Drain;
 use super::network_model::BBRv2NetworkModel;
 use super::probe_bw::ProbeBW;
 use super::probe_rtt::ProbeRTT;
 use super::startup::Startup;
-use super::Acked;
-use super::BBRv2CongestionEvent;
-use super::Limits;
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) enum CyclePhase {
@@ -288,8 +288,8 @@ impl ModeImpl for Placeholder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
     use crate::BbrParams;
+    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
 
     #[test]
     fn cycle_params() {

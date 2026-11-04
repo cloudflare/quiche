@@ -27,6 +27,11 @@
 use std::collections::BTreeMap;
 
 use crate::quiche;
+use qlog::events::Event;
+use qlog::events::EventData;
+use qlog::events::ExData;
+use qlog::events::JsonEvent;
+use qlog::events::RawInfo;
 use qlog::events::http3::FrameCreated;
 use qlog::events::http3::Http3Frame;
 use qlog::events::http3::HttpHeader;
@@ -35,25 +40,20 @@ use qlog::events::http3::StreamTypeSet;
 use qlog::events::quic::ErrorSpace;
 use qlog::events::quic::PacketSent;
 use qlog::events::quic::QuicFrame;
-use qlog::events::Event;
-use qlog::events::EventData;
-use qlog::events::ExData;
-use qlog::events::JsonEvent;
-use qlog::events::RawInfo;
-use quiche::h3::frame::Frame;
 use quiche::h3::NameValue;
+use quiche::h3::frame::Frame;
 
 use serde_json::json;
 
+use crate::HTTP3_CONTROL_STREAM_TYPE_ID;
+use crate::HTTP3_PUSH_STREAM_TYPE_ID;
+use crate::QPACK_DECODER_STREAM_TYPE_ID;
+use crate::QPACK_ENCODER_STREAM_TYPE_ID;
 use crate::actions::h3::Action;
 use crate::actions::h3::WaitType;
 use crate::encode_header_block;
 use crate::encode_header_block_literal;
 use crate::fake_packet_sent;
-use crate::HTTP3_CONTROL_STREAM_TYPE_ID;
-use crate::HTTP3_PUSH_STREAM_TYPE_ID;
-use crate::QPACK_DECODER_STREAM_TYPE_ID;
-use crate::QPACK_ENCODER_STREAM_TYPE_ID;
 
 /// A qlog event representation using either the official RFC format or the
 /// catch-al JSON event.
@@ -170,6 +170,7 @@ impl From<&Action> for QlogEvents {
 
                     _ => qlog::events::http3::StreamType::Unknown,
                 };
+
                 let ty_val =
                     if matches!(ty, qlog::events::http3::StreamType::Unknown) {
                         Some(*stream_type)
@@ -475,12 +476,11 @@ fn map_header(
     let name = hdr.name.as_deref().unwrap_or("");
     let value = hdr.value.as_deref().unwrap_or("");
 
-    if name.eq_ignore_ascii_case(":authority") ||
-        name.eq_ignore_ascii_case("host")
+    if (name.eq_ignore_ascii_case(":authority") ||
+        name.eq_ignore_ascii_case("host")) &&
+        let Some(host) = host_override
     {
-        if let Some(host) = host_override {
-            return quiche::h3::Header::new(name.as_bytes(), host.as_bytes());
-        }
+        return quiche::h3::Header::new(name.as_bytes(), host.as_bytes());
     }
 
     quiche::h3::Header::new(name.as_bytes(), value.as_bytes())
@@ -501,10 +501,11 @@ impl From<H3FrameCreatedEx> for Action {
             .unwrap_or(&serde_json::Value::Null)
             .as_str();
 
-        let ret = match &value.frame_created.frame {
+        match &value.frame_created.frame {
             Http3Frame::Settings { settings, .. } => {
                 let mut raw_settings = vec![];
                 let mut additional_settings = vec![];
+
                 // This is ugly but it reflects ambiguity in the qlog
                 // specs.
                 for s in settings {
@@ -600,9 +601,7 @@ impl From<H3FrameCreatedEx> for Action {
             },
 
             _ => unimplemented!(),
-        };
-
-        ret
+        }
     }
 }
 

@@ -27,20 +27,20 @@
 //! Reporting (tables etc.)
 
 use qlog::events::quic::QuicFrame;
-use tabled::settings::location::ByColumnName;
-use tabled::settings::object::Segment;
+use tabled::Table;
 use tabled::settings::Alignment;
 use tabled::settings::Disable;
 use tabled::settings::Modify;
 use tabled::settings::Style;
-use tabled::Table;
+use tabled::settings::location::ByColumnName;
+use tabled::settings::object::Segment;
 
+use crate::LogFileData;
 use crate::config::AppConfig;
 use crate::datastore::Datastore;
 use crate::datastore::PrintStatsConfig;
 use crate::request_stub::*;
 use crate::stringify_last;
-use crate::LogFileData;
 
 pub fn request_timing_table(
     lf: &LogFileData, config: &AppConfig,
@@ -139,6 +139,7 @@ fn print_sent_packet_stats(data_store: &Datastore) {
                 pkt_num, length, payload_length
             );
         }
+
         println!();
     }
 }
@@ -260,7 +261,8 @@ fn print_local_stream_buffer_reads(data_store: &Datastore) {
                 entry.1.first().unwrap().1.length,
                 entry.1.last().unwrap().1.offset,
                 entry.1.last().unwrap().1.length,
-                entry.1.last().unwrap().1.offset + entry.1.last().unwrap().1.length,
+                entry.1.last().unwrap().1.offset +
+                    entry.1.last().unwrap().1.length,
             );
         }
     }
@@ -284,7 +286,8 @@ fn print_local_stream_buffer_writes(data_store: &Datastore) {
                 entry.1.first().unwrap().1.length,
                 entry.1.last().unwrap().1.offset,
                 entry.1.last().unwrap().1.length,
-                entry.1.last().unwrap().1.offset + entry.1.last().unwrap().1.length,
+                entry.1.last().unwrap().1.offset +
+                    entry.1.last().unwrap().1.length,
             );
         }
     }
@@ -308,7 +311,8 @@ fn print_local_stream_buffer_dropped(data_store: &Datastore) {
                 entry.1.first().unwrap().1.length,
                 entry.1.last().unwrap().1.offset,
                 entry.1.last().unwrap().1.length,
-                entry.1.last().unwrap().1.offset + entry.1.last().unwrap().1.length,
+                entry.1.last().unwrap().1.offset +
+                    entry.1.last().unwrap().1.length,
             );
         }
     }
@@ -361,7 +365,9 @@ pub fn print_flow_control(data: &[LogFileData]) {
                 .unwrap_or("ERROR UNKNOWN".to_string())
         );
 
-        println!("  Initial Client connection window, Initial Client Bidi Local Stream Window");
+        println!(
+            "  Initial Client connection window, Initial Client Bidi Local Stream Window"
+        );
         println!(
             "  {},{}",
             lf.datastore.client_quic_tps.initial_max_data.unwrap_or(0),
@@ -425,7 +431,9 @@ pub fn print_packet_loss(data: &[LogFileData]) {
 
         if !lf.datastore.netlog_ack_received_missing_packet.is_empty() {
             println!("  Packets sent and lost");
-            println!("    Packet Type, Packet tx count, Packet lost count, Packet loss %, Packets lost");
+            println!(
+                "    Packet Type, Packet tx count, Packet lost count, Packet loss %, Packets lost"
+            );
 
             for (pkt_type, pkt_nums) in
                 &lf.datastore.netlog_ack_received_missing_packet
@@ -452,7 +460,9 @@ pub fn print_packet_loss(data: &[LogFileData]) {
 
         if is_received_some {
             println!("  Packet lost and not received");
-            println!("    Packet Type, Packet rx count, Packet lost count, Packet loss %, Packets lost");
+            println!(
+                "    Packet Type, Packet rx count, Packet lost count, Packet loss %, Packets lost"
+            );
 
             for (pkt_type, pkt_nums) in
                 &lf.datastore.netlog_ack_sent_missing_packet

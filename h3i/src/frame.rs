@@ -35,12 +35,12 @@ use std::sync::Arc;
 use crate::quiche;
 use multimap::MultiMap;
 
-use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Header;
 use quiche::h3::NameValue;
+use quiche::h3::frame::Frame as QFrame;
+use serde::Serialize;
 use serde::ser::SerializeStruct;
 use serde::ser::Serializer;
-use serde::Serialize;
 
 use crate::client::connection_summary::MAX_SERIALIZED_BUFFER_LEN;
 use crate::encode_header_block;

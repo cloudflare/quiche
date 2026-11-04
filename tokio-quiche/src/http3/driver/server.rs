@@ -29,7 +29,6 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use super::datagram;
 use super::DriverHooks;
 use super::H3Command;
 use super::H3ConnectionError;
@@ -39,8 +38,9 @@ use super::H3Driver;
 use super::H3Event;
 use super::InboundHeaders;
 use super::IncomingH3Headers;
-use super::StreamCtx;
 use super::STREAM_CAPACITY;
+use super::StreamCtx;
+use super::datagram;
 use crate::http3::settings::Http3Settings;
 use crate::http3::settings::Http3SettingsEnforcer;
 use crate::http3::settings::Http3TimeoutType;
@@ -203,13 +203,12 @@ impl ServerHooks {
         // Note: flow_map entries are considered active work, so the
         // connection will not be closed in cleanup_stream() while
         // flows remain.
-        if driver.hooks.extended_connect_enabled() {
-            if let Some(flow_id) =
+        if driver.hooks.extended_connect_enabled() &&
+            let Some(flow_id) =
                 datagram::extract_quarter_stream_id(stream_id, &headers)
-            {
-                let _ = driver.get_or_insert_flow(flow_id)?;
-                stream_ctx.associated_dgram_flow_id = Some(flow_id);
-            }
+        {
+            let _ = driver.get_or_insert_flow(flow_id)?;
+            stream_ctx.associated_dgram_flow_id = Some(flow_id);
         }
 
         let latest_priority_update: Option<RawPriorityValue> = driver

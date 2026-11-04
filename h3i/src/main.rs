@@ -31,8 +31,8 @@ use std::time;
 use std::time::Instant;
 
 use h3i::actions::h3::Action;
-use h3i::client::connection_summary::ConnectionSummary;
 use h3i::client::ClientError;
+use h3i::client::connection_summary::ConnectionSummary;
 use h3i::prompts::h3::Prompter;
 use h3i::recordreplay::qlog::QlogEvent;
 use h3i::recordreplay::qlog::*;

@@ -25,6 +25,12 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use crate::config::AppConfig;
+use crate::plots::AreaMargin;
+use crate::plots::ChartMargin;
+use crate::plots::ChartOutputType;
+use crate::plots::ChartSize;
+use crate::plots::ClampParams;
+use crate::plots::PlotParameters;
 use crate::plots::congestion_control::plot_cc_plot;
 use crate::plots::conn_flow_control::plot_conn_flow_control_canvas;
 use crate::plots::conn_overview::plot_main_plot;
@@ -33,19 +39,13 @@ use crate::plots::packet_sent::plot_packet_sent_delta_plot_canvas;
 use crate::plots::packet_sent::plot_packet_sent_lost_delivered_count_plot;
 use crate::plots::packet_sent::plot_packet_sent_pacing_rate_plot_canvas;
 use crate::plots::packet_sent::plot_packet_sent_plot_canvas;
-use crate::plots::pending::plot_pending;
 use crate::plots::pending::PendingPlotParams;
+use crate::plots::pending::plot_pending;
 use crate::plots::rtt::plot_rtt_plot;
-use crate::plots::stream_multiplex::plot_stream_multiplexing;
 use crate::plots::stream_multiplex::MultiplexPlotsParams;
-use crate::plots::stream_sparks::plot_sparks;
+use crate::plots::stream_multiplex::plot_stream_multiplexing;
 use crate::plots::stream_sparks::SparkPlotsParams;
-use crate::plots::AreaMargin;
-use crate::plots::ChartMargin;
-use crate::plots::ChartOutputType;
-use crate::plots::ChartSize;
-use crate::plots::ClampParams;
-use crate::plots::PlotParameters;
+use crate::plots::stream_sparks::plot_sparks;
 use crate::reports::html::event_list_html_from_sqlog;
 
 use crate::datastore::Datastore;

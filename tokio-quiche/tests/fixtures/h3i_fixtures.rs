@@ -24,20 +24,20 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use h3i::actions::h3::send_headers_frame;
 use h3i::actions::h3::Action;
 use h3i::actions::h3::StreamEvent;
 use h3i::actions::h3::StreamEventType;
 use h3i::actions::h3::WaitType;
-use h3i::client::connection_summary::ConnectionSummary;
+use h3i::actions::h3::send_headers_frame;
 use h3i::client::ClientError;
+use h3i::client::connection_summary::ConnectionSummary;
 use h3i::frame::H3iFrame;
+use h3i::quiche::ConnectionError;
+use h3i::quiche::WireErrorCode;
 use h3i::quiche::h3::Header;
 use h3i::quiche::h3::{
     self,
 };
-use h3i::quiche::ConnectionError;
-use h3i::quiche::WireErrorCode;
 use url::Url;
 
 /// Default h3i config, connects to "test.com"
@@ -164,6 +164,7 @@ pub fn stream_body(summary: &ConnectionSummary, stream: u64) -> Option<String> {
                     String::from_utf8(payload).expect("response body not UTF-8"),
                 );
             }
+
             None
         })
         .collect();

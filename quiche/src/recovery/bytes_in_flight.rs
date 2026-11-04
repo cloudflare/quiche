@@ -166,6 +166,7 @@ mod tests {
         bytes_in_flight.saturating_subtract(7, start + Duration::from_secs(3));
         assert_eq!(bytes_in_flight.get(), 3);
         assert_eq!(bytes_in_flight.get_duration(), Duration::from_secs(3));
+
         // Interval is still open.
         bytes_in_flight.saturating_subtract(1, start + Duration::from_secs(20));
         assert_eq!(bytes_in_flight.get(), 2);

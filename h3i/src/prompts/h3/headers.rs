@@ -27,24 +27,24 @@
 //! Prompts for HTTP/3 header fields.
 
 use crate::quiche;
+use inquire::Text;
 use inquire::error::InquireResult;
 use inquire::validator::Validation;
-use inquire::Text;
 use quiche::h3::frame::Frame;
 
+use crate::StreamIdAllocator;
 use crate::encode_header_block;
 use crate::encode_header_block_literal;
 use crate::prompts::h3;
-use crate::StreamIdAllocator;
 
-use super::squish_suggester;
-use super::stream::prompt_fin_stream;
-use super::SuggestionResult;
 use super::AUTO_PICK;
 use super::EMPTY_PICKS;
 use super::ESC_TO_RET;
 use super::PUSH_ID_PROMPT;
 use super::STREAM_ID_PROMPT;
+use super::SuggestionResult;
+use super::squish_suggester;
+use super::stream::prompt_fin_stream;
 use crate::actions::h3::Action;
 
 pub fn prompt_headers(

@@ -24,9 +24,9 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use inquire::error::InquireResult;
 use inquire::Select;
 use inquire::Text;
+use inquire::error::InquireResult;
 
 use super::stream::prompt_fin_stream;
 use crate::actions::h3::Action;

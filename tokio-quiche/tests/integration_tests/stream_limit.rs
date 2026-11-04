@@ -35,14 +35,14 @@ use h3i_fixtures::summarize_connection;
 use tokio::sync::oneshot;
 use tokio_quiche::quic::QuicConnectionStats;
 
-use h3i::actions::h3::send_headers_frame;
-use h3i::actions::h3::send_headers_frame_with_expected_result;
 use h3i::actions::h3::Action;
 use h3i::actions::h3::ExpectedStreamSendResult;
 use h3i::actions::h3::RequiredStreamsQuota;
 use h3i::actions::h3::StreamEvent;
 use h3i::actions::h3::StreamEventType;
 use h3i::actions::h3::WaitType;
+use h3i::actions::h3::send_headers_frame;
+use h3i::actions::h3::send_headers_frame_with_expected_result;
 
 /// The server advertises a limit of 2 concurrent bidirectional streams.
 /// The client opens those 2 streams successfully, then attempts a third
@@ -97,6 +97,7 @@ async fn test_bidi_stream_limit_reached() -> QuicResult<()> {
         ExpectedStreamSendResult::Error(quiche::Error::StreamLimit),
     ));
     actions.push(Action::FlushPackets);
+
     // Wait until the server has processed the responses for streams 0 and 4,
     // collected both streams (requiring ACKs from the client), and sent a
     // MAX_STREAMS_BIDI frame that the client has received and applied.
@@ -107,6 +108,7 @@ async fn test_bidi_stream_limit_reached() -> QuicResult<()> {
             bidi: true,
         }),
     });
+
     // Attempt to create the stream that previously blocked. It should succeed
     // since the server sent a MAX_STREAMS update after streams 0 and 4 closed.
     actions.push(send_headers_frame(
@@ -115,6 +117,7 @@ async fn test_bidi_stream_limit_reached() -> QuicResult<()> {
         default_headers(),
     ));
     actions.push(Action::FlushPackets);
+
     // Wait for all streams to finish.
     for i in 0..(MAX_STREAMS + 1) {
         let stream_id = i * 4;
@@ -125,6 +128,7 @@ async fn test_bidi_stream_limit_reached() -> QuicResult<()> {
             }),
         });
     }
+
     actions.push(Action::ConnectionClose {
         error: quiche::ConnectionError {
             is_app: true,

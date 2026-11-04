@@ -125,6 +125,7 @@ impl DgramBuffer {
         if self.start >= headroom {
             return;
         }
+
         self.data
             .splice(0..self.start, std::iter::repeat_n(0u8, headroom));
         self.start = headroom;
@@ -188,14 +189,17 @@ impl std::fmt::Debug for DgramBuffer {
         }
 
         write!(f, "[0x")?;
+
         // Render bytes as two hexadecimal digits, separated every four bytes by
         // an underscore.
         for (i, byte) in self.as_slice().iter().enumerate() {
             if i > 0 && i % 4 == 0 {
                 f.write_str("_")?;
             }
+
             write!(f, "{:02x}", byte)?;
         }
+
         write!(f, ", len={}]", self.len())?;
 
         Ok(())
@@ -211,7 +215,7 @@ unsafe impl bytes::BufMut for DgramBuffer {
 
     unsafe fn advance_mut(&mut self, cnt: usize) {
         // SAFETY: We trust `Vec<u8>`'s `BufMut` implementation.
-        self.data.advance_mut(cnt);
+        unsafe { self.data.advance_mut(cnt) };
     }
 
     fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
@@ -435,6 +439,7 @@ mod tests {
         assert_eq!(b.as_slice(), &[1, 2, 3]);
         let (data, pos) = b.into_parts();
         assert_eq!(pos, 4);
+
         // The first four bytes are the new headroom zeros; payload follows.
         assert_eq!(&data, &[0, 0, 0, 0, 1, 2, 3]);
     }
@@ -446,6 +451,7 @@ mod tests {
         // 2 bytes of headroom, 3 bytes of payload.
         let mut b = DgramBuffer::with_capacity_and_headroom(16, 2);
         b.put_slice(&[10, 20, 30]);
+
         // pos=2, request 6 bytes of headroom.
         b.splice_headroom(6);
 

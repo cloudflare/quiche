@@ -29,8 +29,8 @@
 use events::sqlog_event_list;
 use tabled::settings::Style;
 
-use crate::config::AppConfig;
 use crate::LogFileParseResult;
+use crate::config::AppConfig;
 
 pub fn report(log_file: &LogFileParseResult, config: &AppConfig) {
     if config.report_text {

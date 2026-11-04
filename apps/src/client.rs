@@ -195,10 +195,8 @@ pub fn connect(
     )
     .unwrap();
 
-    if let Some(keylog) = &mut keylog {
-        if let Ok(keylog) = keylog.try_clone() {
-            conn.set_keylog(Box::new(keylog));
-        }
+    if let Some(keylog) = keylog {
+        conn.set_keylog(Box::new(keylog));
     }
 
     // Only bother with qlog if the user specified it.
@@ -216,10 +214,10 @@ pub fn connect(
         }
     }
 
-    if let Some(session_file) = &args.session_file {
-        if let Ok(session) = std::fs::read(session_file) {
-            conn.set_session(&session).ok();
-        }
+    if let Some(session_file) = &args.session_file &&
+        let Ok(session) = std::fs::read(session_file)
+    {
+        conn.set_session(&session).ok();
     }
 
     info!(
@@ -348,16 +346,16 @@ pub fn connect(
                 return Err(ClientError::HandshakeFail);
             }
 
-            if let Some(session_file) = &args.session_file {
-                if let Some(session) = conn.session() {
-                    std::fs::write(session_file, session).ok();
-                }
+            if let Some(session_file) = &args.session_file &&
+                let Some(session) = conn.session()
+            {
+                std::fs::write(session_file, session).ok();
             }
 
-            if let Some(h_conn) = http_conn {
-                if h_conn.report_incomplete(&app_data_start) {
-                    return Err(ClientError::HttpFail);
-                }
+            if http_conn
+                .is_some_and(|h_conn| h_conn.report_incomplete(&app_data_start))
+            {
+                return Err(ClientError::HttpFail);
             }
 
             break;
@@ -531,8 +529,7 @@ pub fn connect(
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             trace!(
                                 "{} -> {}: send() would block",
-                                local_addr,
-                                send_info.to
+                                local_addr, send_info.to
                             );
                             break;
                         }
@@ -567,16 +564,16 @@ pub fn connect(
                 return Err(ClientError::HandshakeFail);
             }
 
-            if let Some(session_file) = &args.session_file {
-                if let Some(session) = conn.session() {
-                    std::fs::write(session_file, session).ok();
-                }
+            if let Some(session_file) = &args.session_file &&
+                let Some(session) = conn.session()
+            {
+                std::fs::write(session_file, session).ok();
             }
 
-            if let Some(h_conn) = http_conn {
-                if h_conn.report_incomplete(&app_data_start) {
-                    return Err(ClientError::HttpFail);
-                }
+            if http_conn
+                .is_some_and(|h_conn| h_conn.report_incomplete(&app_data_start))
+            {
+                return Err(ClientError::HttpFail);
             }
 
             break;

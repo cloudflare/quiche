@@ -26,6 +26,8 @@
 
 use bytes::Bytes;
 use datagram_socket::QuicAuditStats;
+use tokio_quiche::ConnectionParams;
+use tokio_quiche::ServerH3Controller;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::InboundFrame;
 use tokio_quiche::http3::driver::InboundFrameStream;
@@ -43,33 +45,31 @@ use tokio_quiche::quiche::h3::{
 };
 use tokio_quiche::settings::Hooks;
 use tokio_quiche::settings::TlsCertificatePaths;
-use tokio_quiche::ConnectionParams;
-use tokio_quiche::ServerH3Controller;
 
-use futures::stream::FuturesUnordered;
 use futures::Future;
 use futures::SinkExt;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use regex::Regex;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::sync::Mutex;
 use tokio::select;
 use tokio::sync::mpsc;
 
 // Re-export for convenience
-pub use tokio_quiche::http3::settings::Http3Settings;
-pub use tokio_quiche::quic::ConnectionShutdownBehaviour;
-pub use tokio_quiche::settings::QuicSettings;
 pub use tokio_quiche::QuicResult;
 pub use tokio_quiche::QuicResultExt;
 pub use tokio_quiche::ServerH3Connection;
 pub use tokio_quiche::ServerH3Driver;
+pub use tokio_quiche::http3::settings::Http3Settings;
+pub use tokio_quiche::quic::ConnectionShutdownBehaviour;
+pub use tokio_quiche::settings::QuicSettings;
 
 pub mod h3i_fixtures;
 

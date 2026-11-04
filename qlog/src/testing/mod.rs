@@ -26,12 +26,12 @@
 
 //! Testing utilities for qlog.
 
-use crate::events::quic::PacketType;
 use crate::PacketHeader;
 use crate::Trace;
 use crate::TraceSeq;
 use crate::VantagePoint;
 use crate::VantagePointType;
+use crate::events::quic::PacketType;
 
 pub fn make_pkt_hdr(packet_type: PacketType) -> PacketHeader {
     let scid = [0x7e, 0x37, 0xe4, 0xdc, 0xc6, 0x68, 0x2d, 0xa8];

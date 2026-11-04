@@ -2,7 +2,7 @@
 name = "quiche-fuzz"
 version = "0.1.0"
 authors = ["Alessandro Ghedini <alessandro@ghedini.me>"]
-edition = "2018"
+edition = "2024"
 publish = false
 
 [package.metadata]

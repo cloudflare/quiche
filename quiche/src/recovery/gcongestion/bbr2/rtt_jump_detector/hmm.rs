@@ -166,6 +166,7 @@ fn hmm_std_bin(elevation: f32, edges: &[f32; HMM_BINS - 1]) -> usize {
     while bin < edges.len() && elevation >= edges[bin] {
         bin += 1;
     }
+
     bin
 }
 
@@ -203,6 +204,7 @@ fn hmm_argmax(alpha: &[f32; HMM_STATE_COUNT]) -> HmmState {
             best = state;
         }
     }
+
     HmmState::from_index(best)
 }
 
@@ -288,6 +290,7 @@ impl HmmDetector {
                 self.dispersion +=
                     (rel - self.dispersion) / self.warmup_contrib as f32;
             }
+
             self.update_baseline(rtt_sample);
             return RttJumpUpdate::None;
         }
@@ -336,6 +339,7 @@ impl HmmDetector {
                                 episode_start_time: episode_start,
                             };
                         }
+
                         self.episode = raw.to_episode();
                     },
                     HmmState::Transient => {
@@ -347,6 +351,7 @@ impl HmmDetector {
                         self.episode = raw.to_episode();
                     },
                 }
+
                 self.reset_pending(raw);
             }
         }

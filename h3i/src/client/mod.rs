@@ -56,15 +56,15 @@ use crate::frame_parser::FrameParser;
 use crate::frame_parser::InterruptCause;
 use crate::recordreplay::qlog::QlogEvent;
 use crate::recordreplay::qlog::*;
-use qlog::events::http3::Http3Frame;
 use qlog::events::EventData;
+use qlog::events::http3::Http3Frame;
 use qlog::streamer::QlogStreamer;
 use serde::Serialize;
 
 use crate::quiche;
-use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error;
 use quiche::h3::NameValue;
+use quiche::h3::frame::Frame as QFrame;
 
 const MAX_DATAGRAM_SIZE: usize = 1350;
 const QUIC_VERSION: u32 = 1;
@@ -119,31 +119,27 @@ fn validate_stream_send_result(
                 )
             });
         },
-        ExpectedStreamSendResult::OkExact(expected_bytes) => {
-            match result {
-                Ok(actual_bytes) if actual_bytes == *expected_bytes => {},
-                Ok(actual_bytes) => panic!(
-                    "Expected stream_send on stream {} to write {} bytes, got {}",
-                    stream_id, expected_bytes, actual_bytes
-                ),
-                Err(err) => panic!(
-                    "Expected stream_send on stream {} to write {} bytes, got error: {:?}",
-                    stream_id, expected_bytes, err
-                ),
-            }
+        ExpectedStreamSendResult::OkExact(expected_bytes) => match result {
+            Ok(actual_bytes) if actual_bytes == *expected_bytes => {},
+            Ok(actual_bytes) => panic!(
+                "Expected stream_send on stream {} to write {} bytes, got {}",
+                stream_id, expected_bytes, actual_bytes
+            ),
+            Err(err) => panic!(
+                "Expected stream_send on stream {} to write {} bytes, got error: {:?}",
+                stream_id, expected_bytes, err
+            ),
         },
-        ExpectedStreamSendResult::Error(expected_err) => {
-            match result {
-                Ok(written) => panic!(
-                    "Expected stream_send on stream {} to fail with {:?}, but wrote {} bytes",
-                    stream_id, expected_err, written
-                ),
-                Err(actual_err) if &actual_err == expected_err => {},
-                Err(actual_err) => panic!(
-                    "Expected stream_send on stream {} to fail with {:?}, got {:?}",
-                    stream_id, expected_err, actual_err
-                ),
-            }
+        ExpectedStreamSendResult::Error(expected_err) => match result {
+            Ok(written) => panic!(
+                "Expected stream_send on stream {} to fail with {:?}, but wrote {} bytes",
+                stream_id, expected_err, written
+            ),
+            Err(actual_err) if &actual_err == expected_err => {},
+            Err(actual_err) => panic!(
+                "Expected stream_send on stream {} to fail with {:?}, got {:?}",
+                stream_id, expected_err, actual_err
+            ),
         },
     }
 }
@@ -192,6 +188,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                     }
                 }
             }
+
             let len = frame.to_bytes(&mut b).unwrap();
 
             // TODO - consider storying result in ConnectionSummary too.
@@ -244,6 +241,7 @@ pub(crate) fn execute_action<F: quiche::BufFactory>(
                     }
                 }
             }
+
             let len = frame.to_bytes(&mut b).unwrap();
             let result = conn.stream_send(*stream_id, &d[..len], *fin_stream);
             validate_stream_send_result(result, expected_result, *stream_id);

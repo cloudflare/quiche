@@ -30,12 +30,12 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
+use crate::QuicResult;
+use crate::quic::QuicheConnection;
 use crate::quic::connection::ApplicationOverQuic;
 use crate::quic::connection::Incoming;
 use crate::quic::connection::QuicConnectionStatsShared;
 use crate::quic::hooks::ConnectionHook;
-use crate::quic::QuicheConnection;
-use crate::QuicResult;
 
 /// Represents the current lifecycle stage of a [quiche::Connection].
 /// Implementors of this trait inform the underlying I/O loop as to how to

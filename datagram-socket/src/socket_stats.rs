@@ -25,14 +25,14 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::ops::Deref;
-use std::sync::atomic::AtomicI64;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::AtomicU8;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 #[cfg(target_os = "linux")]
 use std::sync::OnceLock;
 use std::sync::RwLock;
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::SystemTime;
 

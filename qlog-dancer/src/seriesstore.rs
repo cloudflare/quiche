@@ -26,10 +26,10 @@
 
 use std::collections::BTreeMap;
 
-use crate::datastore::Datastore;
-use crate::push_interp;
 use crate::QlogPointRtt;
 use crate::QlogPointu64;
+use crate::datastore::Datastore;
+use crate::push_interp;
 use netlog::h2::H2_DEFAULT_WINDOW_SIZE;
 
 use qlog::events::quic::QuicFrame;

@@ -206,9 +206,11 @@ impl Open {
                 Some(n) => n,
                 None => return Err(Error::CryptoFail),
             };
+
             if ad.len() > tag_len && buf[out_len..] == ad[..tag_len] {
                 return Err(Error::CryptoFail);
             }
+
             return Ok(out_len);
         }
 
@@ -299,9 +301,11 @@ impl Seal {
                 if in_len + tag_len + extra.len() > buf.len() {
                     return Err(Error::CryptoFail);
                 }
+
                 buf[in_len..in_len + extra.len()].copy_from_slice(extra);
                 return Ok(in_len + extra.len());
             }
+
             if in_len + tag_len > buf.len() {
                 return Err(Error::CryptoFail);
             }
@@ -519,7 +523,7 @@ pub fn verify_slices_are_equal(a: &[u8], b: &[u8]) -> Result<()> {
     Err(Error::CryptoFail)
 }
 
-extern "C" {
+unsafe extern "C" {
     fn EVP_sha256() -> *const EVP_MD;
 
     fn EVP_sha384() -> *const EVP_MD;
@@ -545,12 +549,14 @@ mod tests {
 
         let aead = Algorithm::AES128_GCM;
 
-        assert!(derive_initial_secret(
-            &dcid,
-            crate::PROTOCOL_VERSION_V1,
-            &mut initial_secret,
-        )
-        .is_ok());
+        assert!(
+            derive_initial_secret(
+                &dcid,
+                crate::PROTOCOL_VERSION_V1,
+                &mut initial_secret,
+            )
+            .is_ok()
+        );
 
         // Client.
         assert!(

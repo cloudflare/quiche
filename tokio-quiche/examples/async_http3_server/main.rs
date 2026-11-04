@@ -29,11 +29,13 @@ mod body;
 mod server;
 
 use crate::args::Args;
-use crate::server::service_fn;
 use crate::server::Server;
+use crate::server::service_fn;
 use clap::Parser;
 use futures::stream::StreamExt;
 use tokio::net::UdpSocket;
+use tokio_quiche::ConnectionParams;
+use tokio_quiche::ServerH3Driver;
 use tokio_quiche::http3::settings::Http3Settings;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
@@ -43,8 +45,6 @@ use tokio_quiche::settings::CertificateKind::{
 use tokio_quiche::settings::Hooks;
 use tokio_quiche::settings::QuicSettings;
 use tokio_quiche::settings::TlsCertificatePaths;
-use tokio_quiche::ConnectionParams;
-use tokio_quiche::ServerH3Driver;
 
 #[tokio::main]
 async fn main() {

@@ -30,13 +30,13 @@ use clap::Arg;
 use clap::ArgAction;
 use clap::Command;
 
+use crate::SerializationFormat;
 use crate::datastore::PrintStatsConfig;
-use crate::plots::colors::PlotColors;
+use crate::plots::ClampParams;
 use crate::plots::colors::DARK_MODE;
 use crate::plots::colors::LIGHT_MODE;
+use crate::plots::colors::PlotColors;
 use crate::plots::stream_sparks::SparkPlotsParams;
-use crate::plots::ClampParams;
-use crate::SerializationFormat;
 
 #[derive(Debug)]
 pub struct AppConfig {
@@ -78,11 +78,7 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn colors(dark_mode: bool) -> PlotColors {
-        if dark_mode {
-            DARK_MODE
-        } else {
-            LIGHT_MODE
-        }
+        if dark_mode { DARK_MODE } else { LIGHT_MODE }
     }
 
     pub fn from_clap() -> std::result::Result<Self, String> {
@@ -216,16 +212,12 @@ impl AppConfig {
             return Err("End time cannot be earlier than start time.".into());
         }
 
-        if let Some(start) = start {
-            if start < 0.0 {
-                return Err("Start time cannot be less than 0.0.".into());
-            }
+        if start.is_some_and(|start| start < 0.0) {
+            return Err("Start time cannot be less than 0.0.".into());
         }
 
-        if let Some(end) = end {
-            if end < 0.0 {
-                return Err("End time cannot be less than 0.0.".into());
-            }
+        if end.is_some_and(|end| end < 0.0) {
+            return Err("End time cannot be less than 0.0.".into());
         }
 
         let stream_y_max =

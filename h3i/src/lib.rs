@@ -154,15 +154,15 @@
 //! [RFC 9204]: https://www.rfc-editor.org/rfc/rfc9204.html
 //! [malformed request]: https://datatracker.ietf.org/doc/html/rfc9114#section-4.1.2-3
 
+use qlog::events::EventData;
 use qlog::events::quic::PacketHeader;
 use qlog::events::quic::PacketSent;
 use qlog::events::quic::PacketType;
 use qlog::events::quic::QuicFrame;
-use qlog::events::EventData;
+use quiche::h3::NameValue;
+use quiche::h3::qpack::LITERAL;
 use quiche::h3::qpack::encode_int;
 use quiche::h3::qpack::encode_str;
-use quiche::h3::qpack::LITERAL;
-use quiche::h3::NameValue;
 
 #[cfg(not(feature = "async"))]
 pub use quiche;

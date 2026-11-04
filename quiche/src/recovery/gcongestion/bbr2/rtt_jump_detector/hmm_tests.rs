@@ -68,6 +68,7 @@ fn hmm_build_baseline(
     for pkt in 1..=count {
         sample(detector, base, ms(pkt * 10), rtt);
     }
+
     assert!(!detector.is_rtt_jump_active());
 }
 
@@ -323,6 +324,7 @@ fn hmm_clear_allows_later_jump_to_recount() {
         offset += 100;
         assert!(offset < 5000, "first persistent jump was never confirmed");
     }
+
     assert_eq!(detector.rtt_persistent_jump_count(), 1);
 
     while detector.is_rtt_jump_active() {
@@ -330,6 +332,7 @@ fn hmm_clear_allows_later_jump_to_recount() {
         offset += 100;
         assert!(offset < 8000, "persistent jump was never cleared");
     }
+
     assert_eq!(detector.rtt_persistent_jump_count(), 1);
 
     while !detector.is_rtt_jump_persistent() {
@@ -337,6 +340,7 @@ fn hmm_clear_allows_later_jump_to_recount() {
         offset += 100;
         assert!(offset < 13000, "second persistent jump was never confirmed");
     }
+
     assert_eq!(detector.rtt_persistent_jump_count(), 2);
 }
 
@@ -362,6 +366,7 @@ fn hmm_sustained_plateau_does_not_clear() {
         );
         offset += 100;
     }
+
     assert_eq!(detector.rtt_persistent_jump_count(), 1);
 }
 
@@ -376,6 +381,7 @@ fn hmm_self_calibration_absorbs_jump_within_link_noise() {
         sample(&mut quiet, base, ms(pkt * 10), RTT_2X);
         fired |= quiet.is_rtt_jump_active();
     }
+
     assert!(fired, "quiet link should flag a sustained 2x step");
 
     let mut noisy = hmm_detector();
@@ -384,11 +390,13 @@ fn hmm_self_calibration_absorbs_jump_within_link_noise() {
         let pkt = i as u64 + 1;
         sample(&mut noisy, base, ms(pkt * 10), ms(rtt));
     }
+
     let mut fired = false;
     for pkt in 9..109u64 {
         sample(&mut noisy, base, ms(pkt * 10), RTT_2X);
         fired |= noisy.is_rtt_jump_active();
     }
+
     assert!(!fired, "noisy link should absorb the same 2x step");
 }
 
@@ -403,6 +411,7 @@ fn hmm_detection_is_scale_invariant() {
             sample(&mut detector, base, base_rtt * pkt as u32, base_rtt * 2);
             fired |= detector.is_rtt_jump_persistent();
         }
+
         fired
     }
 
@@ -432,6 +441,7 @@ fn hmm_startup_grace_suppresses_commits() {
             "startup grace must suppress commits (sample {pkt})"
         );
     }
+
     assert!(!detector.is_rtt_jump_persistent());
     assert_eq!(detector.rtt_persistent_jump_count(), 0);
     assert_eq!(detector.last_persistent_jump_time(), None);
@@ -443,6 +453,7 @@ fn hmm_startup_grace_suppresses_commits() {
         fired |= detector.is_rtt_jump_active();
         offset += 100;
     }
+
     assert!(fired, "detection must resume after leaving Startup");
 }
 

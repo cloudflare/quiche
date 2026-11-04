@@ -112,6 +112,7 @@ pub fn plot_pending(
                 _ => (),
             }
         }
+
         series.push(PendingStack {
             time: x,
             pending,

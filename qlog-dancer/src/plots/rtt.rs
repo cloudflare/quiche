@@ -81,6 +81,7 @@ pub fn draw_rtt_plot<'a, DB: DrawingBackend + 'a>(
     if params.display_chart_title {
         builder.caption("RTT", chart_subtitle_style(&params.colors.caption));
     }
+
     let mut chart = builder
         .build_cartesian_2d(
             axis.x.range(),

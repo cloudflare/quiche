@@ -64,6 +64,7 @@ fn main() {
         {
             println!("cargo:rustc-cfg=boring_v5");
         }
+
         println!("cargo:rustc-link-lib=static=ssl");
         println!("cargo:rustc-link-lib=static=crypto");
     }

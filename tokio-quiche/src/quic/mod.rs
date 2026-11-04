@@ -89,18 +89,18 @@ use foundations::telemetry::log;
 use qlog::writer::make_qlog_writer_from_path;
 use qlog::writer::qlog_file_name;
 
-use crate::http3::settings::Http3Settings;
-use crate::metrics::DefaultMetrics;
-use crate::metrics::Metrics;
-use crate::settings::Config;
-use crate::socket::QuicListener;
-use crate::socket::Socket;
 use crate::ClientH3Controller;
 use crate::ClientH3Driver;
 use crate::ConnectionParams;
 use crate::QuicConnectionStream;
 use crate::QuicResult;
 use crate::QuicResultExt;
+use crate::http3::settings::Http3Settings;
+use crate::metrics::DefaultMetrics;
+use crate::metrics::Metrics;
+use crate::settings::Config;
+use crate::socket::QuicListener;
+use crate::socket::Socket;
 
 mod addr_validation_token;
 pub(crate) mod connection;
@@ -113,10 +113,10 @@ mod router;
 use self::connection::ApplicationOverQuic;
 use self::connection::ConnectionIdGenerator as _;
 use self::connection::QuicConnection;
+use self::router::InboundPacketRouter;
 use self::router::acceptor::ConnectionAcceptor;
 use self::router::acceptor::ConnectionAcceptorConfig;
 use self::router::connector::ClientConnector;
-use self::router::InboundPacketRouter;
 
 pub use self::connection::ConnectionShutdownBehaviour;
 pub use self::connection::HandshakeError;

@@ -319,6 +319,7 @@ impl<'a> Octets<'a> {
                     if out.len() + 1 > max_len {
                         return Err(BufferTooShortError);
                     }
+
                     out.push(sym);
                 }
 
@@ -885,6 +886,7 @@ where
         } else {
             b
         };
+
         let (nbits, code) = ENCODE_TABLE[b as usize];
 
         pending += nbits;

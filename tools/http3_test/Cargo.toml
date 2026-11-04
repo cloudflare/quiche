@@ -2,7 +2,7 @@
 name = "http3_test"
 version = "0.2.0"
 authors = ["Lucas Pardue <lucaspardue.24.7@gmail.com>"]
-edition = "2018"
+edition = "2024"
 publish = false
 
 [features]

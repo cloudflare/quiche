@@ -509,7 +509,10 @@ impl std::fmt::Debug for Frame {
                 raw,
                 ..
             } => {
-                write!(f, "SETTINGS max_field_section={max_field_section_size:?}, qpack_max_table={qpack_max_table_capacity:?}, qpack_blocked={qpack_blocked_streams:?} raw={raw:?}, additional_settings={additional_settings:?}")?;
+                write!(
+                    f,
+                    "SETTINGS max_field_section={max_field_section_size:?}, qpack_max_table={qpack_max_table_capacity:?}, qpack_blocked={qpack_blocked_streams:?} raw={raw:?}, additional_settings={additional_settings:?}"
+                )?;
             },
 
             Frame::PushPromise {

@@ -27,18 +27,18 @@
 use crate::fixtures::*;
 use h3i_fixtures::received_status_code_on_stream;
 
-use foundations::telemetry::with_test_telemetry;
 use foundations::telemetry::TestTelemetryContext;
+use foundations::telemetry::with_test_telemetry;
 use futures::StreamExt;
 use futures_util::future::try_join_all;
 use std::time::Duration;
 use tokio::time::timeout;
+use tokio_quiche::ConnectionParams;
+use tokio_quiche::InitialQuicConnection;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
 use tokio_quiche::settings::Hooks;
 use tokio_quiche::settings::TlsCertificatePaths;
-use tokio_quiche::ConnectionParams;
-use tokio_quiche::InitialQuicConnection;
 
 pub mod async_callbacks;
 pub mod connection_close;
@@ -177,11 +177,13 @@ async fn quiche_logs_forwarded_server_side(cx: TestTelemetryContext) {
     // Unfortunately, the Foundations `fields` struct is empty for some reason.
     // This is a bit of a hacky test, but it checks for a string that should
     // come from Quiche's Trace logs
-    assert!(cx.log_records().iter().any(|record| (record
-        .message
-        .contains("rx pkt") ||
-        record.message.contains("tx pkt")) &&
-        record.level.as_str() == "TRACE"));
+    assert!(
+        cx.log_records().iter().any(
+            |record| (record.message.contains("rx pkt") ||
+                record.message.contains("tx pkt")) &&
+                record.level.as_str() == "TRACE"
+        )
+    );
 }
 
 #[tokio::test]
@@ -239,11 +241,11 @@ async fn test_ioworker_state_machine_pause() {
 #[tokio::test]
 #[cfg(feature = "custom-client-dcid")]
 async fn test_connect_with_custom_dcid() {
+    use tokio_quiche::ClientH3Driver;
+    use tokio_quiche::ConnectionIdGenerator;
     use tokio_quiche::http3::settings::Http3Settings;
     use tokio_quiche::quic::connect_with_config;
     use tokio_quiche::socket::Socket;
-    use tokio_quiche::ClientH3Driver;
-    use tokio_quiche::ConnectionIdGenerator;
 
     let (url, _hook, _audit_stats_rx) = start_server();
     let addr = extract_host_ipv4(&url);
@@ -258,13 +260,15 @@ async fn test_connect_with_custom_dcid() {
     let mut params = ConnectionParams::default();
     params.dcid = Some(dcid);
 
-    assert!(timeout(
-        Duration::from_secs(5),
-        connect_with_config(socket, Some("127.0.0.1"), &params, h3_driver,),
-    )
-    .await
-    .expect("connection timed out")
-    .is_ok());
+    assert!(
+        timeout(
+            Duration::from_secs(5),
+            connect_with_config(socket, Some("127.0.0.1"), &params, h3_driver,),
+        )
+        .await
+        .expect("connection timed out")
+        .is_ok()
+    );
 }
 
 #[tokio::test]

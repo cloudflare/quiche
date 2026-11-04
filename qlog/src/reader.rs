@@ -115,6 +115,7 @@ impl<'a> QlogSeqReader<'a> {
                     Box::new(BufReader::new(flate2::read::GzDecoder::new(file)));
                 return Self::new(reader);
             }
+
             #[cfg(not(feature = "gzip"))]
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
@@ -125,6 +126,7 @@ impl<'a> QlogSeqReader<'a> {
             )
             .into());
         }
+
         if name.ends_with(SQLOG_ZST_EXT) {
             #[cfg(feature = "zstd")]
             {
@@ -133,6 +135,7 @@ impl<'a> QlogSeqReader<'a> {
                     Box::new(BufReader::new(decoder));
                 return Self::new(reader);
             }
+
             #[cfg(not(feature = "zstd"))]
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
@@ -143,6 +146,7 @@ impl<'a> QlogSeqReader<'a> {
             )
             .into());
         }
+
         if name.ends_with(SQLOG_EXT) {
             let reader: Box<dyn std::io::BufRead + Send + Sync> =
                 Box::new(BufReader::new(file));

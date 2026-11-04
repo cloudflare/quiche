@@ -371,6 +371,7 @@ impl QlogStreamer {
             serde_json::to_writer(self.writer.as_mut(), &event)
                 .map_err(|_| Error::Done)?;
         }
+
         self.writer.as_mut().write_all(b"\n")?;
 
         Ok(())
@@ -398,9 +399,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::events::RawInfo;
     use crate::events::quic;
     use crate::events::quic::QuicFrame;
-    use crate::events::RawInfo;
     use testing::*;
 
     use serde_json::json;

@@ -35,8 +35,8 @@ use std::sync::atomic::Ordering;
 
 use crossbeam::queue::SegQueue;
 
-use foundations::telemetry::metrics::metrics;
 use foundations::telemetry::metrics::Gauge;
+use foundations::telemetry::metrics::metrics;
 
 pub use crate::buffer::*;
 pub use crate::raw_pool_buf_io::*;
@@ -119,6 +119,7 @@ impl<T: Default + Reuse> Drop for Pooled<T> {
             max,
             name,
         } = self.pool;
+
         // The memory associated with this object is no longer live.
         buffer_pool::pool_active_count(name).dec();
         if self.inner.reuse(*trim) {
@@ -131,10 +132,12 @@ impl<T: Default + Reuse> Drop for Pooled<T> {
                 queue.push(std::mem::take(&mut self.inner));
                 return;
             }
+
             // There was no room for the buffer, return count to previous value
             // and drop
             elem_cnt.fetch_sub(1, Ordering::Release);
         }
+
         // If item did not qualify for return, drop it
     }
 }
@@ -285,6 +288,7 @@ mod tests {
         for shard in pool.queues.iter() {
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), 0);
         }
+
         assert_eq!(buffer_pool::pool_idle_count(POOL_NAME).get(), 0);
         assert_eq!(buffer_pool::pool_idle_bytes(POOL_NAME).get(), 0);
         assert_eq!(
@@ -294,6 +298,7 @@ mod tests {
 
         for (i, buf) in bufs.iter().enumerate() {
             assert!(buf.is_empty());
+
             // Check the buffer is sharded properly.
             assert_eq!(
                 buf.pool as *const _,
@@ -305,6 +310,7 @@ mod tests {
         for shard in pool.queues.iter() {
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), 0);
         }
+
         assert_eq!(buffer_pool::pool_idle_count(POOL_NAME).get(), 0);
         assert_eq!(buffer_pool::pool_idle_bytes(POOL_NAME).get(), 0);
         assert_eq!(
@@ -329,9 +335,11 @@ mod tests {
                 buf.pool as *const _,
                 &pool.queues[i % SHARDS] as *const _
             );
+
             // Check that the buffer was properly extended
             assert_eq!(&buf[..], &[0, 1]);
         }
+
         assert_eq!(
             buffer_pool::pool_active_count(POOL_NAME).get(),
             bufs.len() as u64
@@ -342,6 +350,7 @@ mod tests {
         for shard in pool.queues.iter() {
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), MAX_IN_SHARD);
         }
+
         assert_eq!(
             buffer_pool::pool_idle_count(POOL_NAME).get(),
             (SHARDS * MAX_IN_SHARD) as u64
@@ -355,6 +364,7 @@ mod tests {
         for (i, buf) in bufs.iter().enumerate() {
             // Check that the buffer was properly cleared.
             assert!(buf.is_empty());
+
             // Check the buffer is sharded properly.
             assert_eq!(
                 buf.pool as *const _,
@@ -365,6 +375,7 @@ mod tests {
         for shard in pool.queues.iter() {
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), 1);
         }
+
         assert_eq!(buffer_pool::pool_idle_count(POOL_NAME).get(), SHARDS as u64);
         assert_ne!(buffer_pool::pool_idle_bytes(POOL_NAME).get(), 0);
         assert_eq!(
@@ -377,6 +388,7 @@ mod tests {
         for shard in pool.queues.iter() {
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), 0);
         }
+
         assert_eq!(buffer_pool::pool_idle_count(POOL_NAME).get(), 0);
         assert_eq!(buffer_pool::pool_idle_bytes(POOL_NAME).get(), 0);
         assert_eq!(
@@ -389,6 +401,7 @@ mod tests {
         for shard in pool.queues.iter() {
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), 0);
         }
+
         assert_eq!(buffer_pool::pool_idle_count(POOL_NAME).get(), 0);
         assert_eq!(buffer_pool::pool_idle_bytes(POOL_NAME).get(), 0);
         assert_eq!(
@@ -401,6 +414,7 @@ mod tests {
         for shard in pool.queues.iter() {
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), 1);
         }
+
         assert_eq!(buffer_pool::pool_idle_count(POOL_NAME).get(), SHARDS as u64);
         assert_ne!(buffer_pool::pool_idle_bytes(POOL_NAME).get(), 0);
         assert_eq!(
@@ -412,6 +426,7 @@ mod tests {
         for shard in pool.queues.iter() {
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), MAX_IN_SHARD);
         }
+
         assert_eq!(
             buffer_pool::pool_idle_count(POOL_NAME).get(),
             (SHARDS * MAX_IN_SHARD) as u64
@@ -427,6 +442,7 @@ mod tests {
             // Can't get over limit.
             assert_eq!(shard.elem_cnt.load(Ordering::Relaxed), MAX_IN_SHARD);
         }
+
         assert_eq!(
             buffer_pool::pool_idle_count(POOL_NAME).get(),
             (SHARDS * MAX_IN_SHARD) as u64

@@ -983,22 +983,23 @@ mod httpbin_tests {
 
             let json = jsonify(&reqs[0].resp_body);
             assert_ne!(json.headers, None);
-            if let Some(headers) = json.headers {
-                if let Some(expected_headers) = &expect_req_headers() {
-                    for (name, val) in expected_headers {
-                        if let Some(expected_value) = val.as_str() {
-                            assert_eq!(
-                                headers.get(name),
-                                Some(&String::from(expected_value)),
-                                "Header '{name}' doesn't match"
-                            );
-                        } else {
-                            assert_eq!(
-                                headers.get(name),
-                                None,
-                                "Header '{name}' exists"
-                            );
-                        }
+
+            if let Some(headers) = json.headers &&
+                let Some(expected_headers) = &expect_req_headers()
+            {
+                for (name, val) in expected_headers {
+                    if let Some(expected_value) = val.as_str() {
+                        assert_eq!(
+                            headers.get(name),
+                            Some(&String::from(expected_value)),
+                            "Header '{name}' doesn't match"
+                        );
+                    } else {
+                        assert_eq!(
+                            headers.get(name),
+                            None,
+                            "Header '{name}' exists"
+                        );
                     }
                 }
             }

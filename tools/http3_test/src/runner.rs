@@ -125,10 +125,10 @@ pub fn run(
         quiche::connect(url.domain(), &scid, local_addr, peer_addr, &mut config)
             .unwrap();
 
-    if let Some(session_file) = &session_file {
-        if let Ok(session) = std::fs::read(session_file) {
-            conn.set_session(&session).ok();
-        }
+    if let Some(session_file) = &session_file &&
+        let Ok(session) = std::fs::read(session_file)
+    {
+        conn.set_session(&session).ok();
     }
 
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
@@ -217,15 +217,19 @@ pub fn run(
             }
 
             if reqs_complete != reqs_count {
-                error!("Client timed out after {:?} and only completed {}/{} requests",
-                req_start.elapsed(), reqs_complete, reqs_count);
+                error!(
+                    "Client timed out after {:?} and only completed {}/{} requests",
+                    req_start.elapsed(),
+                    reqs_complete,
+                    reqs_count
+                );
                 return Err(Http3TestError::HttpFail);
             }
 
-            if let Some(session_file) = session_file {
-                if let Some(session) = conn.session() {
-                    std::fs::write(session_file, session).ok();
-                }
+            if let Some(session_file) = session_file &&
+                let Some(session) = conn.session()
+            {
+                std::fs::write(session_file, session).ok();
             }
 
             break;
@@ -409,15 +413,19 @@ pub fn run(
             info!("connection closed, {:?}", conn.stats());
 
             if reqs_complete != reqs_count {
-                error!("Client timed out after {:?} and only completed {}/{} requests",
-                req_start.elapsed(), reqs_complete, reqs_count);
+                error!(
+                    "Client timed out after {:?} and only completed {}/{} requests",
+                    req_start.elapsed(),
+                    reqs_complete,
+                    reqs_count
+                );
                 return Err(Http3TestError::HttpFail);
             }
 
-            if let Some(session_file) = session_file {
-                if let Some(session) = conn.session() {
-                    std::fs::write(session_file, session).ok();
-                }
+            if let Some(session_file) = session_file &&
+                let Some(session) = conn.session()
+            {
+                std::fs::write(session_file, session).ok();
             }
 
             break;

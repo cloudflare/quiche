@@ -25,9 +25,9 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::mem;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Wake;
@@ -346,14 +346,16 @@ impl StreamCtx {
                 debug_assert!(false, "Outbound waiting requires a receiver");
                 return Err(H3ConnectionError::H3(h3::Error::InternalError));
             };
+
             if let Poll::Ready(data) = recv.poll_recv(&mut cx) {
                 if self.queued_frame.is_some() {
                     debug_assert!(
-                            false,
-                            "channel readiness cannot replace a queued outbound frame"
-                        );
+                        false,
+                        "channel readiness cannot replace a queued outbound frame"
+                    );
                     return Err(H3ConnectionError::H3(h3::Error::InternalError));
                 }
+
                 self.queued_frame = data;
                 self.waiting_for_recv = false;
                 recv_ready = true;
@@ -401,6 +403,7 @@ impl StreamCtx {
                 peer_error |= matches!(frame, OutboundFrame::PeerStreamError);
             }
         }
+
         self.waiting_for_recv = false;
         self.queued_frame = peer_error.then_some(OutboundFrame::PeerStreamError);
     }
@@ -431,6 +434,7 @@ impl StreamCtx {
                 return Err(H3ConnectionError::H3(h3::Error::InternalError));
             },
         }
+
         self.audit_stats
             .set_sent_reset_stream_error_code(wire_err_code as i64);
         self.send_state = SendState::Closed;
@@ -451,6 +455,7 @@ impl StreamCtx {
                 return Err(H3ConnectionError::H3(h3::Error::InternalError));
             },
         }
+
         self.audit_stats
             .set_sent_stop_sending_error_code(wire_err_code as i64);
         // Closing the receive state here is safe. The peer must still send
@@ -487,8 +492,8 @@ impl FlowCtx {
 
 #[cfg(test)]
 mod tests {
-    use std::panic::catch_unwind;
     use std::panic::AssertUnwindSafe;
+    use std::panic::catch_unwind;
     use std::time::Duration;
 
     use assert_matches::assert_matches;
@@ -509,6 +514,7 @@ mod tests {
         assert_eq!(ready_rx.len(), 1);
 
         assert_eq!(ready_rx.recv().await, Some(4));
+
         // Dequeue rearms even if the notification is not followed by a poll.
         ctx.waker.wake_by_ref();
         ctx.waker.wake_by_ref();
@@ -538,10 +544,12 @@ mod tests {
             ctx.wait_for_send();
             ctx.wait_for_send();
         }
+
         if recv_wait {
             ctx.wait_for_recv();
             ctx.wait_for_recv();
         }
+
         // Re-registering either direction still queues only one notification.
         assert_eq!(ready_rx.try_recv().unwrap(), 4);
         assert!(ready_rx.try_recv().is_err());
@@ -552,12 +560,14 @@ mod tests {
             for _ in 0..10 {
                 ctx.waker.wake_by_ref();
             }
+
             assert_eq!(ready_rx.try_recv().unwrap(), 4);
             assert!(ready_rx.try_recv().is_err());
             assert_eq!(ctx.poll_waiting().unwrap(), (false, false));
             assert_eq!(ctx.waiting_for_send(), send_wait);
             assert_eq!(ctx.waiting_for_recv(), recv_wait);
         }
+
         assert!(ctx.recv_state.channel_sender().is_some());
         assert!(ctx.recv.is_some());
 
@@ -631,11 +641,13 @@ mod tests {
                 assert_eq!(ctx.audit_stats.sent_stop_sending_error_code(), -1);
             },
         }
+
         assert!(inbound.is_closed());
         assert!(matches!(ctx.recv_state, RecvState::Closed));
         assert!(!ctx.waiting_for_send());
         assert!(ctx.waiting_for_recv());
         assert!(ready_rx.try_recv().is_err());
+
         // A closed receive state cannot register another capacity wait.
         ctx.wait_for_send();
         assert!(!ctx.waiting_for_send());
@@ -686,6 +698,7 @@ mod tests {
             ctx.cancel_recv_wait();
             ctx.queued_frame = Some(OutboundFrame::PeerStreamError);
         }
+
         for position in 0..3 {
             let frame = if matches!(error, ErrorPlacement::Channel(p) if p == position)
             {
@@ -701,12 +714,14 @@ mod tests {
         } else {
             None
         };
+
         ctx.handle_recvd_stop_sending(42);
         if let Some(permit) = late_error {
             // Sending through a pre-STOP permit is infallible, but its late
             // error must not become retained output after the receiver drops.
             permit.send(OutboundFrame::PeerStreamError);
         }
+
         assert!(!inbound.is_closed());
         assert!(tx.is_closed());
         assert!(ctx.waiting_for_send());
@@ -756,6 +771,7 @@ mod tests {
         ctx.wait_for_recv();
         assert_eq!(ready_rx.try_recv().unwrap(), 4);
         assert_eq!(ctx.poll_waiting().unwrap(), (false, false));
+
         // The driver resets after its outbound channel disconnects.
         drop(outbound);
         ctx.handle_sent_reset(42).unwrap();
@@ -859,6 +875,7 @@ mod tests {
             }
         })
         .await;
+
         // Unblock the producer even if a lost wake caused the timeout.
         drop(ctx);
         let produced = producer.join().unwrap();
@@ -933,11 +950,13 @@ mod tests {
                 .try_send(OutboundFrame::PeerStreamError)
                 .unwrap();
         }
+
         assert_eq!(ready_rx.try_recv().unwrap(), 4);
 
         while tokio::task::coop::has_budget_remaining() {
             tokio::task::coop::consume_budget().await;
         }
+
         assert_eq!(ctx.poll_waiting().unwrap(), (false, false));
         assert_eq!(ctx.waiting_for_send(), capacity_wait);
         assert_eq!(ctx.waiting_for_recv(), !capacity_wait);

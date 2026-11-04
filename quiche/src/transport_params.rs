@@ -32,15 +32,15 @@ use std::mem::size_of;
 
 use crate::ConnectionId;
 use crate::Error;
-use crate::Result;
 use crate::MAX_STREAM_ID;
+use crate::Result;
 
 #[cfg(feature = "qlog")]
 use crate::crypto;
 #[cfg(feature = "qlog")]
-use qlog::events::quic::TransportInitiator;
-#[cfg(feature = "qlog")]
 use qlog::events::EventData;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::TransportInitiator;
 
 /// Maximum permitted value of the `ack_delay_exponent` transport parameter,
 /// as mandated by RFC 9000 Section 18.2.
@@ -241,6 +241,7 @@ impl TransportParams {
             if seen_params.contains(&id) {
                 return Err(Error::InvalidTransportParam);
             }
+
             seen_params.insert(id);
 
             let mut val = params.get_bytes_with_varint_length()?;
@@ -404,11 +405,11 @@ impl TransportParams {
     ) -> Result<&'a mut [u8]> {
         let mut b = octets::OctetsMut::with_slice(out);
 
-        if is_server {
-            if let Some(ref odcid) = tp.original_destination_connection_id {
-                TransportParams::encode_param(&mut b, 0x0000, odcid.len())?;
-                b.put_bytes(odcid)?;
-            }
+        if is_server &&
+            let Some(ref odcid) = tp.original_destination_connection_id
+        {
+            TransportParams::encode_param(&mut b, 0x0000, odcid.len())?;
+            b.put_bytes(odcid)?;
         };
 
         if tp.max_idle_timeout != 0 {
@@ -421,11 +422,9 @@ impl TransportParams {
             b.put_varint(tp.max_idle_timeout)?;
         }
 
-        if is_server {
-            if let Some(ref token) = tp.stateless_reset_token {
-                TransportParams::encode_param(&mut b, 0x0002, 16)?;
-                b.put_bytes(&token.to_be_bytes())?;
-            }
+        if is_server && let Some(ref token) = tp.stateless_reset_token {
+            TransportParams::encode_param(&mut b, 0x0002, 16)?;
+            b.put_bytes(&token.to_be_bytes())?;
         }
 
         if tp.max_udp_payload_size != 0 {
@@ -541,11 +540,9 @@ impl TransportParams {
             b.put_bytes(scid)?;
         }
 
-        if is_server {
-            if let Some(scid) = &tp.retry_source_connection_id {
-                TransportParams::encode_param(&mut b, 0x0010, scid.len())?;
-                b.put_bytes(scid)?;
-            }
+        if is_server && let Some(scid) = &tp.retry_source_connection_id {
+            TransportParams::encode_param(&mut b, 0x0010, scid.len())?;
+            b.put_bytes(scid)?;
         }
 
         if let Some(max_datagram_frame_size) = tp.max_datagram_frame_size {

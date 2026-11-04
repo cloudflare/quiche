@@ -1,10 +1,10 @@
+use h3i::HTTP3_CONTROL_STREAM_TYPE_ID;
+use h3i::QPACK_DECODER_STREAM_TYPE_ID;
+use h3i::QPACK_ENCODER_STREAM_TYPE_ID;
 use h3i::actions::h3::Action;
 use h3i::actions::h3::ExpectedStreamSendResult;
 use h3i::client::sync_client;
 use h3i::config::Config;
-use h3i::HTTP3_CONTROL_STREAM_TYPE_ID;
-use h3i::QPACK_DECODER_STREAM_TYPE_ID;
-use h3i::QPACK_ENCODER_STREAM_TYPE_ID;
 
 /// Test that opening too many unidirectional streams correctly triggers a
 /// StreamLimit error. Most servers advertise a max_streams_uni of 3, so

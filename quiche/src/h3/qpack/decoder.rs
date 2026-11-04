@@ -202,6 +202,7 @@ impl Decoder {
                         if name_len > size_tracker.left() as usize {
                             return Err(Error::HeaderListTooLarge);
                         }
+
                         name.to_vec()
                     };
 
@@ -319,6 +320,7 @@ fn decode_str(b: &mut octets::Octets, max_len: usize) -> Result<Vec<u8>> {
         if len > max_len {
             return Err(Error::HeaderListTooLarge);
         }
+
         val.to_vec()
     };
 

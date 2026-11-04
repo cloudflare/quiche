@@ -34,9 +34,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::quiche;
-use quiche::h3::frame::Frame;
-use quiche::h3::Header;
 use quiche::ConnectionError;
+use quiche::h3::Header;
+use quiche::h3::frame::Frame;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::serde_as;
@@ -236,6 +236,7 @@ impl WaitingFor {
             } else {
                 conn.peer_streams_left_uni()
             };
+
             if available_streams >= streams_required.num {
                 log::info!(
                     "required_stream_quota condition met \
@@ -262,11 +263,11 @@ impl WaitingFor {
     }
 
     pub(crate) fn clear_waits_on_stream(&mut self, stream_id: u64) {
-        if let Some(waits) = self.stream_events.get_mut(&stream_id) {
-            if !waits.is_empty() {
-                log::info!("Clearing all waits for stream {stream_id}");
-                waits.clear();
-            }
+        if let Some(waits) = self.stream_events.get_mut(&stream_id) &&
+            !waits.is_empty()
+        {
+            log::info!("Clearing all waits for stream {stream_id}");
+            waits.clear();
         }
     }
 }

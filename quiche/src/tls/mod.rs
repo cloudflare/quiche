@@ -486,6 +486,7 @@ impl Handshake {
                 raw_params.len(),
             )
         };
+
         self.map_result_ssl(rc)
     }
 
@@ -548,6 +549,7 @@ impl Handshake {
                 buf.len(),
             )
         };
+
         self.map_result_ssl(rc)
     }
 
@@ -566,6 +568,7 @@ impl Handshake {
         if !self.provided_data_outstanding {
             return Ok(());
         }
+
         self.provided_data_outstanding = false;
 
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
@@ -873,9 +876,7 @@ extern "C" fn add_handshake_data(
 
     trace!(
         "{} write message lvl={:?} len={}",
-        ex_data.trace_id,
-        level,
-        len
+        ex_data.trace_id, level, len
     );
 
     let buf = unsafe { slice::from_raw_parts(data, len) };
@@ -914,9 +915,7 @@ extern "C" fn send_alert(
 
     trace!(
         "{} send alert lvl={:?} alert={:x}",
-        ex_data.trace_id,
-        level,
-        alert
+        ex_data.trace_id, level, alert
     );
 
     let error: u64 = TLS_ALERT_ERROR + u64::from(alert);
@@ -1095,7 +1094,7 @@ fn log_ssl_error() {
     );
 }
 
-extern "C" {
+unsafe extern "C" {
     // Note: some vendor-specific methods are implemented in the boringssl
     // submodule.
 

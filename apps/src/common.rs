@@ -135,11 +135,11 @@ fn make_resource_writer(
 }
 
 fn autoindex(path: path::PathBuf, index: &str) -> path::PathBuf {
-    if let Some(path_str) = path.to_str() {
-        if path_str.ends_with('/') {
-            let path_str = format!("{path_str}{index}");
-            return path::PathBuf::from(&path_str);
-        }
+    if let Some(path_str) = path.to_str() &&
+        path_str.ends_with('/')
+    {
+        let path_str = format!("{path_str}{index}");
+        return path::PathBuf::from(&path_str);
     }
 
     path
@@ -195,6 +195,7 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
                 writeln!(out, "        }}").unwrap();
             }
         }
+
         writeln!(out, "      ]}},").unwrap();
 
         writeln!(out, "    \"response\":{{").unwrap();
@@ -222,6 +223,7 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
                 writeln!(out, "        }}").unwrap();
             }
         }
+
         writeln!(out, "      ],").unwrap();
         writeln!(out, "      \"body\": {:?}", req.response_body).unwrap();
         writeln!(out, "    }}").unwrap();
@@ -232,6 +234,7 @@ fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
             writeln!(out, "}}").unwrap();
         }
     }
+
     writeln!(out, "]").unwrap();
     writeln!(out, "}}").unwrap();
 
@@ -356,7 +359,7 @@ pub trait HttpConn {
 
 pub fn writable_response_streams(
     conn: &quiche::Connection,
-) -> impl Iterator<Item = u64> {
+) -> impl Iterator<Item = u64> + use<> {
     conn.writable().filter(|id| id % 4 == 0)
 }
 
@@ -1179,6 +1182,7 @@ impl HttpConn for Http3Conn {
 
             reqs_done += 1;
         }
+
         self.reqs_hdrs_sent += reqs_done;
 
         // Then send any remaining body.

@@ -4,9 +4,9 @@ use h3i::actions::h3::StreamEventType;
 use h3i::actions::h3::WaitType;
 use h3i::client::sync_client;
 use h3i::config::Config;
-use quiche::h3::frame::Frame;
 use quiche::h3::Header;
 use quiche::h3::NameValue;
+use quiche::h3::frame::Frame;
 
 /// The QUIC stream to send the frames on. See
 /// https://datatracker.ietf.org/doc/html/rfc9000#name-streams and

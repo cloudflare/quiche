@@ -35,12 +35,12 @@ use datagram_socket::ShutdownConnection;
 use datagram_socket::SocketStats;
 use quiche::ConnectionId;
 
-use super::client;
-use super::server;
 use super::DriverHooks;
 use super::H3Controller;
-use crate::quic::QuicConnectionStats;
+use super::client;
+use super::server;
 use crate::QuicConnection;
+use crate::quic::QuicConnectionStats;
 
 pub type ClientH3Connection = H3Connection<client::ClientHooks>;
 pub type ServerH3Connection = H3Connection<server::ServerHooks>;

@@ -15,10 +15,8 @@ use quiche::h3::Header;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::oneshot;
 
+use crate::ApplicationOverQuic as _;
 use crate::buf_factory::BufFactory;
-use crate::http3::driver::client::ClientHooks;
-use crate::http3::driver::hooks::DriverHooks;
-use crate::http3::driver::server::ServerHooks;
 use crate::http3::driver::ClientH3Event;
 use crate::http3::driver::H3Controller;
 use crate::http3::driver::H3Driver;
@@ -28,12 +26,14 @@ use crate::http3::driver::InboundFrameStream;
 use crate::http3::driver::NewClientRequest;
 use crate::http3::driver::OutboundFrameSender;
 use crate::http3::driver::ServerH3Event;
+use crate::http3::driver::client::ClientHooks;
+use crate::http3::driver::hooks::DriverHooks;
+use crate::http3::driver::server::ServerHooks;
 use crate::http3::settings::Http3Settings;
-use crate::metrics::labels;
 use crate::metrics::Metrics;
+use crate::metrics::labels;
 use crate::quic::HandshakeInfo;
 use crate::quic::QuicheConnection;
-use crate::ApplicationOverQuic as _;
 
 type Pipe = quiche::test_utils::Pipe<BufFactory>;
 
@@ -218,6 +218,7 @@ impl<H: DriverHooks + GetConnectionForHook> DriverTestHelper<H> {
                 .with_context(|| format!("H::conn_command iter={}", iter))?;
             iter += 1;
         }
+
         Ok(iter)
     }
 
@@ -264,6 +265,7 @@ impl<H: DriverHooks + GetConnectionForHook> DriverTestHelper<H> {
                     if had_fin {
                         panic!("Received data after fin");
                     }
+
                     buf.extend_from_slice(&pooled);
                     had_fin = fin;
                 },
@@ -272,6 +274,7 @@ impl<H: DriverHooks + GetConnectionForHook> DriverTestHelper<H> {
                 },
                 Err(err) => return (buf, had_fin, err),
             }
+
             self.work_loop_iter().unwrap();
         }
     }
@@ -298,6 +301,7 @@ impl DriverTestHelper<ClientHooks> {
             let (tx, _) = oneshot::channel();
             Some(tx)
         };
+
         self.driver_enqueue_request(1, headers, body_writer_oneshot_tx);
         anyhow::ensure!(
             self.process_commands()? == 1,

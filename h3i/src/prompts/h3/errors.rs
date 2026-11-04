@@ -25,11 +25,11 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //! QUIC and HTTP/3 errors for the h3i client.
-use inquire::error::InquireResult;
-use inquire::validator::Validation;
 use inquire::CustomUserError;
 use inquire::Select;
 use inquire::Text;
+use inquire::error::InquireResult;
+use inquire::validator::Validation;
 use qlog::events::quic::ErrorSpace;
 
 use crate::prompts::h3;

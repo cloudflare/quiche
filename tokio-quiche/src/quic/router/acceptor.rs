@@ -32,22 +32,22 @@ use std::time::Instant;
 use datagram_socket::DatagramSocketSend;
 use datagram_socket::DatagramSocketSendExt;
 use datagram_socket::MAX_DATAGRAM_SIZE;
+use qlog::writer::QlogCompression;
 use qlog::writer::make_qlog_writer_from_path;
 use qlog::writer::qlog_file_name;
-use qlog::writer::QlogCompression;
 use quiche::ConnectionId;
 use quiche::Header;
 use quiche::RetryConnectionIds;
 use quiche::Type as PacketType;
 use task_killswitch::spawn_with_killswitch;
 
-use crate::metrics::labels;
+use crate::QuicResultExt;
 use crate::metrics::Metrics;
+use crate::metrics::labels;
+use crate::quic::Incoming;
 use crate::quic::addr_validation_token::AddrValidationTokenManager;
 use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::quic::router::NewConnection;
-use crate::quic::Incoming;
-use crate::QuicResultExt;
 
 use super::InitialPacketHandler;
 
@@ -131,10 +131,10 @@ where
             }
         }
 
-        if let Some(keylog_file) = &self.config.keylog_file {
-            if let Ok(keylog_clone) = keylog_file.try_clone() {
-                conn.set_keylog(Box::new(keylog_clone));
-            }
+        if let Some(Ok(keylog_clone)) =
+            self.config.keylog_file.as_ref().map(File::try_clone)
+        {
+            conn.set_keylog(Box::new(keylog_clone));
         }
 
         Ok(Some(NewConnection {
@@ -203,7 +203,7 @@ where
     ) -> io::Result<Option<NewConnection>> {
         let scid = self.cid_generator.new_connection_id();
 
-        let token = self.token_manager.gen(&hdr.dcid, incoming.peer_addr);
+        let token = self.token_manager.generate(&hdr.dcid, incoming.peer_addr);
 
         self.handshake_reply(incoming, move |buf| {
             quiche::retry(&hdr.scid, &hdr.dcid, &scid, &token, hdr.version, buf)

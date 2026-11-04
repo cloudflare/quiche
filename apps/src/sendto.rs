@@ -50,10 +50,10 @@ fn send_to_gso_pacing(
     socket: &mio::net::UdpSocket, buf: &[u8], send_info: &quiche::SendInfo,
     segment_size: usize,
 ) -> io::Result<usize> {
-    use nix::sys::socket::sendmsg;
     use nix::sys::socket::ControlMessage;
     use nix::sys::socket::MsgFlags;
     use nix::sys::socket::SockaddrStorage;
+    use nix::sys::socket::sendmsg;
     use std::io::IoSlice;
     use std::os::unix::io::AsRawFd;
 

@@ -40,18 +40,18 @@
 use std::path::Path;
 use std::time::Instant;
 
-use qlog::events::quic;
 use qlog::events::EventData;
 use qlog::events::EventImportance;
 use qlog::events::RawInfo;
+use qlog::events::quic;
 use qlog::reader::Event;
 use qlog::reader::QlogSeqReader;
 use qlog::streamer::EventTimePrecision;
 use qlog::streamer::QlogStreamer;
 use qlog::testing;
+use qlog::writer::QlogCompression;
 use qlog::writer::make_qlog_writer_from_path;
 use qlog::writer::qlog_file_name;
-use qlog::writer::QlogCompression;
 
 /// Minimal qlog event used by every round-trip test: a single
 /// `quic:packet_sent`. The specific contents do not matter for this
@@ -198,6 +198,7 @@ fn roundtrip_zstd() {
         "expected .sqlog.zst extension, got {path:?}"
     );
     assert_file_magic(&path, QlogCompression::Zstd);
+
     // If `ZstdFinishOnDrop::drop` failed to write the trailer,
     // `QlogSeqReader::with_file` would observe a truncated frame and
     // either fail to parse the header or the iterator would stop
@@ -213,6 +214,7 @@ fn roundtrip_zstd() {
 fn roundtrip_both_features_coexist() {
     let dir = tempfile::tempdir().expect("tempdir");
     let gz = emit_one_event(QlogCompression::Gzip, dir.path());
+
     // Second file goes into a separate subdir so the two paths don't
     // collide (both use id = "test").
     let zst_dir = dir.path().join("zstd-subdir");

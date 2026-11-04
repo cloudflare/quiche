@@ -28,12 +28,12 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::Config;
+use crate::Result;
 use crate::frame;
 use crate::packet;
 use crate::ranges::RangeSet;
 pub(crate) use crate::recovery::bandwidth::Bandwidth;
-use crate::Config;
-use crate::Result;
 
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
@@ -79,6 +79,7 @@ const PACKET_REORDER_TIME_THRESHOLD: f64 = 5.0 / 4.0;
 // The actual threshold is calcualted as 1 + INITIAL_TIME_THRESHOLD_OVERHEAD and
 // equivalent to INITIAL_TIME_THRESHOLD.
 const INITIAL_TIME_THRESHOLD_OVERHEAD: f64 = 1.0 / 8.0;
+
 // # Experiment: enable_relaxed_loss_threshold
 //
 // The factor by which to increase the time threshold on spurious loss.
@@ -330,7 +331,7 @@ pub trait RecoveryOps {
 
     #[cfg(feature = "qlog")]
     fn get_updated_qlog_cc_state(&mut self, now: Instant)
-        -> Option<&'static str>;
+    -> Option<&'static str>;
 
     fn send_quantum(&self) -> usize;
 
@@ -682,54 +683,59 @@ impl QlogMetrics {
 
         // Build ex_data for rate metrics
         let mut ex_data = CfExData::new();
-        if self.app_limited != latest.app_limited {
-            if let Some(app_limited) = latest.app_limited {
-                self.app_limited = latest.app_limited;
-                emit_event = true;
-                ex_data.insert("cf_app_limited", app_limited);
-            }
-        }
-        if self.delivery_rate != latest.delivery_rate {
-            if let Some(rate) = latest.delivery_rate {
-                self.delivery_rate = latest.delivery_rate;
-                emit_event = true;
-                ex_data.insert("cf_delivery_rate", rate);
-            }
-        }
-        if self.send_rate != latest.send_rate {
-            if let Some(rate) = latest.send_rate {
-                self.send_rate = latest.send_rate;
-                emit_event = true;
-                ex_data.insert("cf_send_rate", rate);
-            }
-        }
-        if self.ack_rate != latest.ack_rate {
-            if let Some(rate) = latest.ack_rate {
-                self.ack_rate = latest.ack_rate;
-                emit_event = true;
-                ex_data.insert("cf_ack_rate", rate);
-            }
+
+        if self.app_limited != latest.app_limited &&
+            let Some(app_limited) = latest.app_limited
+        {
+            self.app_limited = latest.app_limited;
+            emit_event = true;
+            ex_data.insert("cf_app_limited", app_limited);
         }
 
-        if self.lost_packets != latest.lost_packets {
-            if let Some(val) = latest.lost_packets {
-                emit_event = true;
-                ex_data.insert("cf_lost_packets", TotalAndDelta {
-                    total: latest.lost_packets,
-                    delta: Some(val - self.lost_packets.unwrap_or(0)),
-                });
-                self.lost_packets = latest.lost_packets;
-            }
+        if self.delivery_rate != latest.delivery_rate &&
+            let Some(rate) = latest.delivery_rate
+        {
+            self.delivery_rate = latest.delivery_rate;
+            emit_event = true;
+            ex_data.insert("cf_delivery_rate", rate);
         }
-        if self.lost_bytes != latest.lost_bytes {
-            if let Some(val) = latest.lost_bytes {
-                emit_event = true;
-                ex_data.insert("cf_lost_bytes", TotalAndDelta {
-                    total: latest.lost_bytes,
-                    delta: Some(val - self.lost_bytes.unwrap_or(0)),
-                });
-                self.lost_bytes = latest.lost_bytes;
-            }
+
+        if self.send_rate != latest.send_rate &&
+            let Some(rate) = latest.send_rate
+        {
+            self.send_rate = latest.send_rate;
+            emit_event = true;
+            ex_data.insert("cf_send_rate", rate);
+        }
+
+        if self.ack_rate != latest.ack_rate &&
+            let Some(rate) = latest.ack_rate
+        {
+            self.ack_rate = latest.ack_rate;
+            emit_event = true;
+            ex_data.insert("cf_ack_rate", rate);
+        }
+
+        if self.lost_packets != latest.lost_packets &&
+            let Some(val) = latest.lost_packets
+        {
+            emit_event = true;
+            ex_data.insert("cf_lost_packets", TotalAndDelta {
+                total: latest.lost_packets,
+                delta: Some(val - self.lost_packets.unwrap_or(0)),
+            });
+            self.lost_packets = latest.lost_packets;
+        }
+
+        if self.lost_bytes != latest.lost_bytes &&
+            let Some(val) = latest.lost_bytes
+        {
+            emit_event = true;
+            ex_data.insert("cf_lost_bytes", TotalAndDelta {
+                total: latest.lost_bytes,
+                delta: Some(val - self.lost_bytes.unwrap_or(0)),
+            });
+            self.lost_bytes = latest.lost_bytes;
         }
 
         if emit_event {
@@ -879,15 +885,15 @@ pub enum StartupExitReason {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet;
-    use crate::range_buf::RangeBuf;
-    use crate::test_utils;
     use crate::CongestionControlAlgorithm;
     #[cfg(feature = "congestion_window_unchecked_available")]
     use crate::DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS;
     use crate::DEFAULT_INITIAL_RTT;
     #[cfg(feature = "congestion_window_unchecked_available")]
     use crate::MAX_SEND_UDP_PAYLOAD_SIZE;
+    use crate::packet;
+    use crate::range_buf::RangeBuf;
+    use crate::test_utils;
     use rstest::rstest;
     use smallvec::smallvec;
     use std::str::FromStr;
@@ -948,12 +954,14 @@ mod tests {
             })
             .unwrap();
 
-        assert!(metrics
-            .maybe_update(QlogMetrics {
-                app_limited: Some(false),
-                ..Default::default()
-            })
-            .is_none());
+        assert!(
+            metrics
+                .maybe_update(QlogMetrics {
+                    app_limited: Some(false),
+                    ..Default::default()
+                })
+                .is_none()
+        );
 
         let event = metrics
             .maybe_update(QlogMetrics {
@@ -1060,6 +1068,7 @@ mod tests {
                 "",
             );
         }
+
         assert_eq!(recovery.cwnd(), window);
         assert_eq!(recovery.cwnd_available(), 0);
         let mut acked = RangeSet::default();
@@ -1690,6 +1699,7 @@ mod tests {
             assert_eq!(r.rtt(), Duration::from_millis(10));
             assert_eq!(r.min_rtt(), Some(Duration::from_millis(10)));
         }
+
         // Since we only remove packets from the back to avoid compaction, the
         // send length remains the same after receiving reordered ACKs
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 4);
@@ -1723,6 +1733,7 @@ mod tests {
         if cc_algorithm_name == "congestion_window_unchecked" {
             assert_eq!(r.cwnd(), initial_cwnd);
         }
+
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 0);
         assert_eq!(r.bytes_in_flight(), 0);
         assert_eq!(r.bytes_in_flight_duration(), Duration::from_millis(20));
@@ -1867,6 +1878,7 @@ mod tests {
                 spurious_losses: 1,
             }
         );
+
         // The time_thresh after spurious loss
         assert_eq!(r.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
 
@@ -1983,6 +1995,7 @@ mod tests {
 
         assert_eq!(r.sent_packets_len(packet::Epoch::Application), 6);
         assert_eq!(r.bytes_in_flight(), 6 * 1000);
+
         // Intitial thresholds
         assert_eq!(r.pkt_thresh().unwrap(), INITIAL_PACKET_THRESHOLD);
         assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
@@ -2015,6 +2028,7 @@ mod tests {
                 spurious_losses: 0,
             }
         );
+
         // Thresholds after 1st loss
         assert_eq!(r.pkt_thresh().unwrap(), INITIAL_PACKET_THRESHOLD);
         assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
@@ -2043,6 +2057,7 @@ mod tests {
                 spurious_losses: 1,
             }
         );
+
         // Thresholds after 1st spurious loss
         //
         // Packet threshold should be disabled. Time threshold overhead should
@@ -2082,6 +2097,7 @@ mod tests {
                 spurious_losses: 0,
             }
         );
+
         // Thresholds after 2nd loss.
         assert_eq!(r.pkt_thresh(), None);
         assert_eq!(r.time_thresh(), INITIAL_TIME_THRESHOLD);
@@ -2114,6 +2130,7 @@ mod tests {
                 spurious_losses: 1,
             }
         );
+
         // Thresholds after 2nd spurious loss.
         //
         // Time threshold overhead should double.
@@ -2185,6 +2202,7 @@ mod tests {
         } else {
             assert_eq!(r.pacing_rate(), 103963);
         }
+
         assert_eq!(r.get_packet_send_time(now), now);
 
         assert_eq!(r.cwnd(), 12000);
@@ -2340,6 +2358,7 @@ mod tests {
         } else {
             0
         };
+
         assert_eq!(r.pacing_rate(), pacing_rate);
 
         let scale_factor = if pacing_enabled {
@@ -2349,6 +2368,7 @@ mod tests {
         } else {
             1.0
         };
+
         assert_eq!(
             r.get_packet_send_time(now) - now,
             if pacing_enabled {
@@ -2597,6 +2617,7 @@ mod tests {
             let sent = test_utils::helper_packet_sent(pkt_num, now, pkt_size);
             r.on_packet_sent(sent, epoch, HandshakeStatus::default(), now, "");
         }
+
         assert_eq!(r.sent_packets_len(epoch), pkt_count as usize);
         assert_eq!(r.bytes_in_flight(), pkt_count as usize * pkt_size);
         assert!(r.get_largest_acked_on_epoch(epoch).is_none());
@@ -2944,6 +2965,7 @@ mod tests {
         } else {
             12000
         };
+
         assert_eq!(r.cwnd(), initial_cwnd);
         assert_eq!(r.cwnd_available(), initial_cwnd - r.bytes_in_flight());
 
@@ -3055,6 +3077,7 @@ mod tests {
             );
         }
     }
+
     #[rstest]
     fn pto_overflow_reproduction(
         #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,

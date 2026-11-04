@@ -26,9 +26,9 @@
 
 use minmax::XMinMax;
 
+use plotters::coord::Shift;
 use plotters::coord::types::RangedCoordf64;
 use plotters::coord::types::RangedCoordu64;
-use plotters::coord::Shift;
 
 use crate::plots::colors::*;
 use crate::plots::*;

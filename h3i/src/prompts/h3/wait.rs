@@ -26,19 +26,19 @@
 
 use std::time::Duration;
 
+use inquire::Text;
 use inquire::error::InquireResult;
 use inquire::validator::Validation;
-use inquire::Text;
 
 use crate::actions::h3::Action;
 use crate::actions::h3::StreamEvent;
 use crate::actions::h3::StreamEventType;
 use crate::actions::h3::WaitType;
 
+use super::SuggestionResult;
 use super::prompt_stream_id;
 use super::squish_suggester;
 use super::validate_wait_period;
-use super::SuggestionResult;
 
 const DURATION: &str = "duration";
 const HEADERS: &str = "headers";

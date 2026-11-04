@@ -24,9 +24,9 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use futures_util::FutureExt;
 use futures_util::future::poll_fn;
 use futures_util::ready;
-use futures_util::FutureExt;
 use std::future::Future;
 use std::io;
 use std::net::Ipv4Addr;
@@ -201,12 +201,14 @@ pub trait DatagramSocketSend: Sync {
                     if sent == 0 {
                         return Poll::Ready(err);
                     }
+
                     break;
                 },
                 Poll::Pending => {
                     if sent == 0 {
                         return Poll::Pending;
                     }
+
                     break;
                 },
             }

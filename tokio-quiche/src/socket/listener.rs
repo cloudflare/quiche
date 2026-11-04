@@ -38,8 +38,8 @@ use std::sync::Arc;
 use tokio::net::UdpSocket;
 
 use super::SocketCapabilities;
-use crate::quic::SimpleConnectionIdGenerator;
 use crate::ConnectionIdGenerator;
+use crate::quic::SimpleConnectionIdGenerator;
 
 /// Wrapper around a [`UdpSocket`] for server-side QUIC connections.
 ///

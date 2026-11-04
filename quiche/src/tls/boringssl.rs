@@ -290,6 +290,7 @@ pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
         if SSL_SESSION_to_bytes(session, &mut out, &mut out_len) == 0 {
             return Err(Error::TlsFail);
         }
+
         let session_bytes = slice::from_raw_parts(out, out_len).to_vec();
         OPENSSL_free(out as *mut c_void);
         session_bytes
@@ -297,13 +298,14 @@ pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
 
     Ok(session_bytes)
 }
+
 pub(super) const TLS_ERROR: c_int = 3;
 
 #[allow(non_camel_case_types)]
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ssl_early_data_reason_t(pub ::std::os::raw::c_uint);
-extern "C" {
+unsafe extern "C" {
     // SSL_METHOD specific for boringssl.
     pub(super) fn SSL_CTX_set_tlsext_ticket_keys(
         ctx: *mut SSL_CTX, key: *const u8, key_len: usize,
@@ -336,10 +338,10 @@ extern "C" {
     fn SSL_get0_peer_certificates(ssl: *const SSL) -> *const STACK_OF;
 
     pub(super) fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16)
-        -> c_int;
+    -> c_int;
 
     pub(super) fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16)
-        -> c_int;
+    -> c_int;
 
     pub(super) fn SSL_set_tlsext_host_name(
         ssl: *mut SSL, name: *const c_char,

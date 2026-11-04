@@ -24,13 +24,13 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use inquire::Text;
 use inquire::error::InquireResult;
 use inquire::validator::Validation;
-use inquire::Text;
 
+use super::SuggestionResult;
 use super::squish_suggester;
 use super::stream::prompt_fin_stream;
-use super::SuggestionResult;
 use crate::actions::h3::Action;
 use crate::prompts::h3;
 

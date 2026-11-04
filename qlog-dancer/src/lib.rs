@@ -38,8 +38,8 @@ use datastore::NetlogSession;
 use log::debug;
 use log::error;
 
-use qlog::reader::QlogSeqReader;
 use qlog::Qlog;
+use qlog::reader::QlogSeqReader;
 
 use serde::ser::Serialize;
 
@@ -132,16 +132,20 @@ impl SerializationFormat {
         if filename.ends_with(".sqlog.gz") || filename.ends_with(".sqlog.zst") {
             return SerializationFormat::QlogJsonSeq;
         }
+
         if filename.ends_with(".sqlog") {
             return SerializationFormat::QlogJsonSeq;
         }
+
         if filename.ends_with(".qlog") {
             return SerializationFormat::QlogJson;
         }
+
         // Fall back to extension-based detection
         if let Some(ext) = filename.rsplit('.').next() {
             return Self::from_file_extension(ext);
         }
+
         SerializationFormat::Unknown
     }
 }
@@ -207,6 +211,7 @@ pub fn parse_log_file(
 
             println!("populating datastore...");
             let mark = std::time::Instant::now();
+
             // TODO: support more than one trace in a file
             let datastore = Datastore::with_qlog_events(
                 &qlog.traces[0].events,
@@ -413,12 +418,14 @@ pub fn category_and_type_from_name(name: &str) -> (String, String) {
     if let Some(cat) = split.first() {
         category = cat.to_string();
     }
+
     if let Some(t) = split.get(1) {
         ty = t.to_string();
     }
 
     (category, ty)
 }
+
 pub fn category_and_type_from_event<T: Serialize>(ev: &T) -> (String, String) {
     let name = serde_json::to_value(ev).unwrap()["name"]
         .to_string()

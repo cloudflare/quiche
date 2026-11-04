@@ -32,20 +32,20 @@ use std::ops::Add;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery::gcongestion::bbr2::Params;
+use crate::recovery::RecoveryStats;
 use crate::recovery::gcongestion::Acked;
 use crate::recovery::gcongestion::Lost;
-use crate::recovery::RecoveryStats;
+use crate::recovery::gcongestion::bbr2::Params;
 
+use super::BBRv2CongestionEvent;
+use super::BwLoMode;
+use super::Limits;
 use super::mode::Cycle;
 use super::mode::CyclePhase;
 use super::mode::Mode;
 use super::mode::ModeImpl;
 use super::network_model::BBRv2NetworkModel;
 use super::network_model::DEFAULT_MSS;
-use super::BBRv2CongestionEvent;
-use super::BwLoMode;
-use super::Limits;
 
 #[derive(Debug)]
 pub(super) struct ProbeBW {
@@ -423,6 +423,7 @@ impl ProbeBW {
                 if params.add_ack_height_to_queueing_threshold {
                     queuing_threshold_extra_bytes += self.model.max_ack_height();
                 }
+
                 let queuing_threshold = (params.full_bw_threshold *
                     self.model.bdp0() as f32)
                     as usize +
@@ -509,8 +510,10 @@ impl ProbeBW {
 
                     self.model.set_inflight_hi(new_inflight_hi);
                 }
+
                 return AdaptUpperBoundsResult::AdaptedProbedTooHigh;
             }
+
             return AdaptUpperBoundsResult::AdaptedOk;
         }
 
@@ -611,18 +614,17 @@ impl ProbeBW {
             self.cycle.probe_up_acked += congestion_event.bytes_acked;
         }
 
-        if let Some(probe_up_bytes) = self.cycle.probe_up_bytes {
-            if self.cycle.probe_up_acked >= probe_up_bytes {
-                let delta = self.cycle.probe_up_acked / probe_up_bytes;
-                // probe_up_acked is set to the remainder mod probe_up_bytes;
-                // probe_up_acked >= delta * probe_up_bytes so this
-                // can't underflow.
-                self.cycle.probe_up_acked -= delta * probe_up_bytes;
-                let new_inflight_hi =
-                    self.model.inflight_hi() + delta * DEFAULT_MSS;
-                if new_inflight_hi > self.model.inflight_hi() {
-                    self.model.set_inflight_hi(new_inflight_hi);
-                }
+        if let Some(probe_up_bytes) = self.cycle.probe_up_bytes &&
+            self.cycle.probe_up_acked >= probe_up_bytes
+        {
+            let delta = self.cycle.probe_up_acked / probe_up_bytes;
+            // probe_up_acked is set to the remainder mod probe_up_bytes;
+            // probe_up_acked >= delta * probe_up_bytes so this
+            // can't underflow.
+            self.cycle.probe_up_acked -= delta * probe_up_bytes;
+            let new_inflight_hi = self.model.inflight_hi() + delta * DEFAULT_MSS;
+            if new_inflight_hi > self.model.inflight_hi() {
+                self.model.set_inflight_hi(new_inflight_hi);
             }
         }
 
@@ -647,8 +649,8 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::recovery::gcongestion::bbr2::SendTimeState;
     use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
+    use crate::recovery::gcongestion::bbr2::SendTimeState;
 
     #[rstest]
     fn probe_upward(#[values(100, 10_000, 65_536, 300_000)] step: usize) {

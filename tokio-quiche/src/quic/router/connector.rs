@@ -33,19 +33,19 @@ use std::time::Instant;
 
 use datagram_socket::DatagramSocketSend;
 use datagram_socket::DatagramSocketSendExt;
-use datagram_socket::MaybeConnectedSocket;
 use datagram_socket::MAX_DATAGRAM_SIZE;
+use datagram_socket::MaybeConnectedSocket;
 use foundations::telemetry::log;
 use quiche::ConnectionId;
 use quiche::Header;
 use tokio_util::task::AbortOnDropHandle;
-use tokio_util::time::delay_queue::Key;
 use tokio_util::time::DelayQueue;
+use tokio_util::time::delay_queue::Key;
 
-use crate::quic::router::InitialPacketHandler;
-use crate::quic::router::NewConnection;
 use crate::quic::Incoming;
 use crate::quic::QuicheConnection;
+use crate::quic::router::InitialPacketHandler;
+use crate::quic::router::NewConnection;
 
 /// A [`ClientConnector`] manages client-initiated [`quiche::Connection`]s. When
 /// a connection is established, this struct returns the connection to the
@@ -304,6 +304,7 @@ fn simple_conn_send<Tx: DatagramSocketSend + Send + Sync + 'static>(
                 if let Some(prev) = prev {
                     let _ = prev.await;
                 }
+
                 for (buf, to) in packets {
                     if let Err(error) = socket.send_to(&buf, to).await {
                         log::error!("error sending client Initial packets to peer"; "scid" => ?scid, "peer_addr" => to, "error" => error.to_string());
@@ -347,6 +348,7 @@ mod tests {
                 state.waker = Some(cx.waker().clone());
                 return Poll::Pending;
             }
+
             state.sent += 1;
             Poll::Ready(Ok(buf.len()))
         }
@@ -394,6 +396,7 @@ mod tests {
             state.writable = true;
             state.waker.take().expect("no sender waiting on the socket")
         };
+
         waker.wake();
         tokio::time::sleep(Duration::from_secs(1)).await;
 

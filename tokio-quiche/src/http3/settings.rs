@@ -166,6 +166,7 @@ impl Http3SettingsEnforcer {
         if changed {
             return Poll::Ready(result);
         }
+
         Poll::Pending
     }
 

@@ -34,7 +34,6 @@ use quiche::h3;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use super::datagram;
 use super::DriverHooks;
 use super::H3Command;
 use super::H3ConnectionError;
@@ -47,8 +46,9 @@ use super::InboundHeaders;
 use super::IncomingH3Headers;
 use super::OutboundFrameSender;
 use super::RequestSender;
-use super::StreamCtx;
 use super::STREAM_CAPACITY;
+use super::StreamCtx;
+use super::datagram;
 use crate::http3::settings::Http3Settings;
 use crate::quic::HandshakeInfo;
 use crate::quic::QuicCommand;
@@ -333,6 +333,7 @@ impl DriverHooks for ClientHooks {
             // encountered.
             return Ok(());
         };
+
         Self::handle_response(driver, headers, pending_request)
     }
 

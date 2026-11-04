@@ -27,18 +27,18 @@
 pub(crate) mod acceptor;
 pub(crate) mod connector;
 
+use super::QuicheConnection;
 use super::connection::ConnectionMap;
 use super::connection::HandshakeInfo;
 use super::connection::Incoming;
 use super::connection::InitialQuicConnection;
 use super::connection::QuicConnectionParams;
 use super::io::worker::WriterConfig;
-use super::QuicheConnection;
+use crate::metrics::Metrics;
 use crate::metrics::labels;
 use crate::metrics::quic_expensive_metrics_ip_reduce;
-use crate::metrics::Metrics;
-use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::quic::DscpHandle;
+use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::settings::Config;
 use datagram_socket::DatagramSocketRecv;
 use datagram_socket::DatagramSocketSend;
@@ -52,9 +52,9 @@ use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::ready;
 use std::task::Context;
 use std::task::Poll;
+use std::task::ready;
 use std::time::Instant;
 use std::time::SystemTime;
 use task_killswitch::spawn_with_killswitch;
@@ -244,11 +244,11 @@ where
         #[cfg(feature = "perf-quic-listener-metrics")]
         let start = std::time::Instant::now();
 
-        if let Some(dcid) = short_dcid(&incoming.buf) {
-            if let Some(ev_sender) = self.conns.get(&dcid) {
-                let _ = ev_sender.try_send(incoming);
-                return Ok(());
-            }
+        if let Some(dcid) = short_dcid(&incoming.buf) &&
+            let Some(ev_sender) = self.conns.get(&dcid)
+        {
+            let _ = ev_sender.try_send(incoming);
+            return Ok(());
         }
 
         let hdr = Header::from_slice(&mut incoming.buf, MAX_CONN_ID_LEN)
@@ -321,6 +321,7 @@ where
             // Do not create new connections while shutting down.
             return Ok(());
         };
+
         let Ok(send_permit) = self.accept_sink.try_reserve() else {
             // Drop the connection when the backlog is full. The client retries.
             return Err(
@@ -382,14 +383,14 @@ where
         }
 
         self.metrics.accepted_initial_packet_count().inc();
-        if self.config.enable_expensive_packet_count_metrics {
-            if let Some(peer_ip) =
+
+        if self.config.enable_expensive_packet_count_metrics &&
+            let Some(peer_ip) =
                 quic_expensive_metrics_ip_reduce(conn.peer_addr().ip())
-            {
-                self.metrics
-                    .expensive_accepted_initial_packet_count(peer_ip)
-                    .inc();
-            }
+        {
+            self.metrics
+                .expensive_accepted_initial_packet_count(peer_ip)
+                .inc();
         }
 
         send_permit.send(Ok(conn));
@@ -421,6 +422,7 @@ where
             // accordingly
             buf.set_len(n);
         }
+
         Poll::Ready(Ok(PollRecvData {
             buf,
             src_addr: addr,
@@ -442,8 +444,8 @@ where
 
         #[cfg(target_os = "linux")]
         {
-            use libc::SOL_SOCKET;
             use libc::SO_MARK;
+            use libc::SOL_SOCKET;
             use nix::errno::Errno;
             use nix::sys::socket::*;
             use std::net::SocketAddrV4;
@@ -688,17 +690,16 @@ where
             .rejected_initial_packet_count(err_type.clone())
             .inc();
 
-        if self.config.enable_expensive_packet_count_metrics {
-            if let Some(peer_ip) =
+        if self.config.enable_expensive_packet_count_metrics &&
+            let Some(peer_ip) =
                 quic_expensive_metrics_ip_reduce(peer_addr.ip())
-            {
-                self.metrics
-                    .expensive_rejected_initial_packet_count(
-                        err_type.clone(),
-                        peer_ip,
-                    )
-                    .inc();
-            }
+        {
+            self.metrics
+                .expensive_rejected_initial_packet_count(
+                    err_type.clone(),
+                    peer_ip,
+                )
+                .inc();
         }
 
         if matches!(err_type, labels::QuicInvalidInitialPacketError::Unexpected) {
@@ -881,18 +882,18 @@ mod tests {
     use super::acceptor::ConnectionAcceptorConfig;
     use super::*;
 
+    use crate::ConnectionIdGenerator as _;
+    use crate::ConnectionParams;
+    use crate::ServerH3Driver;
     use crate::http3::settings::Http3Settings;
     use crate::metrics::DefaultMetrics;
-    use crate::quic::connection::SimpleConnectionIdGenerator;
     use crate::quic::Dscp;
+    use crate::quic::connection::SimpleConnectionIdGenerator;
     use crate::settings::Config;
     use crate::settings::Hooks;
     use crate::settings::QuicSettings;
     use crate::settings::TlsCertificatePaths;
     use crate::socket::SocketCapabilities;
-    use crate::ConnectionIdGenerator as _;
-    use crate::ConnectionParams;
-    use crate::ServerH3Driver;
 
     use datagram_socket::MAX_DATAGRAM_SIZE;
     use futures::FutureExt as _;
@@ -935,6 +936,7 @@ mod tests {
                 wait_type: WaitType::WaitDuration(duration),
             });
         }
+
         actions.push(Action::ConnectionClose { error: conn_close });
 
         let _ = h3i::client::sync_client::connect(h3i_config, actions, None);
@@ -1208,6 +1210,7 @@ mod tests {
             while ipr.poll_unpin(&mut cx).is_pending() {
                 std::thread::sleep(Duration::from_millis(10));
             }
+
             drop(ipr_notifier);
             ipr
         });
@@ -1219,6 +1222,7 @@ mod tests {
                 .send(ConnectionMapCommand::UnmapCid(random_cid))
                 .unwrap();
         }
+
         // Give the IPR some time to process the ConnectionMapCommands
         std::thread::sleep(Duration::from_secs(1));
 

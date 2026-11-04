@@ -203,13 +203,13 @@ impl<W: Write> Write for ZstdFinishOnDrop<W> {
 #[cfg(feature = "zstd")]
 impl<W: Write> Drop for ZstdFinishOnDrop<W> {
     fn drop(&mut self) {
-        if let Some(encoder) = self.encoder.take() {
-            if let Err(error) = encoder.finish() {
-                // qlog crate has no structured-logging dependency; use
-                // `eprintln!` so trailer-flush failures surface on
-                // stderr rather than silently truncating the stream.
-                eprintln!("qlog: failed to finish zstd encoder: {error}");
-            }
+        if let Some(encoder) = self.encoder.take() &&
+            let Err(error) = encoder.finish()
+        {
+            // qlog crate has no structured-logging dependency; use
+            // `eprintln!` so trailer-flush failures surface on
+            // stderr rather than silently truncating the stream.
+            eprintln!("qlog: failed to finish zstd encoder: {error}");
         }
     }
 }

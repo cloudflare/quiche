@@ -26,21 +26,21 @@
 
 //! A collection of interactive CLI prompts for HTTP/3 based on [inquire].
 
+use inquire::InquireError;
+use inquire::Select;
+use inquire::Text;
 use inquire::error::CustomUserError;
 use inquire::error::InquireResult;
 use inquire::validator::ErrorMessage;
 use inquire::validator::Validation;
-use inquire::InquireError;
-use inquire::Select;
-use inquire::Text;
 use qlog::events::quic::ErrorSpace;
 use quiche::ConnectionError;
 
+use crate::StreamIdAllocator;
 use crate::actions::h3::Action;
 use crate::config::Config;
 use crate::prompts::h3;
 use crate::prompts::h3::headers::prompt_push_promise;
-use crate::StreamIdAllocator;
 
 use std::cell::RefCell;
 
@@ -243,14 +243,12 @@ fn handle_action_loop_error(err: InquireError) -> bool {
 }
 
 fn prompt_action() -> InquireResult<String> {
-    let name = Text::new(
+    Text::new(
         "Select an action to queue. `Commit` ends selection and flushes queue.",
     )
     .with_autocomplete(&action_suggester)
     .with_page_size(18)
-    .prompt();
-
-    name
+    .prompt()
 }
 
 fn action_suggester(val: &str) -> SuggestionResult<Vec<String>> {

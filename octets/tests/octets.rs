@@ -306,6 +306,7 @@ fn put_varint() {
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 8);
     }
+
     let exp = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
     assert_eq!(&d, &exp);
 
@@ -316,6 +317,7 @@ fn put_varint() {
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 4);
     }
+
     let exp = [0x9d, 0x7f, 0x3e, 0x7d];
     assert_eq!(&d, &exp);
 
@@ -326,6 +328,7 @@ fn put_varint() {
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 2);
     }
+
     let exp = [0x7b, 0xbd];
     assert_eq!(&d, &exp);
 
@@ -336,6 +339,7 @@ fn put_varint() {
         assert_eq!(b.cap(), 0);
         assert_eq!(b.off(), 1);
     }
+
     let exp = [0x25];
     assert_eq!(&d, &exp);
 
@@ -346,6 +350,7 @@ fn put_varint() {
         assert_eq!(b.cap(), 3);
         assert_eq!(b.off(), 0);
     }
+
     let exp = [0; 3];
     assert_eq!(&d, &exp);
 }

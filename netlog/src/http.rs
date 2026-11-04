@@ -45,6 +45,7 @@ pub enum Event {
     HttpStreamRequestBoundToJob(HttpStreamRequestBoundToJobEvent),
     HttpStreamRequestBoundToQuicSession(HttpStreamRequestBoundToQuicSessionEvent),
 }
+
 #[derive(Deserialize, Debug, Default)]
 pub struct HttpTransactionSendRequestHeadersParams {
     pub headers: Vec<String>,

@@ -32,11 +32,11 @@ use h3i_fixtures::h3i_config;
 use h3i_fixtures::received_status_code_on_stream;
 use h3i_fixtures::summarize_connection;
 
-use h3i::actions::h3::send_headers_frame;
 use h3i::actions::h3::Action;
 use h3i::actions::h3::StreamEvent;
 use h3i::actions::h3::StreamEventType;
 use h3i::actions::h3::WaitType;
+use h3i::actions::h3::send_headers_frame;
 use h3i::quiche;
 use h3i::quiche::h3::Header;
 
@@ -82,6 +82,7 @@ async fn test_requests_per_connection_limit() -> QuicResult<()> {
             "request {i} didn't have a status code OK",
         );
     }
+
     assert!(summary.stream_map.stream(MAX_REQS * 4).is_empty());
 
     let error = summary

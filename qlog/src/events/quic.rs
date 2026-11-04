@@ -24,11 +24,11 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use serde::de;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::Serializer;
+use serde::de;
 
 use std::fmt;
 use std::ops::RangeInclusive;
@@ -36,6 +36,8 @@ use std::ops::RangeInclusive;
 use super::ExData;
 use crate::HexSlice;
 
+use crate::Bytes;
+use crate::StatelessResetToken;
 use crate::events::ApplicationError;
 use crate::events::ConnectionClosedEventError;
 use crate::events::ConnectionClosedFrameError;
@@ -43,8 +45,6 @@ use crate::events::DataRecipient;
 use crate::events::RawInfo;
 use crate::events::Token;
 use crate::events::TupleEndpointInfo;
-use crate::Bytes;
-use crate::StatelessResetToken;
 
 /// A single ACK range with inclusive start and end packet numbers.
 ///

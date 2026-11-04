@@ -78,6 +78,7 @@ impl Config {
             Some(f) => Some(Cow::Borrowed(f.as_ref())),
             None => std::env::var_os("SSLKEYLOGFILE").map(Cow::from),
         };
+
         let keylog_file = keylog_path.and_then(|path| if KEYLOGFILE_ENABLED {
                 File::options().create(true).append(true).open(path)
                     .inspect_err(|e| {
@@ -228,6 +229,7 @@ fn make_quiche_config(
             track_unknown_transport_params,
         );
     }
+
     if params.settings.enable_early_data {
         config.enable_early_data();
     }
@@ -374,6 +376,7 @@ mod tests {
                     );
                     continue;
                 }
+
                 let mut config = config.expect("build shared QUIC configuration");
 
                 for (endpoint, connection) in [

@@ -165,9 +165,11 @@ impl BoundedNonEmptyConnectionIdVecDeque {
                 if self.inner.len() >= self.capacity {
                     return Err(Error::IdLimit);
                 }
+
                 self.inner.push_back(e);
             },
         };
+
         Ok(())
     }
 
@@ -214,6 +216,7 @@ impl BoundedNonEmptyConnectionIdVecDeque {
                 inspect(e);
                 return false;
             }
+
             true
         });
     }
@@ -408,6 +411,7 @@ impl ConnectionIdentifiers {
             if e.reset_token != reset_token {
                 return Err(Error::InvalidState);
             }
+
             return Ok(e.seq);
         }
 
@@ -468,6 +472,7 @@ impl ConnectionIdentifiers {
             {
                 return Err(Error::InvalidFrame);
             }
+
             // The identifier is already there, nothing to do.
             return Ok(());
         }
@@ -707,6 +712,7 @@ impl ConnectionIdentifiers {
         if self.zero_length_dcid() {
             return 0;
         }
+
         self.dcids.iter().filter(|e| e.path_id.is_none()).count()
     }
 
@@ -937,6 +943,7 @@ mod tests {
             Ok(())
         );
         assert_eq!(retired_path_ids, SmallVec::from_buf([(0, 0)]));
+
         // The CID module does not handle path replacing. Fake it now.
         ids.link_dcid_to_path_id(1, 0).unwrap();
         assert_eq!(ids.available_dcids(), 1);
@@ -958,6 +965,7 @@ mod tests {
 
         // Now it removes DCID with sequence 1.
         assert_eq!(ids.retire_dcid(1), Ok(Some(0)));
+
         // The CID module does not handle path replacing. Fake it now.
         ids.link_dcid_to_path_id(2, 0).unwrap();
         assert_eq!(ids.available_dcids(), 0);
@@ -1082,10 +1090,12 @@ mod tests {
         let seq_nums = [5, 3, 2, 19, 8];
         for &seq in &seq_nums {
             let (dcid, rt) = create_cid_and_reset_token(16);
-            assert!(ids
-                .new_dcid(dcid, seq, rt, 1, &mut retired_path_ids)
-                .is_ok());
+            assert!(
+                ids.new_dcid(dcid, seq, rt, 1, &mut retired_path_ids)
+                    .is_ok()
+            );
         }
+
         assert_eq!(ids.dcids.len(), 5);
 
         // Trigger a retire of sequence numbers 2 and 3, inserting #20

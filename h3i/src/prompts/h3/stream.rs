@@ -24,22 +24,22 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use inquire::Text;
 use inquire::error::InquireResult;
 use inquire::validator::Validation;
-use inquire::Text;
 
+use crate::StreamIdAllocator;
 use crate::actions::h3::Action;
 use crate::prompts::h3;
 use crate::prompts::h3::errors::prompt_transport_or_app_error;
 use crate::prompts::h3::prompt_yes_no;
-use crate::StreamIdAllocator;
 
-use super::squish_suggester;
-use super::SuggestionResult;
 use super::AUTO_PICK;
 use super::EMPTY_PICKS;
 use super::ESC_TO_RET;
 use super::STREAM_ID_PROMPT;
+use super::SuggestionResult;
+use super::squish_suggester;
 
 const CONTROL_STREAM: &str = "Control Stream";
 const PUSH_STREAM: &str = "Push Stream";

@@ -28,10 +28,10 @@ use h3i::quiche;
 use h3i::quiche::test_utils::Pipe;
 use std::net::SocketAddr;
 use std::time::Duration;
+use tokio_quiche::ConnectionIdGenerator as _;
 use tokio_quiche::buf_factory::BufFactory;
 use tokio_quiche::quic::QuicCommand;
 use tokio_quiche::quic::SimpleConnectionIdGenerator;
-use tokio_quiche::ConnectionIdGenerator as _;
 
 use crate::fixtures::*;
 

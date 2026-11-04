@@ -32,9 +32,9 @@ use tokio::task::AbortHandle;
 use tokio::task::Id;
 
 use std::future::Future;
+use std::sync::LazyLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::LazyLock;
 
 /// Drop guard for task removal. If a task panics, this makes sure
 /// it is removed from [`ActiveTasks`] properly.
@@ -42,6 +42,7 @@ struct RemoveOnDrop {
     id: task::Id,
     storage: &'static ActiveTasks,
 }
+
 impl Drop for RemoveOnDrop {
     fn drop(&mut self) {
         self.storage.remove_task(self.id);
@@ -121,6 +122,7 @@ impl TaskKillswitch {
             handle.abort();
             return None;
         }
+
         Some(id)
     }
 
@@ -169,6 +171,7 @@ impl ActiveTasks {
             if let TaskEntry::Handle(task) = entry {
                 task.abort();
             }
+
             false // remove all elements
         });
     }
@@ -184,6 +187,7 @@ impl ActiveTasks {
                 if !cond() {
                     return Err(handle);
                 }
+
                 e.insert(TaskEntry::Handle(handle));
             },
             Occupied(e) if matches!(e.get(), TaskEntry::Tombstone) => {

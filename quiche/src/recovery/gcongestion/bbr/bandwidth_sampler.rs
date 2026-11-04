@@ -66,6 +66,7 @@ impl<T> ConnectionStateMap<T> {
         if first.0 == pkt_num {
             return self.packet_map.pop_front().and_then(|(_, v)| v);
         }
+
         // Use binary search
         let ret =
             match self.packet_map.binary_search_by_key(&pkt_num, |&(n, _)| n) {
@@ -622,6 +623,7 @@ impl BandwidthSampler {
                 event_sample.sample_is_app_limited =
                     sample.state_at_send.is_app_limited;
             }
+
             max_send_rate = max_send_rate.max(sample.send_rate);
             max_ack_rate = max_ack_rate.max(Some(sample.ack_rate));
 
@@ -709,6 +711,7 @@ impl BandwidthSampler {
             self.last_acked_packet_ack_time,
             newly_acked_bytes,
         );
+
         // If `extra_acked` is zero, this ACK starts a new aggregation epoch.
         // Save the previous epoch's last ACK point as an A0 candidate.
         if self.overestimate_avoidance && extra_acked == 0 {
@@ -828,6 +831,7 @@ impl BandwidthSampler {
                     return Some(*candidate);
                 }
             }
+
             a0_candidates.pop_front();
         }
 
@@ -1219,6 +1223,7 @@ mod bandwidth_sampler_tests {
             assert_eq!(expected_bandwidth, last_bandwidth);
             test_sender.advance_time(time_between_packets);
         }
+
         test_sender.sampler.remove_obsolete_packets(41);
         assert_eq!(0, test_sender.number_of_tracked_packets());
         assert_eq!(0, test_sender.bytes_in_flight);
@@ -1251,6 +1256,7 @@ mod bandwidth_sampler_tests {
             } else {
                 test_sender.lose_packet(i);
             }
+
             test_sender.send_packet(i + 20, REGULAR_PACKET_SIZE, true);
             test_sender.advance_time(time_between_packets);
         }
@@ -1263,8 +1269,10 @@ mod bandwidth_sampler_tests {
             } else {
                 test_sender.lose_packet(i);
             }
+
             test_sender.advance_time(time_between_packets);
         }
+
         test_sender.sampler.remove_obsolete_packets(41);
         assert_eq!(0, test_sender.number_of_tracked_packets());
         assert_eq!(0, test_sender.bytes_in_flight);
@@ -1306,6 +1314,7 @@ mod bandwidth_sampler_tests {
             if i % 2 == 0 {
                 test_sender.ack_packet(i);
             }
+
             let has_retransmittable_data = i % 2 == 0;
             test_sender.send_packet(
                 i + 20,
@@ -1321,6 +1330,7 @@ mod bandwidth_sampler_tests {
                 let last_bandwidth = test_sender.ack_packet(i).bandwidth;
                 assert_eq!(expected_bandwidth, last_bandwidth);
             }
+
             test_sender.advance_time(time_between_packets);
         }
 
@@ -1356,6 +1366,7 @@ mod bandwidth_sampler_tests {
             last_bandwidth = test_sender.ack_packet(i).bandwidth;
             test_sender.advance_time(ridiculously_small_time_delta);
         }
+
         assert_eq!(expected_bandwidth, last_bandwidth);
 
         test_sender.sampler.remove_obsolete_packets(41);
@@ -1465,6 +1476,7 @@ mod bandwidth_sampler_tests {
                 // `sample.bandwidth` rises 17 packets too soon.
                 assert_eq!(sample.bandwidth, expected_bandwidth, "{i}");
             }
+
             test_sender.send_packet(i + 20, REGULAR_PACKET_SIZE, true);
             test_sender.advance_time(time_between_packets);
         }
@@ -1501,6 +1513,7 @@ mod bandwidth_sampler_tests {
             test_sender.send_packet(i, REGULAR_PACKET_SIZE, true);
             test_sender.advance_time(time_between_packets);
         }
+
         test_sender.advance_time(rtt - time_between_packets * num_packets as _);
 
         let mut last_sample = Bandwidth::zero();
@@ -1532,6 +1545,7 @@ mod bandwidth_sampler_tests {
         for i in 1..=5 {
             test_sender.send_packet(i, REGULAR_PACKET_SIZE, true);
         }
+
         test_sender.advance_time(Duration::from_millis(100));
         assert_eq!(5, test_sender.number_of_tracked_packets());
         test_sender.sampler.remove_obsolete_packets(4);
@@ -1656,6 +1670,7 @@ mod bandwidth_sampler_tests {
             if i % 2 != 0 {
                 continue;
             }
+
             // Ack packet i and lose i-1.
             let sample = test_sender.on_congestion_event(&[i], &[i - 1]);
             // Losing 50% packets means sending rate is twice the bandwidth.
@@ -1808,6 +1823,7 @@ mod max_ack_height_tracker_tests {
                     self.now,
                     bytes_per_ack,
                 );
+
                 // `extra_acked` should be 0 if either
                 // [1] We are at the beginning of a aggregation epoch(bytes==0)
                 // and the     the current tracker implementation
@@ -1820,6 +1836,7 @@ mod max_ack_height_tracker_tests {
                 } else {
                     assert!(last_extra_acked < extra_acked);
                 }
+
                 self.now += time_between_acks;
                 last_extra_acked = extra_acked;
             }

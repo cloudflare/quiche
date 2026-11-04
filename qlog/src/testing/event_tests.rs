@@ -25,15 +25,15 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::*;
+use crate::Event;
+use crate::events::EventData;
+use crate::events::ExData;
+use crate::events::RawInfo;
 use crate::events::quic::AckRange;
 use crate::events::quic::PacketSent;
 use crate::events::quic::PacketType;
 use crate::events::quic::QuicFrame;
 use crate::events::quic::RecoveryMetricsUpdated;
-use crate::events::EventData;
-use crate::events::ExData;
-use crate::events::RawInfo;
-use crate::Event;
 
 #[test]
 fn packet_sent_event_no_frames() {

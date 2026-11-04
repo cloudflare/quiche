@@ -266,9 +266,9 @@ mod tests {
     use tokio::io::ReadBuf;
     use tokio::net::UnixDatagram;
 
+    use super::MAX_MMSG;
     use super::sendmmsg;
     use super::sendmmsg_with_suffix;
-    use super::MAX_MMSG;
     use crate::DatagramSocketRecvExt;
     use crate::DatagramSocketSendExt;
 

@@ -40,20 +40,20 @@ use crate::actions::h3::Action;
 use crate::actions::h3::StreamEventType;
 use crate::actions::h3::WaitType;
 use crate::actions::h3::WaitingFor;
-use crate::client::execute_action;
-use crate::client::parse_streams;
 use crate::client::ClientError;
 use crate::client::ConnectionCloseDetails;
 use crate::client::MAX_DATAGRAM_SIZE;
+use crate::client::execute_action;
+use crate::client::parse_streams;
 use crate::config::Config;
 
-use super::parse_args;
 use super::Client;
 use super::CloseTriggerFrames;
 use super::ConnectionSummary;
 use super::ParsedArgs;
 use super::StreamMap;
 use super::StreamParserMap;
+use super::parse_args;
 
 #[derive(Default)]
 struct SyncClient {
@@ -118,6 +118,7 @@ fn create_config(args: &Config, should_log_keys: bool) -> quiche::Config {
             args.dgram_send_queue_len,
         );
     }
+
     if should_log_keys {
         config.log_keys()
     }
@@ -204,10 +205,8 @@ pub fn connect_with_early_data(
             .map_err(|error| ClientError::Other(error.to_string()))?;
     }
 
-    if let Some(keylog) = &mut keylog {
-        if let Ok(keylog) = keylog.try_clone() {
-            conn.set_keylog(Box::new(keylog));
-        }
+    if let Some(keylog) = keylog {
+        conn.set_keylog(Box::new(keylog));
     }
 
     log::info!(
@@ -220,24 +219,25 @@ pub fn connect_with_early_data(
     let (write, send_info) = conn.send(&mut out).expect("initial send failed");
 
     let mut client = SyncClient::new(close_trigger_frames);
+
     // Send early data if connection is_in_early_data (resumption with 0-RTT was
     // successful) and if we have early_actions.
-    if conn.is_in_early_data() {
-        if let Some(early_actions) = early_actions {
-            let mut early_action_iter = early_actions.iter();
-            let mut wait_duration = None;
-            let mut wait_instant = None;
-            let mut waiting_for = WaitingFor::default();
+    if conn.is_in_early_data() &&
+        let Some(early_actions) = early_actions
+    {
+        let mut early_action_iter = early_actions.iter();
+        let mut wait_duration = None;
+        let mut wait_instant = None;
+        let mut waiting_for = WaitingFor::default();
 
-            check_duration_and_do_actions(
-                &mut wait_duration,
-                &mut wait_instant,
-                &mut early_action_iter,
-                &mut conn,
-                &mut waiting_for,
-                client.stream_parsers_mut(),
-            );
-        }
+        check_duration_and_do_actions(
+            &mut wait_duration,
+            &mut wait_instant,
+            &mut early_action_iter,
+            &mut conn,
+            &mut waiting_for,
+            client.stream_parsers_mut(),
+        );
     }
 
     while let Err(e) = socket.send_to(&out[..write], send_info.to) {

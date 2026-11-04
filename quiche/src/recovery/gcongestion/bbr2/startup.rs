@@ -30,18 +30,18 @@
 
 use std::time::Instant;
 
-use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::RecoveryStats;
 use crate::recovery::StartupExit;
 use crate::recovery::StartupExitReason;
+use crate::recovery::gcongestion::bbr2::Params;
 
-use super::mode::Mode;
-use super::mode::ModeImpl;
-use super::network_model::BBRv2NetworkModel;
 use super::Acked;
 use super::BBRv2CongestionEvent;
 use super::Limits;
 use super::Lost;
+use super::mode::Mode;
+use super::mode::ModeImpl;
+use super::network_model::BBRv2NetworkModel;
 
 #[derive(Debug)]
 pub(super) struct Startup {

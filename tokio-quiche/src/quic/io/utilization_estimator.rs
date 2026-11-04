@@ -335,12 +335,14 @@ where
                 sample: new_sample,
                 time: new_time,
             });
+
             // The new best estimate may also be stale. Check it once more. The
             // check at the start of the method handles further stale samples.
             if new_time - self.estimates[0].unwrap().time > self.window_length {
                 self.estimates[0] = self.estimates[1];
                 self.estimates[1] = self.estimates[2];
             }
+
             return;
         }
 

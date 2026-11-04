@@ -395,8 +395,8 @@
 
 use std::time::SystemTime;
 
-use crate::events::quic::PacketHeader;
 use crate::events::Event;
+use crate::events::quic::PacketHeader;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -473,6 +473,7 @@ pub struct Qlog {
 
     pub traces: Vec<Trace>,
 }
+
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct QlogSeq {
@@ -665,6 +666,7 @@ impl std::fmt::Display for HexSlice<'_> {
         for byte in self.0 {
             write!(f, "{byte:02x}")?;
         }
+
         Ok(())
     }
 }

@@ -405,12 +405,6 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(feature = "qlog")]
-use qlog::events::quic::DataMovedAdditionalInfo;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::QuicEventType;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::TransportInitiator;
-#[cfg(feature = "qlog")]
 use qlog::events::DataRecipient;
 #[cfg(feature = "qlog")]
 use qlog::events::Event;
@@ -422,6 +416,12 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::RawInfo;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::DataMovedAdditionalInfo;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::QuicEventType;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::TransportInitiator;
 
 use smallvec::SmallVec;
 
@@ -1256,6 +1256,7 @@ impl Config {
         } else {
             None
         };
+
         self.dgram_recv_max_queue_len = recv_queue_len;
         self.dgram_send_max_queue_len = send_queue_len;
     }
@@ -2061,6 +2062,7 @@ impl<F: BufFactory> Connection<F> {
             // other.
             return Err(Error::InvalidDcidInitialization);
         }
+
         #[cfg(feature = "custom-client-dcid")]
         if let Some(client_dcid) = client_dcid {
             // The Minimum length is 8.
@@ -2069,6 +2071,7 @@ impl<F: BufFactory> Connection<F> {
                 return Err(Error::InvalidDcidInitialization);
             }
         }
+
         #[cfg(not(feature = "custom-client-dcid"))]
         if client_dcid.is_some() {
             return Err(Error::InvalidDcidInitialization);
@@ -2392,11 +2395,11 @@ impl<F: BufFactory> Connection<F> {
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String, qlog_level: QlogLevel,
     ) {
-        use qlog::events::quic::TransportInitiator;
-        use qlog::events::HTTP3_URI;
-        use qlog::events::QUIC_URI;
         use qlog::CommonFields;
         use qlog::ReferenceTime;
+        use qlog::events::HTTP3_URI;
+        use qlog::events::QUIC_URI;
+        use qlog::events::quic::TransportInitiator;
 
         let vp = if self.is_server {
             qlog::VantagePointType::Server
@@ -2944,8 +2947,7 @@ impl<F: BufFactory> Connection<F> {
             // the client MUST discard these packets.
             trace!(
                 "{} client received packet from unknown address {:?}, dropping",
-                self.trace_id,
-                info,
+                self.trace_id, info,
             );
 
             return Ok(len);
@@ -3011,6 +3013,7 @@ impl<F: BufFactory> Connection<F> {
                 }
             }
         }
+
         Ok(())
     }
 
@@ -3627,8 +3630,7 @@ impl<F: BufFactory> Connection<F> {
                     } => {
                         trace!(
                             "{} pmtud probe acked; probe size {:?}",
-                            self.trace_id,
-                            mtu_probe
+                            self.trace_id, mtu_probe
                         );
 
                         let local = p.local_addr();
@@ -3758,6 +3760,7 @@ impl<F: BufFactory> Connection<F> {
                         if let Some(stream) = self.streams.get_mut(stream_id) {
                             stream.send.ack_reset_stream();
                         }
+
                         self.streams.remove_reset(stream_id);
                         self.streams.try_collect(stream_id);
                     },
@@ -4052,20 +4055,18 @@ impl<F: BufFactory> Connection<F> {
         let send_path = self.paths.get_mut(send_pid)?;
 
         // Increase the maximum datagram size for a PMTUD probe.
-        if let Some(pmtud) = send_path.pmtud.as_mut() {
-            if pmtud.should_probe() {
-                let size = if self.handshake_confirmed || self.handshake_completed
-                {
-                    pmtud.get_probe_size()
-                } else {
-                    pmtud.get_current_mtu()
-                };
+        if let Some(pmtud) = send_path.pmtud.as_mut() &&
+            pmtud.should_probe()
+        {
+            let size = if self.handshake_confirmed || self.handshake_completed {
+                pmtud.get_probe_size()
+            } else {
+                pmtud.get_current_mtu()
+            };
 
-                send_path.recovery.pmtud_update_max_datagram_size(size);
+            send_path.recovery.pmtud_update_max_datagram_size(size);
 
-                left =
-                    cmp::min(out.len(), send_path.recovery.max_datagram_size());
-            }
+            left = cmp::min(out.len(), send_path.recovery.max_datagram_size());
         }
 
         // Limit data sent by the server based on the amount of data received
@@ -4103,10 +4104,10 @@ impl<F: BufFactory> Connection<F> {
 
             // When sending multiple PTO probes, don't coalesce them together,
             // so they are sent on separate UDP datagrams.
-            if let Ok(epoch) = ty.to_epoch() {
-                if self.paths.get_mut(send_pid)?.recovery.loss_probes(epoch) > 0 {
-                    break;
-                }
+            if let Ok(epoch) = ty.to_epoch() &&
+                self.paths.get_mut(send_pid)?.recovery.loss_probes(epoch) > 0
+            {
+                break;
             }
 
             // Don't coalesce packets that must go on different paths.
@@ -4334,11 +4335,12 @@ impl<F: BufFactory> Connection<F> {
                     // the stream is still active and not FIN'd. Even if the
                     // packet was lost, if the application has the final
                     // size at this point there is no need to retransmit.
-                        if let Some(stream) = self.streams.get(stream_id) {
-                            if !stream.recv.is_fin() {
-                                self.streams
-                                    .insert_stopped(stream_id, error_code);
-                            }
+                        if self
+                            .streams
+                            .get(stream_id)
+                            .is_some_and(|stream| !stream.recv.is_fin())
+                        {
+                            self.streams.insert_stopped(stream_id, error_code);
                         },
 
                     // Retransmit HANDSHAKE_DONE only if it hasn't been acked at
@@ -4502,6 +4504,7 @@ impl<F: BufFactory> Connection<F> {
             pkt_num_manager.set_skip_pn(Some(self.next_pkt_num));
             self.next_pkt_num += 1;
         };
+
         let pn = self.next_pkt_num;
 
         let largest_acked_pkt =
@@ -4718,59 +4721,60 @@ impl<F: BufFactory> Connection<F> {
                     frames.is_empty(),
                 );
 
-                if should_probe_pmtu {
-                    if let Some(pmtud) = active_path.pmtud.as_mut() {
-                        let probe_size = pmtud.get_probe_size();
-                        trace!(
+                if should_probe_pmtu &&
+                    let Some(pmtud) = active_path.pmtud.as_mut()
+                {
+                    let probe_size = pmtud.get_probe_size();
+                    trace!(
                         "{} sending pmtud probe pmtu_probe={} estimated_pmtu={}",
                         self.trace_id,
                         probe_size,
                         pmtud.get_current_mtu(),
                     );
 
-                        left = probe_size;
+                    left = probe_size;
 
-                        match left.checked_sub(overhead) {
-                            Some(v) => left = v,
+                    match left.checked_sub(overhead) {
+                        Some(v) => left = v,
 
-                            None => {
-                                // We can't send more because there isn't enough
-                                // space available in the output buffer.
-                                //
-                                // The congestion window is nearly full. A new
-                                // packet does not fit.
-                                //
-                                // Clear the app-limited state so ACKs can grow
-                                // the congestion window.
-                                active_path.recovery.update_app_limited(false);
-                                return Err(Error::Done);
-                            },
-                        }
+                        None => {
+                            // We can't send more because there isn't enough
+                            // space available in the output buffer.
+                            //
+                            // The congestion window is nearly full. A new
+                            // packet does not fit.
+                            //
+                            // Clear the app-limited state so ACKs can grow
+                            // the congestion window.
+                            active_path.recovery.update_app_limited(false);
+                            return Err(Error::Done);
+                        },
+                    }
 
-                        let frame = frame::Frame::Padding {
-                            len: probe_size - overhead - 1,
+                    let frame = frame::Frame::Padding {
+                        len: probe_size - overhead - 1,
+                    };
+
+                    if push_frame_to_pkt!(b, frames, frame, left) {
+                        let frame = frame::Frame::Ping {
+                            mtu_probe: Some(probe_size),
                         };
 
                         if push_frame_to_pkt!(b, frames, frame, left) {
-                            let frame = frame::Frame::Ping {
-                                mtu_probe: Some(probe_size),
-                            };
-
-                            if push_frame_to_pkt!(b, frames, frame, left) {
-                                ack_eliciting = true;
-                                in_flight = true;
-                            }
+                            ack_eliciting = true;
+                            in_flight = true;
                         }
-
-                        // Reset probe flag after sending to prevent duplicate
-                        // probes in a single flight.
-                        pmtud.set_in_flight(true);
-                        is_pmtud_probe = true;
                     }
+
+                    // Reset probe flag after sending to prevent duplicate
+                    // probes in a single flight.
+                    pmtud.set_in_flight(true);
+                    is_pmtud_probe = true;
                 }
             }
 
             let path = self.paths.get_mut(send_pid)?;
+
             // Create PATH_RESPONSE frame if needed.
             // We do not try to ensure that these are really sent.
             while let Some(challenge) = path.pop_received_challenge() {
@@ -4894,21 +4898,19 @@ impl<F: BufFactory> Connection<F> {
             // exhausted the peer's bidirectional stream count limit.
             if self
                 .streams_blocked_bidi_state
-                .has_pending_stream_blocked_frame()
+                .has_pending_stream_blocked_frame() &&
+                let Some(limit) = self.streams_blocked_bidi_state.blocked_at
             {
-                if let Some(limit) = self.streams_blocked_bidi_state.blocked_at {
-                    let frame = frame::Frame::StreamsBlockedBidi { limit };
+                let frame = frame::Frame::StreamsBlockedBidi { limit };
 
-                    if push_frame_to_pkt!(b, frames, frame, left) {
-                        // Record the limit we just notified the peer about so
-                        // that redundant frames for the same limit are
-                        // suppressed.
-                        self.streams_blocked_bidi_state.blocked_sent =
-                            Some(limit);
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    // Record the limit we just notified the peer about so
+                    // that redundant frames for the same limit are
+                    // suppressed.
+                    self.streams_blocked_bidi_state.blocked_sent = Some(limit);
 
-                        ack_eliciting = true;
-                        in_flight = true;
-                    }
+                    ack_eliciting = true;
+                    in_flight = true;
                 }
             }
 
@@ -4916,20 +4918,19 @@ impl<F: BufFactory> Connection<F> {
             // exhausted the peer's unidirectional stream count limit.
             if self
                 .streams_blocked_uni_state
-                .has_pending_stream_blocked_frame()
+                .has_pending_stream_blocked_frame() &&
+                let Some(limit) = self.streams_blocked_uni_state.blocked_at
             {
-                if let Some(limit) = self.streams_blocked_uni_state.blocked_at {
-                    let frame = frame::Frame::StreamsBlockedUni { limit };
+                let frame = frame::Frame::StreamsBlockedUni { limit };
 
-                    if push_frame_to_pkt!(b, frames, frame, left) {
-                        // Record the limit we just notified the peer about so
-                        // that redundant frames for the same limit are
-                        // suppressed.
-                        self.streams_blocked_uni_state.blocked_sent = Some(limit);
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    // Record the limit we just notified the peer about so
+                    // that redundant frames for the same limit are
+                    // suppressed.
+                    self.streams_blocked_uni_state.blocked_sent = Some(limit);
 
-                        ack_eliciting = true;
-                        in_flight = true;
-                    }
+                    ack_eliciting = true;
+                    in_flight = true;
                 }
             }
 
@@ -5091,29 +5092,14 @@ impl<F: BufFactory> Connection<F> {
 
         // Create CONNECTION_CLOSE frame. Try to send this only on the active
         // path, unless it is the last one available.
-        if path.active() || n_paths == 1 {
-            if let Some(conn_err) = self.local_error.as_ref() {
-                if conn_err.is_app {
-                    // Create ApplicationClose frame.
-                    if pkt_type == Type::Short {
-                        let frame = frame::Frame::ApplicationClose {
-                            error_code: conn_err.error_code,
-                            reason: conn_err.reason.clone(),
-                        };
-
-                        if push_frame_to_pkt!(b, frames, frame, left) {
-                            let pto = path.recovery.pto();
-                            self.draining_timer = Some(now + (pto * 3));
-
-                            ack_eliciting = true;
-                            in_flight = true;
-                        }
-                    }
-                } else {
-                    // Create ConnectionClose frame.
-                    let frame = frame::Frame::ConnectionClose {
+        if (path.active() || n_paths == 1) &&
+            let Some(conn_err) = self.local_error.as_ref()
+        {
+            if conn_err.is_app {
+                // Create ApplicationClose frame.
+                if pkt_type == Type::Short {
+                    let frame = frame::Frame::ApplicationClose {
                         error_code: conn_err.error_code,
-                        frame_type: 0,
                         reason: conn_err.reason.clone(),
                     };
 
@@ -5124,6 +5110,21 @@ impl<F: BufFactory> Connection<F> {
                         ack_eliciting = true;
                         in_flight = true;
                     }
+                }
+            } else {
+                // Create ConnectionClose frame.
+                let frame = frame::Frame::ConnectionClose {
+                    error_code: conn_err.error_code,
+                    frame_type: 0,
+                    reason: conn_err.reason.clone(),
+                };
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    let pto = path.recovery.pto();
+                    self.draining_timer = Some(now + (pto * 3));
+
+                    ack_eliciting = true;
+                    in_flight = true;
                 }
             }
         }
@@ -5215,79 +5216,78 @@ impl<F: BufFactory> Connection<F> {
             left > frame::MAX_DGRAM_OVERHEAD &&
             !is_closing &&
             path.active() &&
-            do_dgram
+            do_dgram &&
+            let Some(max_dgram_payload) = max_dgram_len
         {
-            if let Some(max_dgram_payload) = max_dgram_len {
-                while let Some(len) = self.dgram_send_queue.peek_front_len() {
-                    let hdr_off = b.off();
-                    let hdr_len = 1 + // frame type
-                        2; // length, always encode as 2-byte varint
+            while let Some(len) = self.dgram_send_queue.peek_front_len() {
+                let hdr_off = b.off();
+                let hdr_len = 1 + // frame type
+                    2; // length, always encode as 2-byte varint
 
-                    if (hdr_len + len) <= left {
-                        // Front of the queue fits this packet, send it.
-                        match self.dgram_send_queue.pop() {
-                            Some(data) => {
-                                // Encode the frame.
-                                //
-                                // Instead of creating a `frame::Frame` object,
-                                // encode the frame directly into the packet
-                                // buffer.
-                                //
-                                // First we reserve some space in the output
-                                // buffer for writing the frame header (we
-                                // assume the length field is always a 2-byte
-                                // varint as we don't know the value yet).
-                                //
-                                // Then we emit the data from the DATAGRAM's
-                                // buffer.
-                                //
-                                // Finally we go back and encode the frame
-                                // header with the now available information.
-                                let (mut dgram_hdr, mut dgram_payload) =
-                                    b.split_at(hdr_off + hdr_len)?;
+                if (hdr_len + len) <= left {
+                    // Front of the queue fits this packet, send it.
+                    match self.dgram_send_queue.pop() {
+                        Some(data) => {
+                            // Encode the frame.
+                            //
+                            // Instead of creating a `frame::Frame` object,
+                            // encode the frame directly into the packet
+                            // buffer.
+                            //
+                            // First we reserve some space in the output
+                            // buffer for writing the frame header (we
+                            // assume the length field is always a 2-byte
+                            // varint as we don't know the value yet).
+                            //
+                            // Then we emit the data from the DATAGRAM's
+                            // buffer.
+                            //
+                            // Finally we go back and encode the frame
+                            // header with the now available information.
+                            let (mut dgram_hdr, mut dgram_payload) =
+                                b.split_at(hdr_off + hdr_len)?;
 
-                                dgram_payload.as_mut()[..len]
-                                    .copy_from_slice(data.as_ref());
+                            dgram_payload.as_mut()[..len]
+                                .copy_from_slice(data.as_ref());
 
-                                // Encode the frame's header.
-                                //
-                                // Due to how `OctetsMut::split_at()` works,
-                                // `dgram_hdr` starts from the initial offset
-                                // of `b` (rather than the current offset), so
-                                // it needs to be advanced to the initial frame
-                                // offset.
-                                dgram_hdr.skip(hdr_off)?;
+                            // Encode the frame's header.
+                            //
+                            // Due to how `OctetsMut::split_at()` works,
+                            // `dgram_hdr` starts from the initial offset
+                            // of `b` (rather than the current offset), so
+                            // it needs to be advanced to the initial frame
+                            // offset.
+                            dgram_hdr.skip(hdr_off)?;
 
-                                frame::encode_dgram_header(
-                                    len as u64,
-                                    &mut dgram_hdr,
-                                )?;
+                            frame::encode_dgram_header(
+                                len as u64,
+                                &mut dgram_hdr,
+                            )?;
 
-                                // Advance the packet buffer's offset.
-                                b.skip(hdr_len + len)?;
+                            // Advance the packet buffer's offset.
+                            b.skip(hdr_len + len)?;
 
-                                let frame =
-                                    frame::Frame::DatagramHeader { length: len };
+                            let frame =
+                                frame::Frame::DatagramHeader { length: len };
 
-                                if push_frame_to_pkt!(b, frames, frame, left) {
-                                    ack_eliciting = true;
-                                    in_flight = true;
-                                    dgram_emitted = true;
-                                    self.dgram_sent_count =
-                                        self.dgram_sent_count.saturating_add(1);
-                                    path.dgram_sent_count =
-                                        path.dgram_sent_count.saturating_add(1);
-                                }
-                            },
+                            if push_frame_to_pkt!(b, frames, frame, left) {
+                                ack_eliciting = true;
+                                in_flight = true;
+                                dgram_emitted = true;
+                                self.dgram_sent_count =
+                                    self.dgram_sent_count.saturating_add(1);
+                                path.dgram_sent_count =
+                                    path.dgram_sent_count.saturating_add(1);
+                            }
+                        },
 
-                            None => continue,
-                        };
-                    } else if len > max_dgram_payload {
-                        // This dgram frame will never fit. Let's purge it.
-                        self.dgram_send_queue.pop();
-                    } else {
-                        break;
-                    }
+                        None => continue,
+                    };
+                } else if len > max_dgram_payload {
+                    // This dgram frame will never fit. Let's purge it.
+                    self.dgram_send_queue.pop();
+                } else {
+                    break;
                 }
             }
         }
@@ -5399,6 +5399,7 @@ impl<F: BufFactory> Connection<F> {
                 }
 
                 let priority_key = Arc::clone(&stream.priority_key);
+
                 // Remove the stream when it is no longer flushable.
                 if !stream.is_flushable() {
                     self.streams.remove_flushable(&priority_key);
@@ -5649,10 +5650,11 @@ impl<F: BufFactory> Connection<F> {
 
         // (Re)start the idle timer if we are sending the first ack-eliciting
         // packet since last receiving a packet.
-        if ack_eliciting && !self.ack_eliciting_sent {
-            if let Some(idle_timeout) = self.idle_timeout() {
-                self.idle_timer = Some(now + idle_timeout);
-            }
+        if ack_eliciting &&
+            !self.ack_eliciting_sent &&
+            let Some(idle_timeout) = self.idle_timeout()
+        {
+            self.idle_timer = Some(now + idle_timeout);
         }
 
         if ack_eliciting {
@@ -5688,36 +5690,34 @@ impl<F: BufFactory> Connection<F> {
         );
 
         // Bound recovery metadata when sent packet records accumulate.
-        if self.local_error.is_none() {
-            if let Some(max_outstanding_sent_packets) =
+        if self.local_error.is_none() &&
+            let Some(max_outstanding_sent_packets) =
                 self.max_outstanding_sent_packets
-            {
-                let tracked_sent_packets: usize = self
-                    .paths
-                    .iter()
-                    .flat_map(|(_, p)| {
-                        packet::Epoch::epochs(
-                            packet::Epoch::Initial..=packet::Epoch::Application,
-                        )
-                        .iter()
-                        .map(|&e| p.recovery.sent_packets_len(e))
-                    })
-                    .sum();
-
-                if tracked_sent_packets > max_outstanding_sent_packets.get() {
-                    trace!(
-                        "{} too many outstanding sent packets: {}",
-                        self.trace_id,
-                        tracked_sent_packets
-                    );
-
-                    self.close(
-                        false,
-                        WireErrorCode::ProtocolViolation as u64,
-                        b"too many outstanding sent packets",
+        {
+            let tracked_sent_packets: usize = self
+                .paths
+                .iter()
+                .flat_map(|(_, p)| {
+                    packet::Epoch::epochs(
+                        packet::Epoch::Initial..=packet::Epoch::Application,
                     )
-                    .ok();
-                }
+                    .iter()
+                    .map(|&e| p.recovery.sent_packets_len(e))
+                })
+                .sum();
+
+            if tracked_sent_packets > max_outstanding_sent_packets.get() {
+                trace!(
+                    "{} too many outstanding sent packets: {}",
+                    self.trace_id, tracked_sent_packets
+                );
+
+                self.close(
+                    false,
+                    WireErrorCode::ProtocolViolation as u64,
+                    b"too many outstanding sent packets",
+                )
+                .ok();
             }
         }
 
@@ -6866,12 +6866,12 @@ impl<F: BufFactory> Connection<F> {
             .ok()
             .map(|p| p.recovery.max_datagram_size());
 
-        if let Some(max_datagram_size) = max_datagram_size {
-            if self.is_established() {
-                // Cap the packet size at 16,383 bytes so a two-byte varint can
-                // always encode it.
-                return cmp::min(16383, max_datagram_size);
-            }
+        if let Some(max_datagram_size) = max_datagram_size &&
+            self.is_established()
+        {
+            // Cap the packet size at 16,383 bytes so a two-byte varint can
+            // always encode it.
+            return cmp::min(16383, max_datagram_size);
         }
 
         // Allow for 1200 bytes (minimum QUIC packet size) during the
@@ -6894,6 +6894,7 @@ impl<F: BufFactory> Connection<F> {
         if self.is_closed() || self.is_draining() {
             return Ok(());
         }
+
         self.paths.get_active_mut()?.needs_ack_eliciting = true;
         Ok(())
     }
@@ -6911,6 +6912,7 @@ impl<F: BufFactory> Connection<F> {
         if self.is_closed() || self.is_draining() {
             return Ok(());
         }
+
         let path_id = self
             .paths
             .path_id_from_addrs(&(local, peer))
@@ -6954,6 +6956,7 @@ impl<F: BufFactory> Connection<F> {
                 if d.as_ref().len() > buf.len() {
                     return Err(Error::BufferTooShort);
                 }
+
                 let len = d.as_ref().len();
 
                 buf[..len].copy_from_slice(d.as_ref());
@@ -7253,53 +7256,51 @@ impl<F: BufFactory> Connection<F> {
             return;
         }
 
-        if let Some(timer) = self.idle_timer {
-            if timer <= now {
-                trace!("{} idle timeout expired", self.trace_id);
+        if self.idle_timer.is_some_and(|timer| timer <= now) {
+            trace!("{} idle timeout expired", self.trace_id);
 
-                self.mark_closed();
-                self.timed_out = true;
-                return;
-            }
+            self.mark_closed();
+            self.timed_out = true;
+            return;
         }
 
         if let Some(timer) = self.crypto_ctx[packet::Epoch::Application]
             .key_update
             .as_ref()
-            .map(|key_update| key_update.timer)
+            .map(|key_update| key_update.timer) &&
+            timer <= now
         {
-            if timer <= now {
-                // Discard previous key once key update timer expired.
-                let _ = self.crypto_ctx[packet::Epoch::Application]
-                    .key_update
-                    .take();
-            }
+            // Discard previous key once key update timer expired.
+            let _ = self.crypto_ctx[packet::Epoch::Application]
+                .key_update
+                .take();
         }
 
         let handshake_status = self.handshake_status();
 
         for (_, p) in self.paths.iter_mut() {
-            if let Some(timer) = p.recovery.loss_detection_timer() {
-                if timer <= now {
-                    trace!("{} loss detection timeout expired", self.trace_id);
+            if p.recovery
+                .loss_detection_timer()
+                .is_some_and(|timer| timer <= now)
+            {
+                trace!("{} loss detection timeout expired", self.trace_id);
 
-                    let OnLossDetectionTimeoutOutcome {
-                        lost_packets,
-                        lost_bytes,
-                    } = p.on_loss_detection_timeout(
-                        handshake_status,
-                        now,
-                        self.is_server,
-                        &self.trace_id,
-                    );
+                let OnLossDetectionTimeoutOutcome {
+                    lost_packets,
+                    lost_bytes,
+                } = p.on_loss_detection_timeout(
+                    handshake_status,
+                    now,
+                    self.is_server,
+                    &self.trace_id,
+                );
 
-                    self.lost_count += lost_packets;
-                    self.lost_bytes += lost_bytes as u64;
+                self.lost_count += lost_packets;
+                self.lost_bytes += lost_bytes as u64;
 
-                    qlog_with_type!(QLOG_METRICS, self.qlog, q, {
-                        p.recovery.maybe_qlog(q, now);
-                    });
-                }
+                qlog_with_type!(QLOG_METRICS, self.qlog, q, {
+                    p.recovery.maybe_qlog(q, now);
+                });
             }
         }
 
@@ -7814,12 +7815,11 @@ impl<F: BufFactory> Connection<F> {
     /// lifetime.
     #[inline]
     pub fn source_id(&self) -> ConnectionId<'_> {
-        if let Ok(path) = self.paths.get_active() {
-            if let Some(active_scid_seq) = path.active_scid_seq {
-                if let Ok(e) = self.ids.get_scid(active_scid_seq) {
-                    return ConnectionId::from_ref(e.cid.as_ref());
-                }
-            }
+        if let Ok(path) = self.paths.get_active() &&
+            let Some(active_scid_seq) = path.active_scid_seq &&
+            let Ok(e) = self.ids.get_scid(active_scid_seq)
+        {
+            return ConnectionId::from_ref(e.cid.as_ref());
         }
 
         let e = self.ids.oldest_scid();
@@ -7841,12 +7841,11 @@ impl<F: BufFactory> Connection<F> {
     /// lifetime.
     #[inline]
     pub fn destination_id(&self) -> ConnectionId<'_> {
-        if let Ok(path) = self.paths.get_active() {
-            if let Some(active_dcid_seq) = path.active_dcid_seq {
-                if let Ok(e) = self.ids.get_dcid(active_dcid_seq) {
-                    return ConnectionId::from_ref(e.cid.as_ref());
-                }
-            }
+        if let Ok(path) = self.paths.get_active() &&
+            let Some(active_dcid_seq) = path.active_dcid_seq &&
+            let Ok(e) = self.ids.get_dcid(active_dcid_seq)
+        {
+            return ConnectionId::from_ref(e.cid.as_ref());
         }
 
         let e = self.ids.oldest_dcid();
@@ -8344,14 +8343,16 @@ impl<F: BufFactory> Connection<F> {
             // 0-RTT packets anymore, so clear the buffer now.
             self.undecryptable_pkts.clear();
 
-            trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-                   self.trace_id,
-                   std::str::from_utf8(self.application_proto()),
-                   self.handshake.cipher(),
-                   self.handshake.curve(),
-                   self.handshake.sigalg(),
-                   self.handshake.is_resumed(),
-                   self.peer_transport_params);
+            trace!(
+                "{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
+                self.trace_id,
+                std::str::from_utf8(self.application_proto()),
+                self.handshake.cipher(),
+                self.handshake.curve(),
+                self.handshake.sigalg(),
+                self.handshake.is_resumed(),
+                self.peer_transport_params
+            );
         }
 
         Ok(())
@@ -8579,11 +8580,10 @@ impl<F: BufFactory> Connection<F> {
 
                     // A higher ACK validates `skip_pn`.
                     if let Some((largest_acked, skip_pn)) =
-                        largest_acked.zip(skip_pn)
+                        largest_acked.zip(skip_pn) &&
+                        largest_acked > skip_pn
                     {
-                        if largest_acked > skip_pn {
-                            self.pkt_num_manager.set_skip_pn(None);
-                        }
+                        self.pkt_num_manager.set_skip_pn(None);
                     }
 
                     self.lost_count += lost_packets;
@@ -8649,6 +8649,7 @@ impl<F: BufFactory> Connection<F> {
                 }
 
                 self.rx_data += max_data_delta;
+
                 // We dropped the receive buffer, return connection level
                 // flow-control
                 self.flow_control.add_consumed(consumed_flowcontrol);
@@ -9106,6 +9107,7 @@ impl<F: BufFactory> Connection<F> {
         if crypto_ctx.crypto_open.is_none() {
             return;
         }
+
         crypto_ctx.clear();
         self.pkt_num_spaces[epoch].clear();
 
@@ -9256,10 +9258,7 @@ impl<F: BufFactory> Connection<F> {
                 if prev_recv_pid != recv_pid {
                     trace!(
                         "{} peer reused CID {:?} from path {} on path {}",
-                        self.trace_id,
-                        dcid,
-                        prev_recv_pid,
-                        recv_pid
+                        self.trace_id, dcid, prev_recv_pid, recv_pid
                     );
 
                     // TODO: reset congestion control.
@@ -9267,9 +9266,7 @@ impl<F: BufFactory> Connection<F> {
 
                 trace!(
                     "{} path ID {} now see SCID with seq num {}",
-                    self.trace_id,
-                    recv_pid,
-                    in_scid_seq
+                    self.trace_id, recv_pid, in_scid_seq
                 );
 
                 recv_path.active_scid_seq = Some(in_scid_seq);
@@ -9564,6 +9561,7 @@ impl<F: BufFactory> Connection<F> {
             });
             self.qlog.streamer = None;
         }
+
         self.closed = true;
     }
 }
@@ -9770,11 +9768,11 @@ pub use crate::recovery::StartupExitReason;
 
 pub use crate::stream::StreamIter;
 
+pub use crate::transport_params::MAX_ACK_DELAY_EXPONENT;
 pub use crate::transport_params::TransportParams;
 pub use crate::transport_params::UnknownTransportParameter;
 pub use crate::transport_params::UnknownTransportParameterIterator;
 pub use crate::transport_params::UnknownTransportParameters;
-pub use crate::transport_params::MAX_ACK_DELAY_EXPONENT;
 
 pub use crate::buffers::BufFactory;
 pub use crate::buffers::BufSplit;

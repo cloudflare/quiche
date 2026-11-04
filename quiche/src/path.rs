@@ -512,6 +512,7 @@ impl Path {
                 if lost_probe_time.is_none() {
                     lost_probe_time = Some(*sent_time);
                 }
+
                 false
             } else {
                 true
@@ -536,6 +537,7 @@ impl Path {
                     Some(lost_probe_time)
                 },
             };
+
             // As a server, if requesting a challenge is not
             // possible due to the amplification attack, declare the
             // validation as failed.
@@ -882,26 +884,25 @@ impl PathMap {
         let challenge_pending =
             self.iter_mut().find(|(_, p)| p.has_pending_challenge(data));
 
-        if let Some((pid, p)) = challenge_pending {
-            if p.on_response_received(data) {
-                let local_addr = p.local_addr;
-                let peer_addr = p.peer_addr;
-                let was_migrating = p.migrating;
+        if let Some((pid, p)) = challenge_pending &&
+            p.on_response_received(data)
+        {
+            let local_addr = p.local_addr;
+            let peer_addr = p.peer_addr;
+            let was_migrating = p.migrating;
 
-                p.migrating = false;
+            p.migrating = false;
 
-                // Notifies the application.
-                self.notify_event(PathEvent::Validated(local_addr, peer_addr));
+            // Notifies the application.
+            self.notify_event(PathEvent::Validated(local_addr, peer_addr));
 
-                // If this path was the candidate for migration, notifies the
-                // application.
-                if pid == active_pid && was_migrating {
-                    self.notify_event(PathEvent::PeerMigrated(
-                        local_addr, peer_addr,
-                    ));
-                }
+            // If this path was the candidate for migration, notifies the
+            // application.
+            if pid == active_pid && was_migrating {
+                self.notify_event(PathEvent::PeerMigrated(local_addr, peer_addr));
             }
         }
+
         Ok(())
     }
 
@@ -966,15 +967,15 @@ impl PathMap {
                 None
             };
 
-            if let Some(pmtud) = path.pmtud.as_ref() {
-                if let Some(event) = pmtu_event(
+            if let Some(pmtud) = path.pmtud.as_ref() &&
+                let Some(event) = pmtu_event(
                     path.local_addr,
                     path.peer_addr,
                     old_pmtu,
                     pmtud.get_current_mtu(),
-                ) {
-                    self.events.push_back(event);
-                }
+                )
+            {
+                self.events.push_back(event);
             }
         }
     }
@@ -1100,7 +1101,14 @@ impl std::fmt::Debug for PathStats {
         write!(
             f,
             "recv={} sent={} lost={} retrans={} rtt={:?} min_rtt={:?} rttvar={:?} cwnd={}",
-            self.recv, self.sent, self.lost, self.retrans, self.rtt, self.min_rtt, self.rttvar, self.cwnd,
+            self.recv,
+            self.sent,
+            self.lost,
+            self.retrans,
+            self.rtt,
+            self.min_rtt,
+            self.rttvar,
+            self.cwnd,
         )?;
 
         write!(
@@ -1122,12 +1130,12 @@ impl std::fmt::Debug for PathStats {
 
 #[cfg(test)]
 mod tests {
+    use crate::MIN_CLIENT_INITIAL_LEN;
     use crate::rand;
     use crate::test_utils;
-    use crate::MIN_CLIENT_INITIAL_LEN;
 
-    use crate::recovery::RecoveryConfig;
     use crate::Config;
+    use crate::recovery::RecoveryConfig;
 
     use super::*;
 

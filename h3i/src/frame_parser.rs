@@ -27,9 +27,9 @@
 //! Stateful parsing of QUIC streams into HTTP/3 frames.
 
 use crate::quiche;
-use quiche::h3::frame::Frame as QFrame;
 use quiche::h3::Error as H3Error;
 use quiche::h3::Result;
+use quiche::h3::frame::Frame as QFrame;
 
 use crate::frame::H3iFrame;
 
@@ -176,6 +176,7 @@ impl FrameParser {
                             0xd => "MAX_PUSH_AWAY".to_string(),
                             _ => format!("UNKNOWN val={}", self.ty.unwrap()),
                         };
+
                         log::info!(
                             "{} stream={} frame rx ty={} len={}",
                             qconn.trace_id(),

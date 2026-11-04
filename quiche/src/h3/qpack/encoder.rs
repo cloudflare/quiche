@@ -109,6 +109,7 @@ fn lookup_static<T: NameValue>(h: &T) -> Option<(u64, bool)> {
                     return Some((*enc, true));
                 }
             }
+
             // Only matched the header, not the value.
             return Some((values.first()?.1, false));
         }

@@ -38,6 +38,7 @@ pub enum Event {
     Http3HeadersDecoded(Http3HeadersDecodedEvent),
     Http3DataFrameReceived(Http3DataFrameReceivedEvent),
 }
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PrioritizedElementType {

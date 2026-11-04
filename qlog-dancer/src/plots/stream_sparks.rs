@@ -529,6 +529,7 @@ fn plot_legend<DB: DrawingBackend>(
         TransmissionType::Download => "Stream data read",
         TransmissionType::Upload => "Stream data sent",
     };
+
     root.draw(&PathElement::new(
         vec![(x, y + nl_off), (x + line_len, y + nl_off)],
         PURPLE_500,

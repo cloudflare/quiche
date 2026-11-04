@@ -29,9 +29,9 @@
 use quiche::ConnectionError;
 use quiche::PathStats;
 use quiche::Stats;
+use serde::Serialize;
 use serde::ser::SerializeStruct;
 use serde::ser::Serializer;
-use serde::Serialize;
 use std::cmp;
 use std::collections::HashMap;
 use std::iter::FromIterator;

@@ -32,15 +32,15 @@ use std::ops::Add;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::recovery::gcongestion::bbr::BandwidthSampler;
-use crate::recovery::gcongestion::bbr2::Params;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::gcongestion::Lost;
+use crate::recovery::gcongestion::bbr::BandwidthSampler;
+use crate::recovery::gcongestion::bbr2::Params;
 
-use super::rtt_jump_detector::RttJumpDetector;
 use super::Acked;
 use super::BBRv2CongestionEvent;
 use super::BwLoMode;
+use super::rtt_jump_detector::RttJumpDetector;
 
 pub(super) const DEFAULT_MSS: usize = 1300;
 
@@ -304,6 +304,7 @@ impl BBRv2NetworkModel {
         if bytes_in_flight + bytes >= self.inflight_hi {
             self.inflight_hi_limited_in_round = true;
         }
+
         self.round_trip_counter.on_packet_sent(packet_number);
 
         self.bandwidth_sampler.on_packet_sent(
@@ -355,14 +356,13 @@ impl BBRv2NetworkModel {
         // Do not update `max_bandwidth_filter` for a loss-only event or when no
         // acknowledged packet produced a valid sample. In either case,
         // `total_bytes_acked()` remains unchanged.
-        if let Some(sample_max) = sample.sample_max_bandwidth {
-            if prior_bytes_acked != self.total_bytes_acked() {
-                congestion_event.sample_max_bandwidth = Some(sample_max);
-                if !sample.sample_is_app_limited ||
-                    sample_max > self.max_bandwidth()
-                {
-                    self.max_bandwidth_filter.update(sample_max);
-                }
+        if let Some(sample_max) = sample.sample_max_bandwidth &&
+            prior_bytes_acked != self.total_bytes_acked()
+        {
+            congestion_event.sample_max_bandwidth = Some(sample_max);
+            if !sample.sample_is_app_limited || sample_max > self.max_bandwidth()
+            {
+                self.max_bandwidth_filter.update(sample_max);
             }
         }
 
@@ -468,6 +468,7 @@ impl BBRv2NetworkModel {
                     (self.inflight_lo as f32 * (1.0 - params.beta)) as usize;
                 self.inflight_lo = self.inflight_latest.max(inflight_lo_new);
             }
+
             return;
         }
 
@@ -537,6 +538,7 @@ impl BBRv2NetworkModel {
             // fast, conservation style response to loss, use the last sample.
             last_bandwidth = sample_max_bandwidth;
         }
+
         if self.pacing_gain > params.full_bw_threshold {
             // STARTUP applies `pacing_gain` to `bandwidth_lo`. Remove that
             // factor so pacing can decrease without falling below
@@ -548,6 +550,7 @@ impl BBRv2NetworkModel {
             // Ensure bandwidth_lo isn't lower than last_bandwidth.
             self.bandwidth_lo = self.bandwidth_lo.max(Some(last_bandwidth))
         }
+
         // At the end of a round, ensure `bandwidth_lo` does not decrease by
         // more than `beta`.
         if congestion_event.end_of_round_trip {
@@ -557,6 +560,7 @@ impl BBRv2NetworkModel {
                     .map(|b| b * (1.0 - params.beta)),
             )
         }
+
         // These modes ignore inflight_lo as well.
     }
 
@@ -824,8 +828,8 @@ impl BBRv2NetworkModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
     use crate::recovery::gcongestion::BbrRttJumpDetector;
+    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
 
     fn ms(millis: u64) -> Duration {
         Duration::from_millis(millis)
@@ -917,6 +921,7 @@ mod tests {
         for pkt in 1..5 {
             ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
         }
+
         model.set_full_bandwidth_reached();
 
         ack_with_rtt(&mut model, params, 5, base, ms(100), RTT_JUMP);
@@ -937,6 +942,7 @@ mod tests {
         for pkt in 1..9u64 {
             ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
         }
+
         model.set_full_bandwidth_reached();
 
         let mut offset = 200u64;
@@ -959,6 +965,7 @@ mod tests {
         for pkt in 1..5 {
             ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
         }
+
         model.set_full_bandwidth_reached();
 
         ack_with_rtt(&mut model, params, 5, base, ms(100), RTT_JUMP);

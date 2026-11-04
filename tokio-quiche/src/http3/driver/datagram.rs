@@ -100,9 +100,11 @@ fn h3_dgram_add_quarter_stream_id(
             // Note, since this is const, it asserts at compile time.
             assert!(BufFactory::DGRAM_HEADROOM >= /* max varint len */ 8);
         }
+
         dgram.splice_headroom(BufFactory::DGRAM_HEADROOM);
         dgram.try_add_prefix(prefix).unwrap();
     }
+
     Ok(dgram)
 }
 

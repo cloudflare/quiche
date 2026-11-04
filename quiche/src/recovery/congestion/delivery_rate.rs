@@ -244,14 +244,14 @@ impl RateSample {
 mod tests {
     use super::*;
 
-    use crate::packet;
-    use crate::ranges;
-    use crate::recovery::congestion::recovery::LegacyRecovery;
-    use crate::recovery::HandshakeStatus;
-    use crate::recovery::RecoveryOps;
-    use crate::test_utils;
     use crate::Config;
     use crate::OnAckReceivedOutcome;
+    use crate::packet;
+    use crate::ranges;
+    use crate::recovery::HandshakeStatus;
+    use crate::recovery::RecoveryOps;
+    use crate::recovery::congestion::recovery::LegacyRecovery;
+    use crate::test_utils;
     use std::ops::Range;
 
     // A `RateSample` generated while `Rate` is app-limited inherits that state.

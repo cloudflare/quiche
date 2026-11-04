@@ -194,10 +194,10 @@ impl Bandwidth {
 
         // Fast path: try u64 arithmetic first. At typical bandwidths (< 10
         // Gbps) and short time periods (< 1 second), this won't overflow.
-        if let Ok(time_nanos) = u64::try_from(time_period.as_nanos()) {
-            if let Some(bits) = self.bits_per_second.checked_mul(time_nanos) {
-                return bits / (8 * NUM_NANOS_PER_SECOND);
-            }
+        if let Ok(time_nanos) = u64::try_from(time_period.as_nanos()) &&
+            let Some(bits) = self.bits_per_second.checked_mul(time_nanos)
+        {
+            return bits / (8 * NUM_NANOS_PER_SECOND);
         }
 
         // Slow path: use u128 for intermediate calculation to avoid overflow.

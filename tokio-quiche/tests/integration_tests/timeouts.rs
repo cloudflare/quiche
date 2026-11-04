@@ -24,10 +24,10 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
 use boring::ssl::BoxSelectCertFinish;
@@ -35,9 +35,9 @@ use boring::ssl::ClientHello;
 use boring::ssl::SslContextBuilder;
 use boring::ssl::SslFiletype;
 use boring::ssl::SslMethod;
-use h3i::actions::h3::send_headers_frame;
 use h3i::actions::h3::Action;
 use h3i::actions::h3::WaitType;
+use h3i::actions::h3::send_headers_frame;
 use h3i::quiche::ConnectionError;
 use h3i::quiche::{
     self,

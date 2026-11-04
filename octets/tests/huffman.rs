@@ -26,12 +26,12 @@
 
 #![cfg(feature = "huffman_hpack")]
 
-use octets::huffman_encoding_len;
 use octets::BufferTooShortError;
 use octets::Octets;
 use octets::OctetsMut;
 use octets::OctetsWriter;
 use octets::Result;
+use octets::huffman_encoding_len;
 
 #[test]
 fn invalid_huffman() {

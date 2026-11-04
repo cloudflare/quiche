@@ -24,44 +24,44 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::integration_tests::extract_host_ipv4;
-use crate::integration_tests::h3i_fixtures;
-use crate::integration_tests::start_server_with_settings;
 use crate::integration_tests::Http3Settings;
 use crate::integration_tests::QuicSettings;
 use crate::integration_tests::TestConnectionHook;
+use crate::integration_tests::extract_host_ipv4;
+use crate::integration_tests::h3i_fixtures;
+use crate::integration_tests::start_server_with_settings;
 use datagram_socket::QuicAuditStats;
-use foundations::telemetry::with_test_telemetry;
 use foundations::telemetry::TestTelemetryContext;
+use foundations::telemetry::with_test_telemetry;
 use futures::SinkExt;
 use h3i;
-use h3i::actions::h3::send_headers_frame;
 use h3i::actions::h3::Action;
 use h3i::actions::h3::StreamEvent;
 use h3i::actions::h3::StreamEventType;
 use h3i::actions::h3::WaitType;
+use h3i::actions::h3::send_headers_frame;
 use h3i::client::connection_summary::ConnectionSummary;
-use quiche::h3::NameValue;
 use quiche::ConnectionError;
 use quiche::WireErrorCode;
+use quiche::h3::NameValue;
 use std::future::Future;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use tokio_quiche::ServerH3Connection;
 use tokio_quiche::http3::driver::H3Event;
 use tokio_quiche::http3::driver::IncomingH3Headers;
 use tokio_quiche::http3::driver::OutboundFrame;
 use tokio_quiche::http3::driver::ServerH3Event;
-use tokio_quiche::metrics::labels::HandshakeError as HandshakeErrorLabel;
 use tokio_quiche::metrics::DefaultMetrics;
 use tokio_quiche::metrics::Metrics;
+use tokio_quiche::metrics::labels::HandshakeError as HandshakeErrorLabel;
 use tokio_quiche::quic::HandshakeError;
 use tokio_quiche::quiche::h3::Header;
-use tokio_quiche::ServerH3Connection;
 
 #[derive(Debug, Default, Clone)]
 struct TestContext {
@@ -186,7 +186,7 @@ fn helper_frame_actions(stream_id: u64) -> Vec<Action> {
 
 fn helper_server_handler(
     mut h3_conn: ServerH3Connection, context: &Arc<Mutex<TestContext>>,
-) -> impl Future<Output = ()> {
+) -> impl Future<Output = ()> + use<> {
     let context = context.clone();
 
     async move {
@@ -279,12 +279,10 @@ impl EarlyDataServer {
                     while let Some(event) = event_rx.recv().await {
                         if let ServerH3Event::Headers {
                             is_in_early_data, ..
-                        } = event
+                        } = event &&
+                            *is_in_early_data
                         {
-                            if *is_in_early_data {
-                                recv_early_data_request
-                                    .store(true, Ordering::SeqCst);
-                            }
+                            recv_early_data_request.store(true, Ordering::SeqCst);
                         }
                     }
                 }

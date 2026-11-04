@@ -293,6 +293,7 @@ fn main() {
 
                         panic!("send() failed: {e:?}");
                     }
+
                     continue 'read;
                 }
 
@@ -332,6 +333,7 @@ fn main() {
 
                             panic!("send() failed: {e:?}");
                         }
+
                         continue 'read;
                     }
 
@@ -368,10 +370,10 @@ fn main() {
                 )
                 .unwrap();
 
-                if let Some(keylog) = &mut keylog {
-                    if let Ok(keylog) = keylog.try_clone() {
-                        conn.set_keylog(Box::new(keylog));
-                    }
+                if let Some(Ok(keylog)) =
+                    keylog.as_ref().map(std::fs::File::try_clone)
+                {
+                    conn.set_keylog(Box::new(keylog));
                 }
 
                 // Only bother with qlog if the user specified it.

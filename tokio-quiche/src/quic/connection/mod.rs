@@ -57,6 +57,8 @@ use tokio::sync::mpsc;
 use tokio_util::task::AbortOnDropHandle;
 
 use self::error::make_handshake_result;
+use super::DscpHandle;
+use super::QuicheConnection;
 use super::hooks::ConnectionHook;
 use super::io::connection_stage::Close;
 use super::io::connection_stage::ConnectionStageContext;
@@ -67,14 +69,12 @@ use super::io::worker::IoWorkerParams;
 use super::io::worker::Running;
 use super::io::worker::RunningOrClosing;
 use super::io::worker::WriteState;
-use super::DscpHandle;
-use super::QuicheConnection;
+use crate::QuicResult;
 use crate::metrics::Metrics;
+use crate::quic::io::worker::INCOMING_QUEUE_SIZE;
 use crate::quic::io::worker::IoWorker;
 use crate::quic::io::worker::WriterConfig;
-use crate::quic::io::worker::INCOMING_QUEUE_SIZE;
 use crate::quic::router::ConnectionMapCommand;
-use crate::QuicResult;
 
 /// Wrapper for connection statistics recorded by [quiche].
 #[derive(Debug)]
@@ -84,6 +84,7 @@ pub struct QuicConnectionStats {
     /// Specific statistics about the connection's active path.
     pub path_stats: Option<quiche::PathStats>,
 }
+
 pub(crate) type QuicConnectionStatsShared = Arc<Mutex<QuicConnectionStats>>;
 
 impl QuicConnectionStats {

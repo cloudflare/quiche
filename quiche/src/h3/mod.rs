@@ -282,15 +282,21 @@
 //! [`send_response()`]: struct.Connection.html#method.send_response
 //! [`send_body()`]: struct.Connection.html#method.send_body
 
-use std::collections::hash_map;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::collections::hash_map;
 
 #[cfg(feature = "sfv")]
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Write;
 
+#[cfg(feature = "qlog")]
+use qlog::events::EventData;
+#[cfg(feature = "qlog")]
+use qlog::events::EventImportance;
+#[cfg(feature = "qlog")]
+use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::http3::FrameCreated;
 #[cfg(feature = "qlog")]
@@ -305,15 +311,9 @@ use qlog::events::http3::Initiator;
 use qlog::events::http3::StreamType;
 #[cfg(feature = "qlog")]
 use qlog::events::http3::StreamTypeSet;
-#[cfg(feature = "qlog")]
-use qlog::events::EventData;
-#[cfg(feature = "qlog")]
-use qlog::events::EventImportance;
-#[cfg(feature = "qlog")]
-use qlog::events::EventType;
 
-use crate::buffers::BufFactory;
 use crate::BufSplit;
+use crate::buffers::BufFactory;
 
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
@@ -684,6 +684,7 @@ impl Config {
         {
             return Err(Error::SettingsError);
         }
+
         self.additional_settings = Some(additional_settings);
         Ok(())
     }
@@ -1109,7 +1110,10 @@ impl Connection {
     ) -> Result<Connection> {
         let is_client = !conn.is_server;
         if is_client && !(conn.is_established() || conn.is_in_early_data()) {
-            trace!("{} QUIC connection must be established or in early data before creating an HTTP/3 connection", conn.trace_id());
+            trace!(
+                "{} QUIC connection must be established or in early data before creating an HTTP/3 connection",
+                conn.trace_id()
+            );
             return Err(Error::InternalError);
         }
 
@@ -2228,10 +2232,8 @@ impl Connection {
             return Err(Error::IdError);
         }
 
-        if let Some(sent_id) = self.local_goaway_id {
-            if id > sent_id {
-                return Err(Error::IdError);
-            }
+        if self.local_goaway_id.is_some_and(|sent_id| id > sent_id) {
+            return Err(Error::IdError);
         }
 
         if let Some(stream_id) = self.control_stream_id {
@@ -2891,14 +2893,13 @@ impl Connection {
                     // body were complete. The dummy read has side effects, such
                     // as qlog events, so only do it for finished streams,
                     // which include all reset streams.
-                    if conn.stream_finished(stream_id) {
-                        if let Err(crate::Error::StreamReset(e)) =
+                    if conn.stream_finished(stream_id) &&
+                        let Err(crate::Error::StreamReset(e)) =
                             conn.stream_recv(stream_id, &mut [])
-                        {
-                            return Err(Error::TransportError(
-                                crate::Error::StreamReset(e),
-                            ));
-                        }
+                    {
+                        return Err(Error::TransportError(
+                            crate::Error::StreamReset(e),
+                        ));
                     }
 
                     if !stream.try_trigger_data_event() {
@@ -3012,10 +3013,10 @@ impl Connection {
     }
 
     fn remove_local_finished_stream(&mut self, stream_id: u64) {
-        if let hash_map::Entry::Occupied(stream) = self.streams.entry(stream_id) {
-            if stream.get().local_finished() {
-                stream.remove();
-            }
+        if let hash_map::Entry::Occupied(stream) = self.streams.entry(stream_id) &&
+            stream.get().local_finished()
+        {
+            stream.remove();
         }
     }
 
@@ -3207,16 +3208,17 @@ impl Connection {
                     return Err(Error::IdError);
                 }
 
-                if let Some(received_id) = self.peer_goaway_id {
-                    if id > received_id {
-                        conn.close(
-                            true,
-                            Error::IdError.to_wire(),
-                            b"GOAWAY received with ID larger than previously received",
-                        )?;
+                if self
+                    .peer_goaway_id
+                    .is_some_and(|received_id| id > received_id)
+                {
+                    conn.close(
+                        true,
+                        Error::IdError.to_wire(),
+                        b"GOAWAY received with ID larger than previously received",
+                    )?;
 
-                        return Err(Error::IdError);
-                    }
+                    return Err(Error::IdError);
                 }
 
                 self.peer_goaway_id = Some(id);
@@ -3403,8 +3405,8 @@ pub fn grease_value() -> u64 {
 pub mod testing {
     use super::*;
 
-    use crate::test_utils;
     use crate::DefaultBufFactory;
+    use crate::test_utils;
 
     /// Session is an HTTP/3 test helper structure. It holds a client, server
     /// and pipe that allows them to communicate.
@@ -4006,6 +4008,7 @@ mod tests {
     /// Send a request with no body, get a response with multiple DATA frames.
     fn request_no_body_response_many_chunks_with_buf() {
         let (mut config, h3_config) = Session::default_configs().unwrap();
+
         // we don't want to be limited by flow or cong. control
         config.set_initial_congestion_window_packets(100);
         config.set_initial_max_data(200_000);
@@ -4077,6 +4080,7 @@ mod tests {
             );
             remaining_to_read -= expected;
         }
+
         // We've read everything now. Ensure the Vec reflects that
         assert_eq!(recv_buf.get_ref().len(), total_data_frames * data.len());
 
@@ -6481,6 +6485,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
+
         // Use generous connection-level flow control.
         config.set_initial_max_data(10000);
         config.set_initial_max_stream_data_bidi_local(80);
@@ -6615,6 +6620,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
+
         // Use generous connection-level flow control.
         config.set_initial_max_data(100000);
         config.set_initial_max_stream_data_bidi_local(100000);
@@ -6688,6 +6694,7 @@ mod tests {
             .load_priv_key_from_pem_file("examples/cert.key")
             .unwrap();
         config.set_application_protos(&[b"h3"]).unwrap();
+
         // Use generous connection-level flow control.
         config.set_initial_max_data(100000);
         config.set_initial_max_stream_data_bidi_local(100000);
@@ -8326,6 +8333,7 @@ mod tests {
 
         // Stream has been collected on server by quiche
         assert!(s.pipe.server.streams.is_collected(stream));
+
         // Client stream has not been collected, the client needs to
         // read the fin from the stream first.
         assert!(!s.pipe.client.streams.is_collected(stream));
@@ -8363,6 +8371,7 @@ mod tests {
 
         assert_eq!(s.poll_client(), Ok((stream, ev_headers)));
         assert_eq!(s.poll_client(), Err(Error::Done));
+
         // Client shuts down read
         assert_eq!(
             s.pipe
@@ -8387,6 +8396,7 @@ mod tests {
             Ok(0)
         );
         assert_eq!(s.advance(), Ok(()));
+
         // Note, we get an Event::Data for an empty buffer today. But it
         // would also be fine to not get it.
         assert_eq!(s.poll_server(), Ok((stream, Event::Data)));

@@ -44,11 +44,7 @@ const CONN_ID_USABLE_LEN: usize = min_usize(
 );
 
 const fn min_usize(v1: usize, v2: usize) -> usize {
-    if v1 < v2 {
-        v1
-    } else {
-        v2
-    }
+    if v1 < v2 { v1 } else { v2 }
 }
 
 /// A non unique connection identifier, multiple Cids can map to the same

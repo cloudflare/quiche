@@ -28,22 +28,22 @@ use std::cmp;
 
 use std::sync::Arc;
 
-use std::collections::hash_map;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::hash_map;
 
-use intrusive_collections::intrusive_adapter;
 use intrusive_collections::KeyAdapter;
 use intrusive_collections::RBTree;
 use intrusive_collections::RBTreeAtomicLink;
+use intrusive_collections::intrusive_adapter;
 
 use smallvec::SmallVec;
 
-use crate::buffers::DefaultBufFactory;
-use crate::ranges::RangeSet;
 use crate::BufFactory;
 use crate::Error;
 use crate::Result;
+use crate::buffers::DefaultBufFactory;
+use crate::ranges::RangeSet;
 
 pub(crate) use self::send_buf::PeerStopSendingState;
 
@@ -547,10 +547,12 @@ impl<F: BufFactory> StreamMap<F> {
     pub fn insert_reset(
         &mut self, stream_id: u64, error_code: u64, final_size: u64,
     ) {
-        if let Some(stream) = self.streams.get(&stream_id) {
-            if !stream.send.is_complete() {
-                self.reset.insert(stream_id, (error_code, final_size));
-            }
+        if self
+            .streams
+            .get(&stream_id)
+            .is_some_and(|stream| !stream.send.is_complete())
+        {
+            self.reset.insert(stream_id, (error_code, final_size));
         }
     }
 
@@ -1087,6 +1089,7 @@ impl Ord for StreamPriorityKey {
         if self.incremental && !other.incremental {
             return cmp::Ordering::Greater;
         }
+
         if !self.incremental && other.incremental {
             return cmp::Ordering::Less;
         }
@@ -1193,6 +1196,7 @@ mod tests {
         for id in 0..4 {
             assert!(!collected.contains(id));
         }
+
         assert!(collected.ranges.is_none());
 
         collected.insert(stream_type);
@@ -1318,9 +1322,10 @@ mod tests {
             stream_id: 8 | stream_type,
             data: RangeBuf::from(b"a", 0, true),
         }];
-        assert!(pipe
-            .send_pkt_to_server(crate::Type::Short, &frames, &mut [0; 1280])
-            .is_ok());
+        assert!(
+            pipe.send_pkt_to_server(crate::Type::Short, &frames, &mut [0; 1280])
+                .is_ok()
+        );
         assert_eq!(pipe.server.streams.len(), 0);
     }
 
@@ -1356,6 +1361,7 @@ mod tests {
         } else {
             pipe.client.streams.peer_max_streams_uni()
         };
+
         assert_eq!(peer_limit, 2 * initial_limit);
 
         // The odd sequences consume credit but have never had Stream objects.
@@ -1447,9 +1453,11 @@ mod tests {
             streams.update_max_streams_uni();
         }
 
-        assert!(streams
-            .get_or_create(stream_id, &params, &params, local, is_server)
-            .is_ok());
+        assert!(
+            streams
+                .get_or_create(stream_id, &params, &params, local, is_server)
+                .is_ok()
+        );
         assert!(streams.collected.ranges.is_none());
     }
 
@@ -1577,8 +1585,10 @@ mod tests {
         let first = RangeBuf::from(b"hello", 0, false);
 
         assert_eq!(stream.recv.write(first), Ok(()));
+
         // Read one byte.
         assert_eq!(stream.recv.emit(&mut [0; 1]), Ok((1, false)));
+
         // Reset with a final size > than max previously received
         assert_eq!(
             stream.recv.reset(0, 10),
@@ -2354,9 +2364,11 @@ mod tests {
         for stream_id in [8, 12, 4] {
             assert!(is_local(stream_id, false), "stream id is client initiated");
             assert!(is_bidi(stream_id), "stream id is bidirectional");
-            assert!(streams
-                .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
-                .is_ok());
+            assert!(
+                streams
+                    .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
+                    .is_ok()
+            );
         }
     }
 
@@ -2370,9 +2382,11 @@ mod tests {
 
         // Highest permitted
         let stream_id = 8;
-        assert!(streams
-            .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
-            .is_ok());
+        assert!(
+            streams
+                .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
+                .is_ok()
+        );
 
         // One more than highest permitted
         let stream_id = 12;
@@ -2401,9 +2415,11 @@ mod tests {
         let mut streams = StreamMap::new(100, 100, 100);
 
         for id in [0, 4, 8, 12] {
-            assert!(streams
-                .get_or_create(id, &local_tp, &peer_tp, false, true)
-                .is_ok());
+            assert!(
+                streams
+                    .get_or_create(id, &local_tp, &peer_tp, false, true)
+                    .is_ok()
+            );
         }
 
         let walk_1: Vec<u64> = streams.writable().collect();
@@ -2439,9 +2455,11 @@ mod tests {
         // Inserting same-urgency incremental streams in a "random" order yields
         // same order to start with.
         for id in [12, 4, 8, 0] {
-            assert!(streams
-                .get_or_create(id, &local_tp, &peer_tp, false, true)
-                .is_ok());
+            assert!(
+                streams
+                    .get_or_create(id, &local_tp, &peer_tp, false, true)
+                    .is_ok()
+            );
         }
 
         let walk_1: Vec<u64> = streams.writable().collect();
@@ -2896,6 +2914,7 @@ mod tests {
                 .unwrap();
             assert_eq!(stream.send.write(b"hello", false), Ok(5));
         }
+
         streams.add_tx_buffered(5);
         assert_eq!(streams.get(stream_id).unwrap().send.buffered_bytes(), 5);
         assert_eq!(streams.tx_buffered(), 5);
@@ -2908,6 +2927,7 @@ mod tests {
             let (written, _) = stream.send.emit(&mut buf).unwrap();
             written
         };
+
         assert_eq!(written, 5);
         streams.sub_tx_buffered(5);
         assert_eq!(streams.get(stream_id).unwrap().send.buffered_bytes(), 0);
@@ -2919,6 +2939,7 @@ mod tests {
             let stream = streams.get_mut(stream_id).unwrap();
             stream.send.retransmit(0, 5)
         };
+
         assert_eq!(retransmitted, 5);
         streams.add_tx_buffered(retransmitted);
         assert_eq!(streams.get(stream_id).unwrap().send.buffered_bytes(), 5);
@@ -2931,6 +2952,7 @@ mod tests {
             let stream = streams.get_mut(stream_id).unwrap();
             stream.send.ack_and_drop(0, 5)
         };
+
         assert_eq!(dropped, 5);
         streams.sub_tx_buffered(dropped);
         assert_eq!(streams.get(stream_id).unwrap().send.buffered_bytes(), 0);

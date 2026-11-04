@@ -34,25 +34,25 @@ use std::fmt::Display;
 
 use log::error;
 use log::trace;
+use qlog::events::EventData;
+use qlog::events::RawInfo;
 use qlog::events::http3::Http3Frame;
 use qlog::events::quic::QuicFrame;
 use qlog::events::quic::TransportInitiator;
-use qlog::events::EventData;
-use qlog::events::RawInfo;
 
 use regex::Regex;
 use tabled::Tabled;
 
-use crate::request_stub::find_header_value;
-use crate::request_stub::HttpRequestStub;
-use crate::request_stub::NaOption;
-use crate::trackers::StreamBufferTracker;
-use crate::trackers::StreamMaxTracker;
 use crate::LogFileData;
 use crate::PacketType;
 use crate::QlogPointRtt;
 use crate::QlogPointu64;
 use crate::RawLogEvents::Netlog;
+use crate::request_stub::HttpRequestStub;
+use crate::request_stub::NaOption;
+use crate::request_stub::find_header_value;
+use crate::trackers::StreamBufferTracker;
+use crate::trackers::StreamMaxTracker;
 use netlog;
 use netlog::h2;
 use netlog::h2::Event::*;
@@ -437,12 +437,11 @@ impl Datastore {
 
                 self.total_received_stream_frame_count += 1;
 
-                if e.params.fin {
-                    if let Some(req) =
+                if e.params.fin &&
+                    let Some(req) =
                         self.http_requests.get_mut(&e.params.stream_id)
-                    {
-                        req.time_fin_rx = Some(rel_event_time);
-                    }
+                {
+                    req.time_fin_rx = Some(rel_event_time);
                 }
 
                 let cumulative = if let Some(last) = self
@@ -515,19 +514,18 @@ impl Datastore {
                 // Go back and update the Ack frame type if there was one
                 if let Some(pkts) = self
                     .netlog_ack_sent_missing_packet
-                    .get_mut(&PacketType::Unknown)
+                    .get_mut(&PacketType::Unknown) &&
+                    !pkts.is_empty()
                 {
-                    if !pkts.is_empty() {
-                        let old = std::mem::take(pkts);
+                    let old = std::mem::take(pkts);
 
-                        let s = self
-                            .netlog_ack_sent_missing_packet
-                            .entry(packet_type)
-                            .or_default();
+                    let s = self
+                        .netlog_ack_sent_missing_packet
+                        .entry(packet_type)
+                        .or_default();
 
-                        for num in old {
-                            s.insert(num);
-                        }
+                    for num in old {
+                        s.insert(num);
                     }
                 }
             },
@@ -704,19 +702,18 @@ impl Datastore {
 
                 if let Some(reqs) = h3_session_requests {
                     for r in reqs {
-                        if let Some(stream_id) = r.quic_stream_id {
-                            if stream_id == e.params.stream_id {
-                                // Hat-tip Olivia Trewin: this one cool trick
-                                // allows u64's to be substracted into a correct
-                                // i64.
-                                req.time_discovery = Some(
-                                    (r.discover_time
-                                        .wrapping_sub(session_start_time)
-                                        as i64)
-                                        as f64,
-                                );
-                                break;
-                            }
+                        if r.quic_stream_id.is_some_and(|stream_id| {
+                            stream_id == e.params.stream_id
+                        }) {
+                            // Hat-tip Olivia Trewin: this one cool trick
+                            // allows u64's to be substracted into a correct
+                            // i64.
+                            req.time_discovery = Some(
+                                (r.discover_time.wrapping_sub(session_start_time)
+                                    as i64)
+                                    as f64,
+                            );
+                            break;
                         }
                     }
                 }
@@ -1067,6 +1064,7 @@ impl Datastore {
                         description: "".to_string(),
                     });
                 }
+
                 self.h2_concurrent_requests -= 1;
             },
 
@@ -1230,21 +1228,18 @@ impl Datastore {
             for frame in frames {
                 match frame {
                     QuicFrame::Ack { acked_ranges, .. } => {
-                        if process_acks {
-                            if let Some(ack_ranges) = acked_ranges {
-                                let ty = PacketType::from_qlog_packet_type(
-                                    &pr.header.packet_type,
-                                );
-                                if let Some(pkt_space) =
-                                    self.packet_sent.get_mut(&ty)
-                                {
-                                    for range in ack_ranges {
-                                        // TODO: check ack ranges and rust
-                                        // Range mapping is correct
-                                        pkt_space
-                                            .range_mut(range.as_range_inclusive())
-                                            .for_each(|e| e.1.acked = Some(true));
-                                    }
+                        if process_acks && let Some(ack_ranges) = acked_ranges {
+                            let ty = PacketType::from_qlog_packet_type(
+                                &pr.header.packet_type,
+                            );
+                            if let Some(pkt_space) = self.packet_sent.get_mut(&ty)
+                            {
+                                for range in ack_ranges {
+                                    // TODO: check ack ranges and rust
+                                    // Range mapping is correct
+                                    pkt_space
+                                        .range_mut(range.as_range_inclusive())
+                                        .for_each(|e| e.1.acked = Some(true));
                                 }
                             }
                         }
@@ -1262,6 +1257,7 @@ impl Datastore {
                         } else {
                             self.peer_init_max_stream_data_uni
                         };
+
                         self.received_stream_max_data_tracker
                             .update(*stream_id, *maximum, ev_time, init_val);
                     },
@@ -1361,6 +1357,7 @@ impl Datastore {
                         } else {
                             self.local_init_max_stream_data_uni
                         };
+
                         self.sent_stream_max_data_tracker
                             .update(*stream_id, *maximum, ev_time, init_val);
                     },
@@ -1393,8 +1390,7 @@ impl Datastore {
                     QuicFrame::DataBlocked { limit, .. } => {
                         trace!(
                             "todo DATA_BLOCKED t={} limit={}",
-                            event_time,
-                            limit
+                            event_time, limit
                         );
                     },
 
@@ -1403,9 +1399,7 @@ impl Datastore {
                     } => {
                         trace!(
                             "todo STREAM_DATA_BLOCKED t={} stream={} limit={}",
-                            event_time,
-                            stream_id,
-                            limit
+                            event_time, stream_id, limit
                         );
                     },
 
@@ -1429,17 +1423,15 @@ impl Datastore {
                 _ => todo!(),
             };
 
-            if let Some(stream_id) = dm.stream_id {
-                if let Some(raw) = &dm.raw {
-                    if let (Some(offset), Some(length)) = (dm.offset, raw.length)
-                    {
-                        tracker.update(
-                            stream_id,
-                            StreamAccess { offset, length },
-                            ev_time,
-                        );
-                    }
-                }
+            if let Some(stream_id) = dm.stream_id &&
+                let Some(raw) = &dm.raw &&
+                let (Some(offset), Some(length)) = (dm.offset, raw.length)
+            {
+                tracker.update(
+                    stream_id,
+                    StreamAccess { offset, length },
+                    ev_time,
+                );
             }
         }
     }
@@ -1872,28 +1864,27 @@ pub fn with_netlog_reader<R: std::io::BufRead>(
 
                                 http::Event::HttpStreamRequestBoundToQuicSession(v) => {
                                     let request_discovery_id = event_hdr.source.id;
-                                    if let Some(rd) = request_discovery.get(&request_discovery_id) {
+                                    if let Some(rd) = request_discovery.get(&request_discovery_id) &&
+                                        let Some(session_requests) = h3_session_requests.get_mut(&v.params.source_dependency.id)
+                                    {
+                                        let req = ReqOverH3{id: event_hdr.source.id, discover_time: rd.time, session_id: Some(v.params.source_dependency.id), quic_stream_id: None };
+                                        session_requests.push(req);
 
-                                        if let Some(session_requests) = h3_session_requests.get_mut(&v.params.source_dependency.id) {
-                                            let req = ReqOverH3{id: event_hdr.source.id, discover_time: rd.time, session_id: Some(v.params.source_dependency.id), quic_stream_id: None };
-                                            session_requests.push(req);
-
-                                            // populate reverse mapping, each unique request ID has a session ID
-                                            req_id_to_session_id.insert(event_hdr.source.id, v.params.source_dependency.id);
-                                        }
+                                        // populate reverse mapping, each unique request ID has a session ID
+                                        req_id_to_session_id.insert(event_hdr.source.id, v.params.source_dependency.id);
                                     }
                                 }
 
                                 http::Event::HttpTransactionQuicSendRequestHeaders(v) => {
                                     let req_id = event_hdr.source.id;
-                                    if let Some(session_id) = req_id_to_session_id.get(&req_id) {
-                                        if let Some(reqs) = h3_session_requests.get_mut(session_id) {
-                                            // todo replace vec with map?
-                                            for req in reqs {
-                                                if req.id == req_id {
-                                                    req.quic_stream_id = Some(v.params.quic_stream_id);
-                                                    break;
-                                                }
+                                    if let Some(session_id) = req_id_to_session_id.get(&req_id) &&
+                                        let Some(reqs) = h3_session_requests.get_mut(session_id)
+                                    {
+                                        // todo replace vec with map?
+                                        for req in reqs {
+                                            if req.id == req_id {
+                                                req.quic_stream_id = Some(v.params.quic_stream_id);
+                                                break;
                                             }
                                         }
                                     }
@@ -1909,11 +1900,10 @@ pub fn with_netlog_reader<R: std::io::BufRead>(
                 }
 
                 if let Some(session) =
-                    session_events.get_mut(&event_hdr.source.id)
+                    session_events.get_mut(&event_hdr.source.id) &&
+                    let Some(ev) = netlog::parse_event(&event_hdr, &event)
                 {
-                    if let Some(ev) = netlog::parse_event(&event_hdr, &event) {
-                        session.push((event_hdr, ev));
-                    }
+                    session.push((event_hdr, ev));
                 }
             },
 

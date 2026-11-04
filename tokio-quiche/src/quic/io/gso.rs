@@ -35,10 +35,10 @@ use foundations::telemetry::metrics::TimeHistogram;
 
 #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 mod linux_imports {
-    pub(super) use nix::sys::socket::sendmsg;
     pub(super) use nix::sys::socket::ControlMessage;
     pub(super) use nix::sys::socket::MsgFlags;
     pub(super) use nix::sys::socket::SockaddrStorage;
+    pub(super) use nix::sys::socket::sendmsg;
     pub(super) use smallvec::SmallVec;
     pub(super) use std::io::ErrorKind;
     pub(super) use std::os::fd::AsRawFd;
@@ -186,6 +186,7 @@ pub async fn send_to(
                     sendmsg_retry_timer =
                         Some(send_to_wouldblock_duration_s.start_timer());
                 }
+
                 would_block_metric.inc();
                 socket.writable().await?
             },
@@ -208,20 +209,20 @@ pub(crate) async fn send_to(
 #[cfg(all(target_os = "linux", test, not(feature = "fuzzing")))]
 pub(crate) mod test {
     use super::*;
-    use crate::metrics::labels::QuicWriteError;
     use crate::metrics::DefaultMetrics;
     use crate::metrics::Metrics;
+    use crate::metrics::labels::QuicWriteError;
     use crate::quic::DscpHandle;
+    use nix::sys::socket::ControlMessageOwned;
+    use nix::sys::socket::MsgFlags;
     use nix::sys::socket::recvmsg;
     use nix::sys::socket::setsockopt;
     use nix::sys::socket::sockopt;
-    use nix::sys::socket::ControlMessageOwned;
-    use nix::sys::socket::MsgFlags;
     use std::io::IoSliceMut;
     use std::os::fd::AsRawFd;
     use tokio::net::UdpSocket;
-    use tokio::time::timeout;
     use tokio::time::Duration;
+    use tokio::time::timeout;
 
     const TEST_DSCP: Dscp = Dscp::new(34).unwrap();
 
@@ -397,6 +398,7 @@ pub(crate) mod test {
         let SocketAddr::V4(peer) = receiver.local_addr().unwrap() else {
             unreachable!()
         };
+
         let mapped = SocketAddr::V6(SocketAddrV6::new(
             peer.ip().to_ipv6_mapped(),
             peer.port(),

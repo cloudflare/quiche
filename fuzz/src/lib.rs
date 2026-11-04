@@ -26,6 +26,7 @@ impl<'a> Iterator for PktIterator<'a> {
                     }
                 }
             }
+
             self.index = self.data.len();
             Some(&self.data[start..])
         } else {
@@ -44,7 +45,7 @@ impl<'a> PktsData<'a> {
 }
 
 pub fn reset_rand_for_fuzzing() {
-    extern "C" {
+    unsafe extern "C" {
         fn RAND_reset_for_fuzzing();
     }
 
@@ -122,6 +123,7 @@ pub fn server_process(
                     if method.is_none() {
                         break;
                     }
+
                     let method = method.unwrap();
 
                     // Look for the request's path.
@@ -129,6 +131,7 @@ pub fn server_process(
                     if path.is_none() {
                         break;
                     }
+
                     let path = path.unwrap();
 
                     if method.value() == b"GET" && path.value() == b"/" {

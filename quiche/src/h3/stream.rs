@@ -811,6 +811,7 @@ impl Stream {
     /// If successful, returns the `frame::Frame` and the payload length.
     pub fn try_consume_frame(&mut self) -> Result<(frame::Frame, u64)> {
         debug_assert_eq!(self.state, State::FramePayload);
+
         // Processing a frame other than DATA, so re-arm the Data event.
         self.reset_data_event();
 
@@ -984,9 +985,9 @@ impl Stream {
 
 #[cfg(test)]
 mod tests {
-    use crate::h3::frame::*;
     use crate::h3::PRIORITY_UPDATE_FRAME_PAYLOAD_MAX_SIZE_DEFAULT;
     use crate::h3::SETTINGS_MAX_FIELD_SECTION_SIZE_DEFAULT;
+    use crate::h3::frame::*;
 
     use super::*;
 
@@ -2152,6 +2153,7 @@ mod tests {
             if fed < LARGE_HEADER_LEN {
                 assert_eq!(result, Err(Error::Done));
                 assert_eq!(stream.state_off, fed);
+
                 // spare_state_buf should have reserved on each re-entry
                 // since previous chunk consumed all spare.
                 assert!(stream.state_buf.capacity() >= fed);
@@ -2229,9 +2231,11 @@ mod tests {
             if fed < LARGE_HEADER_LEN {
                 assert_eq!(result, Err(Error::Done));
                 assert_eq!(stream.state_off, fed);
+
                 // Capacity must always be at least as large as what we've
                 // buffered.
                 assert!(stream.state_buf.capacity() >= stream.state_buf.len());
+
                 // Capacity should grow incrementally. The allocator may
                 // over-allocate (typically doubling), so we allow up to
                 // 2x (bytes_read + reserve_size) to account for that.

@@ -32,9 +32,9 @@ use std::ops::RangeInclusive;
 
 use std::time::Instant;
 
+use crate::DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS;
 use crate::Error;
 use crate::Result;
-use crate::DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS;
 
 use crate::crypto;
 use crate::rand;
@@ -393,12 +393,14 @@ impl<'a> Header<'a> {
         if crate::version_is_supported(version) && dcid_len > MAX_CID_LEN {
             return Err(Error::InvalidPacket);
         }
+
         let dcid = b.get_bytes(dcid_len as usize)?.to_vec();
 
         let scid_len = b.get_u8()?;
         if crate::version_is_supported(version) && scid_len > MAX_CID_LEN {
             return Err(Error::InvalidPacket);
         }
+
         let scid = b.get_bytes(scid_len as usize)?.to_vec();
 
         // End of invariants.
@@ -1169,8 +1171,8 @@ impl PktNumWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils;
     use crate::MAX_SEND_UDP_PAYLOAD_SIZE;
+    use crate::test_utils;
 
     #[test]
     fn retry() {
@@ -1365,21 +1367,25 @@ mod tests {
         let num_len = pkt_num_len(0xac5c02, 0xabe8b3);
         assert_eq!(num_len, 2);
         encode_pkt_num(0xac5c02, num_len, &mut b).unwrap();
+
         // reading
         let mut b = octets::OctetsMut::with_slice(&mut d);
         let hdr_num = u64::from(b.get_u16().unwrap());
         let pn = decode_pkt_num(0xac5c01, hdr_num, num_len);
         assert_eq!(pn, 0xac5c02);
+
         // sending 0xace8fe while having 0xabe8b3 acked
         let num_len = pkt_num_len(0xace9fe, 0xabe8b3);
         assert_eq!(num_len, 3);
         let mut b = octets::OctetsMut::with_slice(&mut d);
         encode_pkt_num(0xace9fe, num_len, &mut b).unwrap();
+
         // reading
         let mut b = octets::OctetsMut::with_slice(&mut d);
         let hdr_num = u64::from(b.get_u24().unwrap());
         let pn = decode_pkt_num(0xace9fa, hdr_num, num_len);
         assert_eq!(pn, 0xace9fe);
+
         // roundtrip
         let base = 0xdeadbeef;
         for i in 1..255 {
@@ -2248,6 +2254,7 @@ mod tests {
                 handshake_completed,
             );
         }
+
         assert!(next_pn >= MIN_SKIP_COUNTER_VALUE);
         assert!(skip_manager.skip_pn.is_none());
         assert_eq!(skip_manager.skip_pn_counter.unwrap(), 0);
