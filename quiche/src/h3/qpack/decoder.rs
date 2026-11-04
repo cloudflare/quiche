@@ -28,7 +28,11 @@ use super::Error;
 use super::Result;
 
 use super::dynamic_table::DynamicTable;
-use super::encoder_instructions::EncoderInstruction;
+use super::dynamic_table::EntryName;
+use super::dynamic_table::ENTRY_OVERHEAD;
+use super::encoder_instructions::decode_prefixed_integer;
+use super::encoder_instructions::decode_string;
+use super::encoder_instructions::read_string;
 use super::encoder_instructions::ParseError;
 
 use crate::h3::Header;
@@ -180,15 +184,17 @@ impl Decoder {
             // No string longer than the table's capacity fits in an entry, so
             // strings whose length alone shows that they're too long are
             // rejected without waiting for their bytes.
-            match EncoderInstruction::from_bytes(&mut b, self.table.capacity()) {
-                Ok(instruction) => self
-                    .table
-                    .apply(instruction)
-                    .map_err(|_| Error::InvalidEncoderInstruction)?,
+            match apply_encoder_instruction(&mut b, &mut self.table) {
+                Ok(()) => (),
 
                 Err(ParseError::Incomplete) => {
                     // Keep the incomplete instruction for the next call.
-                    self.partial_instruction.drain(..start);
+                    if start == self.partial_instruction.len() {
+                        self.partial_instruction = Vec::new();
+                    } else if start > 0 {
+                        self.partial_instruction =
+                            self.partial_instruction.split_off(start);
+                    }
 
                     return Ok(());
                 },
@@ -207,8 +213,10 @@ impl Decoder {
 
         let mut size_tracker = FieldListSizeTracker::new(max_size);
 
-        let req_insert_count = decode_int(&mut b, 8)?;
-        let base = decode_int(&mut b, 7)?;
+        let req_insert_count =
+            decode_prefixed_integer(&mut b, 8).map_err(header_integer_error)?;
+        let base =
+            decode_prefixed_integer(&mut b, 7).map_err(header_integer_error)?;
 
         // TODO: decode the Required Insert Count and Base (RFC 9204, Section
         // 4.5.1). With SETTINGS_QPACK_BLOCKED_STREAMS set to 0, a Required
@@ -227,7 +235,8 @@ impl Decoder {
                     const STATIC: u8 = 0x40;
 
                     let s = first & STATIC == STATIC;
-                    let index = decode_int(&mut b, 6)?;
+                    let index = decode_prefixed_integer(&mut b, 6)
+                        .map_err(header_integer_error)?;
 
                     trace!("Indexed index={index} static={s}");
 
@@ -247,7 +256,8 @@ impl Decoder {
                 },
 
                 Representation::IndexedWithPostBase => {
-                    let index = decode_int(&mut b, 4)?;
+                    let index = decode_prefixed_integer(&mut b, 4)
+                        .map_err(header_integer_error)?;
 
                     trace!("Indexed With Post Base index={index}");
 
@@ -257,7 +267,11 @@ impl Decoder {
 
                 Representation::Literal => {
                     let name_huff = b.as_ref()[0] & 0x08 == 0x08;
-                    let name_len = decode_int(&mut b, 3)? as usize;
+                    let name_len = usize::try_from(
+                        decode_prefixed_integer(&mut b, 3)
+                            .map_err(header_integer_error)?,
+                    )
+                    .map_err(|_| Error::InvalidHeaderValue)?;
 
                     let mut name = b.get_bytes(name_len)?;
 
@@ -299,7 +313,8 @@ impl Decoder {
                         return Err(Error::InvalidHeaderValue);
                     }
 
-                    let name_idx = decode_int(&mut b, 4)?;
+                    let name_idx = decode_prefixed_integer(&mut b, 4)
+                        .map_err(header_integer_error)?;
 
                     let (name, _) = lookup_static(name_idx)?;
 
@@ -332,6 +347,72 @@ impl Decoder {
     }
 }
 
+fn apply_encoder_instruction(
+    b: &mut octets::Octets, table: &mut DynamicTable,
+) -> std::result::Result<(), ParseError> {
+    let first = b.peek_u8()?;
+    let max_string_len = table.capacity();
+
+    match first {
+        // Insert with Name Reference: https://www.rfc-editor.org/rfc/rfc9204.html#section-4.3.2
+        0x80..=0xff => {
+            let index = decode_prefixed_integer(b, 6)?;
+            let value = decode_string(b, 7, max_string_len)?;
+
+            let name = if first & 0x40 != 0 {
+                let (name, _) =
+                    lookup_static(index).map_err(|_| ParseError::Malformed)?;
+                EntryName::Static(name)
+            } else {
+                table
+                    .get_by_encoder_relative_index(index)
+                    .map_err(|_| ParseError::Malformed)?
+                    .name
+                    .clone()
+            };
+
+            table.insert(name, value).map_err(|_| ParseError::Malformed)
+        },
+
+        // Insert with Literal Name: https://www.rfc-editor.org/rfc/rfc9204.html#section-4.3.3
+        0x40..=0x7f => {
+            let entry_data_limit = table
+                .capacity()
+                .checked_sub(ENTRY_OVERHEAD)
+                .ok_or(ParseError::Malformed)?;
+            let name = read_string(b, 5, entry_data_limit)?;
+            let value_limit = entry_data_limit
+                .checked_sub(name.minimum_decoded_len())
+                .ok_or(ParseError::Malformed)?;
+            let value = read_string(b, 7, value_limit)?;
+
+            table
+                .insert(EntryName::Shared(name.decode()?), value.decode()?)
+                .map_err(|_| ParseError::Malformed)
+        },
+
+        // Set Dynamic Table Capacity: https://www.rfc-editor.org/rfc/rfc9204.html#section-4.3.1
+        0x20..=0x3f => {
+            let capacity = decode_prefixed_integer(b, 5)?;
+            table
+                .set_dynamic_table_capacity(capacity)
+                .map_err(|_| ParseError::Malformed)
+        },
+
+        // Duplicate: https://www.rfc-editor.org/rfc/rfc9204.html#section-4.3.4
+        0x00..=0x1f => {
+            let index = decode_prefixed_integer(b, 5)?;
+            let entry = table
+                .get_by_encoder_relative_index(index)
+                .map_err(|_| ParseError::Malformed)?;
+            let name = entry.name.clone();
+            let value = entry.value.clone();
+
+            table.insert(name, value).map_err(|_| ParseError::Malformed)
+        },
+    }
+}
+
 fn lookup_static(idx: u64) -> Result<(&'static [u8], &'static [u8])> {
     if idx >= super::static_table::STATIC_DECODE_TABLE.len() as u64 {
         return Err(Error::InvalidStaticTableIndex);
@@ -340,35 +421,12 @@ fn lookup_static(idx: u64) -> Result<(&'static [u8], &'static [u8])> {
     Ok(super::static_table::STATIC_DECODE_TABLE[idx as usize])
 }
 
-fn decode_int(b: &mut octets::Octets, prefix: usize) -> Result<u64> {
-    let mask = 2u64.pow(prefix as u32) - 1;
+fn header_integer_error(error: ParseError) -> Error {
+    match error {
+        ParseError::Incomplete => Error::BufferTooShort,
 
-    let mut val = u64::from(b.get_u8()?);
-    val &= mask;
-
-    if val < mask {
-        return Ok(val);
+        ParseError::Malformed => Error::InvalidHeaderValue,
     }
-
-    let mut shift = 0;
-
-    while b.cap() > 0 {
-        let byte = b.get_u8()?;
-
-        let inc = u64::from(byte & 0x7f)
-            .checked_shl(shift)
-            .ok_or(Error::BufferTooShort)?;
-
-        val = val.checked_add(inc).ok_or(Error::BufferTooShort)?;
-
-        shift += 7;
-
-        if byte & 0x80 == 0 {
-            return Ok(val);
-        }
-    }
-
-    Err(Error::BufferTooShort)
 }
 
 fn decode_str(b: &mut octets::Octets, max_len: usize) -> Result<Vec<u8>> {
@@ -376,7 +434,10 @@ fn decode_str(b: &mut octets::Octets, max_len: usize) -> Result<Vec<u8>> {
 
     let huff = first & 0x80 == 0x80;
 
-    let len = decode_int(b, 7)? as usize;
+    let len = usize::try_from(
+        decode_prefixed_integer(b, 7).map_err(header_integer_error)?,
+    )
+    .map_err(|_| Error::InvalidHeaderValue)?;
 
     let mut val = b.get_bytes(len)?;
 
@@ -397,28 +458,33 @@ fn decode_str(b: &mut octets::Octets, max_len: usize) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn decode_int1() {
-        let encoded = [0b01010, 0x02];
-        let mut b = octets::Octets::with_slice(&encoded);
-
-        assert_eq!(decode_int(&mut b, 5), Ok(10));
-    }
+    const HUFFMAN_WWW_EXAMPLE_COM: [u8; 12] = [
+        0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
+    ];
 
     #[test]
-    fn decode_int2() {
-        let encoded = [0b11111, 0b10011010, 0b00001010];
-        let mut b = octets::Octets::with_slice(&encoded);
+    fn header_integer_overflow_is_invalid() {
+        let mut indexed = vec![0x00, 0x00, 0xff];
+        indexed.extend([0x80; 9]);
+        indexed.push(0x02);
 
-        assert_eq!(decode_int(&mut b, 5), Ok(1337));
-    }
+        assert_eq!(
+            Decoder::new().decode(&indexed[..indexed.len() - 1], u64::MAX),
+            Err(Error::BufferTooShort)
+        );
+        assert_eq!(
+            Decoder::new().decode(&indexed, u64::MAX),
+            Err(Error::InvalidHeaderValue)
+        );
 
-    #[test]
-    fn decode_int3() {
-        let encoded = [0b101010];
-        let mut b = octets::Octets::with_slice(&encoded);
+        let mut value_length = vec![0x00, 0x00, 0x50, 0x7f];
+        value_length.extend([0x80; 9]);
+        value_length.push(0x02);
 
-        assert_eq!(decode_int(&mut b, 8), Ok(42));
+        assert_eq!(
+            Decoder::new().decode(&value_length, u64::MAX),
+            Err(Error::InvalidHeaderValue)
+        );
     }
 
     /// LiteralWithNameRef with the dynamic table flag (S=0) must be
@@ -582,6 +648,19 @@ mod tests {
         instructions.concat()
     }
 
+    fn capacity_instruction(capacity: u64) -> Vec<u8> {
+        let mut buf = [0; 16];
+        let mut bytes = octets::OctetsMut::with_slice(&mut buf);
+        super::super::encode_int(capacity, 0x20, 5, &mut bytes).unwrap();
+        let len = bytes.off();
+        buf[..len].to_vec()
+    }
+
+    fn control_bytes(dec: &mut Decoder, instruction: &[u8]) -> Result<()> {
+        let mut instruction = instruction.to_vec();
+        dec.control(&mut instruction)
+    }
+
     /// The dynamic table at the end of RFC 9204, Appendix B.5, by absolute
     /// index.
     const RFC_TABLE: [Option<(&str, &str)>; 6] = [
@@ -619,80 +698,331 @@ mod tests {
     }
 
     #[test]
-    fn control_applies_rfc_examples() {
-        let mut dec = decoder_with_max_capacity(220);
-
-        assert_eq!(dec.control(&mut rfc_encoder_stream()), Ok(()));
-        assert_eq!(table_entries(&dec, 0..6), RFC_TABLE);
-        assert!(dec.partial_instruction.is_empty());
-    }
-
-    #[test]
-    fn control_buffers_split_instructions() {
+    fn control_applies_and_buffers_instructions() {
         let mut stream = rfc_encoder_stream();
+        stream.extend(capacity_instruction(2048));
+        stream.extend([0xff, 0x00, 0x8c]);
+        stream.extend(HUFFMAN_WWW_EXAMPLE_COM);
+        stream.push(0x6c);
+        stream.extend(HUFFMAN_WWW_EXAMPLE_COM);
+        stream.push(0x8c);
+        stream.extend(HUFFMAN_WWW_EXAMPLE_COM);
+
+        let long_value = "v".repeat(127);
+        stream.extend([0xc0, 0x7f, 0x00]);
+        stream.extend(long_value.as_bytes());
+        stream.extend([0xc2, 0x00, 0xc2, 0x80]);
+
+        for _ in 0..27 {
+            stream.extend([0xc2, 0x01, b'v']);
+        }
+        stream.extend([0x1f, 0x00]);
+
+        let mut expected = RFC_TABLE[..5].to_vec();
+        expected.extend([
+            Some((":status", "www.example.com")),
+            Some(("www.example.com", "www.example.com")),
+            Some((":authority", long_value.as_str())),
+            Some(("age", "")),
+            Some(("age", "")),
+        ]);
+        expected.extend(std::iter::repeat_n(Some(("age", "v")), 27));
+        expected.push(Some((":status", "www.example.com")));
 
         // Split in two at every position, so that every instruction is split
         // at every byte, and some calls end with part of an instruction after
         // complete ones.
         for i in 0..=stream.len() {
-            let mut dec = decoder_with_max_capacity(220);
+            let mut dec = decoder_with_max_capacity(2048);
             assert_eq!(dec.control(&mut stream[..i]), Ok(()));
             assert_eq!(dec.control(&mut stream[i..]), Ok(()));
-            assert_eq!(table_entries(&dec, 0..6), RFC_TABLE);
+            assert_eq!(table_entries(&dec, 0..expected.len() as u64), expected);
             assert!(dec.partial_instruction.is_empty());
         }
 
         // One byte at a time, so that instructions arrive over many calls.
-        let mut dec = decoder_with_max_capacity(220);
+        let mut dec = decoder_with_max_capacity(2048);
         for byte in stream {
             assert_eq!(dec.control(&mut [byte]), Ok(()));
         }
-        assert_eq!(table_entries(&dec, 0..6), RFC_TABLE);
+        assert_eq!(table_entries(&dec, 0..expected.len() as u64), expected);
+
+        let mut dec = decoder_with_max_capacity(80);
+        dec.control(&mut capacity_instruction(80)).unwrap();
+        control_bytes(&mut dec, b"\x44key0\x04val0").unwrap();
+        control_bytes(&mut dec, b"\x44key1\x04val1").unwrap();
+        assert_eq!(table_entries(&dec, 0..3), [
+            Some(("key0", "val0")),
+            Some(("key1", "val1")),
+            None
+        ]);
+
+        control_bytes(&mut dec, b"\x44key2\x04val2").unwrap();
+        assert_eq!(table_entries(&dec, 0..4), [
+            None,
+            Some(("key1", "val1")),
+            Some(("key2", "val2")),
+            None
+        ]);
+
+        dec.control(&mut capacity_instruction(40)).unwrap();
+        assert_eq!(table_entries(&dec, 0..4), [
+            None,
+            None,
+            Some(("key2", "val2")),
+            None
+        ]);
+        dec.control(&mut [0x20]).unwrap();
+        assert_eq!(table_entries(&dec, 0..4), [None; 4]);
+        dec.control(&mut capacity_instruction(40)).unwrap();
+        control_bytes(&mut dec, b"\x44key3\x04val3").unwrap();
+        assert_eq!(table_entries(&dec, 0..5), [
+            None,
+            None,
+            None,
+            Some(("key3", "val3")),
+            None
+        ]);
+
+        let mut dec = decoder_with_max_capacity(40);
+        dec.control(&mut capacity_instruction(40)).unwrap();
+        control_bytes(&mut dec, b"\xc2\x05value").unwrap();
+        dec.control(&mut [0x00]).unwrap();
+        control_bytes(&mut dec, b"\x80\x05other").unwrap();
+        assert_eq!(table_entries(&dec, 0..4), [
+            None,
+            None,
+            Some(("age", "other")),
+            None
+        ]);
+
+        let mut dec = decoder_with_max_capacity(80);
+        dec.control(&mut capacity_instruction(80)).unwrap();
+        let value = "x".repeat(44);
+        let mut exact_fit = b"\x44key0\x2c".to_vec();
+        exact_fit.extend(value.as_bytes());
+        assert_eq!(dec.control(&mut exact_fit), Ok(()));
+        assert_eq!(table_entries(&dec, 0..2), [
+            Some(("key0", value.as_str())),
+            None
+        ]);
+
+        let mut encoded = [0; 8];
+        let mut bytes = octets::OctetsMut::with_slice(&mut encoded);
+        bytes.put_huffman_encoded::<false>(b"\n\n").unwrap();
+        assert_eq!(bytes.off(), encoded.len());
+
+        let mut dec = decoder_with_max_capacity(36);
+        dec.control(&mut capacity_instruction(36)).unwrap();
+        let mut instruction = vec![0x68];
+        instruction.extend(encoded);
+        instruction.push(0x88);
+        instruction.extend(encoded);
+        assert_eq!(dec.control(&mut instruction), Ok(()));
+        assert_eq!(table_entries(&dec, 0..1), [Some(("\n\n", "\n\n"))]);
+
+        let mut dec = decoder_with_max_capacity(64);
+        dec.control(&mut capacity_instruction(64)).unwrap();
+        let mut stream = b"\x41x\x01y".repeat(1000);
+        stream.extend([0x41, b'z']);
+        assert_eq!(dec.control(&mut stream), Ok(()));
+        assert_eq!(dec.partial_instruction, [0x41, b'z']);
+        assert!(dec.partial_instruction.capacity() < stream.len() / 2);
+        assert_eq!(table_entries(&dec, 999..1001), [Some(("x", "y")), None]);
+        assert_eq!(dec.control(&mut [0x01, b'v']), Ok(()));
+        assert!(dec.partial_instruction.is_empty());
+        assert_eq!(dec.partial_instruction.capacity(), 0);
+        assert_eq!(table_entries(&dec, 999..1001), [None, Some(("z", "v"))]);
     }
 
     #[test]
     fn control_rejects_invalid_instructions() {
-        // A capacity of 221, above the maximum.
-        let mut dec = decoder_with_max_capacity(220);
+        let mut name = vec![0x54];
+        name.extend([b'a'; 20]);
+
+        let mut dec = decoder_with_max_capacity(64);
+        dec.control(&mut capacity_instruction(64)).unwrap();
+        let mut incomplete = name.clone();
+        incomplete.push(0xad);
+        assert_eq!(dec.control(&mut incomplete), Ok(()));
+        assert_eq!(dec.partial_instruction.len(), incomplete.len());
+
+        let mut dec = decoder_with_max_capacity(64);
+        dec.control(&mut capacity_instruction(64)).unwrap();
+        let mut oversized_huffman = name.clone();
+        assert_eq!(dec.control(&mut oversized_huffman), Ok(()));
+        assert_eq!(dec.partial_instruction.len(), name.len());
         assert_eq!(
-            dec.control(&mut [0x3f, 0xbe, 0x01]),
+            dec.control(&mut [0xae]),
             Err(Error::InvalidEncoderInstruction)
         );
 
-        // A duplicate of an entry that doesn't exist.
+        let mut dec = decoder_with_max_capacity(64);
+        dec.control(&mut capacity_instruction(64)).unwrap();
+        name.push(0x0d);
+        assert_eq!(
+            dec.control(&mut name),
+            Err(Error::InvalidEncoderInstruction)
+        );
+
+        let mut dec = decoder_with_max_capacity(34);
+        dec.control(&mut capacity_instruction(34)).unwrap();
+        let mut encoded_name = [0; 4];
+        let mut name_bytes = octets::OctetsMut::with_slice(&mut encoded_name);
+        name_bytes.put_huffman_encoded::<false>(b"\n").unwrap();
+        assert_eq!(name_bytes.off(), encoded_name.len());
+        let mut oversized = vec![0x64];
+        oversized.extend(encoded_name);
+        oversized.push(0x85);
+        assert_eq!(
+            dec.control(&mut oversized),
+            Err(Error::InvalidEncoderInstruction)
+        );
+
+        for max_capacity in [0, 100, 220, 4096, 8192, usize::MAX] {
+            if let Some(excess) = (max_capacity as u64).checked_add(1) {
+                let mut dec = decoder_with_max_capacity(max_capacity);
+                assert_eq!(
+                    dec.control(&mut capacity_instruction(excess)),
+                    Err(Error::InvalidEncoderInstruction)
+                );
+                assert_eq!(table_entries(&dec, 0..1), [None]);
+            }
+
+            let mut dec = decoder_with_max_capacity(max_capacity);
+            assert_eq!(
+                dec.control(&mut capacity_instruction(max_capacity as u64)),
+                Ok(())
+            );
+        }
+
+        let mut overflow = vec![0x3f, 0xe1];
+        overflow.extend([0xff; 8]);
+        overflow.push(0x01);
+
+        let mut high_bits_overflow = vec![0x3f];
+        high_bits_overflow.extend([0x80; 9]);
+        high_bits_overflow.push(0x02);
+
+        let mut overlong_integer = vec![0x3f];
+        overlong_integer.extend([0x80; 10]);
+        overlong_integer.push(0x00);
+
+        let mut oversized_huffman = vec![0xc2, 0x8c];
+        oversized_huffman.extend(HUFFMAN_WWW_EXAMPLE_COM);
+
+        let mut eos_huffman = vec![0xc2, 0x84];
+        eos_huffman.extend([0xff; 4]);
+
+        let mut huge_length = vec![0xc2, 0x7f];
+        huge_length.extend([0xff; 3]);
+        huge_length.push(0x7f);
+
+        for (capacity, mut instruction) in [
+            (0, vec![0x21]),
+            (0, vec![0xc0, 0x00]),
+            (0, vec![0x80, 0x00]),
+            (0, vec![0x40, 0x00]),
+            (0, vec![0x00]),
+            (0, vec![0x41]),
+            (220, vec![0x00]),
+            (220, vec![0x80, 0x00]),
+            (220, vec![0xff, 0x24, 0x00]),
+            (220, overflow),
+            (220, high_bits_overflow),
+            (220, overlong_integer),
+            (220, huge_length),
+            (220, eos_huffman),
+            (220, vec![0xc2, 0x81, 0xff]),
+            (220, vec![0xc2, 0x81, 0x00]),
+            (220, vec![0x61, 0xff, 0x00]),
+            (64, vec![0x5f, 0x22]),
+            (64, vec![0x40, 0x41]),
+            (64, vec![0xc0, 0x41]),
+            (34, vec![0x41, b'a', 0x85]),
+            (14, oversized_huffman),
+            (40, b"\xc2\x06values".to_vec()),
+        ] {
+            let mut dec = decoder_with_max_capacity(capacity);
+            if capacity > 0 {
+                dec.control(&mut capacity_instruction(capacity as u64))
+                    .unwrap();
+            }
+            assert_eq!(
+                dec.control(&mut instruction),
+                Err(Error::InvalidEncoderInstruction),
+                "capacity={capacity}, instruction={instruction:?}"
+            );
+            assert_eq!(table_entries(&dec, 0..1), [None]);
+        }
+
         let mut dec = decoder_with_max_capacity(220);
+        dec.control(&mut capacity_instruction(220)).unwrap();
+        let mut incomplete_integer = vec![0x3f];
+        incomplete_integer.extend([0x80; 10]);
+        assert_eq!(dec.control(&mut incomplete_integer), Ok(()));
+        assert_eq!(dec.partial_instruction, incomplete_integer);
         assert_eq!(
             dec.control(&mut [0x00]),
             Err(Error::InvalidEncoderInstruction)
         );
 
-        // A name longer than the table's capacity, which is still zero,
-        // rejected before the name arrives.
-        let mut dec = decoder_with_max_capacity(220);
-        assert_eq!(
-            dec.control(&mut [0x41]),
-            Err(Error::InvalidEncoderInstruction)
-        );
-    }
-
-    #[test]
-    fn zero_max_capacity_allows_only_zero_capacity() {
-        // Setting the capacity to zero changes nothing, so it's accepted.
-        assert_eq!(Decoder::new().control(&mut [0x20]), Ok(()));
-
-        // Every other instruction is rejected: a capacity of 1, each type of
-        // insert, and a duplicate.
-        for mut instruction in [
-            vec![0x21],
-            vec![0xc0, 0x00],
-            vec![0x80, 0x00],
-            vec![0x40, 0x00],
-            vec![0x00],
-        ] {
+        for mut invalid in [vec![0x01], vec![0x81, 0x00]] {
+            let mut dec = decoder_with_max_capacity(40);
+            dec.control(&mut [0x3f, 0x09]).unwrap();
+            let mut first = *b"\x44key0\x04val0";
+            let mut second = *b"\x44key1\x04val1";
+            dec.control(&mut first).unwrap();
+            dec.control(&mut second).unwrap();
             assert_eq!(
-                Decoder::new().control(&mut instruction),
+                dec.control(&mut invalid),
                 Err(Error::InvalidEncoderInstruction)
             );
+            assert_eq!(table_entries(&dec, 0..3), [
+                None,
+                Some(("key1", "val1")),
+                None
+            ]);
         }
+
+        let mut dec = decoder_with_max_capacity(40);
+        dec.control(&mut capacity_instruction(40)).unwrap();
+        control_bytes(&mut dec, b"\xc2\x05value").unwrap();
+        assert_eq!(
+            control_bytes(&mut dec, b"\xc2\x06values"),
+            Err(Error::InvalidEncoderInstruction)
+        );
+        assert_eq!(table_entries(&dec, 0..3), [
+            Some(("age", "value")),
+            None,
+            None
+        ]);
+
+        let exact_value = "x".repeat(44);
+        let too_large_value = "x".repeat(45);
+        let mut exact_fit = b"\x44key0\x2c".to_vec();
+        exact_fit.extend(exact_value.as_bytes());
+        let mut literal = b"\x44key1\x2d".to_vec();
+        literal.extend(too_large_value.as_bytes());
+        let mut dynamic_name = vec![0x80, 45];
+        dynamic_name.extend(too_large_value.as_bytes());
+        let mut static_name = vec![0xc2, 46];
+        static_name.extend([b'x'; 46]);
+
+        for mut invalid in [literal, dynamic_name, static_name] {
+            let mut dec = decoder_with_max_capacity(80);
+            dec.control(&mut capacity_instruction(80)).unwrap();
+            control_bytes(&mut dec, &exact_fit).unwrap();
+            assert_eq!(
+                dec.control(&mut invalid),
+                Err(Error::InvalidEncoderInstruction)
+            );
+            assert_eq!(table_entries(&dec, 0..2), [
+                Some(("key0", exact_value.as_str())),
+                None
+            ]);
+        }
+
+        assert_eq!(Decoder::new().control(&mut [0x20]), Ok(()));
     }
 }
