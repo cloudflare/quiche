@@ -450,7 +450,16 @@ impl BBRv2NetworkModel {
                 return;
             }
 
-            if self.bytes_lost_in_round > 0 {
+            let send_state = &congestion_event.last_packet_send_state;
+            let lost_enough = self.bytes_lost_in_round > 0 &&
+                (params.lower_bounds_loss_threshold <= 0.0 ||
+                    (send_state.is_valid &&
+                        self.bytes_lost_in_round >
+                            (send_state.bytes_in_flight as f32 *
+                                params.lower_bounds_loss_threshold)
+                                as usize));
+
+            if lost_enough {
                 if self.bandwidth_lo.is_none() {
                     self.bandwidth_lo = Some(self.max_bandwidth());
                 }
@@ -1055,5 +1064,58 @@ mod tests {
 
         assert_eq!(model.rtt_persistent_jump_count(), 0);
         assert!(!model.is_rtt_jump_persistent());
+    }
+
+    /// One round trip in which packet 1 is lost (1200 of 100_000 bytes in
+    /// flight, 1.2%) and packet 2 is acked, outside of probing.
+    fn lossy_round(params: &Params) -> BBRv2NetworkModel {
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+        model.on_packet_sent(base, 100_000, 1, 1200, true);
+        model.on_packet_sent(base, 100_000, 2, 1200, true);
+
+        let ack_time = base + RTT;
+        let acked = [Acked {
+            pkt_num: 2,
+            time_sent: base,
+        }];
+        let lost = [Lost {
+            packet_number: 1,
+            bytes_lost: 1200,
+        }];
+        let mut event =
+            BBRv2CongestionEvent::new(ack_time, 100_000, 100_000, false);
+        model.on_congestion_event_start(&acked, &lost, &mut event, params);
+        assert!(event.end_of_round_trip);
+        model
+    }
+
+    #[test]
+    fn lower_bounds_shrink_on_any_loss_by_default() {
+        let model = lossy_round(&DEFAULT_PARAMS);
+        assert!(model.bandwidth_lo.is_some());
+        assert_ne!(model.inflight_lo, usize::MAX);
+    }
+
+    #[test]
+    fn lower_bounds_ignore_loss_below_their_threshold() {
+        let params = Params {
+            lower_bounds_loss_threshold: 0.5,
+            ..DEFAULT_PARAMS
+        };
+        let model = lossy_round(&params);
+        assert!(model.bandwidth_lo.is_none());
+        assert_eq!(model.inflight_lo, usize::MAX);
+    }
+
+    #[test]
+    fn lower_bounds_shrink_when_loss_exceeds_their_threshold() {
+        let params = Params {
+            lower_bounds_loss_threshold: 0.005,
+            ..DEFAULT_PARAMS
+        };
+        let model = lossy_round(&params);
+        assert!(model.bandwidth_lo.is_some());
+        assert_ne!(model.inflight_lo, usize::MAX);
     }
 }
