@@ -150,13 +150,23 @@ impl Default for Decoder {
 impl Decoder {
     /// Creates a new QPACK decoder.
     pub fn new() -> Decoder {
+        Decoder::with_max_table_capacity(0)
+    }
+
+    /// Creates a new QPACK decoder whose dynamic table has a maximum capacity
+    /// of `max_table_capacity`.
+    ///
+    /// `max_table_capacity` must be the `SETTINGS_QPACK_MAX_TABLE_CAPACITY`
+    /// value advertised to the peer (RFC 9204, Section 3.2.3).
+    pub(crate) fn with_max_table_capacity(max_table_capacity: usize) -> Decoder {
         Decoder {
-            // TODO: make the maximum capacity the
-            // SETTINGS_QPACK_MAX_TABLE_CAPACITY value advertised to the peer,
-            // instead of zero.
-            table: DynamicTable::new(0),
+            table: DynamicTable::new(max_table_capacity),
             partial_instruction: Vec::new(),
         }
+    }
+
+    pub(crate) fn should_parse_encoder_stream(&self) -> bool {
+        self.table.max_capacity() > 0
     }
 
     /// Processes encoder instructions (RFC 9204, Section 4.3) from the peer's
@@ -458,6 +468,16 @@ fn decode_str(b: &mut octets::Octets, max_len: usize) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
 
+    impl Decoder {
+        pub(crate) fn dynamic_table_entry(
+            &self, index: u64,
+        ) -> Option<(&[u8], &[u8])> {
+            self.table
+                .get_by_absolute_index(index)
+                .map(|entry| (entry.name(), entry.value()))
+        }
+    }
+
     const HUFFMAN_WWW_EXAMPLE_COM: [u8; 12] = [
         0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
     ];
@@ -644,10 +664,7 @@ mod tests {
 
     /// Returns a decoder whose dynamic table has the given maximum capacity.
     fn decoder_with_max_capacity(max_capacity: usize) -> Decoder {
-        Decoder {
-            table: DynamicTable::new(max_capacity),
-            ..Decoder::new()
-        }
+        Decoder::with_max_table_capacity(max_capacity)
     }
 
     /// Returns the name and value of each dynamic table entry with an absolute
@@ -913,5 +930,16 @@ mod tests {
                 "capacity={capacity}, instruction={instruction:?}"
             );
         }
+    }
+
+    #[test]
+    fn max_table_capacity_accepts_supported_value() {
+        let capacity = (1_u64 << 32).min(usize::MAX as u64) as usize;
+        let mut dec = Decoder::with_max_table_capacity(capacity);
+
+        assert_eq!(
+            dec.control(&mut capacity_instruction(capacity as u64)),
+            Ok(())
+        );
     }
 }
