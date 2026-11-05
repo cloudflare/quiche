@@ -150,11 +150,21 @@ impl Default for Decoder {
 impl Decoder {
     /// Creates a new QPACK decoder.
     pub fn new() -> Decoder {
+        Decoder::with_max_table_capacity(0)
+    }
+
+    /// Creates a new QPACK decoder whose dynamic table has a maximum capacity
+    /// of `max_table_capacity`.
+    ///
+    /// `max_table_capacity` must be the `SETTINGS_QPACK_MAX_TABLE_CAPACITY`
+    /// value advertised to the peer (RFC 9204, Section 3.2.3). On targets where
+    /// it doesn't fit in `usize`, it's clamped to `usize::MAX`, as no larger
+    /// table could fit in memory anyway.
+    pub(crate) fn with_max_table_capacity(max_table_capacity: u64) -> Decoder {
         Decoder {
-            // TODO: make the maximum capacity the
-            // SETTINGS_QPACK_MAX_TABLE_CAPACITY value advertised to the peer,
-            // instead of zero.
-            table: DynamicTable::new(0),
+            table: DynamicTable::new(
+                usize::try_from(max_table_capacity).unwrap_or(usize::MAX),
+            ),
             partial_instruction: Vec::new(),
         }
     }
@@ -674,10 +684,7 @@ mod tests {
 
     /// Returns a decoder whose dynamic table has the given maximum capacity.
     fn decoder_with_max_capacity(max_capacity: usize) -> Decoder {
-        Decoder {
-            table: DynamicTable::new(max_capacity),
-            ..Decoder::new()
-        }
+        Decoder::with_max_table_capacity(max_capacity as u64)
     }
 
     /// Returns the name and value of each dynamic table entry with an absolute
@@ -1024,5 +1031,15 @@ mod tests {
         }
 
         assert_eq!(Decoder::new().control(&mut [0x20]), Ok(()));
+    }
+
+    #[test]
+    fn max_table_capacity_is_clamped_to_usize() {
+        let mut dec = Decoder::with_max_table_capacity(1 << 32);
+
+        // 2^32 doesn't fit in a 32-bit usize, so there the maximum is clamped
+        // to usize::MAX, which the encoder can then set.
+        let capacity = (1_u64 << 32).min(usize::MAX as u64);
+        assert_eq!(dec.control(&mut capacity_instruction(capacity)), Ok(()));
     }
 }
