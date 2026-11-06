@@ -366,6 +366,7 @@ pub struct Http09Request {
     cardinal: u64,
     request_line: String,
     stream_id: Option<u64>,
+    sent_bytes: usize,
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
 }
 
@@ -421,6 +422,7 @@ impl Http09Conn {
                     cardinal: i,
                     request_line,
                     stream_id: None,
+                    sent_bytes: 0,
                     response_writer: None,
                 });
             }
@@ -438,6 +440,22 @@ impl Http09Conn {
     }
 }
 
+fn send_http09_request<F>(
+    req: &mut Http09Request,
+    stream_id: u64,
+    send: F,
+) -> Result<bool, quiche::Error>
+where
+    F: FnOnce(u64, &[u8], bool) -> Result<usize, quiche::Error>,
+{
+    let stream_id = *req.stream_id.get_or_insert(stream_id);
+    let remaining = &req.request_line.as_bytes()[req.sent_bytes..];
+    let written = send(stream_id, remaining, true)?;
+    req.sent_bytes += written;
+
+    Ok(req.sent_bytes == req.request_line.len())
+}
+
 impl HttpConn for Http09Conn {
     fn send_requests(
         &mut self, conn: &mut quiche::Connection, target_path: &Option<String>,
@@ -445,15 +463,21 @@ impl HttpConn for Http09Conn {
         let mut reqs_done = 0;
 
         for req in self.reqs.iter_mut().skip(self.reqs_sent) {
-            match conn.stream_send(
-                self.stream_id,
-                req.request_line.as_bytes(),
-                true,
+            let stream_id = req.stream_id.unwrap_or(self.stream_id);
+            let complete = match send_http09_request(
+                req,
+                stream_id,
+                |stream_id, data, fin| conn.stream_send(stream_id, data, fin),
             ) {
-                Ok(v) => v,
+                Ok(complete) => complete,
 
                 Err(quiche::Error::StreamLimit) => {
                     debug!("not enough stream credits, retry later...");
+                    break;
+                },
+
+                Err(quiche::Error::Done) => {
+                    debug!("request stream is blocked, retry later...");
                     break;
                 },
 
@@ -463,14 +487,24 @@ impl HttpConn for Http09Conn {
                 },
             };
 
+            if req.sent_bytes > 0 && req.response_writer.is_none() {
+                req.response_writer =
+                    make_resource_writer(&req.url, target_path, req.cardinal);
+            }
+
+            if !complete {
+                debug!(
+                    "partially sent HTTP request on stream {} ({}/{} bytes), retry later...",
+                    stream_id,
+                    req.sent_bytes,
+                    req.request_line.len()
+                );
+                break;
+            }
+
             debug!("sending HTTP request {:?}", req.request_line);
 
-            req.stream_id = Some(self.stream_id);
-            req.response_writer =
-                make_resource_writer(&req.url, target_path, req.cardinal);
-
             self.stream_id += 4;
-
             reqs_done += 1;
         }
 
@@ -1667,5 +1701,82 @@ impl HttpConn for Http3Conn {
         if resp.written == resp.body.len() {
             partial_responses.remove(&stream_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod http09_request_tests {
+    use super::*;
+
+    fn request() -> Http09Request {
+        Http09Request {
+            url: url::Url::parse("https://example.com/unrelenting-cool-pirate").unwrap(),
+            cardinal: 1,
+            request_line: "GET /unrelenting-cool-pirate\r\n".to_string(),
+            stream_id: None,
+            sent_bytes: 0,
+            response_writer: None,
+        }
+    }
+
+    #[test]
+    fn partial_http09_request_resumes_same_stream_until_fin_can_be_sent() {
+        let mut req = request();
+        let request_line = req.request_line.clone();
+        let chunks = [(0, 8), (8, 21), (29, 1)];
+
+        for (offset, written) in chunks {
+            let expected = &request_line.as_bytes()[offset..];
+            let complete = send_http09_request(&mut req, 0, |stream_id, data, fin| {
+                assert_eq!(stream_id, 0);
+                assert_eq!(data, expected);
+                assert!(fin);
+                Ok(written)
+            })
+            .unwrap();
+
+            assert_eq!(req.sent_bytes, offset + written);
+            assert_eq!(req.stream_id, Some(0));
+            assert_eq!(complete, req.sent_bytes == request_line.len());
+        }
+
+        assert_eq!(req.sent_bytes, request_line.len());
+    }
+
+    #[test]
+    fn blocked_http09_request_retries_without_losing_stream_or_offset() {
+        let mut req = request();
+        let request_line = req.request_line.clone();
+
+        let complete = send_http09_request(&mut req, 0, |stream_id, data, fin| {
+            assert_eq!(stream_id, 0);
+            assert_eq!(data, request_line.as_bytes());
+            assert!(fin);
+            Ok(8)
+        })
+        .unwrap();
+        assert!(!complete);
+        assert_eq!(req.sent_bytes, 8);
+
+        let remaining = &request_line.as_bytes()[8..];
+        assert!(matches!(
+            send_http09_request(&mut req, 0, |_stream_id, _data, _fin| {
+                Err(quiche::Error::Done)
+            }),
+            Err(quiche::Error::Done)
+        ));
+        assert_eq!(req.stream_id, Some(0));
+        assert_eq!(req.sent_bytes, 8);
+
+        let complete = send_http09_request(&mut req, 0, |stream_id, data, fin| {
+            assert_eq!(stream_id, 0);
+            assert_eq!(data, remaining);
+            assert!(fin);
+            Ok(data.len())
+        })
+        .unwrap();
+
+        assert!(complete);
+        assert_eq!(req.sent_bytes, req.request_line.len());
     }
 }
