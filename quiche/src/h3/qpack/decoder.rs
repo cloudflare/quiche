@@ -122,9 +122,9 @@ impl FieldListSizeTracker {
         Ok(())
     }
 
-    /// The remaining number of bytes in the tracker.
-    fn left(&self) -> u64 {
-        self.remaining
+    /// The remaining number of bytes, capped to what fits in a `usize`.
+    fn left(&self) -> usize {
+        usize::try_from(self.remaining).unwrap_or(usize::MAX)
     }
 }
 
@@ -223,15 +223,11 @@ impl Decoder {
 
         let mut size_tracker = FieldListSizeTracker::new(max_size);
 
-        let req_insert_count =
-            decode_prefixed_integer(&mut b, 8).map_err(header_integer_error)?;
-        let base =
-            decode_prefixed_integer(&mut b, 7).map_err(header_integer_error)?;
-
-        // TODO: decode the Required Insert Count and Base (RFC 9204, Section
-        // 4.5.1). With SETTINGS_QPACK_BLOCKED_STREAMS set to 0, a Required
-        // Insert Count above the dynamic table's insert count is a connection
-        // error of type QPACK_DECOMPRESSION_FAILED (RFC 9204, Section 2.1.2).
+        let (req_insert_count, base) = decode_field_section_prefix(
+            &mut b,
+            self.table.max_capacity(),
+            self.table.insert_count(),
+        )?;
 
         trace!("Header count={req_insert_count} base={base}");
 
@@ -250,12 +246,19 @@ impl Decoder {
 
                     trace!("Indexed index={index} static={s}");
 
-                    if !s {
-                        // TODO: implement dynamic table
-                        return Err(Error::InvalidHeaderValue);
-                    }
-
-                    let (name, value) = lookup_static(index)?;
+                    let (name, value) = if s {
+                        lookup_static(index)?
+                    } else {
+                        let absolute_index = base
+                            .checked_sub(index)
+                            .and_then(|index| index.checked_sub(1))
+                            .ok_or(Error::InvalidHeaderValue)?;
+                        lookup_dynamic(
+                            &self.table,
+                            absolute_index,
+                            req_insert_count,
+                        )?
+                    };
 
                     size_tracker.on_field_part_decoded(
                         (name.len() + value.len()) as u64,
@@ -271,8 +274,21 @@ impl Decoder {
 
                     trace!("Indexed With Post Base index={index}");
 
-                    // TODO: implement dynamic table
-                    return Err(Error::InvalidHeaderValue);
+                    let absolute_index = base
+                        .checked_add(index)
+                        .ok_or(Error::InvalidHeaderValue)?;
+                    let (name, value) = lookup_dynamic(
+                        &self.table,
+                        absolute_index,
+                        req_insert_count,
+                    )?;
+
+                    size_tracker.on_field_part_decoded(
+                        (name.len() + value.len()) as u64,
+                    )?;
+
+                    let hdr = Header::new(name, value);
+                    out.push(hdr);
                 },
 
                 Representation::Literal => {
@@ -287,11 +303,11 @@ impl Decoder {
 
                     let name = if name_huff {
                         name.get_huffman_decoded_with_max_length(
-                            size_tracker.left() as usize,
+                            size_tracker.left(),
                         )
                         .map_err(|_| Error::HeaderListTooLarge)?
                     } else {
-                        if name_len > size_tracker.left() as usize {
+                        if name_len > size_tracker.left() {
                             return Err(Error::HeaderListTooLarge);
                         }
                         name.to_vec()
@@ -299,7 +315,7 @@ impl Decoder {
 
                     size_tracker.on_field_part_decoded(name.len() as u64)?;
 
-                    let value = decode_str(&mut b, size_tracker.left() as usize)?;
+                    let value = decode_str(&mut b, size_tracker.left())?;
 
                     trace!(
                         "Literal Without Name Reference name={name:?} value={value:?}",
@@ -317,20 +333,26 @@ impl Decoder {
                     const STATIC: u8 = 0x10;
 
                     let s = first & STATIC == STATIC;
-
-                    if !s {
-                        // TODO: implement dynamic table
-                        return Err(Error::InvalidHeaderValue);
-                    }
-
                     let name_idx = decode_prefixed_integer(&mut b, 4)
                         .map_err(header_integer_error)?;
 
-                    let (name, _) = lookup_static(name_idx)?;
+                    let (name, _) = if s {
+                        lookup_static(name_idx)?
+                    } else {
+                        let absolute_index = base
+                            .checked_sub(name_idx)
+                            .and_then(|index| index.checked_sub(1))
+                            .ok_or(Error::InvalidHeaderValue)?;
+                        lookup_dynamic(
+                            &self.table,
+                            absolute_index,
+                            req_insert_count,
+                        )?
+                    };
 
                     size_tracker.on_field_part_decoded(name.len() as u64)?;
 
-                    let value = decode_str(&mut b, size_tracker.left() as usize)?;
+                    let value = decode_str(&mut b, size_tracker.left())?;
 
                     trace!(
                         "Literal name_idx={name_idx} static={s} value={value:?}"
@@ -345,16 +367,95 @@ impl Decoder {
                 },
 
                 Representation::LiteralWithPostBase => {
-                    trace!("Literal With Post Base");
+                    let name_idx = decode_prefixed_integer(&mut b, 3)
+                        .map_err(header_integer_error)?;
 
-                    // TODO: implement dynamic table
-                    return Err(Error::InvalidHeaderValue);
+                    let absolute_index = base
+                        .checked_add(name_idx)
+                        .ok_or(Error::InvalidHeaderValue)?;
+                    let (name, _) = lookup_dynamic(
+                        &self.table,
+                        absolute_index,
+                        req_insert_count,
+                    )?;
+
+                    size_tracker.on_field_part_decoded(name.len() as u64)?;
+
+                    let value = decode_str(&mut b, size_tracker.left())?;
+
+                    trace!(
+                        "Literal With Post Base name_idx={name_idx} value={value:?}"
+                    );
+
+                    size_tracker.on_field_part_decoded(value.len() as u64)?;
+
+                    let hdr = Header(name.to_vec(), value);
+                    out.push(hdr);
                 },
             }
         }
 
         Ok(out)
     }
+}
+
+/// Decodes the Required Insert Count and Base (RFC 9204, Section 4.5.1).
+fn decode_field_section_prefix(
+    b: &mut octets::Octets, max_table_capacity: usize, total_insert_count: u64,
+) -> Result<(u64, u64)> {
+    let encoded_insert_count =
+        decode_prefixed_integer(b, 8).map_err(header_integer_error)?;
+
+    // Compute in u128 to keep the wraparound arithmetic valid even when the
+    // maximum capacity and insert count are both large.
+    let max_entries = (max_table_capacity / ENTRY_OVERHEAD) as u128;
+    let full_range = 2 * max_entries;
+
+    let req_insert_count = if encoded_insert_count == 0 {
+        0
+    } else {
+        if u128::from(encoded_insert_count) > full_range {
+            return Err(Error::InvalidHeaderValue);
+        }
+
+        let max_value = u128::from(total_insert_count) + max_entries;
+        let max_wrapped = (max_value / full_range) * full_range;
+        let mut required = max_wrapped + u128::from(encoded_insert_count) - 1;
+
+        if required > max_value {
+            if required <= full_range {
+                return Err(Error::InvalidHeaderValue);
+            }
+
+            required -= full_range;
+        }
+
+        if required == 0 {
+            return Err(Error::InvalidHeaderValue);
+        }
+
+        u64::try_from(required).map_err(|_| Error::InvalidHeaderValue)?
+    };
+
+    let negative = b.peek_u8()? & 0x80 != 0;
+    let delta_base =
+        decode_prefixed_integer(b, 7).map_err(header_integer_error)?;
+    let base = if negative {
+        req_insert_count
+            .checked_sub(delta_base)
+            .and_then(|base| base.checked_sub(1))
+    } else {
+        req_insert_count.checked_add(delta_base)
+    }
+    .ok_or(Error::InvalidHeaderValue)?;
+
+    // Only zero blocked streams are supported. A field section that needs
+    // unseen insertions cannot be decoded (RFC 9204, Section 2.1.2).
+    if req_insert_count > total_insert_count {
+        return Err(Error::InvalidHeaderValue);
+    }
+
+    Ok((req_insert_count, base))
 }
 
 fn apply_encoder_instruction(
@@ -423,6 +524,20 @@ fn apply_encoder_instruction(
     }
 }
 
+fn lookup_dynamic(
+    table: &DynamicTable, absolute_index: u64, req_insert_count: u64,
+) -> Result<(&[u8], &[u8])> {
+    // The Required Insert Count must include every referenced entry.
+    if absolute_index >= req_insert_count {
+        return Err(Error::InvalidHeaderValue);
+    }
+
+    let entry = table
+        .get_by_absolute_index(absolute_index)
+        .ok_or(Error::InvalidHeaderValue)?;
+    Ok((entry.name(), entry.value()))
+}
+
 fn lookup_static(idx: u64) -> Result<(&'static [u8], &'static [u8])> {
     if idx >= super::static_table::STATIC_DECODE_TABLE.len() as u64 {
         return Err(Error::InvalidStaticTableIndex);
@@ -452,6 +567,10 @@ fn decode_str(b: &mut octets::Octets, max_len: usize) -> Result<Vec<u8>> {
     let mut val = b.get_bytes(len)?;
 
     let val = if huff {
+        // TODO: In a follow-up PR, distinguish malformed Huffman from
+        // decoded-size overflow in octets. Map malformed data to
+        // InvalidHuffmanEncoding here and in the literal-name path above,
+        // while keeping HeaderListTooLarge for size overflow.
         val.get_huffman_decoded_with_max_length(max_len)
             .map_err(|_| Error::HeaderListTooLarge)?
     } else {
@@ -482,143 +601,172 @@ mod tests {
         0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
     ];
 
-    /// LiteralWithNameRef with the dynamic table flag (S=0) must be
-    /// rejected since dynamic table references are not decoded yet.
     #[test]
-    fn literal_with_name_ref_dynamic_table_rejected() {
-        let mut dec = Decoder::new();
+    fn field_section_prefix_decodes_count_and_base() {
+        for (encoded, max_capacity, total_inserts, expected) in [
+            (&[0x00, 0x00][..], 0, 0, (0, 0)),
+            (&[0x00, 0x05][..], 0, 0, (0, 5)),
+            (&[0x03, 0x81][..], 220, 2, (2, 0)),
+            (&[0x04, 0x82][..], 100, 10, (9, 6)),
+            (&[0x04, 0x02][..], 100, 10, (9, 11)),
+            (&[0x04, 0x88][..], 100, 10, (9, 0)),
+            (&[0x05, 0x00][..], 100, 10, (10, 10)),
+            (&[0x04, 0x00][..], 64, u64::MAX, (u64::MAX, u64::MAX)),
+        ] {
+            let mut b = octets::Octets::with_slice(encoded);
+            assert_eq!(
+                decode_field_section_prefix(&mut b, max_capacity, total_inserts),
+                Ok(expected)
+            );
+            assert_eq!(b.cap(), 0);
+        }
+    }
 
-        // QPACK header block:
-        //   [0x00, 0x00]  required insert count=0, base=0
-        //   [0x40]        LiteralWithNameRef (0b0100_0000), S=0 (dynamic),
-        //                 name_idx=0
-        //   [0x01, 0x61]  value: non-huffman, length=1, 'a'
-        let encoded = [0x00, 0x00, 0x40, 0x01, 0x61];
+    #[test]
+    fn field_section_prefix_rejects_invalid_counts_and_base() {
+        for (encoded, max_capacity, total_inserts) in [
+            (&[0x01, 0x00][..], 0, 0),
+            (&[0x01, 0x00][..], 31, 0),
+            (&[0x07, 0x00][..], 100, 10),
+            (&[0x01, 0x00][..], 64, 0),
+            (&[0x04, 0x00][..], 64, 0),
+            (&[0x02, 0x00][..], 64, 0),
+            (&[0x06, 0x00][..], 100, 10),
+            (&[0x04, 0x89][..], 100, 10),
+            (&[0x01, 0x00][..], 64, u64::MAX),
+            (&[0x00, 0x80][..], 0, 0),
+        ] {
+            let mut b = octets::Octets::with_slice(encoded);
+            assert_eq!(
+                decode_field_section_prefix(&mut b, max_capacity, total_inserts),
+                Err(Error::InvalidHeaderValue)
+            );
+        }
+
+        for encoded in [&[][..], &[0x00][..], &[0x04, 0xff][..]] {
+            let mut b = octets::Octets::with_slice(encoded);
+            assert_eq!(
+                decode_field_section_prefix(&mut b, 100, 10),
+                Err(Error::BufferTooShort)
+            );
+        }
+
+        let mut encoded = [0; 16];
+        let mut out = octets::OctetsMut::with_slice(&mut encoded);
+        out.put_u8(0x04).unwrap();
+        super::super::encode_int(u64::MAX, 0, 7, &mut out).unwrap();
+        let len = out.off();
+        let mut b = octets::Octets::with_slice(&encoded[..len]);
+        assert_eq!(
+            decode_field_section_prefix(&mut b, 100, 10),
+            Err(Error::InvalidHeaderValue)
+        );
 
         assert_eq!(
-            dec.decode(&encoded, u64::MAX),
-            Err(Error::InvalidHeaderValue),
+            Decoder::new().decode(&[0x01, 0x00], u64::MAX),
+            Err(Error::InvalidHeaderValue)
+        );
+        assert_eq!(
+            Decoder::with_max_table_capacity(64).decode(&[0x02, 0x00], u64::MAX),
+            Err(Error::InvalidHeaderValue)
         );
     }
 
-    /// Non-Huffman value in decode_str must be rejected before allocation
-    /// when it exceeds the remaining budget (max_len).
-    ///
-    /// Uses a LiteralWithNameRef with static `:authority` (index 0, 10
-    /// bytes) and a non-Huffman value of 5 bytes. Budget is set so only
-    /// 4 bytes remain for the value after the name is charged.
     #[test]
-    fn non_huffman_value_exceeding_budget_rejected() {
-        // QPACK header block:
-        //   [0x00, 0x00]  required insert count=0, base=0
-        //   [0x50]        LiteralWithNameRef, S=1 (static), name_idx=0
-        //                 (:authority, 10 bytes)
-        //   [0x05]        value: non-huffman (bit 7=0), length=5
-        //   "abcde"       value bytes
-        let encoded = [0x00, 0x00, 0x50, 0x05, 0x61, 0x62, 0x63, 0x64, 0x65];
-
-        // Exact fit: 32 (overhead) + 10 (name) + 5 (value) = 47.
-        assert!(Decoder::new().decode(&encoded, 47).is_ok());
-
-        // One byte too small: budget = 46.
-        // After overhead (32) and name (10): 4 bytes remain, but
-        // value is 5 bytes → rejected.
+    fn large_field_section_limit_does_not_wrap_on_32_bit() {
+        // After the overhead (32) and :authority (10), exactly 2^32 bytes
+        // remain. Truncating that budget to usize would reject a 1-byte value
+        // on a 32-bit target, even though the decoded field needs only 43.
+        let max_size = (1_u64 << 32) + 42;
         assert_eq!(
-            Decoder::new().decode(&encoded, 46),
-            Err(Error::HeaderListTooLarge),
+            Decoder::new().decode(b"\x00\x00\x50\x01a", max_size),
+            Ok(vec![Header::new(b":authority", b"a")])
         );
+
+        // The same budget is also passed to the bounded Huffman decoder.
+        let mut huffman_value = b"\x00\x00\x50\x8c".to_vec();
+        huffman_value.extend(HUFFMAN_WWW_EXAMPLE_COM);
+        assert_eq!(
+            Decoder::new().decode(&huffman_value, max_size),
+            Ok(vec![Header::new(b":authority", b"www.example.com")])
+        );
+
+        // Exercise both the literal name check and the value check after
+        // charging that name: each can encounter exactly 2^32 bytes left.
+        for max_size in [(1_u64 << 32) + 32, (1_u64 << 32) + 33] {
+            assert_eq!(
+                Decoder::new().decode(b"\x00\x00\x21a\x01b", max_size),
+                Ok(vec![Header::new(b"a", b"b")])
+            );
+        }
+
+        let mut huffman_name = b"\x00\x00\x2f\x05".to_vec();
+        huffman_name.extend(HUFFMAN_WWW_EXAMPLE_COM);
+        huffman_name.extend(b"\x01a");
+        assert_eq!(
+            Decoder::new().decode(&huffman_name, (1_u64 << 32) + 32),
+            Ok(vec![Header::new(b"www.example.com", b"a")])
+        );
+
+        let mut dec = decoder_with_custom_entries();
+        let dynamic_limit = (1_u64 << 32) + 38;
+        let dynamic_expected = vec![Header::new(b"x-dddd", b"a")];
+        for encoded in [
+            &b"\x05\x00\x40\x01a"[..], // Dynamic name reference.
+            &b"\x05\x81\x09\x01a"[..], // Post-base name reference.
+        ] {
+            assert_eq!(
+                dec.decode(encoded, dynamic_limit),
+                Ok(dynamic_expected.clone())
+            );
+        }
     }
 
-    /// Non-Huffman name in the Literal arm must be rejected before
-    /// allocation when it exceeds the remaining budget.
-    ///
-    /// Uses a Literal with a 10-byte non-Huffman name and a 1-byte
-    /// non-Huffman value. Budget is set so only 9 bytes remain for the
-    /// name after overhead.
     #[test]
-    fn non_huffman_name_exceeding_budget_rejected() {
-        // QPACK header block:
-        //   [0x00, 0x00]  required insert count=0, base=0
-        //   [0x27, 0x03]  Literal (0b0010_0000), N=0, H=0 (no huffman),
-        //                 name_len=10 (3-bit prefix 0b111 + overflow 0x03)
-        //   "x-custom99"  name bytes (10 bytes)
-        //   [0x01, 0x61]  value: non-huffman, length=1, 'a'
-        let encoded = [
-            0x00, 0x00, // header block prefix
-            0x27, 0x03, // Literal, name_len=10
-            0x78, 0x2d, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x39,
-            0x39, // "x-custom99"
-            0x01, 0x61, // value: length=1, 'a'
-        ];
+    fn literal_fields_enforce_size_limits() {
+        let mut dec = decoder_with_custom_entries();
 
-        // Exact fit: 32 (overhead) + 10 (name) + 1 (value) = 43.
-        assert!(Decoder::new().decode(&encoded, 43).is_ok());
+        for (encoded, exact_size, too_small) in [
+            (&b"\x00\x00\x50\x05abcde"[..], 47, 46),
+            (&b"\x00\x00\x27\x03x-custom99\x01a"[..], 43, 41),
+        ] {
+            assert!(dec.decode(encoded, exact_size).is_ok());
+            assert_eq!(
+                dec.decode(encoded, too_small),
+                Err(Error::HeaderListTooLarge),
+                "encoded={encoded:?}"
+            );
+        }
 
-        // Two bytes too small: budget = 41.
-        // After overhead (32): 9 bytes remain, name is 10 bytes →
-        // rejected at name check.
-        assert_eq!(
-            Decoder::new().decode(&encoded, 41),
-            Err(Error::HeaderListTooLarge),
-        );
-    }
-
-    /// Verify that both Literal and LiteralWithNameRef charge the name to
-    /// the budget *before* Huffman-decoding the value, so the max_len
-    /// passed to the Huffman decoder is equally strict in both paths.
-    #[test]
-    fn literal_with_name_ref_value_budget_ordering() {
-        use crate::h3::qpack;
-
-        // Static table index 0 = `:authority` (10 bytes).
-        // We'll encode the same value two ways:
-        //   1. LiteralWithNameRef using `:authority` (encoder matches static
-        //      table)
-        //   2. Literal using a custom 10-byte name not in the static table
-        //
-        // Both have name_len=10, so budget arithmetic is comparable.
         let value = b"aaaaaaaaaaaaaaaa"; // 16 bytes; Huffman compresses to 10
+        for (prefix, name, exact_size) in [
+            (&b"\x00\x00\x50"[..], &b":authority"[..], 58),
+            (&b"\x00\x00\x27\x03x-custom99"[..], &b"x-custom99"[..], 58),
+            (&b"\x05\x00\x40"[..], &b"x-dddd"[..], 54),
+            (&b"\x05\x81\x09"[..], &b"x-dddd"[..], 54),
+        ] {
+            let mut encoded = [0; 64];
+            let mut out = octets::OctetsMut::with_slice(&mut encoded);
+            out.put_bytes(prefix).unwrap();
+            super::super::encode_str::<false>(value, 0, 7, &mut out).unwrap();
+            let len = out.off();
+            assert_ne!(encoded[prefix.len()] & 0x80, 0);
+            assert_eq!(
+                dec.decode(&encoded[..len], exact_size),
+                Ok(vec![Header::new(name, value)]),
+                "prefix={prefix:?}"
+            );
+            assert_eq!(
+                dec.decode(&encoded[..len], exact_size - 1),
+                Err(Error::HeaderListTooLarge),
+                "prefix={prefix:?}"
+            );
+        }
 
-        // -- Encode as LiteralWithNameRef --
-        let headers_nameref = vec![Header::new(b":authority", value)];
-        let mut buf = [0u8; 64];
-        let mut enc = qpack::Encoder::new();
-        let nameref_len = enc.encode(&headers_nameref, &mut buf).unwrap();
-        let encoded_nameref = buf[..nameref_len].to_vec();
-
-        // -- Encode as Literal (name not in static table) --
-        let headers_literal = vec![Header::new(b"x-custom99", value)];
-        let mut buf = [0u8; 64];
-        let mut enc = qpack::Encoder::new();
-        let literal_len = enc.encode(&headers_literal, &mut buf).unwrap();
-        let encoded_literal = buf[..literal_len].to_vec();
-
-        // Exact budget: 32 (overhead) + 10 (name) + 16 (value) = 58.
-        // Both representations succeed.
+        // Charge the referenced name before reading the value.
         assert_eq!(
-            Decoder::new().decode(&encoded_nameref, 58),
-            Ok(headers_nameref.clone()),
-        );
-        assert_eq!(
-            Decoder::new().decode(&encoded_literal, 58),
-            Ok(headers_literal.clone()),
-        );
-
-        // One byte too small: budget = 57.
-        // Total decoded field size = 10 + 16 = 26, overhead = 32,
-        // so 32 + 26 = 58 > 57. Both reject with HeaderListTooLarge.
-        //
-        // Both paths now follow the same budget ordering:
-        //   1. name charged first (10 bytes) → remaining = 15
-        //   2. decode_str max_len = 15
-        //   3. Huffman decode produces 16 bytes > 15 → rejected
-        assert_eq!(
-            Decoder::new().decode(&encoded_nameref, 57),
-            Err(Error::HeaderListTooLarge),
-        );
-        assert_eq!(
-            Decoder::new().decode(&encoded_literal, 57),
-            Err(Error::HeaderListTooLarge),
+            dec.decode(b"\x05\x00\x40", 37),
+            Err(Error::HeaderListTooLarge)
         );
     }
 
@@ -649,6 +797,16 @@ mod tests {
         super::super::encode_int(capacity, 0x20, 5, &mut bytes).unwrap();
         let len = bytes.off();
         buf[..len].to_vec()
+    }
+
+    fn decoder_with_custom_entries() -> Decoder {
+        let mut dec = decoder_with_max_capacity(192);
+        dec.control(&capacity_instruction(192)).unwrap();
+        dec.control(
+            b"\x43x-a\x03red\x44x-bb\x04blue\x45x-ccc\x05green\x46x-dddd\x04gold",
+        )
+        .unwrap();
+        dec
     }
 
     /// The dynamic table at the end of RFC 9204, Appendix B.5, by absolute
@@ -682,6 +840,113 @@ mod tests {
                 })
             })
             .collect()
+    }
+
+    #[test]
+    fn dynamic_references_decode_and_enforce_field_limits() {
+        let mut dec = decoder_with_custom_entries();
+
+        for (encoded, max_size, expected) in [
+            // RIC=4, Base=2: relative index 0 and post-base indices 0 and 1.
+            (&b"\x05\x81\x80\x10\x11"[..], 124, vec![
+                Header::new(b"x-bb", b"blue"),
+                Header::new(b"x-ccc", b"green"),
+                Header::new(b"x-dddd", b"gold"),
+            ]),
+            (&b"\x05\x83\x12"[..], 42, vec![Header::new(
+                b"x-ccc", b"green",
+            )]),
+            // RIC=3, Base=5: relative index 2 refers to absolute index 2.
+            (&b"\x04\x02\x82"[..], 42, vec![Header::new(
+                b"x-ccc", b"green",
+            )]),
+            (&b"\x04\x02\x42\x01x"[..], 38, vec![Header::new(
+                b"x-ccc", b"x",
+            )]),
+            // RIC=4, Base=4: relative indices 0 and 1. The N bit is set on
+            // the second field line, whose value differs from the table entry.
+            (&b"\x05\x00\x40\x03new\x61\x03alt"[..], 81, vec![
+                Header::new(b"x-dddd", b"new"),
+                Header::new(b"x-ccc", b"alt"),
+            ]),
+            // RIC=4, Base=2: post-base indices 0 and 1. The N bit is set
+            // on the second field line.
+            (&b"\x05\x81\x00\x03new\x09\x03alt"[..], 81, vec![
+                Header::new(b"x-ccc", b"new"),
+                Header::new(b"x-dddd", b"alt"),
+            ]),
+        ] {
+            assert_eq!(
+                dec.decode(encoded, max_size),
+                Ok(expected),
+                "encoded={encoded:?}"
+            );
+            assert_eq!(
+                dec.decode(encoded, max_size - 1),
+                Err(Error::HeaderListTooLarge),
+                "encoded={encoded:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_references_reject_invalid_indices_and_truncation() {
+        let mut dec = decoder_with_max_capacity(80);
+        dec.control(&capacity_instruction(80)).unwrap();
+        dec.control(b"\x41a\x01x\x41b\x01y\x41c\x01z").unwrap();
+
+        for encoded in [b"\x04\x00\x80", b"\x04\x82\x12"] {
+            assert_eq!(
+                dec.decode(encoded, u64::MAX),
+                Ok(vec![Header::new(b"c", b"z")])
+            );
+        }
+
+        // Only the last two entries fit; the first one was evicted.
+        for encoded in [
+            &b"\x04\x00\x82"[..], // Evicted entry by relative index.
+            b"\x04\x82\x10",      // Evicted entry by post-base index.
+            b"\x03\x01\x80",      // Present entry beyond RIC, relative.
+            b"\x03\x81\x12",      // Present entry beyond RIC, post-base.
+            b"\x00\x00\x80",      // Base zero cannot address a relative index.
+            b"\x00\x00\x10",      // RIC zero cannot reference the table.
+            b"\x04\x00\x83",      // Relative index beyond Base.
+            b"\x04\x00\x42\x01v", // Evicted relative index.
+            b"\x04\x82\x00\x01v", // Evicted post-base index.
+            b"\x03\x01\x40\x01v", // Relative reference beyond RIC.
+            b"\x03\x81\x02\x01v", // Post-base reference beyond RIC.
+            b"\x04\x00\x43\x01v", // Relative index exceeds Base.
+            b"\x00\x00\x00\x01v", // RIC zero cannot reference the table.
+            b"\x00\x00\x40\x01a",
+        ] {
+            assert_eq!(
+                dec.decode(encoded, u64::MAX),
+                Err(Error::InvalidHeaderValue),
+                "encoded={encoded:?}"
+            );
+        }
+
+        for (prefix, mask, bits) in [
+            ([0x04, 0x00], 0x80, 6),
+            ([0x04, 0x80], 0x10, 4),
+            ([0x04, 0x00], 0x40, 4),
+            ([0x04, 0x80], 0x00, 3),
+        ] {
+            let mut encoded = [0; 16];
+            let mut out = octets::OctetsMut::with_slice(&mut encoded);
+            out.put_bytes(&prefix).unwrap();
+            super::super::encode_int(u64::MAX, mask, bits, &mut out).unwrap();
+            let len = out.off();
+
+            assert_eq!(
+                dec.decode(&encoded[..len], u64::MAX),
+                Err(Error::InvalidHeaderValue)
+            );
+        }
+
+        for encoded in [&b"\x04\x00\x40"[..], &b"\x04\x82\x02\x01"[..]] {
+            assert_eq!(dec.decode(encoded, u64::MAX), Err(Error::BufferTooShort));
+        }
     }
 
     #[test]
