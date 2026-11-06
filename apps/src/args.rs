@@ -369,21 +369,21 @@ impl Args for ClientArgs {
             None
         };
 
-        let body = if args.get_bool("--body") {
-            std::fs::read(args.get_str("--body")).ok()
+        let body = if !args.get_str("--body").is_empty() {
+            Some(std::fs::read(args.get_str("--body")).unwrap_or_else(|e| { eprintln!("error reading --body: {e}"); std::process::exit(1); }))
         } else {
             None
         };
 
         let method = args.get_str("--method").to_string();
 
-        let connect_to = if args.get_bool("--connect-to") {
+        let connect_to = if !args.get_str("--connect-to").is_empty() {
             Some(args.get_str("--connect-to").to_string())
         } else {
             None
         };
 
-        let session_file = if args.get_bool("--session-file") {
+        let session_file = if !args.get_str("--session-file").is_empty() {
             Some(args.get_str("--session-file").to_string())
         } else {
             None
@@ -473,6 +473,7 @@ Options:
   --qpack-blocked-streams STREAMS   Limit of streams that can be blocked while decoding. Any value other that 0 is currently unsupported.
   --disable-gso               Disable GSO (linux only).
   --disable-pacing            Disable pacing (linux only).
+  --enable-pmtud              Enable Path MTU Discovery.
   --initial-rtt MILLIS     The initial RTT in milliseconds [default: 333].
   --initial-cwnd-packets PACKETS      The initial congestion window size in terms of packet count [default: 10].
   -h --help                   Show this screen.
