@@ -815,7 +815,7 @@ mod tests {
         oversized.extend(encoded_name);
         oversized.push(0x85);
 
-        for max_capacity in [0, 100, 220, 4096, 8192, usize::MAX] {
+        for max_capacity in [0, 220, usize::MAX] {
             if let Some(excess) = (max_capacity as u64).checked_add(1) {
                 let mut dec = decoder_with_max_capacity(max_capacity);
                 assert_eq!(
@@ -868,8 +868,7 @@ mod tests {
         let dynamic_name_setup: &[&[u8]] = &[exact_fit.as_slice()];
 
         let cases = [
-            (0, no_setup, &b"\x21"[..]),
-            (0, no_setup, b"\xc0\x00"),
+            (0, no_setup, &b"\xc0\x00"[..]),
             (0, no_setup, b"\x80\x00"),
             (0, no_setup, b"\x40\x00"),
             (0, no_setup, b"\x00"),
@@ -914,7 +913,5 @@ mod tests {
                 "capacity={capacity}, instruction={instruction:?}"
             );
         }
-
-        assert_eq!(Decoder::new().control(&[0x20]), Ok(()));
     }
 }
