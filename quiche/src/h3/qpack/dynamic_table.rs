@@ -34,25 +34,12 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use super::Error;
+use super::Result;
+
 /// The overhead, in bytes, added to the lengths of an entry's name and value
 /// to compute its size (RFC 9204, Section 3.2.1).
 pub(super) const ENTRY_OVERHEAD: usize = 32;
-
-/// A dynamic table error.
-///
-/// When caused by an encoder instruction, each of these is a connection error
-/// of type `QPACK_ENCODER_STREAM_ERROR`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TableError {
-    /// The capacity exceeds the table's maximum capacity.
-    CapacityExceedsMaximum,
-
-    /// The entry's size exceeds the table's capacity.
-    EntryTooLarge,
-
-    /// The encoder-relative index doesn't refer to a dynamic table entry.
-    InvalidReference,
-}
 
 /// The name of a dynamic table entry.
 #[derive(Clone)]
@@ -89,13 +76,13 @@ pub(crate) struct Entry {
 }
 
 impl Entry {
-    fn new(name: EntryName, value: Arc<[u8]>) -> Result<Entry, TableError> {
+    fn new(name: EntryName, value: Arc<[u8]>) -> Result<Entry> {
         let size = name
             .as_bytes()
             .len()
             .checked_add(value.len())
             .and_then(|len| len.checked_add(ENTRY_OVERHEAD))
-            .ok_or(TableError::EntryTooLarge)?;
+            .ok_or(Error::InvalidEncoderInstruction)?;
 
         Ok(Entry { name, value, size })
     }
@@ -171,9 +158,9 @@ impl DynamicTable {
     /// fit (RFC 9204, Section 4.3.1).
     pub(super) fn set_dynamic_table_capacity(
         &mut self, capacity: u64,
-    ) -> Result<(), TableError> {
+    ) -> Result<()> {
         if capacity > self.max_capacity as u64 {
-            return Err(TableError::CapacityExceedsMaximum);
+            return Err(Error::InvalidEncoderInstruction);
         }
 
         let capacity = capacity as usize;
@@ -185,32 +172,32 @@ impl DynamicTable {
 
     /// Returns the entry with the given encoder-instruction relative index,
     /// where 0 is the most recently inserted entry (RFC 9204, Section 3.2.5).
-    /// Returns `InvalidReference` if the entry was evicted or never inserted.
+    /// Returns an error if the entry was evicted or never inserted.
     pub(super) fn get_by_encoder_relative_index(
         &self, encoder_relative_index: u64,
-    ) -> Result<&Entry, TableError> {
+    ) -> Result<&Entry> {
         let absolute_index = self
             .insert_count
             .checked_sub(encoder_relative_index)
             .and_then(|index| index.checked_sub(1))
-            .ok_or(TableError::InvalidReference)?;
+            .ok_or(Error::InvalidEncoderInstruction)?;
 
         self.get_by_absolute_index(absolute_index)
-            .ok_or(TableError::InvalidReference)
+            .ok_or(Error::InvalidEncoderInstruction)
     }
 
     /// Adds an entry as the newest entry, first evicting the oldest entries to
     /// make room for it (RFC 9204, Section 3.2.2).
     pub(super) fn insert(
         &mut self, name: EntryName, value: Arc<[u8]>,
-    ) -> Result<(), TableError> {
+    ) -> Result<()> {
         let entry = Entry::new(name, value)?;
 
         // The size that the existing entries must fit in alongside `entry`.
         let limit = self
             .capacity
             .checked_sub(entry.size)
-            .ok_or(TableError::EntryTooLarge)?;
+            .ok_or(Error::InvalidEncoderInstruction)?;
 
         self.evict_to(limit);
 
@@ -234,30 +221,5 @@ impl DynamicTable {
 
             self.size -= entry.size;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn distinguishes_table_errors() {
-        let mut table = DynamicTable::new(40);
-        assert_eq!(
-            table.set_dynamic_table_capacity(41),
-            Err(TableError::CapacityExceedsMaximum)
-        );
-        assert_eq!(
-            table.get_by_encoder_relative_index(0).err(),
-            Some(TableError::InvalidReference)
-        );
-
-        table.set_dynamic_table_capacity(40).unwrap();
-        let name = Arc::from(&b"key"[..]);
-        assert_eq!(
-            table.insert(EntryName::Shared(name), Arc::from(&b"foobar"[..])),
-            Err(TableError::EntryTooLarge)
-        );
     }
 }
