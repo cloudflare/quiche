@@ -3188,6 +3188,29 @@ impl<F: BufFactory> Connection<F> {
                 return Err(Error::Done);
             }
 
+            // RFC 9000 §17.2.5.2: After the client has received and processed
+            // an Initial or Retry packet from the server, it MUST discard any
+            // subsequent Retry packets that it receives.
+            if self.recv_count > 0 {
+                return Err(Error::Done);
+            }
+
+            // RFC 9000 §17.2.5.2: A client MUST discard a Retry packet with a
+            // zero-length Retry Token field.
+            if hdr.token.as_ref().is_none_or(|t| t.is_empty()) {
+                return Err(Error::Done);
+            }
+
+            if hdr.dcid != self.source_id() {
+                return Err(Error::Done);
+            }
+
+            // RFC 9000 §17.2.5.2: The server's Retry SCID MUST NOT equal the
+            // client's Initial DCID.
+            if hdr.scid == self.destination_id() {
+                return Err(Error::Done);
+            }
+
             // Check if Retry packet is valid.
             if packet::verify_retry_integrity(
                 &b,
@@ -3507,6 +3530,12 @@ impl<F: BufFactory> Connection<F> {
             )?;
 
             self.got_peer_conn_id = true;
+        } else if !self.is_server &&
+            self.got_peer_conn_id &&
+            hdr.ty != Type::Short &&
+            hdr.scid != self.destination_id()
+        {
+            return Err(Error::Done);
         }
 
         if self.is_server && !self.got_peer_conn_id {
