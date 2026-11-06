@@ -244,13 +244,6 @@ pub use decoder::Decoder;
 pub use encoder::Encoder;
 
 mod decoder;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "parts are unused until field lines can reference the table"
-    )
-)]
 mod dynamic_table;
 mod encoder;
 mod encoder_instructions;

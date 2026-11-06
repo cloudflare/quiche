@@ -630,8 +630,8 @@ impl Config {
     /// The default value is `0`.
     ///
     /// Dynamic table support is incomplete. Non-zero values are intended only
-    /// for testing encoder-stream processing: dynamic references in HEADERS
-    /// cannot yet be decoded, and decoder-stream feedback is not yet sent.
+    /// for testing. HEADERS can reference dynamic table entries already
+    /// received, but decoder-stream feedback is not yet sent.
     ///
     /// Values that cannot fit in `usize` are rejected when creating an HTTP/3
     /// connection, before sending SETTINGS.
@@ -6027,6 +6027,144 @@ mod tests {
             0x201
         );
         assert_eq!(session.poll_server(), Err(Error::Done));
+    }
+
+    fn qpack_insert_dynamic_test_entries(s: &mut Session) {
+        let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
+        let instructions = [
+            &b"\x3f\xbd\x01"[..],        // Capacity 220.
+            &b"\xc0\x0borigin.test"[..], // :authority.
+            &b"\xc1\x05/docs"[..],       // :path.
+            &b"\x46x-mode\x04fast"[..],
+            &b"\x47x-extra\x01z"[..],
+        ]
+        .concat();
+
+        s.pipe
+            .client
+            .stream_send(stream_id, &instructions, false)
+            .unwrap();
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(
+            s.server.stats().qpack_encoder_stream_recv_bytes,
+            instructions.len() as u64
+        );
+        assert!(s.pipe.server.local_error.is_none());
+    }
+
+    // RIC=4, Base=2. The four dynamic representations reference entries
+    // 0 (:authority), 1 (:path), 2 (x-mode), and 3 (x-extra).
+    const QPACK_DYNAMIC_HEADER_BLOCK: &[u8] =
+        b"\x05\x81\xd1\xd7\x81\x40\x08/dynamic\x10\x01\x02v2";
+
+    fn qpack_send_header_block(s: &mut Session, header_block: &[u8]) {
+        s.send_frame_client(
+            frame::Frame::Headers {
+                header_block: header_block.to_vec(),
+            },
+            0,
+            false,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn qpack_dynamic_references_decode_on_request_stream() {
+        let (mut config, mut h3_config) = Session::default_configs().unwrap();
+        h3_config.set_qpack_max_table_capacity(220);
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        s.handshake().unwrap();
+        qpack_insert_dynamic_test_entries(&mut s);
+        qpack_send_header_block(&mut s, QPACK_DYNAMIC_HEADER_BLOCK);
+
+        assert_eq!(
+            s.poll_server(),
+            Ok((0, Event::Headers {
+                list: vec![
+                    Header::new(b":method", b"GET"),
+                    Header::new(b":scheme", b"https"),
+                    Header::new(b":authority", b"origin.test"),
+                    Header::new(b":path", b"/dynamic"),
+                    Header::new(b"x-mode", b"fast"),
+                    Header::new(b"x-extra", b"v2"),
+                ],
+                more_frames: true,
+            }))
+        );
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert!(s.pipe.server.local_error.is_none());
+    }
+
+    #[test]
+    fn qpack_dynamic_invalid_reference_closes_connection() {
+        for header_block in [
+            &b"\x04\x80\xd1\xd7\x11"[..], // RIC=3, but refers to entry 3.
+            &b"\x06\x00\xd1\xd7\xc1"[..], // RIC=5, but only 4 inserts arrived.
+        ] {
+            let (mut config, mut h3_config) = Session::default_configs().unwrap();
+            h3_config.set_qpack_max_table_capacity(220);
+
+            let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+            s.handshake().unwrap();
+            qpack_insert_dynamic_test_entries(&mut s);
+            qpack_send_header_block(&mut s, header_block);
+
+            assert_eq!(s.poll_server(), Err(Error::QpackDecompressionFailed));
+            assert_eq!(
+                s.pipe.server.local_error.as_ref().unwrap().error_code,
+                0x200
+            );
+        }
+    }
+
+    #[test]
+    fn qpack_dynamic_evicted_reference_closes_connection() {
+        let (mut config, mut h3_config) = Session::default_configs().unwrap();
+        h3_config.set_qpack_max_table_capacity(220);
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        s.handshake().unwrap();
+        qpack_insert_dynamic_test_entries(&mut s);
+
+        // Lower the capacity to 100, evicting entries 0 and 1.
+        let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
+        s.pipe
+            .client
+            .stream_send(stream_id, b"\x3f\x45", false)
+            .unwrap();
+        s.advance().ok();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.server.qpack_decoder.dynamic_table_entry(0), None);
+
+        // RIC=4, Base=4, relative index 3 refers to evicted entry 0.
+        qpack_send_header_block(&mut s, b"\x05\x00\xd1\xd7\x83");
+        assert_eq!(s.poll_server(), Err(Error::QpackDecompressionFailed));
+        assert_eq!(
+            s.pipe.server.local_error.as_ref().unwrap().error_code,
+            0x200
+        );
+    }
+
+    #[test]
+    fn qpack_dynamic_field_section_size_limit_closes_connection() {
+        let (mut config, mut h3_config) = Session::default_configs().unwrap();
+        h3_config.set_qpack_max_table_capacity(220);
+        // The decoded field section is 267 bytes, despite its short encoding.
+        h3_config.set_max_field_section_size(266);
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        s.handshake().unwrap();
+        qpack_insert_dynamic_test_entries(&mut s);
+        qpack_send_header_block(&mut s, QPACK_DYNAMIC_HEADER_BLOCK);
+
+        assert_eq!(s.poll_server(), Err(Error::ExcessiveLoad));
+        assert_eq!(
+            s.pipe.server.local_error.as_ref().unwrap().error_code,
+            0x107
+        );
     }
 
     #[test]
