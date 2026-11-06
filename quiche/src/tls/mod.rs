@@ -330,7 +330,7 @@ impl Context {
         map_result(unsafe {
             SSL_CTX_set_tlsext_ticket_keys(
                 self.as_mut_ptr(),
-                key.as_ptr(),
+                key.as_ptr().cast(),
                 key.len(),
             )
         })

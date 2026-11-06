@@ -306,7 +306,7 @@ pub struct ssl_early_data_reason_t(pub ::std::os::raw::c_uint);
 extern "C" {
     // SSL_METHOD specific for boringssl.
     pub(super) fn SSL_CTX_set_tlsext_ticket_keys(
-        ctx: *mut SSL_CTX, key: *const u8, key_len: usize,
+        ctx: *mut SSL_CTX, key: *const c_void, key_len: usize,
     ) -> c_int;
     fn SSL_CTX_set_early_data_enabled(ctx: *mut SSL_CTX, enabled: i32);
 
