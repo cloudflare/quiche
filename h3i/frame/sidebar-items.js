@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["H3iFrame"],"struct":["CloseTriggerFrame","EnrichedHeaders","ResetStream","SerializableHeader","SerializableQFrame"],"type":["BoxError","HeaderMap"]};
