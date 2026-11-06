@@ -12982,6 +12982,127 @@ fn send_ack_eliciting_causes_ping(
     assert_eq!(iter.next(), Some(&frame::Frame::Ping { mtu_probe: None }));
 }
 
+/// Defer a PING-only packet when cwnd leaves 1..=3 payload bytes: otherwise
+/// it is too short for the header-protection sample.
+#[rstest]
+fn ping_padding_near_full_cwnd(
+    #[values("cubic", "reno")] cc_algorithm_name: &str,
+    #[values(1, 2, 3, 4)] pn_len: usize,
+    #[values(1, 2, 3, 4)] remaining_payload: usize,
+) {
+    let mut buf = [0; 1500];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let epoch = packet::Epoch::Application;
+    let active_pid = pipe.server.paths.get_active_path_id().unwrap();
+
+    let largest_acked = pipe
+        .server
+        .paths
+        .get(active_pid)
+        .unwrap()
+        .recovery
+        .get_largest_acked_on_epoch(epoch)
+        .unwrap_or(0);
+
+    // Mid-bucket packet numbers keep the requested length after +1.
+    let pn_delta = match pn_len {
+        1 => 10,
+        2 => 200,
+        3 => 40_000,
+        4 => 9_000_000,
+        _ => unreachable!(),
+    };
+
+    // Keep the synthetic packet number distinct from the real one.
+    let synthetic_pn = largest_acked + pn_delta;
+    pipe.server.next_pkt_num = synthetic_pn + 1;
+
+    // Random packet number skipping would break the forced length.
+    pipe.server.pkt_num_manager.set_skip_pn(None);
+
+    assert_eq!(
+        packet::pkt_num_len(pipe.server.next_pkt_num, largest_acked),
+        pn_len,
+    );
+
+    let dcid_len = pipe.client.source_id().len();
+    let crypto_overhead =
+        pipe.server.crypto_ctx[epoch].crypto_overhead().unwrap();
+    let overhead = 1 + dcid_len + pn_len + crypto_overhead;
+
+    // Leave only `remaining_payload` bytes of cwnd for the payload.
+    let target_cwnd = overhead + remaining_payload;
+    let handshake_status = pipe.server.handshake_status();
+    let now = Instant::now();
+
+    let path = pipe.server.paths.get_mut(active_pid).unwrap();
+    let cwnd_available = path.recovery.cwnd_available();
+    assert!(cwnd_available > target_cwnd);
+
+    path.recovery.on_packet_sent(
+        test_utils::helper_packet_sent(
+            synthetic_pn,
+            now,
+            cwnd_available - target_cwnd,
+        ),
+        epoch,
+        handshake_status,
+        now,
+        "",
+    );
+    assert_eq!(path.recovery.cwnd_available(), target_cwnd);
+
+    pipe.server.send_ack_eliciting().unwrap();
+
+    let res = pipe.server.send(&mut buf);
+
+    if remaining_payload < PAYLOAD_MIN_LEN {
+        assert!(
+            matches!(res, Err(Error::Done)),
+            "expected PING to be deferred with {remaining_payload} remaining \
+             payload bytes, got {res:?}",
+        );
+        assert_eq!(pipe.server.next_pkt_num, synthetic_pn + 1);
+        assert!(
+            pipe.server
+                .paths
+                .get(active_pid)
+                .unwrap()
+                .needs_ack_eliciting
+        );
+
+        // A loss probe bypasses cwnd and emits the deferred PING padded.
+        pipe.server
+            .paths
+            .get_mut(active_pid)
+            .unwrap()
+            .recovery
+            .inc_loss_probes(epoch);
+
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+        assert!(len >= overhead + PAYLOAD_MIN_LEN);
+
+        let frames =
+            test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+        assert!(frames
+            .iter()
+            .any(|f| matches!(f, frame::Frame::Ping { mtu_probe: None })));
+    } else {
+        let (len, _) = res.unwrap();
+        assert!(len >= overhead + PAYLOAD_MIN_LEN);
+
+        let frames =
+            test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+        assert!(frames
+            .iter()
+            .any(|f| matches!(f, frame::Frame::Ping { mtu_probe: None })));
+    }
+}
+
 #[rstest]
 fn send_ack_eliciting_no_ping(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,

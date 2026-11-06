@@ -4698,6 +4698,16 @@ impl<F: BufFactory> Connection<F> {
                 .saturating_sub(left_before_packing_ack_frame - left),
         );
 
+        // If no frame has been packed yet, defer the packet unless the
+        // remaining budget can hold the minimum payload. Otherwise a one-byte
+        // frame (e.g. PING or HANDSHAKE_DONE) can be written and the later
+        // minimum-padding pass will silently fail, producing a packet too short
+        // for the header-protection sample.
+        if frames.is_empty() && left < PAYLOAD_MIN_LEN {
+            path.recovery.update_app_limited(false);
+            return Err(Error::Done);
+        }
+
         let mut challenge_data = None;
 
         if pkt_type == Type::Short {
