@@ -124,6 +124,38 @@ const SESSIONS_STYLES: &str = r#"
 </style>
 "#;
 
+/// Escapes the characters that would otherwise let log-derived text break out
+/// of the HTML context it is written into.
+fn escape_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+
+    out
+}
+
+/// Builds an [`HtmlTable`] out of `rows`, escaping each cell first.
+///
+/// Cell text is taken from the log file and `table_to_html` writes it out
+/// verbatim, so it has to be escaped here.
+fn escaped_html_table(rows: Vec<Vec<String>>) -> HtmlTable {
+    let rows: Vec<Vec<String>> = rows
+        .into_iter()
+        .map(|row| row.iter().map(|cell| escape_html(cell)).collect())
+        .collect();
+
+    HtmlTable::with_header(rows)
+}
+
 fn inject_table_id_class(
     input: &HtmlTable, id: Option<String>, class: Option<String>,
 ) -> String {
@@ -175,9 +207,9 @@ pub fn overview(log_file: &LogFileParseResult, config: &AppConfig) {
             and <a href="requests.html">requests breakdown</a>.</p>
             "#.as_bytes()).unwrap();
 
-    let all_table = HtmlTable::with_header(Vec::<Vec<String>>::from(
-        Table::builder(log_file.details.sessions.values()),
-    ));
+    let all_table = escaped_html_table(Vec::<Vec<String>>::from(Table::builder(
+        log_file.details.sessions.values(),
+    )));
     file.write_all(
         inject_table_id_class(
             &all_table,
@@ -236,7 +268,7 @@ pub fn closures(log_file: &LogFileParseResult, config: &AppConfig) {
             <h2 class="center">HTTP/2 Connections</h2>"#.as_bytes()).unwrap();
 
     let mut h2_html_table =
-        HtmlTable::with_header(Vec::<Vec<String>>::from(Table::builder(h2)));
+        escaped_html_table(Vec::<Vec<String>>::from(Table::builder(h2)));
     h2_html_table.visit_mut(H2ClosureTableDecorator { i: 0 });
 
     file.write_all(
@@ -260,7 +292,7 @@ pub fn closures(log_file: &LogFileParseResult, config: &AppConfig) {
     .unwrap();
 
     let mut quic_html_table =
-        HtmlTable::with_header(Vec::<Vec<String>>::from(Table::builder(quic)));
+        escaped_html_table(Vec::<Vec<String>>::from(Table::builder(quic)));
     quic_html_table.visit_mut(QUICClosureTableDecorator { i: 0 });
     file.write_all(
         inject_table_id_class(
@@ -347,14 +379,18 @@ pub fn requests(log_file: &LogFileParseResult, config: &AppConfig) {
     .unwrap();
 
     for data in &log_file.data {
+        let host = escape_html(&format!(
+            "{:?}",
+            data.datastore
+                .host
+                .clone()
+                .unwrap_or("ERROR UNKNOWN".to_string())
+        ));
+
         file.write_all(
             format!(
-                "<h2 class=\"center\">Session ID: {:?}, {:?}, {:?}</h2>",
+                "<h2 class=\"center\">Session ID: {:?}, {host}, {:?}</h2>",
                 data.datastore.session_id.unwrap_or(-1),
-                data.datastore
-                    .host
-                    .clone()
-                    .unwrap_or("ERROR UNKNOWN".to_string()),
                 data.datastore.application_proto
             )
             .as_bytes(),
@@ -365,7 +401,7 @@ pub fn requests(log_file: &LogFileParseResult, config: &AppConfig) {
         // it back to a builder to pass to HtmlTable.
         let table: tabled::builder::Builder =
             request_timing_table(data, config).unwrap().into();
-        let mut reqs = HtmlTable::with_header(Vec::<Vec<String>>::from(table));
+        let mut reqs = escaped_html_table(Vec::<Vec<String>>::from(table));
 
         // colorize the table
         reqs.visit_mut(RequestTableDecorator { i: 0 });
@@ -396,7 +432,7 @@ pub fn requests(log_file: &LogFileParseResult, config: &AppConfig) {
 
 pub fn event_list_html_from_sqlog(events: &[qlog::reader::Event]) -> String {
     let table = sqlog_event_list(events);
-    let table = HtmlTable::with_header(Vec::<Vec<String>>::from(table));
+    let table = escaped_html_table(Vec::<Vec<String>>::from(table));
     inject_table_id_class(
         &table,
         None,
@@ -655,5 +691,41 @@ impl HtmlVisitorMut for RequestTableDecorator {
         }
 
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_table_escapes_log_markup() {
+        let ev = qlog::events::JsonEvent {
+            time: 0.0,
+            importance: Default::default(),
+            name: "transport:<img src=x onerror=alert(1)>".to_string(),
+            data: serde_json::json!({
+                "raw": "</td></tr></table><script>alert(1)</script>"
+            }),
+        };
+
+        let html = event_list_html_from_sqlog(&[qlog::reader::Event::Json(ev)]);
+
+        assert!(!html.contains("<img"));
+        assert!(!html.contains("<script>"));
+        assert!(!html.contains("</table><"));
+
+        assert!(html.contains("&lt;img src=x onerror=alert(1)&gt;"));
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    }
+
+    #[test]
+    fn escape_html_leaves_plain_text_alone() {
+        assert_eq!(
+            escape_html("transport:packet_received"),
+            "transport:packet_received"
+        );
+        assert_eq!(escape_html("n/a"), "n/a");
+        assert_eq!(escape_html("200"), "200");
     }
 }
