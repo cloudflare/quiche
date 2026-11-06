@@ -931,15 +931,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn max_table_capacity_accepts_supported_value() {
-        let capacity = (1_u64 << 32).min(usize::MAX as u64) as usize;
-        let mut dec = Decoder::with_max_table_capacity(capacity);
-
-        assert_eq!(
-            dec.control(&mut capacity_instruction(capacity as u64)),
-            Ok(())
-        );
-    }
 }

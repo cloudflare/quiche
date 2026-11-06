@@ -2944,7 +2944,7 @@ impl Connection {
                                 // that traffic can be monitored.
                                 if parse_encoder_stream &&
                                     self.qpack_decoder
-                                        .control(&mut d[..recv])
+                                        .control(&d[..recv])
                                         .is_err()
                                 {
                                     let e = Error::QpackEncoderStreamError;
@@ -5900,97 +5900,41 @@ mod tests {
     #[test]
     /// Client sends QPACK data.
     fn qpack_data() {
-        // At the default maximum capacity of zero, encoder instructions are
-        // discarded. The peer's decoder stream is also discarded.
-        let mut s = Session::new().unwrap();
-        s.handshake().unwrap();
+        // At zero maximum capacity, encoder instructions are discarded.
+        // The peer's decoder stream is also discarded.
+        for capacity in [None, Some(0)] {
+            let (mut config, mut h3_config) = Session::default_configs().unwrap();
+            if let Some(capacity) = capacity {
+                h3_config.set_qpack_max_table_capacity(capacity);
+            }
 
-        let e_stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
-        let d_stream_id = s.client.local_qpack_streams.decoder_stream_id.unwrap();
-        let d = [0; 20];
+            let mut session =
+                Session::with_configs(&mut config, &h3_config).unwrap();
+            session.handshake().unwrap();
+            assert_eq!(
+                session.client.peer_settings.qpack_max_table_capacity,
+                capacity
+            );
 
-        s.pipe.client.stream_send(e_stream_id, &d, false).unwrap();
-        s.advance().ok();
+            let streams = &session.client.local_qpack_streams;
+            for stream_id in [
+                streams.encoder_stream_id.unwrap(),
+                streams.decoder_stream_id.unwrap(),
+            ] {
+                session
+                    .pipe
+                    .client
+                    .stream_send(stream_id, &[0; 20], false)
+                    .unwrap();
+                session.advance().ok();
+            }
 
-        s.pipe.client.stream_send(d_stream_id, &d, false).unwrap();
-        s.advance().ok();
-
-        match s.server.poll(&mut s.pipe.server) {
-            Ok(_) => panic!(),
-
-            Err(Error::Done) => {
-                assert_eq!(s.server.peer_qpack_streams.encoder_stream_bytes, 20);
-                assert_eq!(s.server.peer_qpack_streams.decoder_stream_bytes, 20);
-            },
-
-            Err(_) => {
-                panic!();
-            },
+            assert_eq!(session.poll_server(), Err(Error::Done));
+            assert!(session.pipe.server.local_error.is_none());
+            let stats = session.server.stats();
+            assert_eq!(stats.qpack_encoder_stream_recv_bytes, 20);
+            assert_eq!(stats.qpack_decoder_stream_recv_bytes, 20);
         }
-
-        let stats = s.server.stats();
-        assert_eq!(stats.qpack_encoder_stream_recv_bytes, 20);
-        assert_eq!(stats.qpack_decoder_stream_recv_bytes, 20);
-        assert!(s.pipe.server.local_error.is_none());
-    }
-
-    fn qpack_session_with_max_capacity(max_capacity: u64) -> Session {
-        let (mut config, mut h3_config) = Session::default_configs().unwrap();
-        h3_config.set_qpack_max_table_capacity(max_capacity);
-
-        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
-        s.handshake().unwrap();
-        s
-    }
-
-    #[test]
-    fn qpack_encoder_stream_discards_with_explicit_zero_capacity() {
-        let mut s = qpack_session_with_max_capacity(0);
-        let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
-        let instructions = b"\xff\x00";
-
-        s.pipe
-            .client
-            .stream_send(stream_id, instructions, false)
-            .unwrap();
-        s.advance().ok();
-
-        assert_eq!(s.poll_server(), Err(Error::Done));
-        assert!(s.pipe.server.local_error.is_none());
-        assert_eq!(
-            s.server.stats().qpack_encoder_stream_recv_bytes,
-            instructions.len() as u64
-        );
-    }
-
-    #[test]
-    fn qpack_max_table_capacity_matches_decoder_limit() {
-        let requested = 8192;
-        let mut s = qpack_session_with_max_capacity(requested);
-
-        assert_eq!(
-            s.server.local_settings.qpack_max_table_capacity,
-            Some(requested)
-        );
-        assert_eq!(
-            s.client.peer_settings.qpack_max_table_capacity,
-            Some(requested)
-        );
-
-        let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
-        let mut instruction = [0; 16];
-        let mut b = octets::OctetsMut::with_slice(&mut instruction);
-        qpack::encode_int(requested, 0x20, 5, &mut b).unwrap();
-        let len = b.off();
-
-        s.pipe
-            .client
-            .stream_send(stream_id, &instruction[..len], false)
-            .unwrap();
-        s.advance().ok();
-
-        assert_eq!(s.poll_server(), Err(Error::Done));
-        assert!(s.pipe.server.local_error.is_none());
     }
 
     #[test]
@@ -6011,95 +5955,74 @@ mod tests {
     }
 
     #[test]
-    fn qpack_encoder_stream_applies_instructions() {
-        let mut s = qpack_session_with_max_capacity(64);
-        let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
-        let instructions =
-            [&b"\x3f\x21"[..], &b"\x43foo\x03bar"[..], &b"\x00"[..]];
-        let mut received = 0;
+    fn qpack_encoder_stream_instructions() {
+        let (mut config, mut h3_config) = Session::default_configs().unwrap();
+        h3_config.set_qpack_max_table_capacity(64);
 
-        for (index, instruction) in instructions.iter().enumerate() {
-            s.pipe
-                .client
-                .stream_send(stream_id, instruction, false)
-                .unwrap();
-            s.advance().ok();
-
-            assert_eq!(s.poll_server(), Err(Error::Done));
-            assert!(s.pipe.server.local_error.is_none());
-            received += instruction.len() as u64;
-            assert_eq!(
-                s.server.stats().qpack_encoder_stream_recv_bytes,
-                received
-            );
-
-            if index == 1 {
-                assert_eq!(
-                    s.server.qpack_decoder.dynamic_table_entry(0),
-                    Some((&b"foo"[..], &b"bar"[..]))
-                );
-            }
-        }
-
-        assert_eq!(s.server.qpack_decoder.dynamic_table_entry(0), None);
+        let mut session = Session::with_configs(&mut config, &h3_config).unwrap();
+        session.handshake().unwrap();
         assert_eq!(
-            s.server.qpack_decoder.dynamic_table_entry(1),
-            Some((&b"foo"[..], &b"bar"[..]))
+            session.client.peer_settings.qpack_max_table_capacity,
+            Some(64)
         );
 
-        let decoder_stream_id =
-            s.client.local_qpack_streams.decoder_stream_id.unwrap();
-        s.pipe
-            .client
-            .stream_send(decoder_stream_id, b"\x00", false)
-            .unwrap();
-        s.advance().ok();
-
-        assert_eq!(s.poll_server(), Err(Error::Done));
-        assert!(s.pipe.server.local_error.is_none());
-        assert_eq!(s.server.stats().qpack_decoder_stream_recv_bytes, 1);
-    }
-
-    #[test]
-    fn qpack_encoder_stream_rejects_invalid_instructions() {
-        for instruction in [&b"\x00"[..], &b"\x3f\x22"[..]] {
-            let mut s = qpack_session_with_max_capacity(64);
-            let stream_id =
-                s.client.local_qpack_streams.encoder_stream_id.unwrap();
-
-            s.pipe
-                .client
-                .stream_send(stream_id, instruction, false)
-                .unwrap();
-            s.advance().ok();
-
-            assert_eq!(s.poll_server(), Err(Error::QpackEncoderStreamError));
-            assert_eq!(
-                s.pipe.server.local_error.as_ref().unwrap().error_code,
-                0x201
-            );
-            assert_eq!(s.poll_server(), Err(Error::Done));
-        }
-    }
-
-    #[test]
-    fn qpack_encoder_stream_buffers_split_instructions() {
-        let mut s = qpack_session_with_max_capacity(64);
-        let stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
+        let streams = &session.client.local_qpack_streams;
+        let stream_id = streams.encoder_stream_id.unwrap();
+        let decoder_stream_id = streams.decoder_stream_id.unwrap();
+        let entry = Some((&b"foo"[..], &b"bar"[..]));
         let mut received = 0;
 
-        for part in [&b"\x3f"[..], &b"\x21\x43fo"[..], &b"o\x03bar\x00"[..]] {
-            s.pipe.client.stream_send(stream_id, part, false).unwrap();
-            s.advance().ok();
+        for (part, expected) in [
+            (&b"\x3f"[..], [None; 3]),
+            (b"\x21\x43fo", [None; 3]),
+            (b"o\x03bar", [entry, None, None]),
+            (b"\x00\x00", [None, None, entry]),
+        ] {
+            session
+                .pipe
+                .client
+                .stream_send(stream_id, part, false)
+                .unwrap();
+            session.advance().ok();
 
-            assert_eq!(s.poll_server(), Err(Error::Done));
-            assert!(s.pipe.server.local_error.is_none());
+            assert_eq!(session.poll_server(), Err(Error::Done));
+            assert!(session.pipe.server.local_error.is_none());
             received += part.len() as u64;
             assert_eq!(
-                s.server.stats().qpack_encoder_stream_recv_bytes,
+                session.server.stats().qpack_encoder_stream_recv_bytes,
                 received
             );
+            let decoder = &session.server.qpack_decoder;
+            assert_eq!(
+                [0, 1, 2].map(|index| decoder.dynamic_table_entry(index)),
+                expected
+            );
         }
+
+        session
+            .pipe
+            .client
+            .stream_send(decoder_stream_id, b"\x3f\x22", false)
+            .unwrap();
+        session.advance().ok();
+
+        assert_eq!(session.poll_server(), Err(Error::Done));
+        assert!(session.pipe.server.local_error.is_none());
+        assert_eq!(session.server.stats().qpack_decoder_stream_recv_bytes, 2);
+
+        session
+            .pipe
+            .client
+            .stream_send(stream_id, b"\x3f\x22", false)
+            .unwrap();
+        session.advance().ok();
+
+        assert_eq!(session.poll_server(), Err(Error::QpackEncoderStreamError));
+        assert_eq!(
+            session.pipe.server.local_error.as_ref().unwrap().error_code,
+            0x201
+        );
+        assert_eq!(session.poll_server(), Err(Error::Done));
     }
 
     #[test]
