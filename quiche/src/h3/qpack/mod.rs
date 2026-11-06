@@ -59,6 +59,10 @@ pub enum Error {
 
     /// The decoded header list exceeded the size limit.
     HeaderListTooLarge,
+
+    /// An encoder instruction is malformed or can't be applied to the dynamic
+    /// table.
+    InvalidEncoderInstruction,
 }
 
 impl std::fmt::Display for Error {
@@ -244,9 +248,10 @@ mod decoder;
     not(test),
     expect(
         dead_code,
-        reason = "not used until the decoder processes encoder instructions"
+        reason = "parts are unused until field lines can reference the table"
     )
 )]
 mod dynamic_table;
 mod encoder;
+mod encoder_instructions;
 mod static_table;
