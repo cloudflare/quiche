@@ -404,6 +404,9 @@ pub enum Error {
     /// QPACK Header block decompression failure.
     QpackDecompressionFailed,
 
+    /// An error occurred on the peer's QPACK encoder stream.
+    QpackEncoderStreamError,
+
     /// Error originated from the transport layer.
     TransportError(crate::Error),
 
@@ -504,6 +507,7 @@ impl Error {
             Error::IdError => WireErrorCode::IdError as u64,
             Error::MissingSettings => WireErrorCode::MissingSettings as u64,
             Error::QpackDecompressionFailed => 0x200,
+            Error::QpackEncoderStreamError => 0x201,
             Error::BufferTooShort => 0x999,
             Error::TransportError { .. } | Error::StreamBlocked => 0xFF,
             Error::SettingsError => WireErrorCode::SettingsError as u64,
@@ -539,6 +543,7 @@ impl Error {
             Error::MessageError => -18,
             Error::ConnectError => -19,
             Error::VersionFallback => -20,
+            Error::QpackEncoderStreamError => -21,
 
             Error::TransportError(quic_error) => quic_error.to_c() - 1000,
         }
@@ -623,6 +628,13 @@ impl Config {
     /// Sets the `SETTINGS_QPACK_MAX_TABLE_CAPACITY` setting.
     ///
     /// The default value is `0`.
+    ///
+    /// Dynamic table support is incomplete. Non-zero values are intended only
+    /// for testing encoder-stream processing: dynamic references in HEADERS
+    /// cannot yet be decoded, and decoder-stream feedback is not yet sent.
+    ///
+    /// Values that cannot fit in `usize` are rejected when creating an HTTP/3
+    /// connection, before sending SETTINGS.
     pub fn set_qpack_max_table_capacity(&mut self, v: u64) {
         self.qpack_max_table_capacity = Some(v);
     }
@@ -630,6 +642,10 @@ impl Config {
     /// Sets the `SETTINGS_QPACK_BLOCKED_STREAMS` setting.
     ///
     /// The default value is `0`.
+    ///
+    /// Blocked field sections are not supported: headers cannot wait for
+    /// missing dynamic table entries. Keep this at `0`, even with a non-zero
+    /// table capacity.
     pub fn set_qpack_blocked_streams(&mut self, v: u64) {
         self.qpack_blocked_streams = Some(v);
     }
@@ -1034,6 +1050,9 @@ impl Connection {
     fn new(
         config: &Config, is_server: bool, enable_dgram: bool,
     ) -> Result<Connection> {
+        let max_table_capacity =
+            usize::try_from(config.qpack_max_table_capacity.unwrap_or(0))
+                .map_err(|_| Error::SettingsError)?;
         let initial_uni_stream_id = if is_server { 0x3 } else { 0x2 };
         let h3_datagram = if enable_dgram { Some(1) } else { None };
 
@@ -1070,7 +1089,11 @@ impl Connection {
             peer_control_stream_id: None,
 
             qpack_encoder: qpack::Encoder::new(),
-            qpack_decoder: qpack::Decoder::new(),
+            // The maximum that our SETTINGS advertise, which is zero when the
+            // setting isn't sent (RFC 9204, Section 5).
+            qpack_decoder: qpack::Decoder::with_max_table_capacity(
+                max_table_capacity,
+            ),
 
             local_qpack_streams: Default::default(),
             peer_qpack_streams: Default::default(),
@@ -2910,23 +2933,40 @@ impl Connection {
 
                 stream::State::QpackInstruction => {
                     let mut d = [0; 4096];
+                    let parse_encoder_stream =
+                        self.qpack_decoder.should_parse_encoder_stream();
 
-                    // Read data from the stream and discard immediately.
-                    //
-                    // TODO: pass encoder stream data to the QPACK decoder. If
-                    // it fails, close the connection with a new Error variant
-                    // whose wire code is QPACK_ENCODER_STREAM_ERROR, 0x201
-                    // (RFC 9204, Section 6).
                     loop {
                         let (recv, fin) = conn.stream_recv(stream_id, &mut d)?;
 
                         match stream.ty() {
-                            Some(stream::Type::QpackEncoder) =>
+                            Some(stream::Type::QpackEncoder) => {
                                 self.peer_qpack_streams.encoder_stream_bytes +=
-                                    recv as u64,
-                            Some(stream::Type::QpackDecoder) =>
+                                    recv as u64;
+
+                                // Keep discarding at max capacity zero until
+                                // that traffic can be monitored.
+                                if parse_encoder_stream &&
+                                    self.qpack_decoder
+                                        .control(&d[..recv])
+                                        .is_err()
+                                {
+                                    let e = Error::QpackEncoderStreamError;
+                                    conn.close(
+                                        true,
+                                        e.to_wire(),
+                                        b"Error parsing QPACK encoder stream",
+                                    )?;
+
+                                    return Err(e);
+                                }
+                            },
+
+                            Some(stream::Type::QpackDecoder) => {
                                 self.peer_qpack_streams.decoder_stream_bytes +=
-                                    recv as u64,
+                                    recv as u64;
+                            },
+
                             _ => unreachable!(),
                         };
 
@@ -5864,37 +5904,129 @@ mod tests {
     #[test]
     /// Client sends QPACK data.
     fn qpack_data() {
-        // TODO: QPACK instructions are ignored until dynamic table support is
-        // added so we just test that the data is safely ignored.
-        let mut s = Session::new().unwrap();
-        s.handshake().unwrap();
+        // At zero maximum capacity, encoder instructions are discarded.
+        // The peer's decoder stream is also discarded.
+        for capacity in [None, Some(0)] {
+            let (mut config, mut h3_config) = Session::default_configs().unwrap();
+            if let Some(capacity) = capacity {
+                h3_config.set_qpack_max_table_capacity(capacity);
+            }
 
-        let e_stream_id = s.client.local_qpack_streams.encoder_stream_id.unwrap();
-        let d_stream_id = s.client.local_qpack_streams.decoder_stream_id.unwrap();
-        let d = [0; 20];
+            let mut session =
+                Session::with_configs(&mut config, &h3_config).unwrap();
+            session.handshake().unwrap();
+            assert_eq!(
+                session.client.peer_settings.qpack_max_table_capacity,
+                capacity
+            );
 
-        s.pipe.client.stream_send(e_stream_id, &d, false).unwrap();
-        s.advance().ok();
+            let streams = &session.client.local_qpack_streams;
+            for stream_id in [
+                streams.encoder_stream_id.unwrap(),
+                streams.decoder_stream_id.unwrap(),
+            ] {
+                session
+                    .pipe
+                    .client
+                    .stream_send(stream_id, &[0; 20], false)
+                    .unwrap();
+                session.advance().ok();
+            }
 
-        s.pipe.client.stream_send(d_stream_id, &d, false).unwrap();
-        s.advance().ok();
+            assert_eq!(session.poll_server(), Err(Error::Done));
+            assert!(session.pipe.server.local_error.is_none());
+            let stats = session.server.stats();
+            assert_eq!(stats.qpack_encoder_stream_recv_bytes, 20);
+            assert_eq!(stats.qpack_decoder_stream_recv_bytes, 20);
+        }
+    }
 
-        match s.server.poll(&mut s.pipe.server) {
-            Ok(_) => panic!(),
+    #[test]
+    fn qpack_max_table_capacity_must_fit_on_target() {
+        let mut config = Config::new().unwrap();
+        let capacity = 1_u64 << 32;
+        config.set_qpack_max_table_capacity(capacity);
 
-            Err(Error::Done) => {
-                assert_eq!(s.server.peer_qpack_streams.encoder_stream_bytes, 20);
-                assert_eq!(s.server.peer_qpack_streams.decoder_stream_bytes, 20);
-            },
+        let result = Connection::new(&config, true, false);
+        if usize::try_from(capacity).is_err() {
+            assert!(matches!(result, Err(Error::SettingsError)));
+        } else {
+            assert_eq!(
+                result.unwrap().local_settings.qpack_max_table_capacity,
+                Some(capacity)
+            );
+        }
+    }
 
-            Err(_) => {
-                panic!();
-            },
+    #[test]
+    fn qpack_encoder_stream_instructions() {
+        let (mut config, mut h3_config) = Session::default_configs().unwrap();
+        h3_config.set_qpack_max_table_capacity(64);
+
+        let mut session = Session::with_configs(&mut config, &h3_config).unwrap();
+        session.handshake().unwrap();
+        assert_eq!(
+            session.client.peer_settings.qpack_max_table_capacity,
+            Some(64)
+        );
+
+        let streams = &session.client.local_qpack_streams;
+        let stream_id = streams.encoder_stream_id.unwrap();
+        let decoder_stream_id = streams.decoder_stream_id.unwrap();
+        let entry = Some((&b"foo"[..], &b"bar"[..]));
+        let mut received = 0;
+
+        for (part, expected) in [
+            (&b"\x3f"[..], [None; 3]),
+            (b"\x21\x43fo", [None; 3]),
+            (b"o\x03bar", [entry, None, None]),
+            (b"\x00\x00", [None, None, entry]),
+        ] {
+            session
+                .pipe
+                .client
+                .stream_send(stream_id, part, false)
+                .unwrap();
+            session.advance().ok();
+
+            assert_eq!(session.poll_server(), Err(Error::Done));
+            assert!(session.pipe.server.local_error.is_none());
+            received += part.len() as u64;
+            assert_eq!(
+                session.server.stats().qpack_encoder_stream_recv_bytes,
+                received
+            );
+            let decoder = &session.server.qpack_decoder;
+            assert_eq!(
+                [0, 1, 2].map(|index| decoder.dynamic_table_entry(index)),
+                expected
+            );
         }
 
-        let stats = s.server.stats();
-        assert_eq!(stats.qpack_encoder_stream_recv_bytes, 20);
-        assert_eq!(stats.qpack_decoder_stream_recv_bytes, 20);
+        session
+            .pipe
+            .client
+            .stream_send(decoder_stream_id, b"\x3f\x22", false)
+            .unwrap();
+        session.advance().ok();
+
+        assert_eq!(session.poll_server(), Err(Error::Done));
+        assert!(session.pipe.server.local_error.is_none());
+        assert_eq!(session.server.stats().qpack_decoder_stream_recv_bytes, 2);
+
+        session
+            .pipe
+            .client
+            .stream_send(stream_id, b"\x3f\x22", false)
+            .unwrap();
+        session.advance().ok();
+
+        assert_eq!(session.poll_server(), Err(Error::QpackEncoderStreamError));
+        assert_eq!(
+            session.pipe.server.local_error.as_ref().unwrap().error_code,
+            0x201
+        );
+        assert_eq!(session.poll_server(), Err(Error::Done));
     }
 
     #[test]
