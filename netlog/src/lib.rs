@@ -184,8 +184,11 @@ pub fn read_netlog_constants<R: BufRead>(
 
     // Read the constants line and replace the trailing comma (,) with a brace
     // (}) to close the object and make it parseable.
-    let len = reader.read_until(b'\n', &mut buf).unwrap();
-    buf[len - 2] = b'}';
+    reader.read_until(b'\n', &mut buf).unwrap();
+    trim_line_ending(&mut buf);
+    if let Some(last) = buf.last_mut() {
+        *last = b'}';
+    }
 
     let res: Result<ConstantsLine, serde_json::Error> =
         serde_json::from_slice(&buf);
@@ -219,12 +222,14 @@ pub fn read_netlog_record<R: BufRead>(reader: &mut R) -> Option<Vec<u8>> {
         return None;
     }
 
-    // Remove trailing comma and newline
-    buf.truncate(buf.len() - 2);
+    trim_line_ending(&mut buf);
+    if buf.last() == Some(&b',') {
+        buf.pop();
+    }
 
     // Last line of events closes array. Lets ignore it.
-    if buf[buf.len() - 1] == b']' {
-        buf.truncate(buf.len() - 1);
+    if buf.last() == Some(&b']') {
+        buf.pop();
     }
 
     log::trace!(
@@ -233,6 +238,15 @@ pub fn read_netlog_record<R: BufRead>(reader: &mut R) -> Option<Vec<u8>> {
     );
 
     Some(buf)
+}
+
+fn trim_line_ending(buf: &mut Vec<u8>) {
+    if buf.last() == Some(&b'\n') {
+        buf.pop();
+    }
+    if buf.last() == Some(&b'\r') {
+        buf.pop();
+    }
 }
 
 /// Parses the provided `event` based on the event type provided in `event_hdr`.
