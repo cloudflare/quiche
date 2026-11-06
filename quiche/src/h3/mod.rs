@@ -629,8 +629,10 @@ impl Config {
     ///
     /// The default value is `0`.
     ///
-    /// A non-zero value lets the peer populate the dynamic table, but header
-    /// fields that refer to it cannot yet be decoded.
+    /// Dynamic table support is incomplete. Non-zero values are intended only
+    /// for testing encoder-stream processing: dynamic references in HEADERS
+    /// cannot yet be decoded, and decoder-stream feedback is not yet sent.
+    ///
     /// Values that cannot fit in `usize` are rejected when creating an HTTP/3
     /// connection, before sending SETTINGS.
     pub fn set_qpack_max_table_capacity(&mut self, v: u64) {
@@ -640,8 +642,10 @@ impl Config {
     /// Sets the `SETTINGS_QPACK_BLOCKED_STREAMS` setting.
     ///
     /// The default value is `0`.
-    /// Keep it at zero with non-zero table capacity until dynamic field
-    /// references can be decoded.
+    ///
+    /// Blocked field sections are not supported: headers cannot wait for
+    /// missing dynamic table entries. Keep this at `0`, even with a non-zero
+    /// table capacity.
     pub fn set_qpack_blocked_streams(&mut self, v: u64) {
         self.qpack_blocked_streams = Some(v);
     }
