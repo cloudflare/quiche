@@ -38,6 +38,7 @@ use quiche::h3;
 use tokio::sync::mpsc;
 use tokio_util::sync::PollSender;
 
+use super::DgramFlowId;
 use super::H3ConnectionError;
 use super::H3ConnectionResult;
 use super::InboundFrame;
@@ -253,7 +254,7 @@ pub(crate) struct StreamCtx {
     pub(super) send_state: SendState,
     /// The flow ID for proxying datagrams over this stream. If `None`,
     /// the stream has no associated DATAGRAM flow.
-    pub(crate) associated_dgram_flow_id: Option<u64>,
+    pub(crate) associated_dgram_flow_id: Option<DgramFlowId>,
     /// Whether the outbound channel needs to be re-polled for application data.
     waiting_for_recv: bool,
     waker: Waker,
@@ -461,19 +462,25 @@ impl StreamCtx {
     }
 }
 
+/// Context for a DATAGRAM flow.
 pub(crate) struct FlowCtx {
-    /// Sends inbound datagrams to a local task.
+    /// Sends inbound datagrams to the local app.
     send: mpsc::Sender<InboundFrame>,
+    /// The stream ID that owns this datagram flow.
+    pub(crate) associated_stream_id: u64,
     // No `recv`: all outbound datagrams are sent on a shared channel in H3Driver
 }
 
 impl FlowCtx {
-    /// Creates a new [FlowCtx]. This method returns the context itself
-    /// as well as the datagram receiver for this flow.
-    pub(crate) fn new(capacity: usize) -> (Self, InboundFrameStream) {
+    /// Creates a new [FlowCtx]. Returns the context itself and the datagram
+    /// receiver for this flow.
+    pub(crate) fn new(
+        stream_id: u64, capacity: usize,
+    ) -> (Self, InboundFrameStream) {
         let (forward_sender, forward_receiver) = mpsc::channel(capacity);
         let ctx = FlowCtx {
             send: forward_sender,
+            associated_stream_id: stream_id,
         };
         (ctx, forward_receiver)
     }
