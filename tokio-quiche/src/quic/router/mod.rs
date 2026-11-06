@@ -37,6 +37,8 @@ use super::QuicheConnection;
 use crate::metrics::labels;
 use crate::metrics::quic_expensive_metrics_ip_reduce;
 use crate::metrics::Metrics;
+use crate::quic::connection::CidOwned;
+use crate::quic::connection::IncomingPacketReceiver;
 use crate::quic::connection::SharedConnectionIdGenerator;
 use crate::quic::DscpHandle;
 use crate::settings::Config;
@@ -122,10 +124,16 @@ struct PollRecvData {
 /// removed.
 pub enum ConnectionMapCommand {
     MapCid {
-        existing_cid: ConnectionId<'static>,
-        new_cid: ConnectionId<'static>,
+        existing_cid: CidOwned,
+        new_cid: CidOwned,
     },
-    UnmapCid(ConnectionId<'static>),
+    UnmapCid(CidOwned),
+
+    #[cfg(test)]
+    TestFetchSender {
+        cid: ConnectionId<'static>,
+        resp_tx: tokio::sync::oneshot::Sender<mpsc::Sender<Incoming>>,
+    },
 }
 
 /// An `InboundPacketRouter` maintains a map of quic connections and routes
@@ -328,11 +336,22 @@ where
             );
         };
 
-        let scid = conn.source_id().into_owned();
+        let scid = conn.source_id();
+        let (incoming_tx, mut incoming_pkt_receiver) =
+            IncomingPacketReceiver::new(&scid, self.conn_map_cmd_tx.clone());
+        self.conns.insert((&scid).into(), incoming_tx.clone());
+
+        // Add the client-generated "pending" connection ID to the map as well.
+        // This is only required for QUIC servers, because clients can send
+        // Initial packets with arbitrary DCIDs to servers.
+        if let Some(pending_cid) = &pending_cid {
+            incoming_pkt_receiver.prior_knowledge(pending_cid);
+            self.conns.insert(pending_cid.into(), incoming_tx);
+        }
+
         let writer_cfg = WriterConfig {
             peer_addr,
             local_addr,
-            pending_cid: pending_cid.clone(),
             with_gso: self.config.has_gso,
             pacing_offload: self.config.pacing_offload,
             with_pktinfo: if self.local_addr.is_ipv4() {
@@ -350,11 +369,11 @@ where
 
         let conn = InitialQuicConnection::new(QuicConnectionParams {
             writer_cfg,
+            pending_cid,
             initial_pkt,
             dscp_handle: enable_per_connection_dscp.then(DscpHandle::new),
             shutdown_tx: shutdown_tx.clone(),
-            conn_map_cmd_tx: self.conn_map_cmd_tx.clone(),
-            scid: scid.clone(),
+            incoming_pkt_receiver,
             cid_generator,
             metrics: self.metrics.clone(),
             connection_hook: self.config.connection_hook.clone(),
@@ -363,23 +382,12 @@ where
             handshake_info,
             quiche_conn: conn,
             socket: Arc::clone(&self.socket_tx),
-            local_addr,
-            peer_addr,
         });
 
         conn.audit_log_stats
             .set_transport_handshake_start(instant_to_system(
                 handshake_start_time,
             ));
-
-        self.conns.insert(&scid, &conn);
-
-        // Add the client-generated "pending" connection ID to the map as well.
-        // This is only required for QUIC servers, because clients can send
-        // Initial packets with arbitrary DCIDs to servers.
-        if let Some(pending_cid) = pending_cid {
-            self.conns.map_cid(&scid, &pending_cid);
-        }
 
         self.metrics.accepted_initial_packet_count().inc();
         if self.config.enable_expensive_packet_count_metrics {
@@ -721,9 +729,15 @@ where
                     ConnectionMapCommand::MapCid {
                         existing_cid,
                         new_cid,
-                    } => self.conns.map_cid(&existing_cid, &new_cid),
+                    } => self.conns.map_cid(&existing_cid, new_cid),
                     ConnectionMapCommand::UnmapCid(cid) =>
                         self.conns.unmap_cid(&cid),
+
+                    #[cfg(test)]
+                    ConnectionMapCommand::TestFetchSender { cid, resp_tx } =>
+                        if let Some(incoming_tx) = self.conns.get(&cid) {
+                            let _ = resp_tx.send(incoming_tx.clone());
+                        },
                 }
             }
         }
@@ -940,6 +954,19 @@ mod tests {
         let _ = h3i::client::sync_client::connect(h3i_config, actions, None);
     }
 
+    /// If `cid` is not present in the ConnectionMap, the `oneshot::Sender` is
+    /// dropped without a result and we return `None` here.
+    async fn fetch_sender_for_cid(
+        conn_map_cmd_tx: &mpsc::UnboundedSender<ConnectionMapCommand>,
+        cid: ConnectionId<'static>,
+    ) -> Option<mpsc::Sender<Incoming>> {
+        let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+        conn_map_cmd_tx
+            .send(ConnectionMapCommand::TestFetchSender { cid, resp_tx })
+            .expect("InboundPacketRouter should be alive");
+        resp_rx.await.ok()
+    }
+
     #[tokio::test]
     async fn test_timeout() {
         // Configure a short idle timeout to speed up connection reclamation as
@@ -998,6 +1025,7 @@ mod tests {
             acceptor,
             DefaultMetrics,
         );
+        let conn_map_cmd_tx = socket_driver.conn_map_cmd_tx.clone();
         tokio::spawn(socket_driver);
 
         // Start a request and drop it after connection establishment
@@ -1007,21 +1035,28 @@ mod tests {
         time::pause();
 
         let (h3_driver, _) = ServerH3Driver::new(Http3Settings::default());
-        let conn = incoming.recv().await.unwrap().unwrap();
-        let dscp_handle = conn.dscp_handle().unwrap().clone();
+        let iqc = incoming.recv().await.unwrap().unwrap();
+        let dscp_handle = iqc.dscp_handle().unwrap().clone();
         assert_eq!(dscp_handle.get(), None);
         dscp_handle.set(Dscp::new(0));
-        assert_eq!(conn.dscp_handle().unwrap().get(), Dscp::new(0));
-        let drop_check = conn.incoming_ev_sender.clone();
-        let _conn = conn.start(h3_driver);
+        assert_eq!(iqc.dscp_handle().unwrap().get(), Dscp::new(0));
 
-        // Poll incoming events until the connection is dropped.
+        let scid = iqc.scid().into_owned();
+        let incoming_tx = fetch_sender_for_cid(&conn_map_cmd_tx, scid)
+            .await
+            .expect(
+            "InitialQuicConnection should be registered in IPR's ConnectionMap",
+        );
+
+        let _conn = iqc.start(h3_driver);
+
+        // Advance time til well after the handshake deadline
         time::advance(Duration::new(30, 0)).await;
         time::resume();
 
-        // This is a smoke test. A failure leaves `notified()` unresolved and
-        // hangs the test.
-        drop_check.closed().await;
+        // NOTE: this is a smoke test - in case of issues `closed()` future will
+        // never resolve hanging the test.
+        incoming_tx.closed().await;
     }
 
     #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
@@ -1215,6 +1250,7 @@ mod tests {
         // Fill the `conn_map_cmd` channel with some messages to process
         for _ in 0..20 {
             let random_cid = SimpleConnectionIdGenerator.new_connection_id();
+            let random_cid = CidOwned::from(&random_cid);
             conn_map_cmd_tx
                 .send(ConnectionMapCommand::UnmapCid(random_cid))
                 .unwrap();
