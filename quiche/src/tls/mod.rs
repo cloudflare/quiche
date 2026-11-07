@@ -949,7 +949,7 @@ extern "C" fn keylog(ssl: *const SSL, line: *const c_char) {
 }
 
 extern "C" fn select_alpn(
-    ssl: *mut SSL, out: *mut *const u8, out_len: *mut u8, inp: *mut u8,
+    ssl: *mut SSL, out: *mut *const u8, out_len: *mut u8, inp: *const u8,
     in_len: c_uint, _arg: *mut c_void,
 ) -> c_int {
     // SSL_TLSEXT_ERR_OK 0
@@ -1150,7 +1150,7 @@ extern "C" {
                 ssl: *mut SSL,
                 out: *mut *const u8,
                 out_len: *mut u8,
-                inp: *mut u8,
+                inp: *const u8,
                 in_len: c_uint,
                 arg: *mut c_void,
             ) -> c_int,
