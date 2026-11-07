@@ -190,6 +190,7 @@ impl RecoveryEpoch {
                         pkt_num: unacked.pkt_num,
                         time_sent: unacked.time_sent,
                         size: unacked.size,
+                        in_flight: unacked.in_flight,
 
                         rtt: now.saturating_duration_since(unacked.time_sent),
                         delivered: unacked.delivered,
@@ -1139,6 +1140,9 @@ pub struct Acked {
     pub time_sent: Instant,
 
     pub size: usize,
+
+    /// Whether the acknowledged packet contributed to bytes in flight.
+    pub in_flight: bool,
 
     pub rtt: Duration,
 
