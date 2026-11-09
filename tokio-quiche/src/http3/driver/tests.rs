@@ -3246,6 +3246,49 @@ mod server_side_driver {
         assert_eq!(helper.peer_client_poll(), Ok((0, h3::Event::Finished)));
     }
 
+    /// Verify that the server's GOAWAY ID lies past every accepted request
+    /// stream. Per RFC 9114 Section 5.2, the client treats requests on
+    /// streams at or above the ID as unprocessed and may retry them, so an
+    /// ID equal to the last in-flight stream would abandon that request.
+    #[test]
+    fn server_goaway_id_excludes_in_flight_streams() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        let stream_id = helper
+            .peer_client_send_request(make_request_headers("GET"), true)
+            .unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        helper.controller.send_goaway();
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(
+            helper.peer_client_poll(),
+            Ok((stream_id + 4, h3::Event::GoAway))
+        );
+    }
+
+    /// Verify that no GOAWAY is sent once the client has consumed the last
+    /// bidirectional stream ID, as no valid GOAWAY ID lies past it and the
+    /// client cannot open further requests (RFC 9114 Section 5.2).
+    #[test]
+    fn server_goaway_skipped_when_stream_ids_exhausted() {
+        let mut helper = DriverTestHelper::<ServerHooks>::new().unwrap();
+        helper.complete_handshake().unwrap();
+        helper.advance_and_run_loop().unwrap();
+
+        // Opening 2^60 streams is infeasible, so record the final client
+        // bidirectional stream ID as seen directly.
+        helper.driver.max_stream_seen = Some(octets::MAX_VAR_INT - 3);
+
+        helper.controller.send_goaway();
+        helper.advance_and_run_loop().unwrap();
+
+        assert_eq!(helper.peer_client_poll(), Err(h3::Error::Done));
+    }
+
     // Test that dropping the H3 event receiver when there are no active streams
     // and datagram flows causes the connection to close immediately.
     #[test]
