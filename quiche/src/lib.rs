@@ -5517,8 +5517,7 @@ impl<F: BufFactory> Connection<F> {
         );
 
         #[cfg(feature = "qlog")]
-        let mut qlog_frames: Vec<qlog::events::quic::QuicFrame> =
-            Vec::with_capacity(frames.len());
+        let mut qlog_frames: Vec<qlog::events::quic::QuicFrame> = vec![];
 
         for frame in &mut frames {
             trace!("{} tx frm {:?}", self.trace_id, frame);
