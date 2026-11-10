@@ -803,31 +803,7 @@ impl Frame {
                 ack_delay,
                 ranges,
                 ecn_counts,
-            } => {
-                let ack_ranges = ranges
-                    .iter()
-                    .map(|r| AckRange::new(r.start, r.end - 1))
-                    .collect();
-
-                let (ect0, ect1, ce) = match ecn_counts {
-                    Some(ecn) => (
-                        Some(ecn.ect0_count),
-                        Some(ecn.ect1_count),
-                        Some(ecn.ecn_ce_count),
-                    ),
-
-                    None => (None, None, None),
-                };
-
-                QuicFrame::Ack {
-                    ack_delay: Some(*ack_delay as f32 / 1000.0),
-                    acked_ranges: Some(ack_ranges),
-                    ect1,
-                    ect0,
-                    ce,
-                    raw: None,
-                }
-            },
+            } => ack_to_qlog(*ack_delay, ranges, ecn_counts.as_ref()),
 
             // The record keeps no ranges; the send path logs them from the
             // range set the ACK was encoded from.
@@ -1368,6 +1344,35 @@ pub fn encode_ack(
     }
 
     Ok(())
+}
+
+#[cfg(feature = "qlog")]
+pub fn ack_to_qlog(
+    ack_delay: u64, ranges: &ranges::RangeSet, ecn_counts: Option<&EcnCounts>,
+) -> QuicFrame {
+    let ack_ranges = ranges
+        .iter()
+        .map(|r| AckRange::new(r.start, r.end - 1))
+        .collect();
+
+    let (ect0, ect1, ce) = match ecn_counts {
+        Some(ecn) => (
+            Some(ecn.ect0_count),
+            Some(ecn.ect1_count),
+            Some(ecn.ecn_ce_count),
+        ),
+
+        None => (None, None, None),
+    };
+
+    QuicFrame::Ack {
+        ack_delay: Some(ack_delay as f32 / 1000.0),
+        acked_ranges: Some(ack_ranges),
+        ect1,
+        ect0,
+        ce,
+        raw: None,
+    }
 }
 
 pub fn encode_stream_header(
