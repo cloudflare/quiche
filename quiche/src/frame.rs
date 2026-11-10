@@ -33,6 +33,8 @@ use crate::packet;
 use crate::range_buf::RangeBuf;
 use crate::ranges;
 
+use debug_panic::debug_panic;
+
 #[cfg(feature = "qlog")]
 use qlog::events::quic::AckRange;
 #[cfg(feature = "qlog")]
@@ -72,6 +74,11 @@ pub enum Frame {
         ack_delay: u64,
         ranges: ranges::RangeSet,
         ecn_counts: Option<EcnCounts>,
+    },
+
+    ACKHeader {
+        ack_delay: u64,
+        largest_acked: u64,
     },
 
     ResetStream {
@@ -382,6 +389,9 @@ impl Frame {
                 }
             },
 
+            Frame::ACKHeader { .. } =>
+                debug_panic!("ACKHeader is written with encode_ack()"),
+
             Frame::Ping { .. } => {
                 b.put_varint(0x01)?;
             },
@@ -575,6 +585,12 @@ impl Frame {
                 ecn_counts,
             } => ack_wire_len(*ack_delay, ranges, ecn_counts.as_ref()),
 
+            Frame::ACKHeader { .. } => {
+                debug_panic!("ACKHeader is sized with ack_wire_len()");
+
+                0
+            },
+
             Frame::ResetStream {
                 stream_id,
                 error_code,
@@ -751,6 +767,7 @@ impl Frame {
             self,
             Frame::Padding { .. } |
                 Frame::ACK { .. } |
+                Frame::ACKHeader { .. } |
                 Frame::ApplicationClose { .. } |
                 Frame::ConnectionClose { .. }
         )
@@ -810,6 +827,17 @@ impl Frame {
                     ce,
                     raw: None,
                 }
+            },
+
+            // The record keeps no ranges; the send path logs them from the
+            // range set the ACK was encoded from.
+            Frame::ACKHeader { ack_delay, .. } => QuicFrame::Ack {
+                ack_delay: Some(*ack_delay as f32 / 1000.0),
+                acked_ranges: None,
+                ect1: None,
+                ect0: None,
+                ce: None,
+                raw: None,
             },
 
             Frame::ResetStream {
@@ -1041,6 +1069,13 @@ impl std::fmt::Debug for Frame {
                     f,
                     "ACK delay={ack_delay} blocks={ranges:?} ecn_counts={ecn_counts:?}"
                 )?;
+            },
+
+            Frame::ACKHeader {
+                ack_delay,
+                largest_acked,
+            } => {
+                write!(f, "ACK delay={ack_delay} largest_acked={largest_acked}")?;
             },
 
             Frame::ResetStream {

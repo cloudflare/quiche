@@ -4313,7 +4313,7 @@ impl<F: BufFactory> Connection<F> {
                         p.retrans_count += 1;
                     },
 
-                    frame::Frame::ACK { .. } => {
+                    frame::Frame::ACK { .. } | frame::Frame::ACKHeader { .. } => {
                         pkt_space.ack_elicited = true;
                     },
 
@@ -8773,6 +8773,8 @@ impl<F: BufFactory> Connection<F> {
 
                 self.do_handshake(now)?;
             },
+
+            frame::Frame::ACKHeader { .. } => unreachable!(),
 
             frame::Frame::CryptoHeader { .. } => unreachable!(),
 
