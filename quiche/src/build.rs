@@ -44,25 +44,25 @@ fn target_dir_path() -> std::path::PathBuf {
 }
 
 fn main() {
-    // Emit `cfg(boring_v5)` if boring version 5.x is detected. This
+    // Emit `cfg(boring_v4)` if boring version 4.x is detected. This
     // is used to pick which APIs to expect and to guide test
     // expectations. (Larger post-quantum key shares are enabled by
-    // default in boring 5.x but not boring 4.x.) 4.x is the assumed
+    // default in boring 5.x but not boring 4.x.) 5.x is the assumed
     // default.
     //
     // `boring-sys` >= 5.2 emits `cargo:version_major=<N>` from its
     // build script, which cargo surfaces here as
-    // `DEP_BORINGSSL_VERSION_MAJOR`. When absent (boring-sys < 5.2,
-    // or the `boringssl-boring-crate` feature is off) we assume 4.x.
+    // `DEP_BORINGSSL_VERSION_MAJOR`. boring 4.x predates that (it is
+    // paired with boring-sys < 5.2), so when the
+    // `boringssl-boring-crate` feature is on, an absent variable
+    // means 4.x.
     //
     // The cfg is always registered (even when the backend feature is
     // off) so rustc doesn't warn about unknown cfg names.
-    println!("cargo::rustc-check-cfg=cfg(boring_v5)");
+    println!("cargo::rustc-check-cfg=cfg(boring_v4)");
     if cfg!(feature = "boringssl-boring-crate") {
-        if std::env::var("DEP_BORINGSSL_VERSION_MAJOR").ok().as_deref() ==
-            Some("5")
-        {
-            println!("cargo:rustc-cfg=boring_v5");
+        if std::env::var("DEP_BORINGSSL_VERSION_MAJOR").is_err() {
+            println!("cargo:rustc-cfg=boring_v4");
         }
         println!("cargo:rustc-link-lib=static=ssl");
         println!("cargo:rustc-link-lib=static=crypto");
