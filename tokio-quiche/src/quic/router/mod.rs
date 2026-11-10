@@ -127,9 +127,10 @@ pub enum ConnectionMapCommand {
         existing_cid: CidOwned,
         new_cid: CidOwned,
     },
+
     UnmapCid(CidOwned),
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     TestFetchSender {
         cid: ConnectionId<'static>,
         resp_tx: tokio::sync::oneshot::Sender<mpsc::Sender<Incoming>>,
@@ -730,10 +731,11 @@ where
                         existing_cid,
                         new_cid,
                     } => self.conns.map_cid(&existing_cid, new_cid),
+
                     ConnectionMapCommand::UnmapCid(cid) =>
                         self.conns.unmap_cid(&cid),
 
-                    #[cfg(test)]
+                    #[cfg(all(test, unix))]
                     ConnectionMapCommand::TestFetchSender { cid, resp_tx } =>
                         if let Some(incoming_tx) = self.conns.get(&cid) {
                             let _ = resp_tx.send(incoming_tx.clone());
@@ -961,9 +963,11 @@ mod tests {
         cid: ConnectionId<'static>,
     ) -> Option<mpsc::Sender<Incoming>> {
         let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+
         conn_map_cmd_tx
             .send(ConnectionMapCommand::TestFetchSender { cid, resp_tx })
             .expect("InboundPacketRouter should be alive");
+
         resp_rx.await.ok()
     }
 
