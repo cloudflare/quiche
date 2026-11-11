@@ -1,6 +1,6 @@
 [package]
 name = "tokio-quiche"
-version = "0.20.1"
+version = "0.23.0"
 description = "Asynchronous wrapper around quiche"
 repository = { workspace = true }
 edition = { workspace = true }
@@ -80,12 +80,14 @@ boring = { workspace = true }
 boring-sys = { workspace = true }
 bytes = { workspace = true }
 crossbeam = { workspace = true, default-features = false }
+debug_panic = { workspace = true }
 datagram-socket = { workspace = true }
 foundations = { workspace = true, default-features = false, features = [
   "server-client-common-default",
 ] }
 futures = { workspace = true }
 futures-util = { workspace = true }
+hashlink = { workspace = true }
 ipnetwork = { workspace = true }
 log = { workspace = true }
 octets = { workspace = true }

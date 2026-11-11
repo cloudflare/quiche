@@ -9,7 +9,7 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
 | File | Role |
 |------|------|
 | `mod.rs` | `H3Driver`, `H3Controller`, `H3Event`, `H3Command`, `OutboundFrame`/`InboundFrame`, channel types, `ApplicationOverQuic` impl |
-| `hooks.rs` | `DriverHooks` trait (sealed). Defines `headers_received`, `stream_recv_closed`, `stream_closed`, `conn_established`, `conn_command`, `wait_for_action` |
+| `hooks.rs` | `DriverHooks` trait (sealed). Defines `headers_received`, `stream_recv_closed`, `stream_closed`, `conn_established`, `conn_command`, `wait_for_action`, `handle_incoming_dgram`, `expire_pending_dgrams` |
 | `client.rs` | `ClientHooks` impl, `ClientH3Driver`/`ClientH3Controller` aliases, `ClientH3Event`/`ClientH3Command` |
 | `server.rs` | `ServerHooks` impl, `ServerH3Driver`/`ServerH3Controller` aliases, `ServerH3Event`/`ServerH3Command` |
 | `streams.rs` | `StreamCtx`, `FlowCtx`, shared per-stream waker and channel waiting flags |
@@ -64,6 +64,10 @@ Async HTTP/3 driver bridging `quiche::h3::Connection` to Tokio tasks via channel
 - `H3Driver::new()` returns `(H3Driver<H>, H3Controller<H>)` -- paired at construction, connected by unbounded mpsc channels.
 - Per-stream channels are bounded (`STREAM_CAPACITY`); per-connection event/cmd channels are unbounded.
 - Datagram flows use a shared `FLOW_CAPACITY=2048` bounded channel, separate from stream channels.
-- `H3Event` variants: `IncomingSettings`, `IncomingHeaders`, `NewFlow`, `ResetStream`, `ConnectionError`, `ConnectionShutdown`, `BodyBytesReceived`, `StreamClosed`.
+- Datagram flow channels (`DatagramFlowInfo`: `flow_id`, `send`, `recv`) are delivered inline via `IncomingH3Headers.dgram_flow` — there is no separate `NewFlow` event.
+- Dropping a datagram flow receiver does not close the flow or associated stream. Regular stream channel drops still drive directional stream shutdown, and explicit `OutboundFrame::FlowShutdown` immediately removes the flow and shuts down the associated stream.
+- `DgramFlowId` newtype wraps a validated RFC 9297 Quarter Stream ID or legacy `datagram-flow-id` value (≤ 2^60−1). `establish_flow()` errors with `H3_DATAGRAM_ERROR` on duplicate flow_id.
+- Server-side `PendingDgramBuffer` (capacity 2048, TTL 333ms) buffers datagrams that arrive before the CONNECT request; flushed to the flow on `establish_flow`.
+- `H3Event` variants: `IncomingSettings`, `IncomingHeaders`, `ResetStream`, `ConnectionError`, `ConnectionShutdown`, `BodyBytesReceived`, `StreamClosed`.
 - `H3Command` variants: `QuicCmd`, `GoAway`, `ShutdownStream`.
 - Type aliases (`ClientH3Driver`, `ServerH3Driver`, etc.) are the public API; `H3Driver<H>` and `DriverHooks` are internal.

@@ -38,6 +38,7 @@ pub mod test_utils;
 #[cfg(test)]
 mod tests;
 
+use debug_panic::debug_panic;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -154,6 +155,41 @@ fn body_recv_buf_size(readable: usize, max: usize) -> usize {
     readable.clamp(floor, max)
 }
 
+/// Largest legal Quarter Stream ID value (RFC 9297 §2.1).
+/// Receipt of a datagram with a larger value MUST be treated as
+/// H3_DATAGRAM_ERROR (0x33).
+pub const MAX_QUARTER_STREAM_ID: u64 = (1 << 60) - 1;
+
+/// A validated RFC 9297 Quarter Stream ID or legacy `datagram-flow-id`.
+///
+/// The inner value is guaranteed not to exceed [`MAX_QUARTER_STREAM_ID`].
+///
+/// Note, that legacy flow_ids have a max value of 10^15-1, which is less
+/// than the value of [`MAX_QUARTER_STREAM_ID`]. This struct only checks
+/// against [`MAX_QUARTER_STREAM_ID`].
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct DgramFlowId(u64);
+
+impl DgramFlowId {
+    /// Creates a new [`DgramFlowId`].
+    ///
+    /// Returns `None` when `id` exceeds [`MAX_QUARTER_STREAM_ID`].
+    pub fn new(id: u64) -> Option<Self> {
+        (id <= MAX_QUARTER_STREAM_ID).then_some(Self(id))
+    }
+
+    /// Returns the validated raw ID.
+    pub fn id(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for DgramFlowId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Used by a local task to send [`OutboundFrame`]s to a peer on the
 /// stream or flow associated with this channel.
 pub type OutboundFrameSender = PollSender<OutboundFrame>;
@@ -217,6 +253,18 @@ impl fmt::Display for H3ConnectionError {
 
 type H3ConnectionResult<T> = Result<T, H3ConnectionError>;
 
+/// The channels and metadata for a newly established HTTP/3 DATAGRAM flow
+/// (RFC 9297). Delivered as part of [`IncomingH3Headers`] when the associated
+/// stream exchange carries DATAGRAM semantics (e.g. CONNECT-UDP / MASQUE).
+pub struct DatagramFlowInfo {
+    /// RFC 9297 Quarter Stream ID or legacy flow_id for this flow.
+    pub flow_id: DgramFlowId,
+    /// Sender for transmitting datagrams to the peer.
+    pub send: OutboundFrameSender,
+    /// Receiver for receiving datagrams from the peer.
+    pub recv: InboundFrameStream,
+}
+
 /// HTTP/3 headers that were received on a stream.
 ///
 /// `recv` is used to read the message body, while `send` is used to transmit
@@ -236,6 +284,10 @@ pub struct IncomingH3Headers {
     pub read_fin: bool,
     /// Handle to the [`H3AuditStats`] for the message's stream.
     pub h3_audit_stats: Arc<H3AuditStats>,
+    /// If the associated stream exchange carries HTTP/3 DATAGRAM semantics
+    /// (e.g. CONNECT-UDP), this field contains the flow channels and flow_id.
+    /// `None` for ordinary streams.
+    pub dgram_flow: Option<DatagramFlowInfo>,
 }
 
 impl fmt::Debug for IncomingH3Headers {
@@ -244,6 +296,10 @@ impl fmt::Debug for IncomingH3Headers {
             .field("stream_id", &self.stream_id)
             .field("headers", &self.headers)
             .field("read_fin", &self.read_fin)
+            .field(
+                "dgram_flow_id",
+                &self.dgram_flow.as_ref().map(|f| f.flow_id),
+            )
             .field("h3_audit_stats", &self.h3_audit_stats)
             .finish()
     }
@@ -267,16 +323,6 @@ pub enum H3Event {
     /// receiver.
     IncomingHeaders(IncomingH3Headers),
 
-    /// A DATAGRAM flow was created and associated with the given `flow_id`.
-    /// This event is fired before a HEADERS event for CONNECT[-UDP] requests.
-    NewFlow {
-        /// Flow ID of the new flow.
-        flow_id: u64,
-        /// An [`OutboundFrameSender`] for transmitting datagrams to the peer.
-        send: OutboundFrameSender,
-        /// An [`InboundFrameStream`] for receiving datagrams from the peer.
-        recv: InboundFrameStream,
-    },
     /// A RST_STREAM frame was seen on the given `stream_id`. The user of the
     /// driver should clean up any state allocated for this stream.
     ResetStream { stream_id: u64 },
@@ -328,13 +374,13 @@ pub enum OutboundFrame {
     /// Response body/CONNECT downstream data plus FIN flag.
     Body(Bytes, bool),
     /// CONNECT-UDP (DATAGRAM) downstream data plus flow ID.
-    Datagram(DgramBuffer, u64),
+    Datagram(DgramBuffer, DgramFlowId),
     /// Close the stream with a trailers, with optional priority.
     Trailers(Vec<h3::Header>, Option<quiche::h3::Priority>),
     /// An error encountered when serving the request. Stream should be closed.
     PeerStreamError,
     /// DATAGRAM flow explicitly closed.
-    FlowShutdown { flow_id: u64, stream_id: u64 },
+    FlowShutdown { flow_id: DgramFlowId },
 }
 
 /// An [`InboundFrame`] is a data frame that was received from the peer over a
@@ -380,12 +426,11 @@ pub struct H3Driver<H: DriverHooks> {
     stream_map: BTreeMap<u64, StreamCtx>,
     /// A map of flow IDs to their [FlowCtx]. This is mainly used to retrieve
     /// the internal Tokio channels associated with the flow.
-    flow_map: BTreeMap<u64, FlowCtx>,
+    flow_map: BTreeMap<DgramFlowId, FlowCtx>,
     /// Coalesced notifications from per-stream channel wakers.
     ready_streams: ReadyStreams,
     /// Kept open for the connection's lifetime and cloned into stream wakers.
     ready_stream_sender: ReadyStreamSender,
-
     /// Receives [`OutboundFrame`]s from all datagram flows on the connection.
     dgram_recv: OutboundFrameStream,
     /// Keeps the datagram channel open such that datagram flows can be created.
@@ -448,7 +493,6 @@ impl<H: DriverHooks> H3Driver<H> {
 
                 ready_streams,
                 ready_stream_sender,
-
                 settings_received_and_forwarded: false,
                 h3_event_receiver_dropped: false,
             },
@@ -468,28 +512,45 @@ impl<H: DriverHooks> H3Driver<H> {
         &self.cmd_sender
     }
 
-    /// Retrieve the [FlowCtx] associated with the given `flow_id`. If no
-    /// context is found, a new one will be created.
-    fn get_or_insert_flow(
-        &mut self, flow_id: u64,
-    ) -> H3ConnectionResult<&mut FlowCtx> {
-        use std::collections::btree_map::Entry;
-        Ok(match self.flow_map.entry(flow_id) {
-            Entry::Vacant(e) => {
-                // This is a datagram for a new flow we haven't seen before
-                let (flow, recv) = FlowCtx::new(FLOW_CAPACITY);
-                let flow_req = H3Event::NewFlow {
-                    flow_id,
-                    recv,
-                    send: self.dgram_send.clone(),
-                };
-                self.h3_event_sender
-                    .send(flow_req.into())
-                    .map_err(|_| H3ConnectionError::ControllerWentAway)?;
-                e.insert(flow)
-            },
-            Entry::Occupied(e) => e.into_mut(),
+    /// Create a new [`FlowCtx`] for `flow_id`, insert it into the flow map, and
+    /// return the channels that should be delivered to the application via
+    /// [`IncomingH3Headers::dgram_flow`].
+    /// `stream_id` is the QUIC stream that carried the request establishing
+    /// the datagram flow.
+    ///
+    /// Returns an error and closes the connection if a flow with the same
+    /// `flow_id` already exists. Panics in debug builds.
+    pub(crate) fn establish_flow(
+        &mut self, qconn: &mut QuicheConnection, stream_id: u64,
+        flow_id: DgramFlowId,
+    ) -> H3ConnectionResult<DatagramFlowInfo> {
+        if self.flow_map.contains_key(&flow_id) {
+            debug_panic!(
+                "establish_flow called for already-established flow {}",
+                flow_id
+            );
+            let _ = qconn.close(
+                true,
+                WireErrorCode::DatagramError as u64,
+                b"duplicate flow_id",
+            );
+            return Err(H3ConnectionError::H3(h3::Error::IdError));
+        }
+        let (flow_ctx, recv) = FlowCtx::new(stream_id, FLOW_CAPACITY);
+        self.flow_map.insert(flow_id, flow_ctx);
+        Ok(DatagramFlowInfo {
+            flow_id,
+            send: self.dgram_send.clone(),
+            recv,
         })
+    }
+
+    /// Return a mutable reference to the [`FlowCtx`] for `flow_id`, or `None`
+    /// if no flow with that ID has been established.
+    pub(crate) fn get_flow(
+        &mut self, flow_id: DgramFlowId,
+    ) -> Option<&mut FlowCtx> {
+        self.flow_map.get_mut(&flow_id)
     }
 
     /// Adds a [StreamCtx] to the stream map with the given `stream_id`.
@@ -540,21 +601,15 @@ impl<H: DriverHooks> H3Driver<H> {
                     drop(try_reserve_result);
                     match ctx.recv_state {
                         RecvState::Open(_) => {
-                            if ctx.associated_dgram_flow_id.is_none()
-                            // An associated DATAGRAM flow can outlive its body
-                            // channel.
-                            {
-                                let err =
-                                    h3::WireErrorCode::RequestCancelled as u64;
-                                let _ = qconn.stream_shutdown(
-                                    stream_id,
-                                    quiche::Shutdown::Read,
-                                    err,
-                                );
-                                ctx.handle_sent_stop_sending(err)?;
-                                // TODO: should channel abandonment emit an
-                                // H3Event for logging or auditing?
-                            }
+                            let err = h3::WireErrorCode::RequestCancelled as u64;
+                            let _ = qconn.stream_shutdown(
+                                stream_id,
+                                quiche::Shutdown::Read,
+                                err,
+                            );
+                            ctx.handle_sent_stop_sending(err)?;
+                            // TODO: should channel abandonment emit an H3Event
+                            // for logging or auditing?
                         },
                         RecvState::FinPending(_) => {
                             ctx.recv_state = RecvState::Closed;
@@ -986,6 +1041,9 @@ impl<H: DriverHooks> H3Driver<H> {
     fn dgram_ready(
         &mut self, qconn: &mut QuicheConnection, frame: OutboundFrame,
     ) -> H3ConnectionResult<()> {
+        // Opportunistically purge expired pending datagrams.
+        self.hooks.expire_pending_dgrams();
+
         let mut frame = Ok(frame);
 
         loop {
@@ -994,17 +1052,8 @@ impl<H: DriverHooks> H3Driver<H> {
                     // Drop datagrams if there is no capacity
                     let _ = datagram::send_h3_dgram(qconn, flow_id, dgram);
                 },
-                Ok(OutboundFrame::FlowShutdown { flow_id, stream_id }) => {
-                    self.shutdown_stream(
-                        qconn,
-                        stream_id,
-                        StreamShutdown::Both {
-                            read_error_code: WireErrorCode::NoError as u64,
-                            write_error_code: WireErrorCode::NoError as u64,
-                        },
-                    )?;
-                    self.flow_map.remove(&flow_id);
-                    self.close_if_idle(qconn);
+                Ok(OutboundFrame::FlowShutdown { flow_id }) => {
+                    self.cleanup_flow(qconn, flow_id)?;
                     break;
                 },
                 Ok(_) => unreachable!("Flows can't send frame of other types"),
@@ -1053,9 +1102,14 @@ impl<H: DriverHooks> H3Driver<H> {
             stream_ctx.handle_recvd_stop_sending(code);
         }
 
-        // Close any DATAGRAM-proxying channels associated with the stream.
+        // Close any DATAGRAM-proxying channels when we close the stream, if
+        // they exist, and remove any pending buffered datagrams for that flow.
         if let Some(mapped_flow_id) = stream_ctx.associated_dgram_flow_id {
-            self.flow_map.remove(&mapped_flow_id);
+            // We can call `cleanup_flow()`. While `cleanup_flow()` transitively
+            // calls `cleanup_stream()`, it won't lead to a loop, since
+            // `cleanup_flow()` and `cleanup_stream()` remove the flow / stream
+            // entry first.
+            self.cleanup_flow(qconn, mapped_flow_id)?;
         }
 
         H::stream_closed(self, stream_id);
@@ -1083,6 +1137,32 @@ impl<H: DriverHooks> H3Driver<H> {
                 );
             }
         }
+    }
+
+    /// Cleans up a datagram flow and shuts down its associated HTTP/3 stream.
+    ///
+    /// This is intentionally idempotent: a flow might be cleaned up both by an
+    /// explicit [`OutboundFrame::FlowShutdown`] and associated stream cleanup.
+    /// Only the first caller performs the shutdown.
+    fn cleanup_flow(
+        &mut self, qconn: &mut QuicheConnection, flow_id: DgramFlowId,
+    ) -> H3ConnectionResult<()> {
+        let Some(flow_ctx) = self.flow_map.remove(&flow_id) else {
+            return Ok(());
+        };
+
+        self.shutdown_stream(
+            qconn,
+            flow_ctx.associated_stream_id,
+            StreamShutdown::Both {
+                read_error_code: WireErrorCode::NoError as u64,
+                write_error_code: WireErrorCode::NoError as u64,
+            },
+        )?;
+
+        self.close_if_idle(qconn);
+
+        Ok(())
     }
 
     /// Shuts down the indicated HTTP/3 stream by sending frames and cleaning
@@ -1164,20 +1244,26 @@ impl<H: DriverHooks> H3Driver<H> {
 }
 
 impl<H: DriverHooks> H3Driver<H> {
-    /// Reads all buffered datagrams out of `qconn` and distributes them to
-    /// their flow channels.
+    /// Reads all buffered datagrams out of `qconn` and hands them to the
+    /// `H::handle_incoming_dgram()` hook for delivery, buffering, or dropping.
     fn process_available_dgrams(
         &mut self, qconn: &mut QuicheConnection,
     ) -> H3ConnectionResult<()> {
         loop {
             match datagram::receive_h3_dgram(qconn) {
-                Ok((flow_id, dgram))
-                    if !qconn.is_server() ||
-                        self.hooks.extended_connect_enabled() =>
-                {
-                    self.get_or_insert_flow(flow_id)?.send_best_effort(dgram);
+                Ok((raw_flow_id, dgram)) => {
+                    // RFC 9297 §2.1: Quarter Stream ID > 2^60-1 is a
+                    // connection-level error.
+                    let Some(flow_id) = DgramFlowId::new(raw_flow_id) else {
+                        let _ = qconn.close(
+                            true,
+                            WireErrorCode::DatagramError as u64,
+                            b"",
+                        );
+                        return Err(H3ConnectionError::H3(h3::Error::IdError));
+                    };
+                    H::handle_incoming_dgram(self, flow_id, dgram);
                 },
-                Ok(_) => {},
                 Err(quiche::Error::Done) => return Ok(()),
                 Err(err) => return Err(H3ConnectionError::from(err)),
             }
@@ -1271,23 +1357,17 @@ impl<H: DriverHooks> H3Driver<H> {
                 Err(TryRecvError::Disconnected) => {
                     match ctx.send_state {
                         SendState::Open => {
-                            if ctx.associated_dgram_flow_id.is_none()
-                            // An associated DATAGRAM flow can outlive its body
-                            // channel.
-                            {
-                                // No FIN was written before channel closure.
-                                // Reset because no more data will follow.
-                                let err =
-                                    h3::WireErrorCode::RequestCancelled as u64;
-                                let _ = qconn.stream_shutdown(
-                                    stream_id,
-                                    quiche::Shutdown::Write,
-                                    err,
-                                );
-                                ctx.handle_sent_reset(err)?;
-                                if ctx.fully_closed() {
-                                    return self.cleanup_stream(qconn, stream_id);
-                                }
+                            // No FIN was written before channel closure. Reset
+                            // because no more data will follow.
+                            let err = h3::WireErrorCode::RequestCancelled as u64;
+                            let _ = qconn.stream_shutdown(
+                                stream_id,
+                                quiche::Shutdown::Write,
+                                err,
+                            );
+                            ctx.handle_sent_reset(err)?;
+                            if ctx.fully_closed() {
+                                return self.cleanup_stream(qconn, stream_id);
                             }
                         },
                         SendState::Closed => {},
@@ -1363,7 +1443,8 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
                 },
             };
         }
-
+        // opportunistically expire pending datagrams based on their timeout
+        self.hooks.expire_pending_dgrams();
         self.process_available_dgrams(qconn)?;
         Ok(())
     }
