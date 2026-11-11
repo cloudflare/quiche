@@ -107,7 +107,6 @@
 //!     qlog::events::quic::PacketType::Initial,
 //!     Some(0),          // packet_number
 //!     None,             // token
-//!     None,             // length
 //!     Some(0x00000001), // version
 //!     Some(&scid),
 //!     Some(&dcid),
@@ -131,7 +130,7 @@
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: Some(raw),
-//!         datagram_id: None,
+//!         datagram_payload_checksum: None,
 //!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
@@ -333,7 +332,7 @@
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: None,
-//!         datagram_id: None,
+//!         datagram_payload_checksum: None,
 //!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,

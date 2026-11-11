@@ -246,19 +246,31 @@ pub fn sqlog_event_list(
 
                 match &ev.data {
                     EventData::QuicConnectionStarted(v) => {
-                        printyo!("local_ip_v4", &v.local.ip_v4, p.details);
-                        printyo!("local_port_v4", &v.local.port_v4, p.details);
-                        printyo!("local_ip_v6", &v.local.ip_v6, p.details);
-                        printyo!("local_port_v6", &v.local.port_v6, p.details);
+                        printyo!(
+                            "local_address_v4",
+                            &v.local.address_v4,
+                            p.details
+                        );
+                        printyo!(
+                            "local_address_v6",
+                            &v.local.address_v6,
+                            p.details
+                        );
                         printy!(
                             "local_cids",
                             format!("{:?}", &v.local.connection_ids),
                             p.details
                         );
-                        printyo!("remote_ip_v4", &v.remote.ip_v4, p.details);
-                        printyo!("remote_port_v4", &v.remote.port_v4, p.details);
-                        printyo!("remote_ip_v6", &v.remote.ip_v6, p.details);
-                        printyo!("remote_port_v6", &v.remote.port_v6, p.details);
+                        printyo!(
+                            "remote_address_v4",
+                            &v.remote.address_v4,
+                            p.details
+                        );
+                        printyo!(
+                            "remote_address_v6",
+                            &v.remote.address_v6,
+                            p.details
+                        );
                         printy!(
                             "remote_cid",
                             format!("{:?}", &v.local.connection_ids),
@@ -282,7 +294,7 @@ pub fn sqlog_event_list(
                         printyo_json!("trigger", &v.trigger, p.details);
                     },
                     EventData::QuicParametersSet(v) => {
-                        printyo_json!("initiator", &v.initiator, p.details);
+                        printy_json!("initiator", &v.initiator, p.details);
                         printyo!(
                             "resumption_allowed",
                             &v.resumption_allowed,

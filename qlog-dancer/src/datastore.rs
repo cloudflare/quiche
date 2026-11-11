@@ -1180,7 +1180,7 @@ impl Datastore {
         &mut self, tp: &qlog::events::quic::ParametersSet,
     ) {
         match tp.initiator {
-            Some(TransportInitiator::Local) => {
+            TransportInitiator::Local => {
                 if let Some(max_data) = tp.initial_max_data {
                     self.sent_max_data.push((0.0, max_data));
                 }
@@ -1196,7 +1196,7 @@ impl Datastore {
                 }
             },
 
-            Some(TransportInitiator::Remote) => {
+            TransportInitiator::Remote => {
                 if let Some(max_data) = tp.initial_max_data {
                     self.received_max_data.push((0.0, max_data));
                 }
@@ -1217,8 +1217,6 @@ impl Datastore {
                     self.peer_init_max_stream_data_uni = max_stream_data;
                 }
             },
-
-            _ => unimplemented!(),
         }
     }
 
