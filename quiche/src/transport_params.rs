@@ -628,6 +628,7 @@ impl TransportParams {
 
                 max_datagram_frame_size: None,
                 grease_quic_bit: None,
+                reset_stream_at: None,
             },
         ))
     }

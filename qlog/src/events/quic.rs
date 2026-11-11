@@ -704,6 +704,7 @@ pub struct ParametersSet {
 
     pub max_datagram_frame_size: Option<u64>,
     pub grease_quic_bit: Option<bool>,
+    pub reset_stream_at: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
