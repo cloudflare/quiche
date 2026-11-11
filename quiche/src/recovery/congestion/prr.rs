@@ -73,9 +73,12 @@ impl PRR {
         self.snd_cnt = if pipe > ssthresh {
             // Proportional Rate Reduction.
             if self.recoverfs > 0 {
-                (self.prr_delivered * ssthresh)
-                    .div_ceil(self.recoverfs)
-                    .saturating_sub(self.prr_out)
+                usize::try_from(
+                    (self.prr_delivered as u64 * ssthresh as u64)
+                        .div_ceil(self.recoverfs as u64),
+                )
+                .unwrap_or(usize::MAX)
+                .saturating_sub(self.prr_out)
             } else {
                 0
             }
@@ -128,7 +131,8 @@ mod tests {
     fn on_packet_acked_prr() {
         let mut prr = PRR::default();
         let max_datagram_size = 1000;
-        let bytes_in_flight = max_datagram_size * 10;
+        // Large enough that prr_delivered * ssthresh doesn't fit in 32 bits.
+        let bytes_in_flight = max_datagram_size * 10_000;
         let ssthresh = bytes_in_flight / 2;
         let acked = 1000;
 
