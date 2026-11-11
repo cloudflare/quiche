@@ -370,8 +370,6 @@ pub struct LegacyRecovery {
 
     bytes_in_flight: BytesInFlight,
 
-    bytes_sent: usize,
-
     bytes_lost: u64,
 
     pub max_datagram_size: usize,
@@ -412,8 +410,6 @@ impl LegacyRecovery {
             time_thresh: INITIAL_TIME_THRESHOLD,
 
             bytes_in_flight: Default::default(),
-
-            bytes_sent: 0,
 
             bytes_lost: 0,
 
@@ -649,8 +645,6 @@ impl RecoveryOps for LegacyRecovery {
 
             self.set_loss_detection_timer(handshake_status, now);
         }
-
-        self.bytes_sent += sent_bytes;
 
         #[cfg(test)]
         {
@@ -1142,7 +1136,7 @@ pub struct Acked {
 
     pub rtt: Duration,
 
-    pub delivered: usize,
+    pub delivered: u64,
 
     pub delivered_time: Instant,
 
