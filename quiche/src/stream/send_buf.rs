@@ -125,6 +125,47 @@ impl PeerStopSendingState {
     }
 }
 
+/// The lifecycle of the stream's final size.
+///
+/// This is only meaningful once `fin_off` is set.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum FinState {
+    /// The final size still needs to be sent in a STREAM frame carrying FIN,
+    /// because no such frame was sent yet, or the last one was lost.
+    #[default]
+    Pending,
+
+    /// No STREAM frame carrying FIN needs to be sent, because one was already
+    /// sent, or because RESET_STREAM carries the final size instead.
+    Sent,
+
+    /// A STREAM frame carrying FIN was acknowledged.
+    Acked,
+}
+
+impl FinState {
+    /// Returns true if the final size still needs to be sent.
+    fn is_pending(self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    /// Returns true if a STREAM frame carrying FIN was acknowledged.
+    fn is_acked(self) -> bool {
+        matches!(self, Self::Acked)
+    }
+
+    /// Records that a STREAM frame carrying FIN was sent.
+    ///
+    /// An acknowledged FIN stays acknowledged, as the peer may have already
+    /// acknowledged a retransmitted range that ends at the final offset.
+    fn sent(self) -> Self {
+        match self {
+            Self::Acked => Self::Acked,
+            Self::Pending | Self::Sent => Self::Sent,
+        }
+    }
+}
+
 /// Send-side stream buffer.
 ///
 /// Stream data scheduled to be sent to the peer is buffered in a list of data
@@ -168,8 +209,8 @@ where
     /// The final stream offset written to the stream, if any.
     fin_off: Option<u64>,
 
-    /// Whether a STREAM frame carrying FIN has been acknowledged.
-    fin_acked: bool,
+    /// The lifecycle of the final size, only meaningful once `fin_off` is set.
+    fin_state: FinState,
 
     /// Whether a RESET_STREAM frame has been acknowledged, or is not needed
     /// because the send side was already complete when it was reset.
@@ -350,6 +391,10 @@ impl<F: BufFactory> SendBuf<F> {
         // propagate the final size.
         let fin = self.fin_off == Some(next_off);
 
+        if fin {
+            self.fin_state = self.fin_state.sent();
+        }
+
         // Record the largest offset that has been sent so we can accurately
         // report final_size
         self.emit_off = cmp::max(self.emit_off, next_off);
@@ -379,7 +424,7 @@ impl<F: BufFactory> SendBuf<F> {
 
     /// Marks the stream's final size as acknowledged by the peer.
     pub(crate) fn ack_fin(&mut self) {
-        self.fin_acked = true;
+        self.fin_state = FinState::Acked;
     }
 
     /// Marks the stream's reset as acknowledged by the peer.
@@ -497,6 +542,19 @@ impl<F: BufFactory> SendBuf<F> {
         total_retransmitted as usize
     }
 
+    /// Marks the final size for retransmission after a STREAM frame carrying
+    /// FIN was lost.
+    ///
+    /// This is needed even when the frame's data was acknowledged in another
+    /// packet, as the FIN still has to reach the peer.
+    pub(crate) fn retransmit_fin(&mut self) {
+        if self.fin_state.is_acked() {
+            return;
+        }
+
+        self.fin_state = FinState::Pending;
+    }
+
     /// Resets the stream at the current offset and clears all buffered data.
     pub fn reset(&mut self) -> (u64, u64) {
         // A send side whose data and FIN were already acknowledged needs no
@@ -508,6 +566,9 @@ impl<F: BufFactory> SendBuf<F> {
         let unsent_len = self.off_back().saturating_sub(unsent_off);
 
         self.fin_off = Some(unsent_off);
+
+        // The final size is sent in RESET_STREAM instead.
+        self.fin_state = self.fin_state.sent();
 
         // Drop all buffered data.
         self.data.clear();
@@ -601,6 +662,11 @@ impl<F: BufFactory> SendBuf<F> {
         false
     }
 
+    /// Returns true if the final size still needs to be sent to the peer.
+    pub(crate) fn is_fin_pending(&self) -> bool {
+        self.fin_off.is_some() && self.fin_state.is_pending()
+    }
+
     /// Returns true if the send-side of the stream is complete.
     ///
     /// This happens when the peer has acknowledged the stream's final size and
@@ -611,7 +677,7 @@ impl<F: BufFactory> SendBuf<F> {
         }
 
         if let Some(fin_off) = self.fin_off {
-            if self.fin_acked && self.acked == (0..fin_off) {
+            if self.fin_state.is_acked() && self.acked == (0..fin_off) {
                 return true;
             }
         }
@@ -1017,6 +1083,7 @@ mod tests {
         );
 
         send.stop(0).unwrap();
+        assert!(!send.is_fin_pending());
         assert_eq!(
             send.peer_stop_sending_state(),
             PeerStopSendingState::NotReported(0)

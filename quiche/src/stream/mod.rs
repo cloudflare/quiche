@@ -966,9 +966,16 @@ impl<F: BufFactory> Stream<F> {
     }
 
     /// Returns true if the stream has data to send and is allowed to send at
-    /// least some of it.
+    /// least some of it, or if only its final size remains to be sent.
     pub fn is_flushable(&self) -> bool {
         let off_front = self.send.off_front();
+
+        // A pending FIN can be sent on its own only once there is no data left
+        // to send before the final offset, e.g. when retransmitted data ends
+        // before an already acknowledged tail.
+        if self.send.is_fin_pending() && off_front == self.send.off_back() {
+            return true;
+        }
 
         !self.send.is_empty() &&
             off_front < self.send.off_back() &&
@@ -2193,17 +2200,28 @@ mod tests {
         let mut stream = <Stream>::new(0, 0, 20, true, 0, DEFAULT_STREAM_WINDOW);
 
         assert!(!stream.send.empty_fin_next());
+        assert!(!stream.is_flushable());
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        assert!(stream.is_flushable());
 
         let mut buf = [0; 5];
         assert_eq!(stream.send.emit(&mut buf), Ok((5, false)));
         assert!(!stream.send.empty_fin_next());
+        assert!(!stream.is_flushable());
 
         assert_eq!(stream.send.write(b"", true), Ok(0));
         assert!(stream.send.empty_fin_next());
 
+        // The pending FIN is the only thing left to send.
+        assert!(stream.is_flushable());
+
         let mut empty = [];
         assert_eq!(stream.send.emit(&mut empty), Ok((0, true)));
+        assert!(!stream.is_flushable());
+
+        // Writing the FIN again doesn't schedule another one.
+        assert_eq!(stream.send.write(b"", true), Ok(0));
+        assert!(!stream.is_flushable());
     }
 
     #[test]
@@ -2732,28 +2750,35 @@ mod tests {
     fn retransmit_returns_zero_when_already_acked() {
         let mut stream = <Stream>::new(0, 15, 15, true, 0, 15);
 
-        // Write and emit some data.
-        assert_eq!(stream.send.write(b"hello", false), Ok(5));
+        // Write and emit some data, with the final size.
+        assert_eq!(stream.send.write(b"hello", true), Ok(5));
         assert_eq!(stream.send.buffered_bytes(), 5);
+        assert!(stream.is_flushable());
 
         let mut buf = [0; 10];
         let (written, _) = stream.send.emit(&mut buf).unwrap();
         assert_eq!(written, 5);
         assert_eq!(stream.send.buffered_bytes(), 0);
+        assert!(!stream.is_flushable());
 
         // Mark data for retransmission.
         let retransmitted = stream.send.retransmit(0, 5);
         assert_eq!(retransmitted, 5);
         assert_eq!(stream.send.buffered_bytes(), 5);
+        assert!(stream.is_flushable());
 
-        // Ack the data.
+        // Ack the data and the FIN.
         stream.send.ack_and_drop(0, 5);
+        stream.send.ack_fin();
         assert_eq!(stream.send.buffered_bytes(), 0);
+        assert!(!stream.is_flushable());
 
         // Try to retransmit again - should return 0 since data is acked.
         let retransmitted = stream.send.retransmit(0, 5);
+        stream.send.retransmit_fin();
         assert_eq!(retransmitted, 0);
         assert_eq!(stream.send.buffered_bytes(), 0);
+        assert!(!stream.is_flushable());
     }
 
     #[test]

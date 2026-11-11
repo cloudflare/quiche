@@ -14312,10 +14312,11 @@ fn stream_empty_fin_is_not_complete_until_fin_acked(
 }
 
 #[rstest]
-/// Tests that a lost zero-length FIN is retransmitted after all stream data has
-/// already been acknowledged.
+/// Tests that a lost FIN is retransmitted after its data was already
+/// acknowledged, whether the lost frame carried data or not.
 fn stream_empty_fin_is_retransmitted(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] fin_with_data: bool,
 ) {
     let mut buf = [0; 65535];
 
@@ -14327,32 +14328,134 @@ fn stream_empty_fin_is_retransmitted(
     assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((5, true)));
 
     assert_eq!(pipe.server.stream_send(4, b"response", false), Ok(8));
-    assert_eq!(pipe.advance(), Ok(()));
-    assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((8, false)));
 
-    assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+    if fin_with_data {
+        // The PTO probe retransmits the data together with the FIN.
+        let data_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
-    let frames =
-        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+        let timer = pipe.server.timeout().unwrap();
+        std::thread::sleep(timer + Duration::from_millis(1));
+        pipe.server.on_timeout();
 
-    assert!(frames.iter().any(|f| matches!(
-        f,
-        frame::Frame::Stream { stream_id: 4, data }
-            if data.off() == 8 && data.is_empty() && data.fin()
-    )));
+        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+        let frames =
+            test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+        assert!(frames.iter().any(|f| matches!(
+            f,
+            frame::Frame::Stream { stream_id: 4, data }
+                if data.off() == 0 && data.len() == 8 && data.fin()
+        )));
+
+        // Lose the probe, but deliver and acknowledge the original data.
+        test_utils::process_flight(&mut pipe.client, data_flight).unwrap();
+        assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((8, false)));
+
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+        assert_eq!(pipe.server.streams.get(4).unwrap().send.ack_off(), 8);
+    } else {
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((8, false)));
+
+        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+        let frames =
+            test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+        assert!(frames.iter().any(|f| matches!(
+            f,
+            frame::Frame::Stream { stream_id: 4, data }
+                if data.off() == 8 && data.is_empty() && data.fin()
+        )));
+    }
 
     test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
 
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
-    let frames =
-        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let mut frames = Vec::new();
+
+    for (mut pkt, _) in flight.clone() {
+        frames
+            .extend(test_utils::decode_pkt(&mut pipe.client, &mut pkt).unwrap());
+    }
 
     assert!(frames.iter().any(|f| matches!(
         f,
         frame::Frame::Stream { stream_id: 4, data }
             if data.off() == 8 && data.is_empty() && data.fin()
     )));
+
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((0, true)));
+}
+
+#[rstest]
+/// Tests that a FIN is sent when retransmitted data ends before an already
+/// acknowledged tail, unless the FIN was already sent with that tail.
+fn stream_fin_is_sent_after_retransmission_before_acked_tail(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] fin_with_tail: bool,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_initial_max_data(4096);
+    config.set_initial_max_stream_data_bidi_local(1024);
+    config.set_initial_max_stream_data_bidi_remote(1024);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((5, true)));
+
+    let data = vec![42; 256];
+    assert_eq!(pipe.server.stream_send(4, &data, fin_with_tail), Ok(256));
+
+    let mut flight =
+        test_utils::emit_flight_with_max_buffer(&mut pipe.server, 64, None, None)
+            .unwrap();
+    assert!(flight.len() > 3);
+
+    // Only deliver the last packet. Its ACK declares all the others lost.
+    let tail = flight.pop().unwrap();
+    test_utils::process_flight(&mut pipe.client, vec![tail]).unwrap();
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    if !fin_with_tail {
+        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+    }
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let mut frames = Vec::new();
+
+    for (mut pkt, _) in flight.clone() {
+        frames
+            .extend(test_utils::decode_pkt(&mut pipe.client, &mut pkt).unwrap());
+    }
+
+    assert!(frames.iter().any(|f| matches!(
+        f,
+        frame::Frame::Stream { stream_id: 4, data } if data.off() == 0
+    )));
+
+    // The FIN must be sent only when it wasn't already sent with the tail.
+    assert_eq!(
+        frames.iter().any(|f| matches!(
+            f,
+            frame::Frame::Stream { stream_id: 4, data } if data.fin()
+        )),
+        !fin_with_tail,
+        "unexpected FIN in {frames:?}"
+    );
+
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((256, true)));
 }
 
 #[rstest]
