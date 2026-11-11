@@ -8736,7 +8736,7 @@ impl<F: BufFactory> Connection<F> {
 
                     self.streams.insert_reset(stream_id, error_code, final_size);
 
-                    self.streams.insert_stopped_writable(&priority_key);
+                    self.streams.insert_writable(&priority_key);
 
                     // A stopped stream has nothing left to flush. A stale
                     // flushable entry could make send() return Done while

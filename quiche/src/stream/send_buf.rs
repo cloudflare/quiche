@@ -103,6 +103,15 @@ impl PeerStopSendingState {
         }
     }
 
+    /// Returns whether a received STOP_SENDING is still owed to the
+    /// application.
+    pub(crate) fn is_unreported(self) -> bool {
+        match self {
+            Self::NotReported(_) => true,
+            Self::NotReceived | Self::Reported(_) => false,
+        }
+    }
+
     /// Returns the peer's error without consuming its application notification.
     fn check_not_stopped(self) -> Result<()> {
         match self {

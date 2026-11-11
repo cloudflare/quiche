@@ -420,22 +420,23 @@ impl<F: BufFactory> StreamMap<F> {
     /// This should also be called anytime a new stream is created, in addition
     /// to when an existing stream becomes writable.
     ///
+    /// A stream with an unreported STOP_SENDING is also queued for its stopped
+    /// notification, which is reported even without send capacity.
+    ///
     /// If the stream was already in the list, this does nothing.
     pub fn insert_writable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
         if !priority_key.writable.is_linked() {
             self.writable.insert(Arc::clone(priority_key));
         }
-    }
 
-    /// Marks a newly stopped stream as queued for writable notification.
-    pub fn insert_stopped_writable(
-        &mut self, priority_key: &Arc<StreamPriorityKey>,
-    ) {
-        if !priority_key.stopped_writable.is_linked() {
+        let stopped = self
+            .streams
+            .get(&priority_key.id)
+            .is_some_and(|s| s.send.peer_stop_sending_state().is_unreported());
+
+        if stopped && !priority_key.stopped_writable.is_linked() {
             self.stopped_writable.insert(Arc::clone(priority_key));
         }
-
-        self.insert_writable(priority_key);
     }
 
     /// Removes the stream ID from the writable streams set.
@@ -502,13 +503,8 @@ impl<F: BufFactory> StreamMap<F> {
         }
 
         if old.writable.is_linked() {
-            let stopped = old.stopped_writable.is_linked();
             self.remove_writable(old);
-            if stopped {
-                self.insert_stopped_writable(new);
-            } else {
-                self.insert_writable(new);
-            }
+            self.insert_writable(new);
         }
 
         if old.flushable.is_linked() {
@@ -2964,6 +2960,55 @@ mod tests {
         let dropped = stream.send.ack_and_drop(0, 5);
         assert_eq!(dropped, 5);
         assert_eq!(stream.send.buffered_bytes(), 0);
+    }
+
+    /// Stopped-writable membership follows the stream's STOP_SENDING state,
+    /// so a stream taken out of the writable queue and put back keeps its
+    /// pending notification whichever caller does it.
+    #[test]
+    fn insert_writable_derives_stopped_writable() {
+        let local_tp = crate::TransportParams::default();
+        let peer_tp = crate::TransportParams {
+            initial_max_stream_data_bidi_local: 100,
+            ..Default::default()
+        };
+
+        let mut streams: StreamMap = StreamMap::new(100, 100, 100);
+
+        for id in [4, 8] {
+            streams
+                .get_or_create(id, &local_tp, &peer_tp, false, true)
+                .unwrap();
+            let priority_key = Arc::clone(&streams.get(id).unwrap().priority_key);
+            streams.insert_writable(&priority_key);
+        }
+
+        assert!(streams.stopped_writable().next().is_none());
+
+        streams.get_mut(4).unwrap().send.stop(0).unwrap();
+        let priority_key = Arc::clone(&streams.get(4).unwrap().priority_key);
+        streams.insert_writable(&priority_key);
+
+        assert_eq!(streams.writable().collect::<Vec<_>>(), vec![4, 8]);
+        assert_eq!(streams.stopped_writable().collect::<Vec<_>>(), vec![4]);
+
+        streams.remove_writable(&priority_key);
+        streams.insert_writable(&priority_key);
+
+        assert_eq!(streams.stopped_writable().collect::<Vec<_>>(), vec![4]);
+
+        // Once reported, the stream is no longer owed a notification.
+        assert!(streams
+            .get_mut(4)
+            .unwrap()
+            .send
+            .cap_and_report_stop_sending()
+            .is_err());
+        streams.remove_writable(&priority_key);
+        streams.insert_writable(&priority_key);
+
+        assert!(streams.writable().any(|id| id == 4));
+        assert!(streams.stopped_writable().next().is_none());
     }
 }
 
