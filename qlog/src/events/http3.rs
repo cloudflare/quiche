@@ -156,6 +156,7 @@ pub enum Http3Frame {
 
     Origin {
         origin_entries: Vec<Http3OriginEntry>,
+        raw: Option<RawInfo>,
     },
 
     Reserved {
@@ -186,8 +187,7 @@ impl Default for Http3Frame {
 }
 
 impl Http3Frame {
-    /// Sets the `raw` field of the frame. Has no effect on frame variants
-    /// that do not carry raw information (e.g. `Origin`).
+    /// Sets the `raw` field of the frame.
     pub fn set_raw(&mut self, info: RawInfo) {
         match self {
             Http3Frame::Data { raw } |
@@ -198,14 +198,13 @@ impl Http3Frame {
             Http3Frame::Goaway { raw, .. } |
             Http3Frame::MaxPushId { raw, .. } |
             Http3Frame::PriorityUpdate { raw, .. } |
+            Http3Frame::Origin { raw, .. } |
             Http3Frame::Reserved { raw, .. } |
             Http3Frame::Unknown { raw, .. } => *raw = Some(info),
-
-            Http3Frame::Origin { .. } => {},
         }
     }
 
-    /// Returns the `raw` field of the frame, if the variant carries one.
+    /// Returns the `raw` field of the frame.
     pub fn raw(&self) -> Option<&RawInfo> {
         match self {
             Http3Frame::Data { raw } |
@@ -216,10 +215,9 @@ impl Http3Frame {
             Http3Frame::Goaway { raw, .. } |
             Http3Frame::MaxPushId { raw, .. } |
             Http3Frame::PriorityUpdate { raw, .. } |
+            Http3Frame::Origin { raw, .. } |
             Http3Frame::Reserved { raw, .. } |
             Http3Frame::Unknown { raw, .. } => raw.as_ref(),
-
-            Http3Frame::Origin { .. } => None,
         }
     }
 }
@@ -227,17 +225,19 @@ impl Http3Frame {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ParametersSet {
-    pub initiator: Option<Initiator>,
+    pub initiator: Initiator,
 
     #[serde(alias = "max_header_list_size")]
     pub max_field_section_size: Option<u64>,
     pub max_table_capacity: Option<u64>,
     pub blocked_streams_count: Option<u64>,
-    pub extended_connect: Option<u16>,
-    pub h3_datagram: Option<u16>,
+    pub extended_connect: Option<u64>,
+    pub h3_datagram: Option<u64>,
 
     // qlog-defined
     pub waits_for_settings: Option<bool>,
+
+    pub unknown_settings: Option<Vec<Setting>>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -247,8 +247,8 @@ pub struct ParametersRestored {
     pub max_field_section_size: Option<u64>,
     pub max_table_capacity: Option<u64>,
     pub blocked_streams_count: Option<u64>,
-    pub extended_connect: Option<u16>,
-    pub h3_datagram: Option<u16>,
+    pub extended_connect: Option<u64>,
+    pub h3_datagram: Option<u64>,
 }
 
 #[serde_with::skip_serializing_none]

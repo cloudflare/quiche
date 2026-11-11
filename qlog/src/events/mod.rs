@@ -37,11 +37,11 @@ use std::collections::BTreeMap;
 
 pub type ExData = BTreeMap<String, serde_json::Value>;
 
-pub const LOGLEVEL_URI: &str = "urn:ietf:params:qlog:events:loglevel-14";
+pub const LOGLEVEL_URI: &str = "urn:ietf:params:qlog:events:loglevel-15";
 
-pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic-13";
-pub const HTTP3_URI: &str = "urn:ietf:params:qlog:events:http3-13";
-pub const HTTP_URI: &str = "urn:ietf:params:qlog:events:http-13";
+pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic-14";
+pub const HTTP3_URI: &str = "urn:ietf:params:qlog:events:http3-14";
+pub const HTTP_URI: &str = "urn:ietf:params:qlog:events:http-14";
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(untagged)]
@@ -249,11 +249,11 @@ impl From<EventType> for EventImportance {
                 EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::FramesParsed) =>
                 EventImportance::Extra,
-            EventType::QuicEventType(QuicEventType::FramesProcessed) =>
-                EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::StreamDataMoved) =>
                 EventImportance::Base,
             EventType::QuicEventType(QuicEventType::DatagramDataMoved) =>
+                EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::DatagramDropped) =>
                 EventImportance::Base,
             EventType::QuicEventType(
                 QuicEventType::ConnectionDataBlockedUpdated,
@@ -369,12 +369,12 @@ impl From<&EventData> for EventType {
                 EventType::QuicEventType(QuicEventType::FramesCreated),
             EventData::QuicFramesParsed { .. } =>
                 EventType::QuicEventType(QuicEventType::FramesParsed),
-            EventData::QuicFramesProcessed { .. } =>
-                EventType::QuicEventType(QuicEventType::FramesProcessed),
             EventData::QuicStreamDataMoved { .. } =>
                 EventType::QuicEventType(QuicEventType::StreamDataMoved),
             EventData::QuicDatagramDataMoved { .. } =>
                 EventType::QuicEventType(QuicEventType::DatagramDataMoved),
+            EventData::QuicDatagramDropped { .. } =>
+                EventType::QuicEventType(QuicEventType::DatagramDropped),
             EventData::QuicConnectionDataBlockedUpdated { .. } =>
                 EventType::QuicEventType(
                     QuicEventType::ConnectionDataBlockedUpdated,
@@ -523,13 +523,13 @@ pub enum EventData {
     #[serde(rename = "quic:packets_acked")]
     QuicPacketsAcked(quic::PacketsAcked),
 
-    #[serde(rename = "quic:datagrams_sent")]
+    #[serde(rename = "quic:udp_datagrams_sent")]
     QuicUdpDatagramsSent(quic::UdpDatagramsSent),
 
-    #[serde(rename = "quic:datagrams_received")]
+    #[serde(rename = "quic:udp_datagrams_received")]
     QuicUdpDatagramsReceived(quic::UdpDatagramsReceived),
 
-    #[serde(rename = "quic:datagram_dropped")]
+    #[serde(rename = "quic:udp_datagram_dropped")]
     QuicUdpDatagramDropped(quic::UdpDatagramDropped),
 
     #[serde(rename = "quic:stream_state_updated")]
@@ -541,14 +541,14 @@ pub enum EventData {
     #[serde(rename = "quic:frames_parsed")]
     QuicFramesParsed(quic::FramesParsed),
 
-    #[serde(rename = "quic:frames_processed")]
-    QuicFramesProcessed(quic::FramesProcessed),
-
     #[serde(rename = "quic:stream_data_moved")]
     QuicStreamDataMoved(quic::StreamDataMoved),
 
     #[serde(rename = "quic:datagram_data_moved")]
     QuicDatagramDataMoved(quic::DatagramDataMoved),
+
+    #[serde(rename = "quic:datagram_dropped")]
+    QuicDatagramDropped(quic::DatagramDropped),
 
     #[serde(rename = "quic:connection_data_blocked_updated")]
     QuicConnectionDataBlockedUpdated(quic::ConnectionDataBlockedUpdated),
@@ -565,7 +565,7 @@ pub enum EventData {
     #[serde(rename = "quic:key_updated")]
     QuicKeyUpdated(quic::KeyUpdated),
 
-    #[serde(rename = "quic:key_retired")]
+    #[serde(rename = "quic:key_discarded")]
     QuicKeyDiscarded(quic::KeyDiscarded),
 
     #[serde(rename = "quic:recovery_parameters_set")]
@@ -665,7 +665,6 @@ impl EventData {
             EventData::QuicMarkedForRetransmit(ev) => Some(ev.frames.len()),
             EventData::QuicFramesCreated(ev) => Some(ev.frames.len()),
             EventData::QuicFramesParsed(ev) => Some(ev.frames.len()),
-            EventData::QuicFramesProcessed(ev) => Some(ev.frames.len()),
 
             _ => None,
         }
@@ -712,30 +711,53 @@ pub enum ApplicationError {
     HttpIdError,
     HttpStreamCreationError,
     HttpClosedCriticalStream,
-    HttpEarlyResponse,
+    HttpMessageError,
     HttpMissingSettings,
     HttpFrameUnexpected,
     HttpRequestRejected,
     HttpSettingsError,
+    QpackDecompressionFailed,
+    QpackEncoderStreamError,
+    QpackDecoderStreamError,
+    HttpDatagramError,
     Unknown,
 }
 
 /// A TLS alert-derived QUIC CRYPTO_ERROR code.
 ///
-/// Per draft-ietf-quic-qlog-quic-events-13, this is serialized as a string
+/// Per draft-ietf-quic-qlog-quic-events-14, this is serialized as a string
 /// of the form `crypto_error_0x1XX` where `XX` are the lowercase hexadecimal
 /// digits of the TLS alert.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(transparent)]
 pub struct CryptoError(pub String);
 
+/// An IP address and port pair, or an application-defined redacted string.
+///
+/// `ip` is either a human-readable address or a hex-encoded raw address.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(untagged)]
+pub enum IpAddressPort {
+    Endpoint { ip: String, port: u16 },
+    Redacted(String),
+}
+
+impl std::fmt::Display for IpAddressPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IpAddressPort::Endpoint { ip, port } if ip.contains(':') =>
+                write!(f, "[{ip}]:{port}"),
+            IpAddressPort::Endpoint { ip, port } => write!(f, "{ip}:{port}"),
+            IpAddressPort::Redacted(s) => f.write_str(s),
+        }
+    }
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct TupleEndpointInfo {
-    pub ip_v4: Option<String>,
-    pub port_v4: Option<u16>,
-    pub ip_v6: Option<String>,
-    pub port_v6: Option<u16>,
+    pub address_v4: Option<IpAddressPort>,
+    pub address_v6: Option<IpAddressPort>,
 
     pub connection_ids: Option<Vec<Bytes>>,
 }
@@ -743,3 +765,59 @@ pub struct TupleEndpointInfo {
 pub mod http;
 pub mod http3;
 pub mod quic;
+
+#[cfg(test)]
+mod draft_14_tests {
+    use super::*;
+
+    #[test]
+    fn ip_address_port_forms() {
+        let ep = IpAddressPort::Endpoint {
+            ip: "127.0.0.1".into(),
+            port: 443,
+        };
+        assert_eq!(
+            serde_json::to_string(&ep).unwrap(),
+            r#"{"ip":"127.0.0.1","port":443}"#
+        );
+        assert_eq!(ep.to_string(), "127.0.0.1:443");
+
+        let red: IpAddressPort = serde_json::from_str(r#""redacted""#).unwrap();
+        assert_eq!(red, IpAddressPort::Redacted("redacted".into()));
+    }
+
+    #[test]
+    fn reordering_threshold_forms() {
+        use quic::ReorderingThreshold;
+        use quic::ReorderingThresholdDisabled;
+
+        assert_eq!(
+            serde_json::to_string(&ReorderingThreshold::Packets(3)).unwrap(),
+            "3"
+        );
+        assert_eq!(
+            serde_json::to_string(&ReorderingThreshold::Disabled(
+                ReorderingThresholdDisabled::Disabled
+            ))
+            .unwrap(),
+            r#""disabled""#
+        );
+    }
+
+    #[test]
+    fn event_names() {
+        let ev = EventData::QuicDatagramDropped(quic::DatagramDropped {
+            direction: Some(quic::DatagramDroppedDirection::Sending),
+            raw: None,
+            trigger: Some(quic::DatagramDroppedTrigger::BufferFull),
+        });
+        assert_eq!(
+            serde_json::to_string(&ev).unwrap(),
+            r#"{"name":"quic:datagram_dropped","data":{"direction":"sending","trigger":"buffer_full"}}"#
+        );
+        assert!(matches!(
+            EventImportance::from(EventType::from(&ev)),
+            EventImportance::Base
+        ));
+    }
+}
