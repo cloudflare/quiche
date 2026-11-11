@@ -580,7 +580,7 @@ impl BBRv2 {
             e => e,
         };
 
-        if network_model.total_bytes_acked() == bytes_acked {
+        if network_model.total_bytes_acked() == bytes_acked as u64 {
             // After the first ACK, cwnd is still the initial congestion window.
             self.pacing_rate = Bandwidth::from_bytes_and_time_delta(
                 self.cwnd,

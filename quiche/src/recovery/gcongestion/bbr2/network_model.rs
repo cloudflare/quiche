@@ -382,8 +382,9 @@ impl BBRv2NetworkModel {
         self.latest_ack_rate = sample.sample_max_ack_rate;
 
         congestion_event.bytes_acked =
-            self.total_bytes_acked() - prior_bytes_acked;
-        congestion_event.bytes_lost = self.total_bytes_lost() - prior_bytes_lost;
+            (self.total_bytes_acked() - prior_bytes_acked) as usize;
+        congestion_event.bytes_lost =
+            (self.total_bytes_lost() - prior_bytes_lost) as usize;
 
         congestion_event.bytes_in_flight = congestion_event
             .prior_bytes_in_flight
@@ -400,8 +401,9 @@ impl BBRv2NetworkModel {
             self.total_bytes_acked() >
                 congestion_event.last_packet_send_state.total_bytes_acked
         {
-            let bytes_delivered = self.total_bytes_acked() -
-                congestion_event.last_packet_send_state.total_bytes_acked;
+            let bytes_delivered = (self.total_bytes_acked() -
+                congestion_event.last_packet_send_state.total_bytes_acked)
+                as usize;
             self.max_bytes_delivered_in_round =
                 self.max_bytes_delivered_in_round.max(bytes_delivered);
         }
@@ -700,11 +702,11 @@ impl BBRv2NetworkModel {
         self.max_bytes_delivered_in_round
     }
 
-    pub(super) fn total_bytes_acked(&self) -> usize {
+    pub(super) fn total_bytes_acked(&self) -> u64 {
         self.bandwidth_sampler.total_bytes_acked()
     }
 
-    pub(super) fn total_bytes_lost(&self) -> usize {
+    pub(super) fn total_bytes_lost(&self) -> u64 {
         self.bandwidth_sampler.total_bytes_lost()
     }
 
