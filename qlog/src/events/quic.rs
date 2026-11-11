@@ -212,6 +212,13 @@ pub enum PacketNumberSpace {
     ApplicationData,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamSide {
+    Sending,
+    Receiving,
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamType {
@@ -339,7 +346,7 @@ pub enum ConnectionState {
     PeerValidated,
     HandshakeStarted,
     EarlyWrite,
-    HandshakeCompleted,
+    HandshakeComplete,
     HandshakeConfirmed,
     Closing,
     Draining,
@@ -526,6 +533,16 @@ pub enum QuicFrame {
         error: ApplicationError,
         error_code: Option<u64>,
         final_size: u64,
+
+        raw: Option<Box<RawInfo>>,
+    },
+
+    ResetStreamAt {
+        stream_id: u64,
+        error: ApplicationError,
+        error_code: Option<u64>,
+        final_size: u64,
+        reliable_size: u64,
 
         raw: Option<Box<RawInfo>>,
     },
@@ -849,6 +866,7 @@ pub struct StreamStateUpdated {
 
     pub old: Option<StreamState>,
     pub new: StreamState,
+    pub stream_side: StreamSide,
 
     pub trigger: Option<StreamTrigger>,
 }
@@ -929,7 +947,7 @@ pub enum BlockedState {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockedReason {
-    Scheduled,
+    Scheduling,
     Pacing,
     AmplificationProtection,
     CongestionControl,

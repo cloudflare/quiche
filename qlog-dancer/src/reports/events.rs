@@ -100,6 +100,9 @@ pub fn frames_to_string(frames: &[QuicFrame]) -> String {
             QuicFrame::ResetStream { stream_id, error, error_code, final_size, .. } => {
                 s += &format!(" RESET_STREAM {{id={stream_id}, error={error:?}, error_code={error_code:?}, final_size={final_size}}}");
             },
+            QuicFrame::ResetStreamAt { stream_id, error, error_code, final_size, reliable_size, .. } => {
+                s += &format!(" RESET_STREAM_AT {{id={stream_id}, error={error:?}, error_code={error_code:?}, final_size={final_size}, reliable_size={reliable_size}}}");
+            },
             QuicFrame::StopSending { stream_id, error, error_code, ..} => {
                 s += &format!(" STOP_SENDING {{id={stream_id}, error={error:?}, error_code={error_code:?}}}");
             },
