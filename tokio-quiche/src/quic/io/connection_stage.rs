@@ -24,14 +24,14 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use quiche::ConnectionId;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
-
 use crate::quic::connection::ApplicationOverQuic;
 use crate::quic::connection::Incoming;
+use crate::quic::connection::IncomingPacketReceiver;
 use crate::quic::connection::QuicConnectionStatsShared;
 use crate::quic::hooks::ConnectionHook;
 use crate::quic::QuicheConnection;
@@ -69,13 +69,18 @@ pub trait ConnectionStage: Send + Debug {
 pub struct ConnectionStageContext<A> {
     pub in_pkt: Option<Incoming>,
     pub application: A,
-    pub incoming_pkt_receiver: mpsc::Receiver<Incoming>,
+    pub incoming_pkt_receiver: IncomingPacketReceiver,
     pub stats: QuicConnectionStatsShared,
     pub connection_hook: Option<Arc<dyn ConnectionHook + Send + Sync + 'static>>,
 }
 
 #[derive(Debug)]
-pub struct Handshake;
+pub struct Handshake {
+    /// Random DCID chosen by the client in its first INITIAL.
+    /// Unmapped in `IoWorker::on_conn_established` on success,
+    /// or via `IncomingPacketReceiver::drop` on failure.
+    pub pending_cid: Option<ConnectionId<'static>>,
+}
 
 impl ConnectionStage for Handshake {
     fn on_flush<A: ApplicationOverQuic>(

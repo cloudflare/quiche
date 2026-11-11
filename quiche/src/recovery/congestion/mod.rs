@@ -113,6 +113,10 @@ pub struct Congestion {
     /// Initial congestion window size in terms of packet count.
     pub(crate) initial_congestion_window_packets: usize,
 
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    /// Fixed congestion window in bytes for the unchecked controller.
+    pub(crate) unchecked_congestion_window: usize,
+
     max_datagram_size: usize,
 
     pub(crate) lost_count: usize,
@@ -146,6 +150,9 @@ impl Congestion {
 
             initial_congestion_window_packets: recovery_config
                 .initial_congestion_window_packets,
+            #[cfg(feature = "congestion_window_unchecked_available")]
+            unchecked_congestion_window: recovery_config
+                .unchecked_congestion_window,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
 
@@ -247,6 +254,9 @@ impl Congestion {
 pub(crate) struct CongestionControlOps {
     pub on_init: fn(r: &mut Congestion),
 
+    /// Updates controller state after the packet-size limit changes.
+    pub on_mtu_update: fn(congestion: &mut Congestion),
+
     pub on_packet_sent: fn(
         r: &mut Congestion,
         sent_bytes: usize,
@@ -283,6 +293,34 @@ pub(crate) struct CongestionControlOps {
     ) -> std::fmt::Result,
 }
 
+#[cfg(feature = "congestion_window_unchecked_available")]
+static CONGESTION_WINDOW_UNCHECKED: CongestionControlOps = CongestionControlOps {
+    on_init: reset_unchecked_congestion_window,
+    on_mtu_update: reset_unchecked_congestion_window,
+    on_packet_sent: |congestion, _, _, _| {
+        reset_unchecked_congestion_window(congestion)
+    },
+    on_packets_acked: |congestion, _, _, _, _| {
+        reset_unchecked_congestion_window(congestion)
+    },
+    congestion_event: |congestion, _, _, _, _| {
+        reset_unchecked_congestion_window(congestion)
+    },
+    checkpoint: reset_unchecked_congestion_window,
+    rollback: |congestion| {
+        reset_unchecked_congestion_window(congestion);
+        true
+    },
+    #[cfg(feature = "qlog")]
+    state_str: |_, _| "congestion_window_unchecked",
+    debug_fmt: |_, _| Ok(()),
+};
+
+#[cfg(feature = "congestion_window_unchecked_available")]
+fn reset_unchecked_congestion_window(congestion: &mut Congestion) {
+    congestion.congestion_window = congestion.unchecked_congestion_window;
+}
+
 impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
     fn from(algo: CongestionControlAlgorithm) -> Self {
         match algo {
@@ -293,6 +331,9 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
             // LegacyRecovery never gets a RecoveryConfig with the
             // Bbr2Gcongestion algorithm.
             CongestionControlAlgorithm::Bbr2Gcongestion => unreachable!(),
+            #[cfg(feature = "congestion_window_unchecked_available")]
+            CongestionControlAlgorithm::CongestionWindowUnchecked =>
+                &CONGESTION_WINDOW_UNCHECKED,
         }
     }
 }
@@ -300,6 +341,70 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    use crate::test_utils;
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    use crate::Config;
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    use rstest::rstest;
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    use std::time::Duration;
+
+    #[cfg(feature = "congestion_window_unchecked_available")]
+    #[rstest]
+    fn unchecked_window_is_restored_by_callbacks(
+        #[values(usize::MAX, 40 * 1024 * 1024)] window: usize,
+    ) {
+        let mut config = Config::new(crate::PROTOCOL_VERSION)
+            .expect("create transport configuration");
+        config.set_cc_algorithm(
+            CongestionControlAlgorithm::CongestionWindowUnchecked,
+        );
+        config.set_unchecked_congestion_window(window);
+        let mut congestion =
+            Congestion::from_config(&RecoveryConfig::from_config(&config));
+        assert_eq!(congestion.congestion_window(), window);
+
+        let callbacks: [fn(&mut Congestion); 5] = [
+            |congestion| {
+                (congestion.cc_ops.on_packet_sent)(
+                    congestion,
+                    1_200,
+                    0,
+                    Instant::now(),
+                );
+            },
+            |congestion| {
+                (congestion.cc_ops.on_packets_acked)(
+                    congestion,
+                    0,
+                    &mut Vec::new(),
+                    Instant::now(),
+                    &RttStats::new(
+                        Duration::from_millis(100),
+                        Duration::from_millis(25),
+                    ),
+                );
+            },
+            |congestion| {
+                let now = Instant::now();
+                let packet = test_utils::helper_packet_sent(0, now, 1_200);
+                (congestion.cc_ops.congestion_event)(
+                    congestion, 1_200, 1_200, &packet, now,
+                );
+            },
+            |congestion| (congestion.cc_ops.checkpoint)(congestion),
+            |congestion| {
+                assert!((congestion.cc_ops.rollback)(congestion));
+            },
+        ];
+
+        for callback in callbacks {
+            congestion.congestion_window = 0;
+            callback(&mut congestion);
+            assert_eq!(congestion.congestion_window(), window);
+        }
+    }
 
     #[test]
     fn ssthresh_init() {

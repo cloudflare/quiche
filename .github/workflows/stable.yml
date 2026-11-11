@@ -7,7 +7,7 @@ permissions:
   pull-requests: write
 
 env:
-  DEFAULT_OPTIONS: "--features=async,ffi,qlog,rpk --workspace"
+  DEFAULT_OPTIONS: "--features=async,ffi,qlog,rpk,congestion_window_unchecked_available --workspace"
   # Used by `quiche_multiarch`, which can't link `boring` for foreign targets.
   NO_BORING_OPTIONS: "--features=ffi,qlog --workspace --exclude h3i --exclude tokio-quiche"
   RUSTFLAGS: "-D warnings"
@@ -61,6 +61,12 @@ jobs:
 
       - name: Run cargo test
         run: cargo test --verbose --all-targets ${{ env.DEFAULT_OPTIONS }}
+
+      - name: Run recovery and settings tests without unchecked congestion window
+        if: matrix.boring_version == 'latest'
+        run: |
+          cargo test --verbose --lib ${DEFAULT_OPTIONS/,congestion_window_unchecked_available/} 'recovery::'
+          cargo test --verbose --lib ${DEFAULT_OPTIONS/,congestion_window_unchecked_available/} 'settings::'
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
@@ -264,6 +270,12 @@ jobs:
         run: cargo-binstall -y cross
 
       - name: Run cargo test using cross
+        # Docker 29.4.2 on ubuntu-26.04 makes socketcall(2) fail with ENOSYS,
+        # and i386 glibc uses it for every socket call. Docker 29.4.3 reverted
+        # this, so drop the option once the runner image updates
+        # (https://github.com/actions/runner-images/issues/14790).
+        env:
+          CROSS_CONTAINER_OPTS: --security-opt seccomp=unconfined
         run: cross test --target=${{ matrix.target }} --verbose --all-targets ${{ env.NO_BORING_OPTIONS }} --exclude qlog-dancer
 
   http3_test:

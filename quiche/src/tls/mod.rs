@@ -723,6 +723,8 @@ pub struct ExData<'a> {
 
     pub tx_cap_factor: f64,
 
+    pub max_outstanding_sent_packets: Option<std::num::NonZeroUsize>,
+
     /// PMTUD configuration: (enable, max_probes)
     pub pmtud: Option<(bool, u8)>,
 

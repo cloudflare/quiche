@@ -29,13 +29,14 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
-use datagram_socket::StreamClosureKind;
 use foundations::telemetry::log;
 use quiche::h3;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 use super::datagram;
+use super::DatagramFlowInfo;
+use super::DgramFlowId;
 use super::DriverHooks;
 use super::H3Command;
 use super::H3ConnectionError;
@@ -43,6 +44,7 @@ use super::H3ConnectionResult;
 use super::H3Controller;
 use super::H3Driver;
 use super::H3Event;
+use super::InboundFrame;
 use super::InboundFrameStream;
 use super::InboundHeaders;
 use super::IncomingH3Headers;
@@ -134,9 +136,17 @@ impl From<NewClientRequest> for ClientH3Command {
 ///
 /// The `send` and `recv` halves are passed to the [ClientH3Controller] in an
 /// [`H3Event::IncomingHeaders`] once the server's response has been received.
+/// If this was a DATAGRAM-capable request (e.g. CONNECT-UDP), `dgram_flow`
+/// carries the pre-allocated flow channels.
+/// The lifetime of the DATAGRAM exchange is tied to the lifetime of the
+/// regular stream-based `send` and `recv`. Dropping them closes the datagram
+/// exchange.
 struct PendingClientRequest {
     send: OutboundFrameSender,
     recv: InboundFrameStream,
+    /// Pre-allocated DATAGRAM flow channels, if this request carries datagram
+    /// semantics. `None` for ordinary requests.
+    dgram_flow: Option<DatagramFlowInfo>,
 }
 
 /// Retry delay when `StreamBlocked` or `StreamLimit` is returned by
@@ -212,44 +222,47 @@ impl ClientHooks {
         };
 
         // log::info!("sent h3 request"; "stream_id" => stream_id);
-        let (mut stream_ctx, send, recv) =
-            StreamCtx::new(stream_id, STREAM_CAPACITY);
+        let (mut stream_ctx, send, recv) = StreamCtx::new(
+            stream_id,
+            STREAM_CAPACITY,
+            driver.ready_stream_sender.clone(),
+        );
 
         if body_finished {
             // `send_request()` already sent FIN for bodyless requests, so
             // mark the send side complete and drop the outbound-frame receiver
             // since no body will be sent.
-            stream_ctx.fin_or_reset_sent = true;
-            stream_ctx.recv = None;
-            stream_ctx
-                .audit_stats
-                .set_sent_stream_fin(StreamClosureKind::Explicit);
+            H3Driver::<ClientHooks>::on_fin_sent(&mut stream_ctx)?;
         }
 
-        if let Some(quarter_stream_id) =
+        let dgram_flow_info = if let Some(quarter_stream_id) =
             datagram::extract_quarter_stream_id(stream_id, &request.headers)
         {
             log::info!(
                 "creating new flow for MASQUE request";
                 "stream_id" => stream_id,
-                "quarter_stream_id" => quarter_stream_id,
+                "quarter_stream_id" => quarter_stream_id.id(),
             );
-            let _ = driver.get_or_insert_flow(quarter_stream_id)?;
             stream_ctx.associated_dgram_flow_id = Some(quarter_stream_id);
-        }
+            Some(driver.establish_flow(qconn, stream_id, quarter_stream_id)?)
+        } else {
+            None
+        };
 
         if let Some(body_writer) = request.body_writer {
             let _ = body_writer.send(send.clone());
-            driver
-                .waiting_streams
-                .push(stream_ctx.wait_for_recv(stream_id))?;
+            stream_ctx.wait_for_recv();
         }
 
         driver.insert_stream(stream_id, stream_ctx);
         driver
             .hooks
             .pending_requests
-            .insert(stream_id, PendingClientRequest { send, recv });
+            .insert(stream_id, PendingClientRequest {
+                send,
+                recv,
+                dgram_flow: dgram_flow_info,
+            });
 
         // Notify the H3Controller that we've allocated a stream_id for a
         // given request_id.
@@ -287,6 +300,7 @@ impl ClientHooks {
             recv: pending_request.recv,
             read_fin: !has_body,
             h3_audit_stats: Arc::clone(&stream_ctx.audit_stats),
+            dgram_flow: pending_request.dgram_flow,
         };
 
         driver
@@ -346,6 +360,19 @@ impl DriverHooks for ClientHooks {
 
     fn stream_closed(driver: &mut H3Driver<Self>, stream_id: u64) {
         driver.hooks.pending_requests.remove(&stream_id);
+    }
+
+    /// Client-side datagram receive policy: deliver to the flow if it exists,
+    /// otherwise drop. The client always establishes flows before
+    /// sending CONNECT requests, so receiving a datagram for an unknown flow is
+    /// either a peer misbehaviour or reordered packets after the flow has
+    /// closed.
+    fn handle_incoming_dgram(
+        driver: &mut H3Driver<Self>, flow_id: DgramFlowId, dgram: InboundFrame,
+    ) {
+        if let Some(flow) = driver.get_flow(flow_id) {
+            flow.send_best_effort(dgram);
+        }
     }
 
     fn conn_command(

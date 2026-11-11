@@ -103,7 +103,8 @@ quiche:        default=boringssl-boring-crate
                pkg-config-meta
 tokio-quiche:  fuzzing, quiche_internal, gcongestion, zero-copy, rpk
                (hardcodes: quiche/boringssl-boring-crate + quiche/qlog)
-h3i:           async (enables tokio-quiche dependency)
+h3i:           default=cli (binary + interactive prompts)
+               async (enables tokio-quiche dependency)
 ```
 
 ## COMMANDS
