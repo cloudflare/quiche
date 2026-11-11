@@ -749,7 +749,7 @@ pub enum Ecn {
 pub struct UdpDatagramsReceived {
     pub count: Option<u16>,
     pub raw: Option<Vec<RawInfo>>,
-    pub ecn: Option<Ecn>,
+    pub ecn: Option<Vec<Ecn>>,
     pub datagram_payload_checksums: Option<Vec<u32>>,
 }
 
@@ -758,7 +758,7 @@ pub struct UdpDatagramsReceived {
 pub struct UdpDatagramsSent {
     pub count: Option<u16>,
     pub raw: Option<Vec<RawInfo>>,
-    pub ecn: Option<Ecn>,
+    pub ecn: Option<Vec<Ecn>>,
     pub datagram_payload_checksums: Option<Vec<u32>>,
 }
 
