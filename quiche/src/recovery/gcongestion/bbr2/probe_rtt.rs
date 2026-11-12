@@ -92,11 +92,21 @@ impl ModeImpl for ProbeRTT {
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize, params: &Params,
         _recovery_stats: &mut RecoveryStats, _cwnd: usize,
+        cwnd_lower_bound: usize,
     ) -> Mode {
         match self.exit_time {
             None => {
+                // Arm the exit timer once bytes in flight drain below the
+                // PROBE_RTT inflight target, or below the connection's
+                // minimum congestion window. The latter clause matters when
+                // the inflight target is below the minimum window: without
+                // it, the cwnd floor (applied in `get_cwnd_limits`/global
+                // limits) keeps bytes in flight pinned above the target
+                // forever, the exit timer never gets armed, and the
+                // connection wedges in PROBE_RTT indefinitely.
                 if congestion_event.bytes_in_flight <=
-                    self.inflight_target(params)
+                    self.inflight_target(params) ||
+                    congestion_event.bytes_in_flight <= cwnd_lower_bound
                 {
                     self.exit_time = Some(
                         congestion_event.event_time + params.probe_rtt_duration,
@@ -153,6 +163,7 @@ impl ModeImpl for ProbeRTT {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recovery::gcongestion::bbr2::SendTimeState;
     use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
     use crate::BbrParams;
     use std::time::Duration;
@@ -171,5 +182,63 @@ mod tests {
         probe_rtt.enter(Instant::now(), None, params);
         assert_eq!(probe_rtt.model.pacing_gain(), 0.8);
         assert_eq!(probe_rtt.model.cwnd_gain(), 0.5);
+    }
+
+    // Regression test for https://github.com/cloudflare/quiche/issues/2698:
+    // when the PROBE_RTT inflight target (0.5 * BDP) is below the
+    // connection's cwnd floor, bytes_in_flight can never drain to or below
+    // the target, so the exit timer must still be armed once in-flight
+    // drains to the floor instead.
+    #[test]
+    fn probe_rtt_exits_when_inflight_hits_the_cwnd_floor() {
+        let params = &DEFAULT_PARAMS;
+        // No bandwidth samples have been fed into the model yet, so the
+        // inflight target (0.5 * max_bandwidth * min_rtt) is 0 and can never
+        // be reached by a sender with any bytes in flight at all.
+        let model = BBRv2NetworkModel::new(params, Duration::from_millis(50));
+        let probe_rtt = ProbeRTT::new(model, Cycle::default());
+        assert_eq!(probe_rtt.inflight_target(params), 0);
+
+        let now = Instant::now();
+        let mut congestion_event = BBRv2CongestionEvent {
+            event_time: now,
+            prior_cwnd: 100_000,
+            prior_bytes_in_flight: 100_000,
+            bytes_in_flight: 50_000,
+            bytes_acked: 50_000,
+            bytes_lost: 0,
+            end_of_round_trip: false,
+            is_probing_for_bandwidth: false,
+            sample_max_bandwidth: None,
+            sample_min_rtt: None,
+            last_packet_send_state: SendTimeState::default(),
+        };
+        let mut recovery_stats = RecoveryStats::default();
+
+        // bytes_in_flight (50_000) is above the inflight target (0), but at
+        // or below the cwnd's lower bound (60_000, e.g. the initial cwnd) --
+        // this must still arm the exit timer, or the connection wedges in
+        // PROBE_RTT forever.
+        let next = probe_rtt.on_congestion_event(
+            100_000,
+            now,
+            &[],
+            &[],
+            &mut congestion_event,
+            0,
+            params,
+            &mut recovery_stats,
+            100_000,
+            60_000,
+        );
+
+        match next {
+            Mode::ProbeRTT(probe_rtt) => assert!(
+                probe_rtt.exit_time.is_some(),
+                "exit timer should be armed once bytes_in_flight drains \
+                 to the cwnd floor"
+            ),
+            _ => panic!("expected to remain in ProbeRTT"),
+        }
     }
 }
