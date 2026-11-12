@@ -2779,6 +2779,10 @@ mod tests {
         assert_eq!(retransmitted, 0);
         assert_eq!(stream.send.buffered_bytes(), 0);
         assert!(!stream.is_flushable());
+
+        // A stale queue entry can still emit the FIN after it was acked.
+        stream.send.emit(&mut buf).unwrap();
+        assert!(stream.send.is_complete());
     }
 
     #[test]

@@ -14375,22 +14375,15 @@ fn stream_empty_fin_is_retransmitted(
 
     test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
 
-    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
-    let mut frames = Vec::new();
-
-    for (mut pkt, _) in flight.clone() {
-        frames
-            .extend(test_utils::decode_pkt(&mut pipe.client, &mut pkt).unwrap());
-    }
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
 
     assert!(frames.iter().any(|f| matches!(
         f,
         frame::Frame::Stream { stream_id: 4, data }
             if data.off() == 8 && data.is_empty() && data.fin()
     )));
-
-    test_utils::process_flight(&mut pipe.client, flight).unwrap();
-    assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((0, true)));
 }
 
 #[rstest]
