@@ -28,9 +28,6 @@
 //!
 //! See <https://www.rfc-editor.org/rfc/rfc9204.html#section-3.2>.
 
-// TODO: field lines can't reference this table yet; see the TODOs in
-// decoder.rs.
-
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -142,8 +139,14 @@ impl DynamicTable {
         self.capacity
     }
 
+    /// Returns the maximum capacity advertised to the peer.
     pub(super) fn max_capacity(&self) -> usize {
         self.max_capacity
+    }
+
+    /// Returns the total number of entries inserted into the table.
+    pub(super) fn insert_count(&self) -> u64 {
+        self.insert_count
     }
 
     /// Returns the entry with the given absolute index, unless it was evicted
