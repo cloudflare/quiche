@@ -146,6 +146,10 @@ struct Params {
     /// Estimate startup/bw probing has gone too far if loss rate exceeds this.
     loss_threshold: f32,
 
+    /// Per-round loss rate above which `bandwidth_lo` / `inflight_lo` are
+    /// lowered outside of probing. 0 lowers them on any loss.
+    lower_bounds_loss_threshold: f32,
+
     /// A common factor for multiplicative decreases. Used for adjusting
     /// `bandwidth_lo``, `inflight_lo`` and `inflight_hi`` upon losses.
     beta: f32,
@@ -254,6 +258,7 @@ impl Params {
         apply_override!(probe_rtt_cwnd_gain);
         apply_override!(max_probe_up_queue_rounds);
         apply_override!(loss_threshold);
+        apply_override!(lower_bounds_loss_threshold);
         apply_override!(use_bytes_delivered_for_inflight_hi);
         apply_override!(decrease_startup_pacing_at_end_of_round);
         apply_override!(ignore_app_limited_for_no_bandwidth_growth);
@@ -334,6 +339,8 @@ const DEFAULT_PARAMS: Params = Params {
     inflight_hi_headroom: 0.15,
 
     loss_threshold: 0.015,
+
+    lower_bounds_loss_threshold: 0.0,
 
     beta: 0.3,
 
