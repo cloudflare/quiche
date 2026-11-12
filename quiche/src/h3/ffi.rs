@@ -27,6 +27,8 @@
 #[cfg(feature = "sfv")]
 use std::convert::TryFrom;
 
+use std::mem::align_of;
+use std::mem::size_of;
 use std::ptr;
 use std::slice;
 
@@ -39,6 +41,76 @@ use crate::*;
 
 use crate::h3::NameValue;
 use crate::h3::Priority;
+
+const H3_FFI_ERR_INVALID_ARGUMENT: ssize_t = -21;
+
+fn validate_h3_ssize_len(len: size_t) -> std::result::Result<(), ssize_t> {
+    if len > ssize_t::MAX as usize {
+        Err(H3_FFI_ERR_INVALID_ARGUMENT)
+    } else {
+        Ok(())
+    }
+}
+
+fn ffi_slice_layout_valid<T>(ptr: *const T, len: usize) -> bool {
+    if len == 0 {
+        return true;
+    }
+
+    if ptr.is_null() || !(ptr as usize).is_multiple_of(align_of::<T>()) {
+        return false;
+    }
+
+    size_of::<T>()
+        .checked_mul(len)
+        .is_some_and(|bytes| bytes <= isize::MAX as usize)
+}
+
+/// Builds a shared slice from C pointer metadata after validating what can be
+/// checked without dereferencing caller memory.
+///
+/// # Safety
+///
+/// For non-empty slices, ptr must still point to len initialized T values in
+/// one live allocation for the returned lifetime.
+unsafe fn ffi_slice_from_raw_parts<'a, T>(
+    ptr: *const T, len: usize,
+) -> Option<&'a [T]> {
+    if len == 0 {
+        return Some(unsafe {
+            slice::from_raw_parts(ptr::NonNull::<T>::dangling().as_ptr(), 0)
+        });
+    }
+
+    if !ffi_slice_layout_valid(ptr, len) {
+        return None;
+    }
+
+    Some(unsafe { slice::from_raw_parts(ptr, len) })
+}
+
+/// Builds a mutable slice from C pointer metadata after validating what can be
+/// checked without dereferencing caller memory.
+///
+/// # Safety
+///
+/// For non-empty slices, ptr must point to len initialized T values in one
+/// live allocation and be exclusively borrowed for the returned lifetime.
+unsafe fn ffi_slice_from_raw_parts_mut<'a, T>(
+    ptr: *mut T, len: usize,
+) -> Option<&'a mut [T]> {
+    if len == 0 {
+        return Some(unsafe {
+            slice::from_raw_parts_mut(ptr::NonNull::<T>::dangling().as_ptr(), 0)
+        });
+    }
+
+    if !ffi_slice_layout_valid(ptr.cast_const(), len) {
+        return None;
+    }
+
+    Some(unsafe { slice::from_raw_parts_mut(ptr, len) })
+}
 
 #[no_mangle]
 pub extern "C" fn quiche_h3_config_new() -> *mut h3::Config {
@@ -235,7 +307,9 @@ pub extern "C" fn quiche_h3_send_request(
     conn: &mut h3::Connection, quic_conn: &mut Connection,
     headers: *const Header, headers_len: size_t, fin: bool,
 ) -> i64 {
-    let req_headers = headers_from_ptr(headers, headers_len);
+    let Ok(req_headers) = headers_from_ptr(headers, headers_len) else {
+        return H3_FFI_ERR_INVALID_ARGUMENT as i64;
+    };
 
     match conn.send_request(quic_conn, &req_headers, fin) {
         Ok(v) => v as i64,
@@ -249,7 +323,9 @@ pub extern "C" fn quiche_h3_send_response(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
     headers: *const Header, headers_len: size_t, fin: bool,
 ) -> c_int {
-    let resp_headers = headers_from_ptr(headers, headers_len);
+    let Ok(resp_headers) = headers_from_ptr(headers, headers_len) else {
+        return H3_FFI_ERR_INVALID_ARGUMENT as c_int;
+    };
 
     match conn.send_response(quic_conn, stream_id, &resp_headers, fin) {
         Ok(_) => 0,
@@ -263,7 +339,9 @@ pub extern "C" fn quiche_h3_send_response_with_priority(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
     headers: *const Header, headers_len: size_t, priority: &Priority, fin: bool,
 ) -> c_int {
-    let resp_headers = headers_from_ptr(headers, headers_len);
+    let Ok(resp_headers) = headers_from_ptr(headers, headers_len) else {
+        return H3_FFI_ERR_INVALID_ARGUMENT as c_int;
+    };
 
     match conn.send_response_with_priority(
         quic_conn,
@@ -284,7 +362,9 @@ pub extern "C" fn quiche_h3_send_additional_headers(
     headers: *const Header, headers_len: size_t, is_trailer_section: bool,
     fin: bool,
 ) -> c_int {
-    let headers = headers_from_ptr(headers, headers_len);
+    let Ok(headers) = headers_from_ptr(headers, headers_len) else {
+        return H3_FFI_ERR_INVALID_ARGUMENT as c_int;
+    };
 
     match conn.send_additional_headers(
         quic_conn,
@@ -304,11 +384,13 @@ pub extern "C" fn quiche_h3_send_body(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
     body: *const u8, body_len: size_t, fin: bool,
 ) -> ssize_t {
-    if body_len > <ssize_t>::MAX as usize {
-        panic!("The provided buffer is too large");
+    if let Err(e) = validate_h3_ssize_len(body_len) {
+        return e;
     }
 
-    let body = unsafe { slice::from_raw_parts(body, body_len) };
+    let Some(body) = (unsafe { ffi_slice_from_raw_parts(body, body_len) }) else {
+        return H3_FFI_ERR_INVALID_ARGUMENT;
+    };
 
     match conn.send_body(quic_conn, stream_id, body, fin) {
         Ok(v) => v as ssize_t,
@@ -322,11 +404,14 @@ pub extern "C" fn quiche_h3_recv_body(
     conn: &mut h3::Connection, quic_conn: &mut Connection, stream_id: u64,
     out: *mut u8, out_len: size_t,
 ) -> ssize_t {
-    if out_len > <ssize_t>::MAX as usize {
-        panic!("The provided buffer is too large");
+    if let Err(e) = validate_h3_ssize_len(out_len) {
+        return e;
     }
 
-    let out = unsafe { slice::from_raw_parts_mut(out, out_len) };
+    let Some(out) = (unsafe { ffi_slice_from_raw_parts_mut(out, out_len) })
+    else {
+        return H3_FFI_ERR_INVALID_ARGUMENT;
+    };
 
     match conn.recv_body(quic_conn, stream_id, out) {
         Ok(v) => v as ssize_t,
@@ -351,7 +436,11 @@ pub extern "C" fn quiche_h3_send_goaway(
 pub extern "C" fn quiche_h3_parse_extensible_priority(
     priority: *const u8, priority_len: size_t, parsed: &mut Priority,
 ) -> c_int {
-    let priority = unsafe { slice::from_raw_parts(priority, priority_len) };
+    let Some(priority) =
+        (unsafe { ffi_slice_from_raw_parts(priority, priority_len) })
+    else {
+        return H3_FFI_ERR_INVALID_ARGUMENT as c_int;
+    };
 
     match Priority::try_from(priority) {
         Ok(v) => {
@@ -417,21 +506,21 @@ pub extern "C" fn quiche_h3_conn_free(conn: *mut h3::Connection) {
 
 fn headers_from_ptr<'a>(
     ptr: *const Header, len: size_t,
-) -> Vec<h3::HeaderRef<'a>> {
-    let headers = unsafe { slice::from_raw_parts(ptr, len) };
+) -> std::result::Result<Vec<h3::HeaderRef<'a>>, ()> {
+    let headers = unsafe { ffi_slice_from_raw_parts(ptr, len) }.ok_or(())?;
 
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(headers.len());
 
     for h in headers {
-        out.push({
-            let name = unsafe { slice::from_raw_parts(h.name, h.name_len) };
-            let value = unsafe { slice::from_raw_parts(h.value, h.value_len) };
+        let name =
+            unsafe { ffi_slice_from_raw_parts(h.name, h.name_len) }.ok_or(())?;
+        let value =
+            unsafe { ffi_slice_from_raw_parts(h.value, h.value_len) }.ok_or(())?;
 
-            h3::HeaderRef::new(name, value)
-        });
+        out.push(h3::HeaderRef::new(name, value));
     }
 
-    out
+    Ok(out)
 }
 
 #[repr(C)]
@@ -446,4 +535,54 @@ pub extern "C" fn quiche_h3_conn_stats(conn: &h3::Connection, out: &mut Stats) {
 
     out.qpack_encoder_stream_recv_bytes = stats.qpack_encoder_stream_recv_bytes;
     out.qpack_decoder_stream_recv_bytes = stats.qpack_decoder_stream_recv_bytes;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oversized_h3_ffi_length_returns_invalid_argument() {
+        assert_eq!(validate_h3_ssize_len(ssize_t::MAX as usize), Ok(()));
+
+        if usize::BITS > ssize_t::BITS {
+            assert_eq!(
+                validate_h3_ssize_len((ssize_t::MAX as usize) + 1),
+                Err(H3_FFI_ERR_INVALID_ARGUMENT)
+            );
+        }
+    }
+
+    #[test]
+    fn h3_header_slices_accept_null_zero_and_reject_bad_parts() {
+        assert!(headers_from_ptr(ptr::null(), 0).unwrap().is_empty());
+        assert!(headers_from_ptr(ptr::null(), 1).is_err());
+
+        let empty = Header {
+            name: ptr::null_mut(),
+            name_len: 0,
+            value: ptr::null_mut(),
+            value_len: 0,
+        };
+        let headers = headers_from_ptr(&empty, 1).unwrap();
+        assert_eq!(headers.len(), 1);
+        assert!(headers[0].name().is_empty());
+        assert!(headers[0].value().is_empty());
+
+        let bad_name = Header {
+            name: ptr::null_mut(),
+            name_len: 1,
+            value: ptr::null_mut(),
+            value_len: 0,
+        };
+        assert!(headers_from_ptr(&bad_name, 1).is_err());
+
+        let bad_value = Header {
+            name: ptr::null_mut(),
+            name_len: 0,
+            value: ptr::null_mut(),
+            value_len: 1,
+        };
+        assert!(headers_from_ptr(&bad_value, 1).is_err());
+    }
 }
