@@ -432,8 +432,8 @@ use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
 use crate::recovery::ReleaseDecision;
 
+use crate::stream::PriorityQueue;
 use crate::stream::RecvAction;
-use crate::stream::StreamPriorityKey;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -5339,11 +5339,8 @@ impl<F: BufFactory> Connection<F> {
                     _ => {
                         stream_data_skipped = true;
 
-                        if stream.incremental {
-                            let priority_key = Arc::clone(&stream.priority_key);
-                            self.streams.remove_flushable(&priority_key);
-                            self.streams.insert_flushable(&priority_key);
-                        }
+                        self.streams
+                            .cycle_priority(stream_id, PriorityQueue::Flushable);
 
                         break;
                     },
@@ -5398,16 +5395,15 @@ impl<F: BufFactory> Connection<F> {
                     has_data = true;
                 }
 
-                let priority_key = Arc::clone(&stream.priority_key);
-                // Remove the stream when it is no longer flushable.
+                // Reached through `peek_flushable`, so the stream is in the
+                // queue already and only needs taking out.
                 if !stream.is_flushable() {
+                    let priority_key = Arc::clone(&stream.priority_key);
                     self.streams.remove_flushable(&priority_key);
-                } else if stream.incremental {
-                    // Shuffle the incremental stream to the back of the
-                    // queue.
-                    self.streams.remove_flushable(&priority_key);
-                    self.streams.insert_flushable(&priority_key);
                 }
+
+                self.streams
+                    .cycle_priority(stream_id, PriorityQueue::Flushable);
 
                 // Update tx_buffered when data is emitted.
                 self.streams.sub_tx_buffered(len);
@@ -5993,8 +5989,15 @@ impl<F: BufFactory> Connection<F> {
             self.streams.insert_almost_full(stream_id);
         }
 
+        // The queue holds the streams that are eligible, so a stream that
+        // still has data belongs in it even if stream_readable_next() handed
+        // it out and took it back out. Only a read that took data re-arms it,
+        // so that a caller looping on stream_readable_next() with an empty
+        // buffer still reaches the end.
         if !readable {
             self.streams.remove_readable(&priority_key);
+        } else if read > 0 {
+            self.streams.insert_readable(&priority_key);
         }
 
         if state == stream::StreamState::Collectable {
@@ -6021,11 +6024,8 @@ impl<F: BufFactory> Connection<F> {
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
-        if priority_key.incremental && readable {
-            // Shuffle the incremental stream to the back of the queue.
-            self.streams.remove_readable(&priority_key);
-            self.streams.insert_readable(&priority_key);
-        }
+        self.streams
+            .cycle_priority(stream_id, PriorityQueue::Readable);
 
         Ok((read, fin))
     }
@@ -6210,11 +6210,7 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        let (cap, fin, blocked_by_cap) = if cap < len {
-            (cap, false, true)
-        } else {
-            (len, fin, false)
-        };
+        let (cap, fin) = if cap < len { (cap, false) } else { (len, fin) };
 
         let (sent, ret) = match write_fn(stream, buf, cap, fin) {
             Ok(v) => v,
@@ -6225,7 +6221,6 @@ impl<F: BufFactory> Connection<F> {
             },
         };
 
-        let incremental = stream.incremental;
         let priority_key = Arc::clone(&stream.priority_key);
 
         let flushable = stream.is_flushable();
@@ -6257,14 +6252,6 @@ impl<F: BufFactory> Connection<F> {
 
         if !writable {
             self.streams.remove_writable(&priority_key);
-        } else if was_writable && blocked_by_cap {
-            // When `stream_writable_next()` returns a stream, the writable
-            // mark is removed, but because the stream is blocked by the
-            // connection-level send capacity it won't be marked as writable
-            // again once the capacity increases.
-            //
-            // Since the stream is writable already, mark it here instead.
-            self.streams.insert_writable(&priority_key);
         }
 
         self.tx_cap -= sent;
@@ -6297,11 +6284,17 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        if incremental && writable {
-            // Shuffle the incremental stream to the back of the queue.
-            self.streams.remove_writable(&priority_key);
+        // As above: a stream with capacity left belongs in the queue even if
+        // stream_writable_next() handed it out, which is also how it gets
+        // reported again once connection-level capacity increases. Only a write
+        // that took data re-arms it, so that a caller looping on
+        // stream_writable_next() with nothing to write still reaches the end.
+        if writable && sent > 0 {
             self.streams.insert_writable(&priority_key);
         }
+
+        self.streams
+            .cycle_priority(stream_id, PriorityQueue::Writable);
 
         Ok(ret)
     }
@@ -6319,33 +6312,15 @@ impl<F: BufFactory> Connection<F> {
     ) -> Result<()> {
         // Get existing stream or create a new one, but if the stream
         // has already been closed and collected, ignore the prioritization.
-        let stream = match self.get_or_create_stream(stream_id, true) {
-            Ok(v) => v,
+        match self.get_or_create_stream(stream_id, true) {
+            Ok(_) => (),
 
             Err(Error::Done) => return Ok(()),
 
             Err(e) => return Err(e),
-        };
-
-        if stream.urgency == urgency && stream.incremental == incremental {
-            return Ok(());
         }
 
-        stream.urgency = urgency;
-        stream.incremental = incremental;
-
-        let new_priority_key = Arc::new(StreamPriorityKey {
-            urgency: stream.urgency,
-            incremental: stream.incremental,
-            id: stream_id,
-            ..Default::default()
-        });
-
-        let old_priority_key =
-            std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
-
-        self.streams
-            .update_priority(&old_priority_key, &new_priority_key);
+        self.streams.set_priority(stream_id, urgency, incremental);
 
         Ok(())
     }
@@ -6521,10 +6496,9 @@ impl<F: BufFactory> Connection<F> {
     /// Returns the next stream that has data to read.
     ///
     /// Note that once returned by this method, a stream ID will not be returned
-    /// again until it is "re-armed".
-    ///
-    /// The application will need to read all of the pending data on the stream,
-    /// and new data has to be received before the stream is reported again.
+    /// again until it is "re-armed": either by reading from the stream while it
+    /// still holds data the application has not consumed, or, once it has been
+    /// drained, by new data arriving for it.
     ///
     /// This is unlike the [`readable()`] method, that returns the same list of
     /// readable streams when called multiple times in succession.
@@ -6579,7 +6553,9 @@ impl<F: BufFactory> Connection<F> {
     /// Returns the next stream that can be written to.
     ///
     /// Note that once returned by this method, a stream ID will not be returned
-    /// again until it is "re-armed".
+    /// again until it is "re-armed": either by writing data to the stream while
+    /// it still has send capacity left, or by the peer raising the stream's
+    /// flow control limit.
     ///
     /// This is unlike the [`writable()`] method, that returns the same list of
     /// writable streams when called multiple times in succession. It is not
@@ -6597,28 +6573,30 @@ impl<F: BufFactory> Connection<F> {
     /// [`StreamStopped`]: enum.Error.html#variant.StreamStopped
     pub fn stream_writable_next(&mut self) -> Option<u64> {
         if self.tx_cap == 0 {
-            return self.streams.pop_stopped_writable();
+            let stream_id = self.streams.pop_stopped_writable()?;
+            self.streams
+                .cycle_priority(stream_id, PriorityQueue::Writable);
+
+            return Some(stream_id);
         }
 
         let mut cursor = self.streams.writable.front();
 
         while let Some(priority_key) = cursor.clone_pointer() {
             if let Some(stream) = self.streams.get(priority_key.id) {
-                let cap = match stream.send.cap() {
-                    Ok(v) => v,
+                let ready = match stream.send.cap() {
+                    Ok(cap) => cmp::min(self.tx_cap, cap) >= stream.send_lowat,
 
                     // Return the stream to the application immediately if it's
                     // stopped.
-                    Err(_) =>
-                        return {
-                            self.streams.remove_writable(&priority_key);
-
-                            Some(priority_key.id)
-                        },
+                    Err(_) => true,
                 };
 
-                if cmp::min(self.tx_cap, cap) >= stream.send_lowat {
+                if ready {
                     self.streams.remove_writable(&priority_key);
+                    self.streams
+                        .cycle_priority(priority_key.id, PriorityQueue::Writable);
+
                     return Some(priority_key.id);
                 }
             }
@@ -8736,7 +8714,7 @@ impl<F: BufFactory> Connection<F> {
 
                     self.streams.insert_reset(stream_id, error_code, final_size);
 
-                    self.streams.insert_stopped_writable(&priority_key);
+                    self.streams.insert_writable(&priority_key);
 
                     // A stopped stream has nothing left to flush. A stale
                     // flushable entry could make send() return Done while
