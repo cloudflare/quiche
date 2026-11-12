@@ -330,6 +330,10 @@ impl RecvBuf {
             return Ok(RecvBufResetReturn::zero());
         }
 
+        if final_size > self.max_data() {
+            return Err(Error::FlowControl);
+        }
+
         // Calculate how many bytes need to be removed from the connection flow
         // control.
         let result = RecvBufResetReturn {
@@ -1419,5 +1423,22 @@ mod tests {
 
         assert_emit_discard_done(&mut recv, true);
         assert_emit_discard_done(&mut recv, false);
+    }
+
+    #[test]
+    fn reset_beyond_flow_control_keeps_buffer_consistent() {
+        // Stream-level flow-control limit of 15 bytes.
+        let mut recv =
+            RecvBuf::new(15, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
+
+        // A RESET_STREAM whose final size of 20 bytes exceeds the flow-control
+        // limit must be rejected.
+        assert_eq!(recv.reset(0, 20), Err(Error::FlowControl));
+
+        assert_eq!(recv.off, 0);
+        assert_eq!(recv.max_off(), 0);
+
+        // shutdown() must therefore not underflow `max_off() - off`.
+        assert_eq!(recv.shutdown(), Ok(0));
     }
 }
