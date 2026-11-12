@@ -1012,6 +1012,11 @@ impl RecoveryOps for GRecovery {
         let epoch = &mut self.epochs[epoch];
         self.bytes_in_flight
             .saturating_subtract(epoch.discard(&mut self.pacer), now);
+
+        // Discarding a packet number space is forward progress, so the PTO
+        // backoff starts over (RFC 9002, Appendix A.11).
+        self.pto_count = 0;
+
         self.set_loss_detection_timer(handshake_status, now);
     }
 

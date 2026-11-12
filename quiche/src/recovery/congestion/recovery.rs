@@ -868,6 +868,10 @@ impl RecoveryOps for LegacyRecovery {
         epoch.loss_probes = 0;
         epoch.in_flight_count = 0;
 
+        // Discarding a packet number space is forward progress, so the PTO
+        // backoff starts over (RFC 9002, Appendix A.11).
+        self.pto_count = 0;
+
         self.set_loss_detection_timer(handshake_status, now);
     }
 
