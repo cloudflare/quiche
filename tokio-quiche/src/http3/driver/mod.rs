@@ -445,8 +445,8 @@ pub struct H3Driver<H: DriverHooks> {
     /// [`DEFAULT_MAX_BODY_RECV_BUF_SIZE`], so this is always non-zero.
     max_recv_body_buf_size: usize,
 
-    /// The maximum HTTP/3 stream ID seen on this connection.
-    max_stream_seen: u64,
+    /// The maximum HTTP/3 stream ID seen on this connection, if any.
+    max_stream_seen: Option<u64>,
 
     /// Tracks whether we have forwarded the HTTP/3 SETTINGS frame
     /// to the [H3Controller] once.
@@ -482,7 +482,7 @@ impl<H: DriverHooks> H3Driver<H> {
 
                 dgram_recv,
                 dgram_send: PollSender::new(dgram_send),
-                max_stream_seen: 0,
+                max_stream_seen: None,
                 body_recv_buf: None,
                 // `Some(0)` would make `recv_body_buf` a no-op, so treat it as
                 // unset.
@@ -556,7 +556,7 @@ impl<H: DriverHooks> H3Driver<H> {
     /// Adds a [StreamCtx] to the stream map with the given `stream_id`.
     fn insert_stream(&mut self, stream_id: u64, ctx: StreamCtx) {
         self.stream_map.insert(stream_id, ctx);
-        self.max_stream_seen = self.max_stream_seen.max(stream_id);
+        self.max_stream_seen = self.max_stream_seen.max(Some(stream_id));
     }
 
     /// Fetches body chunks from the [`quiche::h3::Connection`] and forwards
@@ -1227,10 +1227,18 @@ impl<H: DriverHooks> H3Driver<H> {
         match cmd {
             H3Command::QuicCmd(cmd) => cmd.execute(qconn),
             H3Command::GoAway => {
-                let max_id = self.max_stream_seen;
+                // The GOAWAY ID is the first request stream the peer must
+                // treat as unprocessed (RFC 9114 Section 5.2), so it has to
+                // lie past every stream accepted so far. Once the last stream
+                // ID is consumed, no such ID exists, and none is needed since
+                // the peer cannot open further requests.
+                let id = self.max_stream_seen.map_or(0, |id| id + 4);
+                if id > octets::MAX_VAR_INT {
+                    return Ok(());
+                }
                 self.conn_mut()
                     .expect("connection should be established")
-                    .send_goaway(qconn, max_id)?;
+                    .send_goaway(qconn, id)?;
             },
             H3Command::ShutdownStream {
                 stream_id,
@@ -1475,7 +1483,7 @@ impl<H: DriverHooks> ApplicationOverQuic for H3Driver<H> {
         &mut self, quiche_conn: &mut QuicheConnection, metrics: &M,
         work_loop_result: &QuicResult<()>,
     ) {
-        let max_stream_seen = self.max_stream_seen;
+        let max_stream_seen = self.max_stream_seen.unwrap_or(0);
         metrics
             .maximum_writable_streams()
             .observe(max_stream_seen as f64);
