@@ -33,18 +33,24 @@ use crate::buffers::DefaultBufFactory;
 
 /// Buffer holding data at a specific offset.
 ///
-/// The data is stored in a `Vec<u8>` in such a way that it can be shared
-/// between multiple `RangeBuf` objects.
+/// The backing storage is supplied by `F::Buf`. The default factory uses
+/// reference-counted storage `Arc<[u8]>`, allowing multiple `RangeBuf`
+/// objects to share the same allocation.
 ///
 /// Each `RangeBuf` will have its own view of that buffer, where the `start`
-/// value indicates the initial offset within the `Vec`, and `len` indicates the
-/// number of bytes, starting from `start` that are included.
+/// value indicates the initial offset within the buffer, and `len` indicates
+/// the number of bytes, starting from `start` that are included.
 ///
-/// In addition, `pos` indicates the current offset within the `Vec`, starting
-/// from the very beginning of the `Vec`.
+/// In addition, `pos` indicates the current offset within the buffer, starting
+/// from the very beginning.
 ///
 /// Finally, `off` is the starting offset for the specific `RangeBuf` within the
 /// stream the buffer belongs to.
+///
+/// For example, a view of backing-buffer bytes `600..1200` at stream
+/// offset `1600` has `start = 600`, `pos = 600`, `len = 600`, and
+/// `off = 1600`. After consuming 100 bytes, `pos = 700`, `len() = 500`,
+/// and `off() = 1700`. The stored `start`, `len`, and `off` are unchanged.
 #[derive(Clone, Debug, Default)]
 pub struct RangeBuf<F = DefaultBufFactory>
 where
