@@ -53,6 +53,7 @@ use crate::datastore::VantagePoint;
 
 use plotters::chart::ChartContext;
 use plotters::coord::types::RangedCoordf32;
+use plotters::coord::types::RangedCoordf64;
 use plotters::coord::types::RangedCoordu64;
 use plotters::prelude::Cartesian2d;
 use plotters_canvas::CanvasBackend;
@@ -168,12 +169,99 @@ impl<T, U> ChartInfo<T, U> {
         }
     }
 
+    pub fn with_f64_u64(
+        chart: &ChartContext<
+            CanvasBackend,
+            Cartesian2d<RangedCoordf64, RangedCoordu64>,
+        >,
+    ) -> ChartInfo<f64, u64> {
+        let plotting_area = chart.plotting_area();
+        let pixel_range = plotting_area.get_pixel_range();
+
+        let chart_bounds = ChartBounds {
+            left: pixel_range.0.start,
+            top: pixel_range.1.start,
+            width: pixel_range.0.end - pixel_range.0.start,
+            height: pixel_range.1.end - pixel_range.1.start,
+        };
+
+        let plot_ranges = PlotRanges {
+            x_min: chart.x_range().start,
+            x_max: chart.x_range().end,
+            y_min: chart.y_range().start,
+            y_max: chart.y_range().end,
+        };
+
+        ChartInfo {
+            chart_bounds,
+            plot_ranges,
+        }
+    }
+
+    pub fn with_f64_f32(
+        chart: &ChartContext<
+            CanvasBackend,
+            Cartesian2d<RangedCoordf64, RangedCoordf32>,
+        >,
+    ) -> ChartInfo<f64, f32> {
+        let plotting_area = chart.plotting_area();
+        let pixel_range = plotting_area.get_pixel_range();
+
+        let chart_bounds = ChartBounds {
+            left: pixel_range.0.start,
+            top: pixel_range.1.start,
+            width: pixel_range.0.end - pixel_range.0.start,
+            height: pixel_range.1.end - pixel_range.1.start,
+        };
+
+        let plot_ranges = PlotRanges {
+            x_min: chart.x_range().start,
+            x_max: chart.x_range().end,
+            y_min: chart.y_range().start,
+            y_max: chart.y_range().end,
+        };
+
+        ChartInfo {
+            chart_bounds,
+            plot_ranges,
+        }
+    }
+
     pub fn with_u64_f32(
         chart: &ChartContext<
             CanvasBackend,
             Cartesian2d<RangedCoordu64, RangedCoordf32>,
         >,
     ) -> ChartInfo<u64, f32> {
+        let plotting_area = chart.plotting_area();
+        let pixel_range = plotting_area.get_pixel_range();
+
+        let chart_bounds = ChartBounds {
+            left: pixel_range.0.start,
+            top: pixel_range.1.start,
+            width: pixel_range.0.end - pixel_range.0.start,
+            height: pixel_range.1.end - pixel_range.1.start,
+        };
+
+        let plot_ranges = PlotRanges {
+            x_min: chart.x_range().start,
+            x_max: chart.x_range().end,
+            y_min: chart.y_range().start,
+            y_max: chart.y_range().end,
+        };
+
+        ChartInfo {
+            chart_bounds,
+            plot_ranges,
+        }
+    }
+
+    pub fn with_u64_f64(
+        chart: &ChartContext<
+            CanvasBackend,
+            Cartesian2d<RangedCoordu64, RangedCoordf64>,
+        >,
+    ) -> ChartInfo<u64, f64> {
         let plotting_area = chart.plotting_area();
         let pixel_range = plotting_area.get_pixel_range();
 
@@ -249,15 +337,15 @@ pub struct QlogDancerWeb {
     log_info: Option<Vec<u8>>,
     qlog_events: Vec<qlog::reader::Event>,
 
-    mp_chart_info: Option<ChartInfo<f32, u64>>,
-    cc_chart_info: Option<ChartInfo<f32, u64>>,
-    rtt_chart_info: Option<ChartInfo<f32, f32>>,
-    fc_chart_info: Option<ChartInfo<f32, u64>>,
+    mp_chart_info: Option<ChartInfo<f64, u64>>,
+    cc_chart_info: Option<ChartInfo<f64, u64>>,
+    rtt_chart_info: Option<ChartInfo<f64, f32>>,
+    fc_chart_info: Option<ChartInfo<f64, u64>>,
     pkt_rx_chart_info: Option<ChartInfo<f32, u64>>,
-    pkt_tx_chart_info: Option<ChartInfo<f32, u64>>,
-    pkt_tx_counts_chart_info: Option<ChartInfo<f32, u64>>,
-    pkt_tx_delta_chart_info: Option<ChartInfo<u64, f32>>,
-    pkt_tx_pacing_chart_info: Option<ChartInfo<f32, u64>>,
+    pkt_tx_chart_info: Option<ChartInfo<f64, u64>>,
+    pkt_tx_counts_chart_info: Option<ChartInfo<f64, u64>>,
+    pkt_tx_delta_chart_info: Option<ChartInfo<u64, f64>>,
+    pkt_tx_pacing_chart_info: Option<ChartInfo<f64, u64>>,
 }
 
 #[wasm_bindgen]
@@ -404,7 +492,7 @@ impl QlogDancerWeb {
     /// canvas_id.
     pub fn draw_connection_overview(
         &mut self, mp_canvas_id: &str, display_legend: bool,
-        x_start: Option<f32>, x_end: Option<f32>,
+        x_start: Option<f64>, x_end: Option<f64>,
     ) {
         if let Some(ss) = &self.ss {
             let params = PlotParameters {
@@ -430,7 +518,7 @@ impl QlogDancerWeb {
                 plot_main_plot(&params, &self.display_name, ss, &mp_canvas_id);
 
             self.mp_chart_info =
-                Some(ChartInfo::<f32, u64>::with_f32_u64(&chart));
+                Some(ChartInfo::<f64, u64>::with_f64_u64(&chart));
         }
     }
 
@@ -439,7 +527,7 @@ impl QlogDancerWeb {
     /// Draws the congestion plot into the provided canvas_id.
     pub fn draw_cc_plot(
         &mut self, cc_canvas_id: &str, display_legend: bool,
-        x_start: Option<f32>, x_end: Option<f32>,
+        x_start: Option<f64>, x_end: Option<f64>,
     ) {
         if let Some(ss) = &self.ss {
             let params = PlotParameters {
@@ -464,7 +552,7 @@ impl QlogDancerWeb {
             let chart = plot_cc_plot(&params, ss, &self.ds, &cc_canvas_id);
 
             self.cc_chart_info =
-                Some(ChartInfo::<f32, u64>::with_f32_u64(&chart));
+                Some(ChartInfo::<f64, u64>::with_f64_u64(&chart));
         }
     }
 
@@ -473,7 +561,7 @@ impl QlogDancerWeb {
     /// Draws the rtt plot into the provided canvas_id.
     pub fn draw_rtt_plot(
         &mut self, rtt_canvas_id: &str, display_legend: bool,
-        x_start: Option<f32>, x_end: Option<f32>,
+        x_start: Option<f64>, x_end: Option<f64>,
     ) {
         if let Some(ss) = &self.ss {
             let params = PlotParameters {
@@ -497,7 +585,7 @@ impl QlogDancerWeb {
 
             let chart = plot_rtt_plot(&params, ss, &rtt_canvas_id);
             self.rtt_chart_info =
-                Some(ChartInfo::<f32, f32>::with_f32_f32(&chart));
+                Some(ChartInfo::<f64, f32>::with_f64_f32(&chart));
         }
     }
 
@@ -536,7 +624,7 @@ impl QlogDancerWeb {
                 &chart_type,
             );
             self.fc_chart_info =
-                Some(ChartInfo::<f32, f32>::with_f32_u64(&chart));
+                Some(ChartInfo::<f64, u64>::with_f64_u64(&chart));
         }
     }
 
@@ -658,7 +746,7 @@ impl QlogDancerWeb {
     /// Draws the packet sent plot into the provided canvas_id.
     pub fn draw_packet_sent_plot(
         &mut self, pkt_tx_canvas_id: &str, display_legend: bool,
-        x_start: Option<f32>, x_end: Option<f32>,
+        x_start: Option<f64>, x_end: Option<f64>,
     ) {
         if let Some(ss) = &self.ss {
             let params = PlotParameters {
@@ -688,15 +776,15 @@ impl QlogDancerWeb {
             );
 
             self.pkt_tx_chart_info =
-                Some(ChartInfo::<f32, u64>::with_f32_u64(&chart));
+                Some(ChartInfo::<f64, u64>::with_f64_u64(&chart));
         }
     }
 
     #[wasm_bindgen]
     /// Draws the packet sent plot into the provided canvas_id.
     pub fn draw_packet_sent_lost_delivered_count_plot(
-        &mut self, canvas_id: &str, display_legend: bool, x_start: Option<f32>,
-        x_end: Option<f32>,
+        &mut self, canvas_id: &str, display_legend: bool, x_start: Option<f64>,
+        x_end: Option<f64>,
     ) {
         if let Some(ss) = &self.ss {
             let params = PlotParameters {
@@ -723,7 +811,7 @@ impl QlogDancerWeb {
             );
 
             self.pkt_tx_counts_chart_info =
-                Some(ChartInfo::<f32, u64>::with_f32_u64(&chart));
+                Some(ChartInfo::<f64, u64>::with_f64_u64(&chart));
         }
     }
 
@@ -731,7 +819,7 @@ impl QlogDancerWeb {
     /// Draws the packet sent plot into the provided canvas_id.
     pub fn draw_packet_sent_delta_plot(
         &mut self, pkt_tx_delta_canvas_id: &str, display_legend: bool,
-        x_start: Option<f32>, x_end: Option<f32>,
+        x_start: Option<f64>, x_end: Option<f64>,
     ) {
         if let Some(ss) = &self.ss {
             let params = PlotParameters {
@@ -760,7 +848,7 @@ impl QlogDancerWeb {
             );
 
             self.pkt_tx_delta_chart_info =
-                Some(ChartInfo::<f32, u64>::with_u64_f32(&chart));
+                Some(ChartInfo::<u64, f64>::with_u64_f64(&chart));
         }
     }
 
@@ -768,7 +856,7 @@ impl QlogDancerWeb {
     /// Draws the packet sent plot into the provided canvas_id.
     pub fn draw_packet_sent_pacing_plot(
         &mut self, pkt_tx_pacing_canvas_id: &str, display_legend: bool,
-        x_start: Option<f32>, x_end: Option<f32>,
+        x_start: Option<f64>, x_end: Option<f64>,
     ) {
         if let Some(ss) = &self.ss {
             let params = PlotParameters {
@@ -798,7 +886,7 @@ impl QlogDancerWeb {
             );
 
             self.pkt_tx_pacing_chart_info =
-                Some(ChartInfo::<f32, u64>::with_f32_u64(&chart));
+                Some(ChartInfo::<f64, u64>::with_f64_u64(&chart));
         }
     }
 
