@@ -33,6 +33,8 @@ use crate::packet;
 use crate::range_buf::RangeBuf;
 use crate::ranges;
 
+use debug_panic::debug_panic;
+
 #[cfg(feature = "qlog")]
 use qlog::events::quic::AckRange;
 #[cfg(feature = "qlog")]
@@ -72,6 +74,11 @@ pub enum Frame {
         ack_delay: u64,
         ranges: ranges::RangeSet,
         ecn_counts: Option<EcnCounts>,
+    },
+
+    ACKHeader {
+        ack_delay: u64,
+        largest_acked: u64,
     },
 
     ResetStream {
@@ -382,6 +389,9 @@ impl Frame {
                 }
             },
 
+            Frame::ACKHeader { .. } =>
+                debug_panic!("ACKHeader is written with encode_ack()"),
+
             Frame::Ping { .. } => {
                 b.put_varint(0x01)?;
             },
@@ -390,41 +400,7 @@ impl Frame {
                 ack_delay,
                 ranges,
                 ecn_counts,
-            } => {
-                if ecn_counts.is_none() {
-                    b.put_varint(0x02)?;
-                } else {
-                    b.put_varint(0x03)?;
-                }
-
-                let mut it = ranges.iter().rev();
-
-                let first = it.next().unwrap();
-                let ack_block = (first.end - 1) - first.start;
-
-                b.put_varint(first.end - 1)?;
-                b.put_varint(*ack_delay)?;
-                b.put_varint(it.len() as u64)?;
-                b.put_varint(ack_block)?;
-
-                let mut smallest_ack = first.start;
-
-                for block in it {
-                    let gap = smallest_ack - block.end - 1;
-                    let ack_block = (block.end - 1) - block.start;
-
-                    b.put_varint(gap)?;
-                    b.put_varint(ack_block)?;
-
-                    smallest_ack = block.start;
-                }
-
-                if let Some(ecn) = ecn_counts {
-                    b.put_varint(ecn.ect0_count)?;
-                    b.put_varint(ecn.ect1_count)?;
-                    b.put_varint(ecn.ecn_ce_count)?;
-                }
-            },
+            } => encode_ack(*ack_delay, ranges, ecn_counts.as_ref(), b)?,
 
             Frame::ResetStream {
                 stream_id,
@@ -607,37 +583,12 @@ impl Frame {
                 ack_delay,
                 ranges,
                 ecn_counts,
-            } => {
-                let mut it = ranges.iter().rev();
+            } => ack_wire_len(*ack_delay, ranges, ecn_counts.as_ref()),
 
-                let first = it.next().unwrap();
-                let ack_block = (first.end - 1) - first.start;
+            Frame::ACKHeader { .. } => {
+                debug_panic!("ACKHeader is sized with ack_wire_len()");
 
-                let mut len = 1 + // frame type
-                    octets::varint_len(first.end - 1) + // largest_ack
-                    octets::varint_len(*ack_delay) + // ack_delay
-                    octets::varint_len(it.len() as u64) + // block_count
-                    octets::varint_len(ack_block); // first_block
-
-                let mut smallest_ack = first.start;
-
-                for block in it {
-                    let gap = smallest_ack - block.end - 1;
-                    let ack_block = (block.end - 1) - block.start;
-
-                    len += octets::varint_len(gap) + // gap
-                           octets::varint_len(ack_block); // ack_block
-
-                    smallest_ack = block.start;
-                }
-
-                if let Some(ecn) = ecn_counts {
-                    len += octets::varint_len(ecn.ect0_count) +
-                        octets::varint_len(ecn.ect1_count) +
-                        octets::varint_len(ecn.ecn_ce_count);
-                }
-
-                len
+                0
             },
 
             Frame::ResetStream {
@@ -816,6 +767,7 @@ impl Frame {
             self,
             Frame::Padding { .. } |
                 Frame::ACK { .. } |
+                Frame::ACKHeader { .. } |
                 Frame::ApplicationClose { .. } |
                 Frame::ConnectionClose { .. }
         )
@@ -851,30 +803,17 @@ impl Frame {
                 ack_delay,
                 ranges,
                 ecn_counts,
-            } => {
-                let ack_ranges = ranges
-                    .iter()
-                    .map(|r| AckRange::new(r.start, r.end - 1))
-                    .collect();
+            } => ack_to_qlog(*ack_delay, ranges, ecn_counts.as_ref()),
 
-                let (ect0, ect1, ce) = match ecn_counts {
-                    Some(ecn) => (
-                        Some(ecn.ect0_count),
-                        Some(ecn.ect1_count),
-                        Some(ecn.ecn_ce_count),
-                    ),
-
-                    None => (None, None, None),
-                };
-
-                QuicFrame::Ack {
-                    ack_delay: Some(*ack_delay as f32 / 1000.0),
-                    acked_ranges: Some(ack_ranges),
-                    ect1,
-                    ect0,
-                    ce,
-                    raw: None,
-                }
+            // The record keeps no ranges; the send path logs them from the
+            // range set the ACK was encoded from.
+            Frame::ACKHeader { ack_delay, .. } => QuicFrame::Ack {
+                ack_delay: Some(*ack_delay as f32 / 1000.0),
+                acked_ranges: None,
+                ect1: None,
+                ect0: None,
+                ce: None,
+                raw: None,
             },
 
             Frame::ResetStream {
@@ -1108,6 +1047,13 @@ impl std::fmt::Debug for Frame {
                 )?;
             },
 
+            Frame::ACKHeader {
+                ack_delay,
+                largest_acked,
+            } => {
+                write!(f, "ACK delay={ack_delay} largest_acked={largest_acked}")?;
+            },
+
             Frame::ResetStream {
                 stream_id,
                 error_code,
@@ -1322,6 +1268,111 @@ pub fn encode_crypto_header(
     b.put_varint_with_len(length, 2)?;
 
     Ok(())
+}
+
+pub fn ack_wire_len(
+    ack_delay: u64, ranges: &ranges::RangeSet, ecn_counts: Option<&EcnCounts>,
+) -> usize {
+    let mut it = ranges.iter().rev();
+
+    let first = it.next().unwrap();
+    let ack_block = (first.end - 1) - first.start;
+
+    let mut len = 1 + // frame type
+        octets::varint_len(first.end - 1) + // largest_ack
+        octets::varint_len(ack_delay) + // ack_delay
+        octets::varint_len(it.len() as u64) + // block_count
+        octets::varint_len(ack_block); // first_block
+
+    let mut smallest_ack = first.start;
+
+    for block in it {
+        let gap = smallest_ack - block.end - 1;
+        let ack_block = (block.end - 1) - block.start;
+
+        len += octets::varint_len(gap) + // gap
+            octets::varint_len(ack_block); // ack_block
+
+        smallest_ack = block.start;
+    }
+
+    if let Some(ecn) = ecn_counts {
+        len += octets::varint_len(ecn.ect0_count) +
+            octets::varint_len(ecn.ect1_count) +
+            octets::varint_len(ecn.ecn_ce_count);
+    }
+
+    len
+}
+
+pub fn encode_ack(
+    ack_delay: u64, ranges: &ranges::RangeSet, ecn_counts: Option<&EcnCounts>,
+    b: &mut octets::OctetsMut,
+) -> Result<()> {
+    if ecn_counts.is_none() {
+        b.put_varint(0x02)?;
+    } else {
+        b.put_varint(0x03)?;
+    }
+
+    let mut it = ranges.iter().rev();
+
+    let first = it.next().unwrap();
+    let ack_block = (first.end - 1) - first.start;
+
+    b.put_varint(first.end - 1)?;
+    b.put_varint(ack_delay)?;
+    b.put_varint(it.len() as u64)?;
+    b.put_varint(ack_block)?;
+
+    let mut smallest_ack = first.start;
+
+    for block in it {
+        let gap = smallest_ack - block.end - 1;
+        let ack_block = (block.end - 1) - block.start;
+
+        b.put_varint(gap)?;
+        b.put_varint(ack_block)?;
+
+        smallest_ack = block.start;
+    }
+
+    if let Some(ecn) = ecn_counts {
+        b.put_varint(ecn.ect0_count)?;
+        b.put_varint(ecn.ect1_count)?;
+        b.put_varint(ecn.ecn_ce_count)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "qlog")]
+pub fn ack_to_qlog(
+    ack_delay: u64, ranges: &ranges::RangeSet, ecn_counts: Option<&EcnCounts>,
+) -> QuicFrame {
+    let ack_ranges = ranges
+        .iter()
+        .map(|r| AckRange::new(r.start, r.end - 1))
+        .collect();
+
+    let (ect0, ect1, ce) = match ecn_counts {
+        Some(ecn) => (
+            Some(ecn.ect0_count),
+            Some(ecn.ect1_count),
+            Some(ecn.ecn_ce_count),
+        ),
+
+        None => (None, None, None),
+    };
+
+    QuicFrame::Ack {
+        ack_delay: Some(ack_delay as f32 / 1000.0),
+        acked_ranges: Some(ack_ranges),
+        ect1,
+        ect0,
+        ce,
+        raw: None,
+    }
 }
 
 pub fn encode_stream_header(

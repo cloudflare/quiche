@@ -8123,6 +8123,63 @@ fn limit_ack_ranges(
 }
 
 #[rstest]
+/// The server drops the ACK ranges it reported once the peer acknowledges the
+/// packet that carried them.
+fn ack_ranges_dropped_after_ack_is_acked(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let epoch = packet::Epoch::Application;
+
+    assert_eq!(pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.len(), 0);
+
+    let frames = [
+        frame::Frame::Ping { mtu_probe: None },
+        frame::Frame::Padding { len: 3 },
+    ];
+
+    let pkt_type = Type::Short;
+
+    // Leave gaps in the packet numbers the server receives, so its range set
+    // grows past the inline capacity.
+    for _ in 0..7 {
+        pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
+            .unwrap();
+
+        // Skip packet number.
+        pipe.client.next_pkt_num += 1;
+    }
+
+    // Deliver the last packet without letting the server send, so the pending
+    // ACK rides along with the stream data below instead of going out in an
+    // ACK-only packet the client would never acknowledge.
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+    assert_eq!(pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.len(), 8);
+
+    let largest = pipe.server.pkt_num_spaces[epoch]
+        .recv_pkt_need_ack
+        .last()
+        .unwrap();
+
+    assert_eq!(pipe.server.stream_send(1, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Every range up to the largest packet number the ACK reported is gone.
+    assert!(pipe.server.pkt_num_spaces[epoch]
+        .recv_pkt_need_ack
+        .first()
+        .is_none_or(|first| first > largest));
+}
+
+#[rstest]
 /// The server closes the connection once it tracks more than the maximum
 /// number of outstanding sent packets.
 fn max_outstanding_sent_packets(

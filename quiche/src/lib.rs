@@ -3678,15 +3678,13 @@ impl<F: BufFactory> Connection<F> {
                         }
                     },
 
-                    frame::Frame::ACK { ranges, .. } => {
+                    frame::Frame::ACKHeader { largest_acked, .. } => {
                         // Stop acknowledging packets less than or equal to the
                         // largest acknowledged in the sent ACK frame that, in
                         // turn, got acked.
-                        if let Some(largest_acked) = ranges.last() {
-                            self.pkt_num_spaces[epoch]
-                                .recv_pkt_need_ack
-                                .remove_until(largest_acked);
-                        }
+                        self.pkt_num_spaces[epoch]
+                            .recv_pkt_need_ack
+                            .remove_until(largest_acked);
                     },
 
                     frame::Frame::CryptoHeader { offset, length } => {
@@ -4313,7 +4311,7 @@ impl<F: BufFactory> Connection<F> {
                         p.retrans_count += 1;
                     },
 
-                    frame::Frame::ACK { .. } => {
+                    frame::Frame::ACKHeader { .. } => {
                         pkt_space.ack_elicited = true;
                     },
 
@@ -4429,6 +4427,15 @@ impl<F: BufFactory> Connection<F> {
                             "Unexpected frame lost: Crypto. quiche should \
                              have tracked retransmittable crypto data as \
                              CryptoHeader frames."
+                        );
+                    },
+
+                    // Sent as ACKHeader frames. ACK frames are never stored
+                    // in sent packets by quiche.
+                    frame::Frame::ACK { .. } => {
+                        debug_panic!(
+                            "Unexpected frame lost: ACK. quiche should have \
+                             tracked sent ACK frames as ACKHeader frames."
                         );
                     },
 
@@ -4670,23 +4677,34 @@ impl<F: BufFactory> Connection<F> {
             #[cfg(feature = "fuzzing")]
             let ack_delay = rand::rand_u8() as u64 + 1;
 
-            let frame = frame::Frame::ACK {
-                ack_delay,
-                ranges: pkt_space.recv_pkt_need_ack.clone(),
-                ecn_counts: None, // sending ECN is not supported at this time
-            };
+            let ranges = &pkt_space.recv_pkt_need_ack;
+
+            // Sending ECN is not supported at this time.
+            let ack_len = frame::ack_wire_len(ack_delay, ranges, None);
 
             // When a PING frame needs to be sent, avoid sending the ACK if
             // there is not enough cwnd available for both (note that PING
             // frames are always 1 byte, so we just need to check that the
             // ACK's length is lower than cwnd).
-            if pkt_space.ack_elicited || frame.wire_len() < send_limit_from_cwnd {
-                // ACK-only packets are not congestion controlled so ACKs must
-                // be bundled considering the buffer capacity only, and not the
-                // available cwnd.
-                if push_frame_to_pkt!(b, frames, frame, left) {
-                    pkt_space.ack_elicited = false;
-                }
+            //
+            // ACK-only packets are not congestion controlled so ACKs must be
+            // bundled considering the buffer capacity only, and not the
+            // available cwnd.
+            if (pkt_space.ack_elicited || ack_len < send_limit_from_cwnd) &&
+                ack_len <= left
+            {
+                frame::encode_ack(ack_delay, ranges, None, &mut b)?;
+                left -= ack_len;
+
+                let largest_acked =
+                    ranges.last().expect("ACK ranges are not empty");
+
+                frames.push(frame::Frame::ACKHeader {
+                    ack_delay,
+                    largest_acked,
+                });
+
+                pkt_space.ack_elicited = false;
             }
         }
 
@@ -5524,7 +5542,20 @@ impl<F: BufFactory> Connection<F> {
             trace!("{} tx frm {:?}", self.trace_id, frame);
 
             qlog_with_type!(QLOG_PACKET_TX, self.qlog, _q, {
-                qlog_frames.push(frame.to_qlog());
+                // The sent ACK only keeps its largest acked packet, so log
+                // the ranges it was encoded from, which are unchanged.
+                let qlog_frame = match frame {
+                    frame::Frame::ACKHeader { ack_delay, .. } =>
+                        frame::ack_to_qlog(
+                            *ack_delay,
+                            &self.pkt_num_spaces[epoch].recv_pkt_need_ack,
+                            None,
+                        ),
+
+                    _ => frame.to_qlog(),
+                };
+
+                qlog_frames.push(qlog_frame);
             });
         }
 
@@ -8773,6 +8804,8 @@ impl<F: BufFactory> Connection<F> {
 
                 self.do_handshake(now)?;
             },
+
+            frame::Frame::ACKHeader { .. } => unreachable!(),
 
             frame::Frame::CryptoHeader { .. } => unreachable!(),
 
