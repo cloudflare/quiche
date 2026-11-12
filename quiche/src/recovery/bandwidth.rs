@@ -71,7 +71,9 @@ impl std::ops::Add<Bandwidth> for Bandwidth {
 
     fn add(self, rhs: Bandwidth) -> Self::Output {
         Bandwidth {
-            bits_per_second: self.bits_per_second.add(rhs.bits_per_second),
+            bits_per_second: self
+                .bits_per_second
+                .saturating_add(rhs.bits_per_second),
         }
     }
 }
@@ -92,25 +94,30 @@ impl Bandwidth {
             return Bandwidth { bits_per_second: 0 };
         }
 
-        let mut nanos = time_delta.as_nanos() as u64;
-        if nanos == 0 {
-            nanos = 1;
-        }
+        let nanos = time_delta.as_nanos();
+        let nanos = if nanos == 0 { 1 } else { nanos };
+        let num_nano_bits =
+            (bytes as u128).saturating_mul((8 * NUM_NANOS_PER_SECOND) as u128);
 
-        let num_nano_bits = 8 * bytes as u64 * NUM_NANOS_PER_SECOND;
         if num_nano_bits < nanos {
             return Bandwidth { bits_per_second: 1 };
         }
 
+        let bits_per_second = num_nano_bits / nanos;
+
         Bandwidth {
-            bits_per_second: num_nano_bits / nanos,
+            bits_per_second: if bits_per_second > u64::MAX as u128 {
+                u64::MAX
+            } else {
+                bits_per_second as u64
+            },
         }
     }
 
     #[allow(dead_code)]
     pub const fn from_bytes_per_second(bytes_per_second: u64) -> Self {
         Bandwidth {
-            bits_per_second: bytes_per_second * 8,
+            bits_per_second: bytes_per_second.saturating_mul(8),
         }
     }
 
@@ -125,13 +132,13 @@ impl Bandwidth {
 
     pub const fn from_kbits_per_second(k_bits_per_second: u64) -> Self {
         Bandwidth {
-            bits_per_second: k_bits_per_second * 1_000,
+            bits_per_second: k_bits_per_second.saturating_mul(1_000),
         }
     }
 
     #[allow(dead_code)]
     pub const fn from_mbits_per_second(m_bits_per_second: u64) -> Self {
-        Bandwidth::from_kbits_per_second(m_bits_per_second * 1_000)
+        Bandwidth::from_kbits_per_second(m_bits_per_second.saturating_mul(1_000))
     }
 
     /// Returns a sentinel representing infinite bandwidth.
@@ -250,6 +257,20 @@ mod tests {
 
         assert_eq!(Bandwidth::infinite().bits_per_second, u64::MAX);
         assert_eq!(Bandwidth::zero().bits_per_second, 0);
+
+        // Constructors saturate instead of wrapping or panicking.
+        assert_eq!(
+            Bandwidth::from_bytes_per_second(u64::MAX),
+            Bandwidth::infinite()
+        );
+        assert_eq!(
+            Bandwidth::from_kbits_per_second(u64::MAX),
+            Bandwidth::infinite()
+        );
+        assert_eq!(
+            Bandwidth::from_mbits_per_second(u64::MAX),
+            Bandwidth::infinite()
+        );
     }
 
     #[test]
@@ -260,6 +281,7 @@ mod tests {
 
         // Addition
         assert_eq!(bw_1k + bw_5k, bw_6k);
+        assert_eq!(Bandwidth::infinite() + bw_1k, Bandwidth::infinite());
 
         // Subtraction
         assert_eq!(bw_6k - bw_5k, Some(bw_1k));
@@ -304,6 +326,29 @@ mod tests {
             )
             .bits_per_second,
             800
+        );
+
+        // Large numerators saturate instead of overflowing u64 arithmetic.
+        assert_eq!(
+            Bandwidth::from_bytes_and_time_delta(
+                usize::MAX,
+                Duration::from_nanos(1)
+            ),
+            Bandwidth::infinite()
+        );
+
+        // Large durations must not be truncated to u64 nanoseconds.
+        assert_eq!(
+            Bandwidth::from_bytes_and_time_delta(1, Duration::MAX)
+                .bits_per_second,
+            1
+        );
+
+        // Preserve the existing non-zero-bytes / zero-time behavior while
+        // making the overflow policy explicit.
+        assert_eq!(
+            Bandwidth::from_bytes_and_time_delta(usize::MAX, Duration::ZERO),
+            Bandwidth::infinite()
         );
     }
 
