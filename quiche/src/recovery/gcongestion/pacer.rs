@@ -31,6 +31,7 @@
 use std::time::Instant;
 
 use crate::recovery::gcongestion::bbr2::BBRv2;
+use crate::recovery::gcongestion::brutal::Brutal;
 use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::gcongestion::CongestionControl;
 use crate::recovery::rtt::RttStats;
@@ -58,12 +59,143 @@ const LUMPY_PACING_MIN_BANDWIDTH_KBPS: Bandwidth =
 /// never larger than the current CWND in packets.
 const INITIAL_UNPACED_BURST: usize = 10;
 
+/// The congestion controller driven by the [`Pacer`].
+#[derive(Debug)]
+pub(crate) enum Sender {
+    Bbr2(Box<BBRv2>),
+    Brutal(Brutal),
+}
+
+macro_rules! sender {
+    ($self:ident, $s:ident => $e:expr) => {
+        match $self {
+            Sender::Bbr2($s) => $e,
+            Sender::Brutal($s) => $e,
+        }
+    };
+}
+
+impl Sender {
+    pub(crate) fn time_sent_set_to_now(&self) -> bool {
+        sender!(self, s => s.time_sent_set_to_now())
+    }
+
+    pub(crate) fn rtt_persistent_jump_count(&self) -> u64 {
+        match self {
+            Sender::Bbr2(s) => s.rtt_persistent_jump_count(),
+            Sender::Brutal(_) => 0,
+        }
+    }
+
+    #[cfg(feature = "qlog")]
+    pub(crate) fn send_rate(&self) -> Option<Bandwidth> {
+        match self {
+            Sender::Bbr2(s) => s.send_rate(),
+            Sender::Brutal(_) => None,
+        }
+    }
+
+    #[cfg(feature = "qlog")]
+    pub(crate) fn ack_rate(&self) -> Option<Bandwidth> {
+        match self {
+            Sender::Bbr2(s) => s.ack_rate(),
+            Sender::Brutal(_) => None,
+        }
+    }
+}
+
+impl CongestionControl for Sender {
+    #[cfg(feature = "qlog")]
+    fn state_str(&self) -> &'static str {
+        sender!(self, s => s.state_str())
+    }
+
+    fn get_congestion_window(&self) -> usize {
+        sender!(self, s => s.get_congestion_window())
+    }
+
+    fn get_congestion_window_in_packets(&self) -> usize {
+        sender!(self, s => s.get_congestion_window_in_packets())
+    }
+
+    fn can_send(&self, bytes_in_flight: usize) -> bool {
+        sender!(self, s => s.can_send(bytes_in_flight))
+    }
+
+    fn on_packet_sent(
+        &mut self, sent_time: Instant, bytes_in_flight: usize,
+        packet_number: u64, bytes: usize, is_retransmissible: bool,
+    ) {
+        sender!(self, s => s.on_packet_sent(sent_time, bytes_in_flight, packet_number, bytes, is_retransmissible))
+    }
+
+    fn on_packet_neutered(&mut self, packet_number: u64) {
+        sender!(self, s => s.on_packet_neutered(packet_number))
+    }
+
+    fn on_congestion_event(
+        &mut self, rtt_updated: bool, prior_in_flight: usize,
+        bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
+        lost_packets: &[Lost], least_unacked: u64, rtt_stats: &RttStats,
+        recovery_stats: &mut RecoveryStats,
+    ) {
+        sender!(self, s => s.on_congestion_event(rtt_updated, prior_in_flight, bytes_in_flight, event_time, acked_packets, lost_packets, least_unacked, rtt_stats, recovery_stats))
+    }
+
+    fn on_retransmission_timeout(&mut self, packets_retransmitted: bool) {
+        sender!(self, s => s.on_retransmission_timeout(packets_retransmitted))
+    }
+
+    fn on_connection_migration(&mut self) {
+        sender!(self, s => s.on_connection_migration())
+    }
+
+    fn limit_cwnd(&mut self, max_cwnd: usize) {
+        sender!(self, s => s.limit_cwnd(max_cwnd))
+    }
+
+    fn is_in_recovery(&self) -> bool {
+        sender!(self, s => s.is_in_recovery())
+    }
+
+    fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool {
+        sender!(self, s => s.is_cwnd_limited(bytes_in_flight))
+    }
+
+    fn pacing_rate(
+        &self, bytes_in_flight: usize, rtt_stats: &RttStats,
+    ) -> Bandwidth {
+        sender!(self, s => s.pacing_rate(bytes_in_flight, rtt_stats))
+    }
+
+    fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth {
+        sender!(self, s => s.bandwidth_estimate(rtt_stats))
+    }
+
+    fn max_bandwidth(&self) -> Bandwidth {
+        sender!(self, s => s.max_bandwidth())
+    }
+
+    fn update_mss(&mut self, new_mss: usize) {
+        sender!(self, s => s.update_mss(new_mss))
+    }
+
+    fn on_app_limited(&mut self, bytes_in_flight: usize) {
+        sender!(self, s => s.on_app_limited(bytes_in_flight))
+    }
+
+    #[cfg(feature = "qlog")]
+    fn ssthresh(&self) -> Option<u64> {
+        sender!(self, s => s.ssthresh())
+    }
+}
+
 #[derive(Debug)]
 pub struct Pacer {
     /// Should this [`Pacer`] be making any release decisions?
     enabled: bool,
     /// Underlying sender
-    sender: BBRv2,
+    sender: Sender,
     /// The maximum rate the [`Pacer`] will use.
     max_pacing_rate: Option<Bandwidth>,
     /// Number of unpaced packets to be sent before packets are delayed.
@@ -84,7 +216,7 @@ impl Pacer {
     /// implementation, and an optional throttling as specified by
     /// `max_pacing_rate`.
     pub(crate) fn new(
-        enabled: bool, congestion: BBRv2, max_pacing_rate: Option<Bandwidth>,
+        enabled: bool, congestion: Sender, max_pacing_rate: Option<Bandwidth>,
     ) -> Self {
         Pacer {
             enabled,
@@ -111,6 +243,12 @@ impl Pacer {
             time: self.ideal_next_packet_send_time,
             allow_burst,
         }
+    }
+
+    pub fn use_brutal(&mut self, bytes_per_second: u64, mss: usize) {
+        self.sender = Sender::Brutal(Brutal::new(bytes_per_second, mss));
+        self.burst_tokens = 0;
+        self.pacing_limited = false;
     }
 
     #[cfg(feature = "qlog")]
