@@ -32,6 +32,7 @@ pub use self::error::HandshakeError;
 pub use self::id::ConnectionIdGenerator;
 pub use self::id::SharedConnectionIdGenerator;
 pub use self::id::SimpleConnectionIdGenerator;
+pub(crate) use self::map::CidOwned;
 pub(crate) use self::map::ConnectionMap;
 
 use boring::ssl::SslRef;
@@ -42,8 +43,10 @@ use datagram_socket::QuicAuditStats;
 use datagram_socket::ShutdownConnection;
 use datagram_socket::SocketStats;
 use foundations::telemetry::log;
+use foundations::telemetry::metrics::GaugeGuard;
 use futures::Future;
 use quiche::ConnectionId;
+use std::collections::HashSet;
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
@@ -210,6 +213,90 @@ pub struct Incoming {
     pub so_mark_data: Option<[u8; 4]>,
 }
 
+pub(crate) struct IncomingPacketReceiver {
+    pub(crate) rx: mpsc::Receiver<Incoming>,
+    /// Channel to submit changes to the ConnectionMap
+    cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>,
+    /// Tracker for which CIDs we have to unmap still
+    registered_cids: HashSet<CidOwned>,
+}
+
+impl IncomingPacketReceiver {
+    pub(crate) fn new(
+        cid: &ConnectionId, cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>,
+    ) -> (mpsc::Sender<Incoming>, Self) {
+        // QUIC's `active_connection_id_limit` must be >= 2
+        let mut registered_cids = HashSet::with_capacity(2);
+        registered_cids.insert(cid.into());
+
+        let (tx, rx) = mpsc::channel(INCOMING_QUEUE_SIZE);
+        let incoming_pkt_receiver = Self {
+            rx,
+            cmd_tx,
+            registered_cids,
+        };
+        (tx, incoming_pkt_receiver)
+    }
+
+    pub(crate) fn prior_knowledge(&mut self, cid: &ConnectionId) {
+        self.registered_cids.insert(cid.into());
+    }
+
+    pub(crate) fn map_cid(&mut self, cid: &ConnectionId) -> bool {
+        let Some(existing) = self.registered_cids.iter().next() else {
+            // Can't map a CID if we don't have anything to map to
+            log::warn!(
+                "failed to map new CID";
+                "error" => "connection is not registered in InboundPacketRouter",
+                "connection_id" => ?cid,
+            );
+            return false;
+        };
+
+        let cid = CidOwned::from(cid);
+
+        let cmd = ConnectionMapCommand::MapCid {
+            existing_cid: existing.clone(),
+            new_cid: cid.clone(),
+        };
+        if self.cmd_tx.send(cmd).is_err() {
+            return false;
+        }
+
+        self.registered_cids.insert(cid);
+        true
+    }
+
+    pub(crate) fn unmap_cid(&mut self, cid: &ConnectionId) -> bool {
+        let cid_owned = CidOwned::from(cid);
+
+        let cmd = ConnectionMapCommand::UnmapCid(cid_owned.clone());
+        if self.cmd_tx.send(cmd).is_err() {
+            return false;
+        }
+
+        // We don't _need_ the CID to be registered with this receiver,
+        // but if it's not, something went wrong earlier. (For example,
+        // a missing call to `prior_knowledge`.)
+        if !self.registered_cids.remove(&cid_owned) {
+            log::debug!(
+                "unmapped a CID that was not registered with this IncomingPacketReceiver";
+                "connection_id" => ?cid,
+            );
+        }
+        true
+    }
+}
+
+impl Drop for IncomingPacketReceiver {
+    fn drop(&mut self) {
+        // Ensure all registered CIDs are released from the InboundPacketRouter
+        for cid in self.registered_cids.drain() {
+            let _ = self.cmd_tx.send(ConnectionMapCommand::UnmapCid(cid));
+        }
+    }
+}
+
 /// A QUIC connection that has not performed a handshake yet.
 ///
 /// This type is currently only used for server-side connections. It is created
@@ -237,8 +324,6 @@ where
     params: QuicConnectionParams<Tx, M>,
     pub(crate) audit_log_stats: Arc<QuicAuditStats>,
     stats: QuicConnectionStatsShared,
-    pub(crate) incoming_ev_sender: mpsc::Sender<Incoming>,
-    incoming_ev_receiver: mpsc::Receiver<Incoming>,
 }
 
 impl<Tx, M> InitialQuicConnection<Tx, M>
@@ -248,10 +333,8 @@ where
 {
     #[inline]
     pub(crate) fn new(params: QuicConnectionParams<Tx, M>) -> Self {
-        let (incoming_ev_sender, incoming_ev_receiver) =
-            mpsc::channel(INCOMING_QUEUE_SIZE);
-        let audit_log_stats = Arc::new(QuicAuditStats::new(params.scid.to_vec()));
-
+        let scid = params.quiche_conn.source_id();
+        let audit_log_stats = Arc::new(QuicAuditStats::new(scid.into()));
         let stats = Arc::new(Mutex::new(QuicConnectionStats::from_conn(
             &params.quiche_conn,
         )));
@@ -260,19 +343,22 @@ where
             params,
             audit_log_stats,
             stats,
-            incoming_ev_sender,
-            incoming_ev_receiver,
         }
     }
 
     /// The local address this connection listens on.
     pub fn local_addr(&self) -> SocketAddr {
-        self.params.local_addr
+        self.params.writer_cfg.local_addr
     }
 
     /// The remote address for this connection.
     pub fn peer_addr(&self) -> SocketAddr {
-        self.params.peer_addr
+        self.params.writer_cfg.peer_addr
+    }
+
+    /// The QUIC source connection ID used by this connection.
+    pub fn scid(&self) -> ConnectionId<'_> {
+        self.params.quiche_conn.source_id()
     }
 
     /// [boring]'s SSL object for this connection.
@@ -324,23 +410,27 @@ where
         QuicConnection,
         impl Future<Output = io::Result<Running<Arc<Tx>, M, A>>> + Send + 'static,
     ) {
-        self.params.metrics.connections_in_memory().inc();
+        let active_conn_guard =
+            GaugeGuard::new(self.params.metrics.connections_in_memory());
+        let scid = self.params.quiche_conn.source_id().into_owned();
 
         let conn = QuicConnection {
-            local_addr: self.params.local_addr,
-            peer_addr: self.params.peer_addr,
+            local_addr: self.local_addr(),
+            peer_addr: self.peer_addr(),
             audit_log_stats: Arc::clone(&self.audit_log_stats),
             stats: Arc::clone(&self.stats),
-            scid: self.params.scid,
+            scid,
         };
         let context = ConnectionStageContext {
             in_pkt: self.params.initial_pkt,
-            incoming_pkt_receiver: self.incoming_ev_receiver,
+            incoming_pkt_receiver: self.params.incoming_pkt_receiver,
             application: app,
             stats: Arc::clone(&self.stats),
             connection_hook: self.params.connection_hook,
         };
-        let conn_stage = Handshake;
+        let conn_stage = Handshake {
+            pending_cid: self.params.pending_cid,
+        };
         let params = IoWorkerParams {
             socket: MaybeConnectedSocket::new(self.params.socket),
             shutdown_tx: self.params.shutdown_tx,
@@ -348,12 +438,12 @@ where
             audit_log_stats: self.audit_log_stats,
             write_state: WriteState::default(),
             dscp_handle: self.params.dscp_handle,
-            conn_map_cmd_tx: self.params.conn_map_cmd_tx,
             cid_generator: self.params.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: self.params.init_rx_time,
             metrics: self.params.metrics.clone(),
             handshake_info: self.params.handshake_info,
+            active_conn_guard,
         };
 
         let handshake_fut = async move {
@@ -478,11 +568,11 @@ where
     M: Metrics,
 {
     pub writer_cfg: WriterConfig,
+    pub pending_cid: Option<ConnectionId<'static>>,
     pub initial_pkt: Option<Incoming>,
     pub dscp_handle: Option<DscpHandle>,
     pub shutdown_tx: mpsc::Sender<()>,
-    pub conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>, /* channel that signals connection map changes */
-    pub scid: ConnectionId<'static>,
+    pub incoming_pkt_receiver: IncomingPacketReceiver,
     pub cid_generator: Option<SharedConnectionIdGenerator>,
     pub metrics: M,
     pub connection_hook: Option<Arc<dyn ConnectionHook + Send + Sync + 'static>>,
@@ -495,8 +585,6 @@ where
     /// across an `.await`.
     pub quiche_conn: Box<QuicheConnection>,
     pub socket: Arc<Tx>,
-    pub local_addr: SocketAddr,
-    pub peer_addr: SocketAddr,
 }
 
 /// Metadata about an established QUIC connection.
