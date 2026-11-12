@@ -1078,6 +1078,10 @@ pub fn map_result_ptr<'a, T>(bssl_result: *const T) -> Result<&'a T> {
 }
 
 fn log_ssl_error() {
+    if !log_enabled!(log::Level::Trace) {
+        return;
+    }
+
     let mut err = [0u8; 1024];
 
     unsafe {
