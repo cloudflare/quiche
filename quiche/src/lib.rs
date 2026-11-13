@@ -4592,12 +4592,6 @@ impl<F: BufFactory> Connection<F> {
             },
         }
 
-        // Make sure there is enough space for the minimum payload length.
-        if left < PAYLOAD_MIN_LEN {
-            path.recovery.update_app_limited(false);
-            return Err(Error::Done);
-        }
-
         let mut frames: SmallVec<[frame::Frame; 1]> = SmallVec::new();
 
         let mut ack_eliciting = false;
@@ -4694,6 +4688,13 @@ impl<F: BufFactory> Connection<F> {
             send_limit_from_cwnd
                 .saturating_sub(left_before_packing_ack_frame - left),
         );
+
+        // Make sure there is enough space for the minimum payload length.
+        // ACK frames are always longer than that.
+        if frames.is_empty() && left < PAYLOAD_MIN_LEN {
+            path.recovery.update_app_limited(false);
+            return Err(Error::Done);
+        }
 
         let mut challenge_data = None;
 
