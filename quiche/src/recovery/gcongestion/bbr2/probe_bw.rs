@@ -479,8 +479,9 @@ impl ProbeBW {
         // TODO(vlad): use BytesInFlight?
         let mut inflight_at_send = send_state.bytes_in_flight;
         if params.use_bytes_delivered_for_inflight_hi {
-            inflight_at_send = self.model.total_bytes_acked() -
-                congestion_event.last_packet_send_state.total_bytes_acked;
+            inflight_at_send = (self.model.total_bytes_acked() -
+                congestion_event.last_packet_send_state.total_bytes_acked)
+                as usize;
         }
 
         if self.cycle.is_sample_from_probing {

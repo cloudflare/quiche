@@ -30,6 +30,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::datagram;
+use super::datagram::PendingDgramBuffer;
+use super::DgramFlowId;
 use super::DriverHooks;
 use super::H3Command;
 use super::H3ConnectionError;
@@ -37,6 +39,7 @@ use super::H3ConnectionResult;
 use super::H3Controller;
 use super::H3Driver;
 use super::H3Event;
+use super::InboundFrame;
 use super::InboundHeaders;
 use super::IncomingH3Headers;
 use super::StreamCtx;
@@ -167,6 +170,9 @@ pub struct ServerHooks {
     /// Whether the extended CONNECT protocol is enabled. When disabled,
     /// skip DATAGRAM flow creation for `:protocol` requests.
     extended_connect_enabled: bool,
+    /// Datagrams received before the corresponding CONNECT request has been
+    /// processed. Bounded by [`datagram::PENDING_DGRAM_CAPACITY`].
+    pending_dgrams: PendingDgramBuffer,
 }
 
 impl ServerHooks {
@@ -197,18 +203,30 @@ impl ServerHooks {
             driver.ready_stream_sender.clone(),
         );
 
-        // When Extended CONNECT is enabled, extract the datagram flow ID
-        // from the request headers and register it in flow_map. This
-        // allows incoming DATAGRAMs to be routed to the correct stream.
-        // Note: flow_map entries are considered active work, so the
-        // connection will not be closed in cleanup_stream() while
-        // flows remain.
-        if driver.hooks.extended_connect_enabled() {
+        // Create the datagram flow immediately on request receipt so that
+        // any early datagrams buffered in `pending_dgrams` can be flushed.
+        // Only do this when extended CONNECT is enabled; otherwise the
+        // `:protocol` pseudo-header should not trigger flow creation.
+        //
+        // TODO: Longer term it would be ideal if we waited until the
+        // app *accepts* the request before we create the flow channels.
+        let dgram_flow = if driver.hooks.extended_connect_enabled {
             if let Some(flow_id) =
                 datagram::extract_quarter_stream_id(stream_id, &headers)
             {
-                let _ = driver.get_or_insert_flow(flow_id)?;
                 stream_ctx.associated_dgram_flow_id = Some(flow_id);
+                Some(driver.establish_flow(qconn, stream_id, flow_id)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // Flush any pending datagrams that arrived before the CONNECT
+        // request was processed.
+        if let Some(flow_id) = stream_ctx.associated_dgram_flow_id {
+            if let Some(flow) = driver.flow_map.get_mut(&flow_id) {
+                driver.hooks.pending_dgrams.flush_to_flow(flow_id, flow);
             }
         }
 
@@ -236,6 +254,7 @@ impl ServerHooks {
             recv,
             read_fin: !has_body,
             h3_audit_stats: Arc::clone(&stream_ctx.audit_stats),
+            dgram_flow,
         };
 
         stream_ctx.wait_for_recv();
@@ -260,6 +279,12 @@ impl ServerHooks {
 
         Ok(())
     }
+
+    #[cfg(test)]
+    /// Returns a mutable reference to the pending datagram buffer.
+    pub(crate) fn pending_dgrams_mut(&mut self) -> &mut PendingDgramBuffer {
+        &mut self.pending_dgrams
+    }
 }
 
 #[allow(private_interfaces)]
@@ -273,11 +298,8 @@ impl DriverHooks for ServerHooks {
             requests: 0,
             post_accept_timeout: None,
             extended_connect_enabled: settings.enable_extended_connect,
+            pending_dgrams: PendingDgramBuffer::new(),
         }
-    }
-
-    fn extended_connect_enabled(&self) -> bool {
-        self.extended_connect_enabled
     }
 
     fn conn_established(
@@ -335,6 +357,35 @@ impl DriverHooks for ServerHooks {
         let _ = driver
             .h3_event_sender
             .send(H3Event::StreamClosed { stream_id }.into());
+    }
+
+    /// Server-side datagram receive logic:
+    ///
+    /// * If a [`FlowCtx`] already exists for `flow_id` (the CONNECT request has
+    ///   been processed), deliver the datagram immediately.
+    /// * Otherwise, buffer the datagram in `pending_dgrams` up to
+    ///   [`PENDING_DGRAM_CAPACITY`].
+    fn handle_incoming_dgram(
+        driver: &mut H3Driver<Self>, flow_id: DgramFlowId, dgram: InboundFrame,
+    ) {
+        // When extended CONNECT is disabled, no DATAGRAM flows can be
+        // established, so silently drop.
+        if !driver.hooks.extended_connect_enabled {
+            return;
+        }
+
+        // Flow already established.
+        if let Some(flow) = driver.get_flow(flow_id) {
+            flow.send_best_effort(dgram);
+            return;
+        }
+
+        // Buffer while awaiting the CONNECT request.
+        driver.hooks.pending_dgrams.push(flow_id, dgram);
+    }
+
+    fn expire_pending_dgrams(&mut self) {
+        self.pending_dgrams.expire();
     }
 
     fn conn_command(

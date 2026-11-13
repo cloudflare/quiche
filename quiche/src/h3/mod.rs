@@ -438,9 +438,17 @@ pub enum Error {
 
 /// HTTP/3 error codes sent on the wire.
 ///
-/// As defined in [RFC9114](https://www.rfc-editor.org/rfc/rfc9114.html#http-error-codes).
+/// These are from the IANA registry at
+/// https://www.iana.org/assignments/http3-parameters/http3-parameters.xhtml
+/// (Section: "HTTP/3 Error Codes")
+///
+/// Most of these are defined in
+/// [RFC9114](https://www.rfc-editor.org/rfc/rfc9114.html#http-error-codes).
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum WireErrorCode {
+    /// Datagram or Capsule Protocol error per
+    /// [RFC9297](https://datatracker.ietf.org/doc/html/rfc9297#name-http-3-error-code)
+    DatagramError        = 0x33,
     /// No error. This is used when the connection or stream needs to be closed,
     /// but there is no error to signal.
     NoError              = 0x100,

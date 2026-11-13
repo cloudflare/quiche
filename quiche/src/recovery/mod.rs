@@ -457,7 +457,7 @@ pub struct Sent {
 
     pub in_flight: bool,
 
-    pub delivered: usize,
+    pub delivered: u64,
 
     pub delivered_time: Instant,
 

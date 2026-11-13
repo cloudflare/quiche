@@ -43,6 +43,7 @@ use std::task::Poll;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
+use super::connection::IncomingPacketReceiver;
 use super::connection::InitialQuicConnection;
 use super::connection::QuicConnectionParams;
 use super::io::worker::WriterConfig;
@@ -102,11 +103,10 @@ where
     } = tx_socket;
     let (shutdown_tx, worker_shutdown_rx) = mpsc::channel(1);
     let (conn_map_cmd_tx, conn_map_rx) = mpsc::unbounded_channel();
-
-    let scid = quiche_conn.source_id().into_owned();
+    let (incoming_tx, incoming_pkt_receiver) =
+        IncomingPacketReceiver::new(&quiche_conn.source_id(), conn_map_cmd_tx);
 
     let writer_cfg = WriterConfig {
-        pending_cid: None, // only used for unmapping in IPR
         peer_addr,
         local_addr,
         // TODO: try to read Tx' SocketCaps. false is always a safe default.
@@ -119,11 +119,11 @@ where
 
     let conn_params = QuicConnectionParams {
         writer_cfg,
+        pending_cid: None, // only used for unmapping in IPR
         initial_pkt: None,
         dscp_handle: None,
         shutdown_tx,
-        conn_map_cmd_tx,
-        scid,
+        incoming_pkt_receiver,
         cid_generator: None,
         metrics,
         connection_hook: None,
@@ -132,12 +132,9 @@ where
         handshake_info: HandshakeInfo::new(Instant::now(), None),
         quiche_conn: Box::new(quiche_conn),
         socket,
-        local_addr,
-        peer_addr,
     };
 
     let conn = InitialQuicConnection::new(conn_params);
-    let incoming_tx = conn.incoming_ev_sender.clone();
 
     ConnWrapperResult {
         conn,

@@ -39,7 +39,7 @@ use super::Sent;
 
 #[derive(Debug)]
 pub struct Rate {
-    delivered: usize,
+    delivered: u64,
 
     delivered_time: Instant,
 
@@ -102,7 +102,7 @@ impl Rate {
 
     // Update the delivery rate sample when a packet is acked.
     pub fn update_rate_sample(&mut self, pkt: &Acked, now: Instant) {
-        self.delivered += pkt.size;
+        self.delivered += pkt.size as u64;
         self.delivered_time = now;
 
         // Update info using the newest packet. If rate_sample is not yet
@@ -188,7 +188,7 @@ impl Rate {
     }
 
     #[cfg(test)]
-    pub fn delivered(&self) -> usize {
+    pub fn delivered(&self) -> u64 {
         self.delivered
     }
 
@@ -211,9 +211,9 @@ struct RateSample {
 
     interval: Duration,
 
-    delivered: usize,
+    delivered: u64,
 
-    prior_delivered: usize,
+    prior_delivered: u64,
 
     prior_time: Option<Instant>,
 
@@ -375,6 +375,9 @@ mod tests {
     fn rate_check() {
         let config = Config::new(0xbabababa).unwrap();
         let mut r = LegacyRecovery::new(&config);
+        // Start at u32::MAX so the total exceeds 32 bits.
+        let base = u64::from(u32::MAX);
+        r.congestion.delivery_rate.delivered = base;
 
         let now = Instant::now();
         let mss = r.max_datagram_size();
@@ -402,7 +405,7 @@ mod tests {
                 time_sent: now,
                 size: mss,
                 rtt,
-                delivered: 0,
+                delivered: base,
                 delivered_time: now,
                 first_sent_time: now.checked_sub(rtt).unwrap(),
                 is_app_limited: false,
@@ -415,7 +418,7 @@ mod tests {
         r.congestion.delivery_rate.generate_rate_sample(rtt);
 
         // Bytes acked so far.
-        assert_eq!(r.congestion.delivery_rate.delivered(), 2400);
+        assert_eq!(r.congestion.delivery_rate.delivered(), base + 2400);
 
         // Estimated delivery rate = (1200 x 2) / 0.05s = 48000.
         assert_eq!(r.delivery_rate().to_bytes_per_second(), 48000);
