@@ -110,7 +110,6 @@ tokio-util = { workspace = true, features = [
   "io",
   "rt",
 ] }
-url = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
@@ -125,6 +124,7 @@ rstest = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true, features = ["time", "test-util", "rt-multi-thread"] }
+url = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
