@@ -98,6 +98,7 @@ pub enum Http3FrameTypeName {
     Goaway,
     MaxPushId,
     DuplicatePush,
+    Origin,
     Reserved,
     Unknown,
 }
@@ -146,13 +147,6 @@ pub enum Http3Frame {
         raw: Option<RawInfo>,
     },
 
-    PriorityUpdate {
-        stream_id: Option<u64>,
-        push_id: Option<u64>,
-        priority_field_value: String,
-        raw: Option<RawInfo>,
-    },
-
     Reserved {
         frame_type_bytes: u64,
         raw: Option<RawInfo>,
@@ -162,6 +156,25 @@ pub enum Http3Frame {
         frame_type_bytes: u64,
         raw: Option<RawInfo>,
     },
+
+    PriorityUpdate {
+        stream_id: Option<u64>,
+        push_id: Option<u64>,
+        priority_field_value: String,
+        raw: Option<RawInfo>,
+    },
+
+    Origin {
+        origin_entries: Vec<Http3OriginEntry>,
+        raw: Option<RawInfo>,
+    },
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct Http3OriginEntry {
+    pub origin_len: u16,
+    pub ascii_origin: Option<String>,
 }
 
 impl Default for Http3Frame {
@@ -173,20 +186,58 @@ impl Default for Http3Frame {
     }
 }
 
+impl Http3Frame {
+    /// Sets the `raw` field of the frame.
+    pub fn set_raw(&mut self, info: RawInfo) {
+        match self {
+            Http3Frame::Data { raw } |
+            Http3Frame::Headers { raw, .. } |
+            Http3Frame::CancelPush { raw, .. } |
+            Http3Frame::Settings { raw, .. } |
+            Http3Frame::PushPromise { raw, .. } |
+            Http3Frame::Goaway { raw, .. } |
+            Http3Frame::MaxPushId { raw, .. } |
+            Http3Frame::Reserved { raw, .. } |
+            Http3Frame::Unknown { raw, .. } |
+            Http3Frame::PriorityUpdate { raw, .. } |
+            Http3Frame::Origin { raw, .. } => *raw = Some(info),
+        }
+    }
+
+    /// Returns the `raw` field of the frame.
+    pub fn raw(&self) -> Option<&RawInfo> {
+        match self {
+            Http3Frame::Data { raw } |
+            Http3Frame::Headers { raw, .. } |
+            Http3Frame::CancelPush { raw, .. } |
+            Http3Frame::Settings { raw, .. } |
+            Http3Frame::PushPromise { raw, .. } |
+            Http3Frame::Goaway { raw, .. } |
+            Http3Frame::MaxPushId { raw, .. } |
+            Http3Frame::Reserved { raw, .. } |
+            Http3Frame::Unknown { raw, .. } |
+            Http3Frame::PriorityUpdate { raw, .. } |
+            Http3Frame::Origin { raw, .. } => raw.as_ref(),
+        }
+    }
+}
+
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct ParametersSet {
-    pub initiator: Option<Initiator>,
+    pub initiator: Initiator,
 
     #[serde(alias = "max_header_list_size")]
     pub max_field_section_size: Option<u64>,
     pub max_table_capacity: Option<u64>,
     pub blocked_streams_count: Option<u64>,
-    pub extended_connect: Option<u16>,
-    pub h3_datagram: Option<u16>,
+    pub extended_connect: Option<u64>,
+    pub h3_datagram: Option<u64>,
 
     // qlog-defined
     pub waits_for_settings: Option<bool>,
+
+    pub unknown_settings: Option<Vec<Setting>>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -196,8 +247,8 @@ pub struct ParametersRestored {
     pub max_field_section_size: Option<u64>,
     pub max_table_capacity: Option<u64>,
     pub blocked_streams_count: Option<u64>,
-    pub extended_connect: Option<u16>,
-    pub h3_datagram: Option<u16>,
+    pub extended_connect: Option<u64>,
+    pub h3_datagram: Option<u64>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -242,27 +293,20 @@ pub struct PriorityUpdated {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct FrameCreated {
     pub stream_id: u64,
-    pub length: Option<u64>,
     pub frame: Http3Frame,
-
-    pub raw: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct FrameParsed {
     pub stream_id: u64,
-    pub length: Option<u64>,
     pub frame: Http3Frame,
-
-    pub raw: Option<RawInfo>,
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct DatagramCreated {
     pub quarter_stream_id: u64,
-    pub datagram: Option<Vec<String>>,
     pub raw: Option<RawInfo>,
 }
 
@@ -270,7 +314,6 @@ pub struct DatagramCreated {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
 pub struct DatagramParsed {
     pub quarter_stream_id: u64,
-    pub datagram: Option<Vec<String>>,
     pub raw: Option<RawInfo>,
 }
 

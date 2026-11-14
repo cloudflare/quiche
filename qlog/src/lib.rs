@@ -107,7 +107,6 @@
 //!     qlog::events::quic::PacketType::Initial,
 //!     Some(0),          // packet_number
 //!     None,             // token
-//!     None,             // length
 //!     Some(0x00000001), // version
 //!     Some(&scid),
 //!     Some(&dcid),
@@ -131,7 +130,7 @@
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: Some(raw),
-//!         datagram_id: None,
+//!         datagram_payload_checksum: None,
 //!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
@@ -333,7 +332,7 @@
 //!         stateless_reset_token: None,
 //!         supported_versions: None,
 //!         raw: None,
-//!         datagram_id: None,
+//!         datagram_payload_checksum: None,
 //!         is_mtu_probe_packet: None,
 //!         send_at_time: None,
 //!         trigger: None,
@@ -565,7 +564,7 @@ pub struct VantagePoint {
     #[serde(rename = "type")]
     pub ty: VantagePointType,
 
-    pub flow: Option<VantagePointType>,
+    pub flow: Option<VantagePointFlow>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq, Debug)]
@@ -574,6 +573,15 @@ pub enum VantagePointType {
     Client,
     Server,
     Network,
+    #[default]
+    Unknown,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum VantagePointFlow {
+    Client,
+    Server,
     #[default]
     Unknown,
 }
@@ -617,11 +625,9 @@ impl ReferenceTime {
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
 pub struct CommonFields {
     pub tuple: Option<String>,
-    pub group_id: Option<String>,
-    pub protocol_types: Option<Vec<String>>,
-
-    pub reference_time: ReferenceTime,
     pub time_format: Option<TimeFormat>,
+    pub reference_time: Option<ReferenceTime>,
+    pub group_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]

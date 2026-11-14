@@ -100,6 +100,9 @@ pub fn frames_to_string(frames: &[QuicFrame]) -> String {
             QuicFrame::ResetStream { stream_id, error, error_code, final_size, .. } => {
                 s += &format!(" RESET_STREAM {{id={stream_id}, error={error:?}, error_code={error_code:?}, final_size={final_size}}}");
             },
+            QuicFrame::ResetStreamAt { stream_id, error, error_code, final_size, reliable_size, .. } => {
+                s += &format!(" RESET_STREAM_AT {{id={stream_id}, error={error:?}, error_code={error_code:?}, final_size={final_size}, reliable_size={reliable_size}}}");
+            },
             QuicFrame::StopSending { stream_id, error, error_code, ..} => {
                 s += &format!(" STOP_SENDING {{id={stream_id}, error={error:?}, error_code={error_code:?}}}");
             },
@@ -177,11 +180,8 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
     let mut s = String::new();
 
     match frame {
-        Http3Frame::Data { raw } =>{
+        Http3Frame::Data { .. } =>{
             s += " DATA";
-            if let Some(r) = raw {
-                printyo!("len", r.length, s);
-            }
         },
         Http3Frame::Headers { headers, .. } => {
             s += " HEADERS {";
@@ -215,9 +215,16 @@ fn http_frame_to_string(frame: &Http3Frame) -> String {
         Http3Frame::Reserved { /*length*/ .. } => {
             s += " GREASE {{todo}}";
         },
+        Http3Frame::Origin { .. } => {
+            s += " ORIGIN {{todo}}";
+        },
         Http3Frame::Unknown { frame_type_bytes, .. } => {
             s += &format!(" UNKNOWN {{ty={frame_type_bytes}}}");
         }
+    }
+
+    if let Some(r) = frame.raw() {
+        printyo!("len", r.length, s);
     }
 
     s
@@ -242,19 +249,31 @@ pub fn sqlog_event_list(
 
                 match &ev.data {
                     EventData::QuicConnectionStarted(v) => {
-                        printyo!("local_ip_v4", &v.local.ip_v4, p.details);
-                        printyo!("local_port_v4", &v.local.port_v4, p.details);
-                        printyo!("local_ip_v6", &v.local.ip_v6, p.details);
-                        printyo!("local_port_v6", &v.local.port_v6, p.details);
+                        printyo!(
+                            "local_address_v4",
+                            &v.local.address_v4,
+                            p.details
+                        );
+                        printyo!(
+                            "local_address_v6",
+                            &v.local.address_v6,
+                            p.details
+                        );
                         printy!(
                             "local_cids",
                             format!("{:?}", &v.local.connection_ids),
                             p.details
                         );
-                        printyo!("remote_ip_v4", &v.remote.ip_v4, p.details);
-                        printyo!("remote_port_v4", &v.remote.port_v4, p.details);
-                        printyo!("remote_ip_v6", &v.remote.ip_v6, p.details);
-                        printyo!("remote_port_v6", &v.remote.port_v6, p.details);
+                        printyo!(
+                            "remote_address_v4",
+                            &v.remote.address_v4,
+                            p.details
+                        );
+                        printyo!(
+                            "remote_address_v6",
+                            &v.remote.address_v6,
+                            p.details
+                        );
                         printy!(
                             "remote_cid",
                             format!("{:?}", &v.local.connection_ids),
@@ -278,7 +297,7 @@ pub fn sqlog_event_list(
                         printyo_json!("trigger", &v.trigger, p.details);
                     },
                     EventData::QuicParametersSet(v) => {
-                        printyo_json!("initiator", &v.initiator, p.details);
+                        printy_json!("initiator", &v.initiator, p.details);
                         printyo!(
                             "resumption_allowed",
                             &v.resumption_allowed,
@@ -422,12 +441,10 @@ pub fn sqlog_event_list(
                     },
                     EventData::Http3FrameCreated(v) => {
                         printy!("id", v.stream_id, p.details);
-                        printyo!("len", v.length, p.details);
                         p.details += &http_frame_to_string(&v.frame);
                     },
                     EventData::Http3FrameParsed(v) => {
                         printy!("id", v.stream_id, p.details);
-                        printyo!("len", v.length, p.details);
                         p.details += &http_frame_to_string(&v.frame);
                     },
 

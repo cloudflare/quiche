@@ -14661,7 +14661,7 @@ fn server_qlog() {
         header.trace.vantage_point.unwrap().ty,
         qlog::VantagePointType::Server
     );
-    let ref_time = header.trace.common_fields.unwrap().reference_time;
+    let ref_time = header.trace.common_fields.unwrap().reference_time.unwrap();
     assert_eq!(ref_time.clock_type, "monotonic");
     assert_eq!(ref_time.epoch, "unknown");
     assert!(ref_time.wall_clock_time.is_some());
@@ -14670,7 +14670,7 @@ fn server_qlog() {
     let first = reader.next().unwrap();
     if let qlog::reader::Event::Qlog(event) = first {
         if let EventData::QuicParametersSet(params) = event.data {
-            assert_eq!(params.initiator, Some(TransportInitiator::Local));
+            assert_eq!(params.initiator, TransportInitiator::Local);
         } else {
             panic!("expected QuicParametersSet event");
         }

@@ -26,6 +26,7 @@
 
 use crate::Bytes;
 use crate::Token;
+use http::*;
 use http3::*;
 use quic::*;
 
@@ -36,10 +37,11 @@ use std::collections::BTreeMap;
 
 pub type ExData = BTreeMap<String, serde_json::Value>;
 
-pub const LOGLEVEL_URI: &str = "urn:ietf:params:qlog:events:loglevel-13";
+pub const LOGLEVEL_URI: &str = "urn:ietf:params:qlog:events:loglevel-15";
 
-pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic-12";
-pub const HTTP3_URI: &str = "urn:ietf:params:qlog:events:http3-12";
+pub const QUIC_URI: &str = "urn:ietf:params:qlog:events:quic-14";
+pub const HTTP3_URI: &str = "urn:ietf:params:qlog:events:http3-14";
+pub const HTTP_URI: &str = "urn:ietf:params:qlog:events:http-14";
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(untagged)]
@@ -47,6 +49,8 @@ pub enum EventType {
     QuicEventType(QuicEventType),
 
     Http3EventType(Http3EventType),
+
+    HttpEventType(HttpEventType),
 
     LogLevelEventType(LogLevelEventType),
 
@@ -83,9 +87,13 @@ pub struct Event {
     #[serde(flatten)]
     pub ex_data: Box<ExData>,
 
-    pub group_id: Option<Box<String>>,
+    pub tuple: Option<Box<String>>,
 
     pub time_format: Option<TimeFormat>,
+
+    pub group_id: Option<Box<String>>,
+
+    pub system_info: Option<SystemInformation>,
 
     #[serde(skip)]
     ty: EventType,
@@ -104,8 +112,10 @@ impl Event {
             time,
             data,
             ex_data: Box::new(ex_data),
-            group_id: Default::default(),
+            tuple: Default::default(),
             time_format: Default::default(),
+            group_id: Default::default(),
+            system_info: Default::default(),
             ty,
         }
     }
@@ -127,9 +137,19 @@ impl PartialEq for Event {
         self.time == other.time &&
             self.data == other.data &&
             self.ex_data == other.ex_data &&
+            self.tuple == other.tuple &&
+            self.time_format == other.time_format &&
             self.group_id == other.group_id &&
-            self.time_format == other.time_format
+            self.system_info == other.system_info
     }
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub struct SystemInformation {
+    pub processor_id: Option<u32>,
+    pub process_id: Option<u32>,
+    pub thread_id: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -225,11 +245,15 @@ impl From<EventType> for EventImportance {
                 EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::StreamStateUpdated) =>
                 EventImportance::Base,
-            EventType::QuicEventType(QuicEventType::FramesProcessed) =>
+            EventType::QuicEventType(QuicEventType::FramesCreated) =>
+                EventImportance::Extra,
+            EventType::QuicEventType(QuicEventType::FramesParsed) =>
                 EventImportance::Extra,
             EventType::QuicEventType(QuicEventType::StreamDataMoved) =>
                 EventImportance::Base,
             EventType::QuicEventType(QuicEventType::DatagramDataMoved) =>
+                EventImportance::Base,
+            EventType::QuicEventType(QuicEventType::DatagramDropped) =>
                 EventImportance::Base,
             EventType::QuicEventType(
                 QuicEventType::ConnectionDataBlockedUpdated,
@@ -278,6 +302,11 @@ impl From<EventType> for EventImportance {
                 EventImportance::Base,
             EventType::Http3EventType(Http3EventType::PushResolved) =>
                 EventImportance::Extra,
+
+            EventType::HttpEventType(HttpEventType::CapsuleCreated) =>
+                EventImportance::Core,
+            EventType::HttpEventType(HttpEventType::CapsuleParsed) =>
+                EventImportance::Core,
 
             _ => unimplemented!(),
         }
@@ -336,12 +365,16 @@ impl From<&EventData> for EventType {
                 EventType::QuicEventType(QuicEventType::UdpDatagramDropped),
             EventData::QuicStreamStateUpdated { .. } =>
                 EventType::QuicEventType(QuicEventType::StreamStateUpdated),
-            EventData::QuicFramesProcessed { .. } =>
-                EventType::QuicEventType(QuicEventType::FramesProcessed),
+            EventData::QuicFramesCreated { .. } =>
+                EventType::QuicEventType(QuicEventType::FramesCreated),
+            EventData::QuicFramesParsed { .. } =>
+                EventType::QuicEventType(QuicEventType::FramesParsed),
             EventData::QuicStreamDataMoved { .. } =>
                 EventType::QuicEventType(QuicEventType::StreamDataMoved),
             EventData::QuicDatagramDataMoved { .. } =>
                 EventType::QuicEventType(QuicEventType::DatagramDataMoved),
+            EventData::QuicDatagramDropped { .. } =>
+                EventType::QuicEventType(QuicEventType::DatagramDropped),
             EventData::QuicConnectionDataBlockedUpdated { .. } =>
                 EventType::QuicEventType(
                     QuicEventType::ConnectionDataBlockedUpdated,
@@ -393,6 +426,11 @@ impl From<&EventData> for EventType {
                 EventType::Http3EventType(Http3EventType::DatagramParsed),
             EventData::Http3PushResolved { .. } =>
                 EventType::Http3EventType(Http3EventType::PushResolved),
+
+            EventData::HttpCapsuleCreated { .. } =>
+                EventType::HttpEventType(HttpEventType::CapsuleCreated),
+            EventData::HttpCapsuleParsed { .. } =>
+                EventType::HttpEventType(HttpEventType::CapsuleParsed),
 
             EventData::LogLevelError { .. } =>
                 EventType::LogLevelEventType(LogLevelEventType::Error),
@@ -485,26 +523,32 @@ pub enum EventData {
     #[serde(rename = "quic:packets_acked")]
     QuicPacketsAcked(quic::PacketsAcked),
 
-    #[serde(rename = "quic:datagrams_sent")]
+    #[serde(rename = "quic:udp_datagrams_sent")]
     QuicUdpDatagramsSent(quic::UdpDatagramsSent),
 
-    #[serde(rename = "quic:datagrams_received")]
+    #[serde(rename = "quic:udp_datagrams_received")]
     QuicUdpDatagramsReceived(quic::UdpDatagramsReceived),
 
-    #[serde(rename = "quic:datagram_dropped")]
+    #[serde(rename = "quic:udp_datagram_dropped")]
     QuicUdpDatagramDropped(quic::UdpDatagramDropped),
 
     #[serde(rename = "quic:stream_state_updated")]
     QuicStreamStateUpdated(quic::StreamStateUpdated),
 
-    #[serde(rename = "quic:frames_processed")]
-    QuicFramesProcessed(quic::FramesProcessed),
+    #[serde(rename = "quic:frames_created")]
+    QuicFramesCreated(quic::FramesCreated),
+
+    #[serde(rename = "quic:frames_parsed")]
+    QuicFramesParsed(quic::FramesParsed),
 
     #[serde(rename = "quic:stream_data_moved")]
     QuicStreamDataMoved(quic::StreamDataMoved),
 
     #[serde(rename = "quic:datagram_data_moved")]
     QuicDatagramDataMoved(quic::DatagramDataMoved),
+
+    #[serde(rename = "quic:datagram_dropped")]
+    QuicDatagramDropped(quic::DatagramDropped),
 
     #[serde(rename = "quic:connection_data_blocked_updated")]
     QuicConnectionDataBlockedUpdated(quic::ConnectionDataBlockedUpdated),
@@ -521,7 +565,7 @@ pub enum EventData {
     #[serde(rename = "quic:key_updated")]
     QuicKeyUpdated(quic::KeyUpdated),
 
-    #[serde(rename = "quic:key_retired")]
+    #[serde(rename = "quic:key_discarded")]
     QuicKeyDiscarded(quic::KeyDiscarded),
 
     #[serde(rename = "quic:recovery_parameters_set")]
@@ -573,6 +617,13 @@ pub enum EventData {
     #[serde(rename = "http3:push_resolved")]
     Http3PushResolved(http3::PushResolved),
 
+    // HTTP
+    #[serde(rename = "http:capsule_created")]
+    HttpCapsuleCreated(http::CapsuleCreated),
+
+    #[serde(rename = "http:capsule_parsed")]
+    HttpCapsuleParsed(http::CapsuleParsed),
+
     // LogLevel
     #[serde(rename = "loglevel:error")]
     LogLevelError {
@@ -587,22 +638,13 @@ pub enum EventData {
     },
 
     #[serde(rename = "loglevel:info")]
-    LogLevelInfo {
-        code: Option<u64>,
-        message: Option<String>,
-    },
+    LogLevelInfo { message: String },
 
     #[serde(rename = "loglevel:debug")]
-    LogLevelDebug {
-        code: Option<u64>,
-        message: Option<String>,
-    },
+    LogLevelDebug { message: String },
 
     #[serde(rename = "loglevel:verbose")]
-    LogLevelVerbose {
-        code: Option<u64>,
-        message: Option<String>,
-    },
+    LogLevelVerbose { message: String },
 }
 
 impl EventData {
@@ -621,7 +663,8 @@ impl EventData {
                 pkt.frames.as_ref().map(|f| f.len()),
 
             EventData::QuicMarkedForRetransmit(ev) => Some(ev.frames.len()),
-            EventData::QuicFramesProcessed(ev) => Some(ev.frames.len()),
+            EventData::QuicFramesCreated(ev) => Some(ev.frames.len()),
+            EventData::QuicFramesParsed(ev) => Some(ev.frames.len()),
 
             _ => None,
         }
@@ -659,40 +702,122 @@ pub enum ApplicationError {
     HttpNoError,
     HttpGeneralProtocolError,
     HttpInternalError,
-    HttpRequestCancelled,
-    HttpIncompleteRequest,
-    HttpConnectError,
-    HttpFrameError,
-    HttpExcessiveLoad,
-    HttpVersionFallback,
-    HttpIdError,
     HttpStreamCreationError,
     HttpClosedCriticalStream,
-    HttpEarlyResponse,
-    HttpMissingSettings,
-    HttpUnexpectedFrame,
-    HttpRequestRejection,
+    HttpFrameUnexpected,
+    HttpFrameError,
+    HttpExcessiveLoad,
+    HttpIdError,
     HttpSettingsError,
+    HttpMissingSettings,
+    HttpRequestRejected,
+    HttpRequestCancelled,
+    HttpRequestIncomplete,
+    HttpMessageError,
+    HttpConnectError,
+    HttpVersionFallback,
+    QpackDecompressionFailed,
+    QpackEncoderStreamError,
+    QpackDecoderStreamError,
+    HttpDatagramError,
     Unknown,
 }
 
-// TODO
+/// A TLS alert-derived QUIC CRYPTO_ERROR code.
+///
+/// Per draft-ietf-quic-qlog-quic-events-14, this is serialized as a string
+/// of the form `crypto_error_0x1XX` where `XX` are the lowercase hexadecimal
+/// digits of the TLS alert.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum CryptoError {
-    Prefix,
+#[serde(transparent)]
+pub struct CryptoError(pub String);
+
+/// An IP address and port pair, or an application-defined redacted string.
+///
+/// `ip` is either a human-readable address or a hex-encoded raw address.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+#[serde(untagged)]
+pub enum IpAddressPort {
+    Endpoint { ip: String, port: u16 },
+    Redacted(String),
+}
+
+impl std::fmt::Display for IpAddressPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IpAddressPort::Endpoint { ip, port } if ip.contains(':') =>
+                write!(f, "[{ip}]:{port}"),
+            IpAddressPort::Endpoint { ip, port } => write!(f, "{ip}:{port}"),
+            IpAddressPort::Redacted(s) => f.write_str(s),
+        }
+    }
 }
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct TupleEndpointInfo {
-    pub ip_v4: Option<String>,
-    pub port_v4: Option<u16>,
-    pub ip_v6: Option<String>,
-    pub port_v6: Option<u16>,
+    pub address_v4: Option<IpAddressPort>,
+    pub address_v6: Option<IpAddressPort>,
 
     pub connection_ids: Option<Vec<Bytes>>,
 }
 
+pub mod http;
 pub mod http3;
 pub mod quic;
+
+#[cfg(test)]
+mod draft_14_tests {
+    use super::*;
+
+    #[test]
+    fn ip_address_port_forms() {
+        let ep = IpAddressPort::Endpoint {
+            ip: "127.0.0.1".into(),
+            port: 443,
+        };
+        assert_eq!(
+            serde_json::to_string(&ep).unwrap(),
+            r#"{"ip":"127.0.0.1","port":443}"#
+        );
+        assert_eq!(ep.to_string(), "127.0.0.1:443");
+
+        let red: IpAddressPort = serde_json::from_str(r#""redacted""#).unwrap();
+        assert_eq!(red, IpAddressPort::Redacted("redacted".into()));
+    }
+
+    #[test]
+    fn reordering_threshold_forms() {
+        use quic::ReorderingThreshold;
+        use quic::ReorderingThresholdDisabled;
+
+        assert_eq!(
+            serde_json::to_string(&ReorderingThreshold::Packets(3)).unwrap(),
+            "3"
+        );
+        assert_eq!(
+            serde_json::to_string(&ReorderingThreshold::Disabled(
+                ReorderingThresholdDisabled::Disabled
+            ))
+            .unwrap(),
+            r#""disabled""#
+        );
+    }
+
+    #[test]
+    fn event_names() {
+        let ev = EventData::QuicDatagramDropped(quic::DatagramDropped {
+            direction: Some(quic::DatagramDroppedDirection::Sending),
+            raw: None,
+            trigger: Some(quic::DatagramDroppedTrigger::BufferFull),
+        });
+        assert_eq!(
+            serde_json::to_string(&ev).unwrap(),
+            r#"{"name":"quic:datagram_dropped","data":{"direction":"sending","trigger":"buffer_full"}}"#
+        );
+        assert!(matches!(
+            EventImportance::from(EventType::from(&ev)),
+            EventImportance::Base
+        ));
+    }
+}

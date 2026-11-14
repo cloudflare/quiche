@@ -1180,7 +1180,7 @@ impl Datastore {
         &mut self, tp: &qlog::events::quic::ParametersSet,
     ) {
         match tp.initiator {
-            Some(TransportInitiator::Local) => {
+            TransportInitiator::Local => {
                 if let Some(max_data) = tp.initial_max_data {
                     self.sent_max_data.push((0.0, max_data));
                 }
@@ -1196,7 +1196,7 @@ impl Datastore {
                 }
             },
 
-            Some(TransportInitiator::Remote) => {
+            TransportInitiator::Remote => {
                 if let Some(max_data) = tp.initial_max_data {
                     self.received_max_data.push((0.0, max_data));
                 }
@@ -1217,8 +1217,6 @@ impl Datastore {
                     self.peer_init_max_stream_data_uni = max_stream_data;
                 }
             },
-
-            _ => unimplemented!(),
         }
     }
 
@@ -1528,14 +1526,15 @@ impl Datastore {
                 req.set_request_info_from_qlog(headers);
             },
 
-            Http3Frame::Data { .. } => {
+            Http3Frame::Data { raw } => {
                 let req = self.get_or_insert_http_req(fc.stream_id);
 
                 req.time_first_data_tx.get_or_insert(ev_time);
 
                 let _ = req.time_last_data_tx.insert(ev_time);
 
-                let length = fc.length.unwrap_or_default();
+                let length =
+                    raw.as_ref().and_then(|r| r.length).unwrap_or_default();
                 req.time_data_tx_set.push((ev_time, length));
                 self.largest_data_frame_tx_length_global = std::cmp::max(
                     self.largest_data_frame_tx_length_global,
@@ -1568,14 +1567,15 @@ impl Datastore {
                 req.set_response_info_from_qlog(headers);
             },
 
-            Http3Frame::Data { .. } => {
+            Http3Frame::Data { raw } => {
                 let req = self.get_or_insert_http_req(fc.stream_id);
 
                 req.time_first_data_tx.get_or_insert(ev_time);
 
                 let _ = req.time_last_data_tx.insert(ev_time);
 
-                let length = fc.length.unwrap_or_default();
+                let length =
+                    raw.as_ref().and_then(|r| r.length).unwrap_or_default();
                 req.time_data_tx_set.push((ev_time, length));
                 self.largest_data_frame_tx_length_global = std::cmp::max(
                     self.largest_data_frame_tx_length_global,
@@ -1599,7 +1599,7 @@ impl Datastore {
                 req.set_response_info_from_qlog(headers);
             },
 
-            Http3Frame::Data { .. } => {
+            Http3Frame::Data { raw } => {
                 let req = self.get_or_insert_http_req(fp.stream_id);
 
                 req.time_first_data_rx.get_or_insert(ev_time);
@@ -1607,7 +1607,8 @@ impl Datastore {
                 let _ = req.time_last_data_rx.insert(ev_time);
 
                 // TODO: is default length sensible here?
-                let length = fp.length.unwrap_or_default();
+                let length =
+                    raw.as_ref().and_then(|r| r.length).unwrap_or_default();
                 req.time_data_rx_set.push((ev_time, length));
                 self.largest_data_frame_rx_length_global = std::cmp::max(
                     self.largest_data_frame_rx_length_global,
@@ -1637,14 +1638,15 @@ impl Datastore {
                     NaOption::new(find_header_value(headers, "priority"));
             },
 
-            Http3Frame::Data { .. } => {
+            Http3Frame::Data { raw } => {
                 let req = self.get_or_insert_http_req(fp.stream_id);
 
                 req.time_first_data_rx.get_or_insert(ev_time);
 
                 let _ = req.time_last_data_rx.insert(ev_time);
 
-                let length = fp.length.unwrap_or_default();
+                let length =
+                    raw.as_ref().and_then(|r| r.length).unwrap_or_default();
                 req.time_data_rx_set.push((ev_time, length));
                 self.largest_data_frame_rx_length_global = std::cmp::max(
                     self.largest_data_frame_rx_length_global,
