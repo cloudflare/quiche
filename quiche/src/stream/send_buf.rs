@@ -655,11 +655,7 @@ impl<F: BufFactory> SendBuf<F> {
     /// This happens when the stream's send final size is known, and the
     /// application has already written data up to that point.
     pub fn is_fin(&self) -> bool {
-        if self.fin_off == Some(self.off) {
-            return true;
-        }
-
-        false
+        self.fin_off == Some(self.off)
     }
 
     /// Returns true if the final size still needs to be sent to the peer.
