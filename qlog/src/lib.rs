@@ -625,10 +625,9 @@ impl ReferenceTime {
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
 pub struct CommonFields {
     pub tuple: Option<String>,
-    pub group_id: Option<String>,
-
-    pub reference_time: Option<ReferenceTime>,
     pub time_format: Option<TimeFormat>,
+    pub reference_time: Option<ReferenceTime>,
+    pub group_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
