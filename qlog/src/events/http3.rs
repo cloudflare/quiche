@@ -147,6 +147,16 @@ pub enum Http3Frame {
         raw: Option<RawInfo>,
     },
 
+    Reserved {
+        frame_type_bytes: u64,
+        raw: Option<RawInfo>,
+    },
+
+    Unknown {
+        frame_type_bytes: u64,
+        raw: Option<RawInfo>,
+    },
+
     PriorityUpdate {
         stream_id: Option<u64>,
         push_id: Option<u64>,
@@ -156,16 +166,6 @@ pub enum Http3Frame {
 
     Origin {
         origin_entries: Vec<Http3OriginEntry>,
-        raw: Option<RawInfo>,
-    },
-
-    Reserved {
-        frame_type_bytes: u64,
-        raw: Option<RawInfo>,
-    },
-
-    Unknown {
-        frame_type_bytes: u64,
         raw: Option<RawInfo>,
     },
 }
@@ -197,10 +197,10 @@ impl Http3Frame {
             Http3Frame::PushPromise { raw, .. } |
             Http3Frame::Goaway { raw, .. } |
             Http3Frame::MaxPushId { raw, .. } |
-            Http3Frame::PriorityUpdate { raw, .. } |
-            Http3Frame::Origin { raw, .. } |
             Http3Frame::Reserved { raw, .. } |
-            Http3Frame::Unknown { raw, .. } => *raw = Some(info),
+            Http3Frame::Unknown { raw, .. } |
+            Http3Frame::PriorityUpdate { raw, .. } |
+            Http3Frame::Origin { raw, .. } => *raw = Some(info),
         }
     }
 
@@ -214,10 +214,10 @@ impl Http3Frame {
             Http3Frame::PushPromise { raw, .. } |
             Http3Frame::Goaway { raw, .. } |
             Http3Frame::MaxPushId { raw, .. } |
-            Http3Frame::PriorityUpdate { raw, .. } |
-            Http3Frame::Origin { raw, .. } |
             Http3Frame::Reserved { raw, .. } |
-            Http3Frame::Unknown { raw, .. } => raw.as_ref(),
+            Http3Frame::Unknown { raw, .. } |
+            Http3Frame::PriorityUpdate { raw, .. } |
+            Http3Frame::Origin { raw, .. } => raw.as_ref(),
         }
     }
 }

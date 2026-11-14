@@ -89,9 +89,9 @@ pub struct Event {
 
     pub tuple: Option<Box<String>>,
 
-    pub group_id: Option<Box<String>>,
-
     pub time_format: Option<TimeFormat>,
+
+    pub group_id: Option<Box<String>>,
 
     pub system_info: Option<SystemInformation>,
 
@@ -113,8 +113,8 @@ impl Event {
             data,
             ex_data: Box::new(ex_data),
             tuple: Default::default(),
-            group_id: Default::default(),
             time_format: Default::default(),
+            group_id: Default::default(),
             system_info: Default::default(),
             ty,
         }
@@ -138,8 +138,8 @@ impl PartialEq for Event {
             self.data == other.data &&
             self.ex_data == other.ex_data &&
             self.tuple == other.tuple &&
-            self.group_id == other.group_id &&
             self.time_format == other.time_format &&
+            self.group_id == other.group_id &&
             self.system_info == other.system_info
     }
 }

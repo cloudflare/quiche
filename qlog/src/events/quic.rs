@@ -222,8 +222,8 @@ pub enum StreamSide {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamType {
-    Bidirectional,
     Unidirectional,
+    Bidirectional,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -246,12 +246,12 @@ pub enum StreamState {
     Send,
     DataSent,
     ResetSent,
-    ResetReceived,
     Receive,
     SizeKnown,
     DataRead,
     ResetRead,
     DataReceived,
+    ResetReceived,
     Destroyed,
 }
 
@@ -319,6 +319,7 @@ pub enum QuicEventType {
     StreamDataBlockedUpdated,
     DatagramDataBlockedUpdated,
     MigrationStateUpdated,
+    TimerUpdated,
 
     KeyUpdated,
     KeyDiscarded,
@@ -326,7 +327,6 @@ pub enum QuicEventType {
     RecoveryParametersSet,
     RecoveryMetricsUpdated,
     CongestionStateUpdated,
-    TimerUpdated,
     PacketLost,
     MarkedForRetransmit,
     EcnStateUpdated,
@@ -495,9 +495,9 @@ pub enum QuicFrameTypeName {
     ConnectionClose,
     ApplicationClose,
     HandshakeDone,
-    Datagram,
     #[default]
     Unknown,
+    Datagram,
 }
 
 #[serde_with::skip_serializing_none]
@@ -645,12 +645,12 @@ pub enum QuicFrame {
         raw: Option<Box<RawInfo>>,
     },
 
-    Datagram {
+    Unknown {
+        frame_type_bytes: Option<u64>,
         raw: Option<Box<RawInfo>>,
     },
 
-    Unknown {
-        frame_type_bytes: Option<u64>,
+    Datagram {
         raw: Option<Box<RawInfo>>,
     },
 }
