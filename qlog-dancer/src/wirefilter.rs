@@ -50,6 +50,8 @@ fn stream_ids(event: &Event) -> TypedArray<'_, i64> {
                         match frame {
                             QuicFrame::ResetStream { stream_id, .. } =>
                                 ids.push(*stream_id as i64),
+                            QuicFrame::ResetStreamAt { stream_id, .. } =>
+                                ids.push(*stream_id as i64),
                             QuicFrame::StopSending { stream_id, .. } =>
                                 ids.push(*stream_id as i64),
                             QuicFrame::Stream { stream_id, .. } =>
