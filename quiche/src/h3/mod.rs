@@ -1548,11 +1548,10 @@ impl Connection {
 
             let frame = Http3Frame::Headers {
                 headers: qlog_headers,
-                raw: Some(qlog::events::RawInfo {
-                    length: Some(header_block.len() as u64),
-                    payload_length: None,
-                    data: None,
-                }),
+                raw: Some(frame::qlog_raw_info(
+                    frame::HEADERS_FRAME_TYPE_ID,
+                    header_block.len() as u64,
+                )),
             };
             let ev_data =
                 EventData::Http3FrameCreated(FrameCreated { stream_id, frame });
@@ -1783,11 +1782,10 @@ impl Connection {
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::Data {
-                raw: Some(qlog::events::RawInfo {
-                    length: Some(written as u64),
-                    payload_length: None,
-                    data: None,
-                }),
+                raw: Some(frame::qlog_raw_info(
+                    frame::DATA_FRAME_TYPE_ID,
+                    written as u64,
+                )),
             };
             let ev_data =
                 EventData::Http3FrameCreated(FrameCreated { stream_id, frame });
@@ -2048,11 +2046,10 @@ impl Connection {
                 stream_id: Some(stream_id),
                 push_id: None,
                 priority_field_value: field_value.clone(),
-                raw: Some(qlog::events::RawInfo {
-                    length: Some(priority_field_value.len() as u64),
-                    payload_length: None,
-                    data: None,
-                }),
+                raw: Some(frame::qlog_raw_info(
+                    frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID,
+                    frame_payload_len as u64,
+                )),
             };
 
             let ev_data =
@@ -2261,11 +2258,10 @@ impl Connection {
 
             qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
                 let mut frame = frame.to_qlog();
-                frame.set_raw(qlog::events::RawInfo {
-                    length: Some(octets::varint_len(id) as u64),
-                    payload_length: None,
-                    data: None,
-                });
+                frame.set_raw(frame::qlog_raw_info(
+                    frame::GOAWAY_FRAME_TYPE_ID,
+                    octets::varint_len(id) as u64,
+                ));
                 let ev_data = EventData::Http3FrameCreated(FrameCreated {
                     stream_id,
                     frame,
@@ -2421,11 +2417,7 @@ impl Connection {
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::Reserved {
                 frame_type_bytes: grease_frame1,
-                raw: Some(qlog::events::RawInfo {
-                    length: Some(0),
-                    payload_length: None,
-                    data: None,
-                }),
+                raw: Some(frame::qlog_raw_info(grease_frame1, 0)),
             };
             let ev_data =
                 EventData::Http3FrameCreated(FrameCreated { stream_id, frame });
@@ -2452,11 +2444,10 @@ impl Connection {
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::Reserved {
                 frame_type_bytes: grease_frame2,
-                raw: Some(qlog::events::RawInfo {
-                    length: Some(grease_payload.len() as u64),
-                    payload_length: None,
-                    data: None,
-                }),
+                raw: Some(frame::qlog_raw_info(
+                    grease_frame2,
+                    grease_payload.len() as u64,
+                )),
             };
             let ev_data =
                 EventData::Http3FrameCreated(FrameCreated { stream_id, frame });
@@ -2833,11 +2824,10 @@ impl Connection {
 
                         qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
                             let frame = Http3Frame::Data {
-                                raw: Some(qlog::events::RawInfo {
-                                    length: Some(payload_len),
-                                    payload_length: None,
-                                    data: None,
-                                }),
+                                raw: Some(frame::qlog_raw_info(
+                                    frame::DATA_FRAME_TYPE_ID,
+                                    payload_len,
+                                )),
                             };
 
                             let ev_data =
@@ -3088,12 +3078,10 @@ impl Connection {
         qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
             // HEADERS frames are special case and will be logged below.
             if !matches!(frame, frame::Frame::Headers { .. }) {
+                let raw =
+                    frame::qlog_raw_info(frame.frame_type_id(), payload_len);
                 let mut frame = frame.to_qlog();
-                frame.set_raw(qlog::events::RawInfo {
-                    length: Some(payload_len),
-                    payload_length: None,
-                    data: None,
-                });
+                frame.set_raw(raw);
                 let ev_data =
                     EventData::Http3FrameParsed(FrameParsed { stream_id, frame });
 
@@ -3195,11 +3183,10 @@ impl Connection {
 
                     let frame = Http3Frame::Headers {
                         headers: qlog_headers,
-                        raw: Some(qlog::events::RawInfo {
-                            length: Some(payload_len),
-                            payload_length: None,
-                            data: None,
-                        }),
+                        raw: Some(frame::qlog_raw_info(
+                            frame::HEADERS_FRAME_TYPE_ID,
+                            payload_len,
+                        )),
                     };
 
                     let ev_data = EventData::Http3FrameParsed(FrameParsed {
@@ -8770,6 +8757,138 @@ mod tests {
         // The server stream should be gone now
         assert_eq!(s.client.streams.len(), init_streams_client);
         assert_eq!(s.server.streams.len(), init_streams_server);
+    }
+
+    #[cfg(feature = "qlog")]
+    #[test]
+    fn qlog_frame_raw_info() {
+        use qlog::reader::QlogSeqReader;
+
+        #[derive(Clone, Default)]
+        struct SharedLog(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+        impl std::io::Write for SharedLog {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        // Returns (created, frame) for every H3 frame event in the log.
+        fn frame_events(log: &SharedLog) -> Vec<(bool, Http3Frame)> {
+            let bytes = log.0.lock().unwrap().clone();
+            let reader = QlogSeqReader::new(Box::new(std::io::BufReader::new(
+                std::io::Cursor::new(bytes),
+            )))
+            .unwrap();
+
+            reader
+                .filter_map(|ev| match ev {
+                    qlog::reader::Event::Qlog(ev) => match ev.data {
+                        EventData::Http3FrameCreated(fc) =>
+                            Some((true, fc.frame)),
+                        EventData::Http3FrameParsed(fp) =>
+                            Some((false, fp.frame)),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect()
+        }
+
+        let client_log = SharedLog::default();
+        let server_log = SharedLog::default();
+
+        let mut s = Session::new().unwrap();
+        s.pipe.client.set_qlog(
+            Box::new(client_log.clone()),
+            "client".to_string(),
+            "client".to_string(),
+        );
+        s.pipe.server.set_qlog(
+            Box::new(server_log.clone()),
+            "server".to_string(),
+            "server".to_string(),
+        );
+        s.handshake().unwrap();
+
+        let (stream, _) = s.send_request(false).unwrap();
+        let body = s.send_body_client(stream, true).unwrap();
+
+        let mut recv_buf = vec![0; body.len()];
+        while let Ok((_, ev)) = s.poll_server() {
+            if ev == Event::Data {
+                s.recv_body_server(stream, &mut recv_buf).unwrap();
+            }
+        }
+
+        let client_frames = frame_events(&client_log);
+        let server_frames = frame_events(&server_log);
+
+        // A 10-byte DATA payload has a 1-byte type and a 1-byte length.
+        let data_raw = qlog::events::RawInfo {
+            length: Some(12),
+            payload_length: Some(10),
+            data: None,
+        };
+        assert!(client_frames.contains(&(true, Http3Frame::Data {
+            raw: Some(data_raw.clone())
+        })));
+        assert!(server_frames.contains(&(false, Http3Frame::Data {
+            raw: Some(data_raw)
+        })));
+
+        let mut seen_headers = false;
+        let mut seen_settings = false;
+        let mut seen_grease = false;
+
+        for (_, f) in client_frames.iter().chain(server_frames.iter()) {
+            let ty = match f {
+                Http3Frame::Data { .. } => frame::DATA_FRAME_TYPE_ID,
+                Http3Frame::Headers { .. } => {
+                    seen_headers = true;
+                    frame::HEADERS_FRAME_TYPE_ID
+                },
+                Http3Frame::Settings { .. } => {
+                    seen_settings = true;
+                    frame::SETTINGS_FRAME_TYPE_ID
+                },
+                Http3Frame::Reserved {
+                    frame_type_bytes, ..
+                } |
+                Http3Frame::Unknown {
+                    frame_type_bytes, ..
+                } => {
+                    seen_grease = true;
+                    *frame_type_bytes
+                },
+                _ => continue,
+            };
+
+            // SETTINGS sent only records the full length.
+            let Some(raw) = f.raw() else { continue };
+            let (Some(length), Some(payload_len)) =
+                (raw.length, raw.payload_length)
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                length,
+                octets::varint_len(ty) as u64 +
+                    octets::varint_len(payload_len) as u64 +
+                    payload_len,
+                "{f:?}"
+            );
+        }
+
+        assert!(seen_headers);
+        assert!(seen_settings);
+        assert!(seen_grease);
     }
 }
 

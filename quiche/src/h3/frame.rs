@@ -335,6 +335,24 @@ impl Frame {
     }
 
     #[cfg(feature = "qlog")]
+    pub(crate) fn frame_type_id(&self) -> u64 {
+        match self {
+            Frame::Data { .. } => DATA_FRAME_TYPE_ID,
+            Frame::Headers { .. } => HEADERS_FRAME_TYPE_ID,
+            Frame::CancelPush { .. } => CANCEL_PUSH_FRAME_TYPE_ID,
+            Frame::Settings { .. } => SETTINGS_FRAME_TYPE_ID,
+            Frame::PushPromise { .. } => PUSH_PROMISE_FRAME_TYPE_ID,
+            Frame::GoAway { .. } => GOAWAY_FRAME_TYPE_ID,
+            Frame::MaxPushId { .. } => MAX_PUSH_FRAME_TYPE_ID,
+            Frame::PriorityUpdateRequest { .. } =>
+                PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID,
+            Frame::PriorityUpdatePush { .. } =>
+                PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID,
+            Frame::Unknown { raw_type, .. } => *raw_type,
+        }
+    }
+
+    #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> Http3Frame {
         use qlog::events::RawInfo;
 
@@ -564,6 +582,23 @@ impl std::fmt::Debug for Frame {
         }
 
         Ok(())
+    }
+}
+
+/// Returns the qlog `RawInfo` for a frame with the given type and payload
+/// length.
+#[cfg(feature = "qlog")]
+pub(crate) fn qlog_raw_info(
+    frame_type: u64, payload_len: u64,
+) -> qlog::events::RawInfo {
+    let length = octets::varint_len(frame_type) as u64 +
+        octets::varint_len(payload_len) as u64 +
+        payload_len;
+
+    qlog::events::RawInfo {
+        length: Some(length),
+        payload_length: Some(payload_len),
+        data: None,
     }
 }
 
