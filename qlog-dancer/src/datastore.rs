@@ -1264,7 +1264,8 @@ impl Datastore {
                             .update(*stream_id, *maximum, ev_time, init_val);
                     },
 
-                    QuicFrame::ResetStream { stream_id, .. } => {
+                    QuicFrame::ResetStream { stream_id, .. } |
+                    QuicFrame::ResetStreamAt { stream_id, .. } => {
                         let s = self
                             .received_reset_stream
                             .entry(*stream_id)
@@ -1363,7 +1364,8 @@ impl Datastore {
                             .update(*stream_id, *maximum, ev_time, init_val);
                     },
 
-                    QuicFrame::ResetStream { stream_id, .. } => {
+                    QuicFrame::ResetStream { stream_id, .. } |
+                    QuicFrame::ResetStreamAt { stream_id, .. } => {
                         let s =
                             self.sent_reset_stream.entry(*stream_id).or_default();
                         s.push(frame.clone());
