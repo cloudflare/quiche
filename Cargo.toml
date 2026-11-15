@@ -57,7 +57,6 @@ assert_matches = { version = "1" }
 # can ever be in the dep graph at a time.
 boring = { version = ">=4.19, <6" }
 boring-sys = { version = ">=4.19, <6" }
-buffer-pool = { version = "0.2.1", path = "./buffer-pool" }
 bytes = { version = "1.11.1" }
 clap = { version = "4" }
 crossbeam = { version = "0.8.1", default-features = false }
