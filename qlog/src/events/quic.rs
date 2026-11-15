@@ -926,6 +926,8 @@ pub enum DatagramDroppedDirection {
 pub enum DatagramDroppedTrigger {
     BufferFull,
     TooLarge,
+    #[serde(untagged)]
+    Other(String),
 }
 
 #[serde_with::skip_serializing_none]

@@ -805,6 +805,26 @@ mod draft_14_tests {
     }
 
     #[test]
+    fn datagram_dropped_trigger() {
+        use quic::DatagramDroppedTrigger;
+
+        for (trigger, json) in [
+            (DatagramDroppedTrigger::BufferFull, r#""buffer_full""#),
+            (DatagramDroppedTrigger::TooLarge, r#""too_large""#),
+            (
+                DatagramDroppedTrigger::Other("no_space".to_string()),
+                r#""no_space""#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&trigger).unwrap(), json);
+            assert_eq!(
+                serde_json::from_str::<DatagramDroppedTrigger>(json).unwrap(),
+                trigger
+            );
+        }
+    }
+
+    #[test]
     fn event_names() {
         let ev = EventData::QuicDatagramDropped(quic::DatagramDropped {
             direction: Some(quic::DatagramDroppedDirection::Sending),
