@@ -75,6 +75,12 @@ fn stream_ids(event: &Event) -> TypedArray<'_, i64> {
             EventData::Http3FrameParsed(v) => {
                 ids.push(v.stream_id as i64);
             },
+            EventData::HttpCapsuleCreated(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::HttpCapsuleParsed(v) => {
+                ids.push(v.stream_id as i64);
+            },
 
             // other events are not related to streams
             _ => (),
