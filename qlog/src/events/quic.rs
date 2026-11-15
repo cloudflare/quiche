@@ -655,6 +655,7 @@ pub enum QuicFrame {
     },
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct PreferredAddress {
     pub address_v4: Option<IpAddressPort>,
