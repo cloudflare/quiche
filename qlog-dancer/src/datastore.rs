@@ -1535,8 +1535,10 @@ impl Datastore {
 
                 let _ = req.time_last_data_tx.insert(ev_time);
 
-                let length =
-                    raw.as_ref().and_then(|r| r.length).unwrap_or_default();
+                let length = raw
+                    .as_ref()
+                    .and_then(|r| r.payload_length)
+                    .unwrap_or_default();
                 req.time_data_tx_set.push((ev_time, length));
                 self.largest_data_frame_tx_length_global = std::cmp::max(
                     self.largest_data_frame_tx_length_global,
@@ -1576,8 +1578,10 @@ impl Datastore {
 
                 let _ = req.time_last_data_tx.insert(ev_time);
 
-                let length =
-                    raw.as_ref().and_then(|r| r.length).unwrap_or_default();
+                let length = raw
+                    .as_ref()
+                    .and_then(|r| r.payload_length)
+                    .unwrap_or_default();
                 req.time_data_tx_set.push((ev_time, length));
                 self.largest_data_frame_tx_length_global = std::cmp::max(
                     self.largest_data_frame_tx_length_global,
@@ -1609,8 +1613,10 @@ impl Datastore {
                 let _ = req.time_last_data_rx.insert(ev_time);
 
                 // TODO: is default length sensible here?
-                let length =
-                    raw.as_ref().and_then(|r| r.length).unwrap_or_default();
+                let length = raw
+                    .as_ref()
+                    .and_then(|r| r.payload_length)
+                    .unwrap_or_default();
                 req.time_data_rx_set.push((ev_time, length));
                 self.largest_data_frame_rx_length_global = std::cmp::max(
                     self.largest_data_frame_rx_length_global,
@@ -1647,8 +1653,10 @@ impl Datastore {
 
                 let _ = req.time_last_data_rx.insert(ev_time);
 
-                let length =
-                    raw.as_ref().and_then(|r| r.length).unwrap_or_default();
+                let length = raw
+                    .as_ref()
+                    .and_then(|r| r.payload_length)
+                    .unwrap_or_default();
                 req.time_data_rx_set.push((ev_time, length));
                 self.largest_data_frame_rx_length_global = std::cmp::max(
                     self.largest_data_frame_rx_length_global,
