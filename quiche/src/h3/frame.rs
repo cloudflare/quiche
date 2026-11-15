@@ -438,8 +438,15 @@ impl Frame {
 
                 if let Some(additional_settings) = additional_settings {
                     for (k, v) in additional_settings {
+                        // Reserved identifiers have the form 31 * N + 33.
+                        let name = if *k >= 33 && (*k - 33) % 31 == 0 {
+                            "reserved"
+                        } else {
+                            "unknown"
+                        };
+
                         settings.push(qlog::events::http3::Setting {
-                            name: Some("unknown".to_string()),
+                            name: Some(name.to_string()),
                             name_bytes: Some(*k),
                             value: *v,
                         });
@@ -1436,5 +1443,34 @@ mod tests {
                 payload: vec![42; 12]
             })
         );
+    }
+
+    #[cfg(feature = "qlog")]
+    #[test]
+    fn settings_qlog_additional_names() {
+        let frame = Frame::Settings {
+            max_field_section_size: None,
+            qpack_max_table_capacity: None,
+            qpack_blocked_streams: None,
+            connect_protocol_enabled: None,
+            h3_datagram: None,
+            grease: None,
+            raw: None,
+            additional_settings: Some(vec![(31 * 5 + 33, 1), (0x50, 2)]),
+        };
+
+        let Http3Frame::Settings { settings, .. } = frame.to_qlog() else {
+            panic!("expected SETTINGS");
+        };
+
+        let names: Vec<_> = settings
+            .iter()
+            .map(|s| (s.name.as_deref(), s.name_bytes))
+            .collect();
+
+        assert_eq!(names, [
+            (Some("reserved"), Some(31 * 5 + 33)),
+            (Some("unknown"), Some(0x50)),
+        ]);
     }
 }
