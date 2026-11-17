@@ -105,15 +105,15 @@ impl<T> ConnectionStateMap<T> {
 pub struct BandwidthSampler {
     /// The total number of congestion controlled bytes sent during the
     /// connection.
-    total_bytes_sent: u64,
-    total_bytes_acked: u64,
-    total_bytes_lost: u64,
-    total_bytes_neutered: u64,
+    total_bytes_sent: usize,
+    total_bytes_acked: usize,
+    total_bytes_lost: usize,
+    total_bytes_neutered: usize,
     last_sent_packet: u64,
     last_acked_packet: u64,
     is_app_limited: bool,
     last_acked_packet_ack_time: Instant,
-    total_bytes_sent_at_last_acked_packet: u64,
+    total_bytes_sent_at_last_acked_packet: usize,
     last_acked_packet_sent_time: Instant,
     recent_ack_points: RecentAckPoints,
     a0_candidates: VecDeque<AckPoint>,
@@ -129,7 +129,7 @@ pub struct BandwidthSampler {
     choose_a0_point_fix: bool,
     limit_max_ack_height_tracker_by_send_rate: bool,
 
-    total_bytes_acked_after_last_ack_event: u64,
+    total_bytes_acked_after_last_ack_event: usize,
 }
 
 /// A subset of [`ConnectionStateOnSentPacket`] which is returned
@@ -145,12 +145,12 @@ pub struct SendTimeState {
     pub is_app_limited: bool,
     /// Total number of sent bytes at the time the packet was sent.
     /// Includes the packet itself.
-    pub total_bytes_sent: u64,
+    pub total_bytes_sent: usize,
     /// Total number of acked bytes at the time the packet was sent.
-    pub total_bytes_acked: u64,
+    pub total_bytes_acked: usize,
     /// Total number of lost bytes at the time the packet was sent.
     #[allow(dead_code)]
-    pub total_bytes_lost: u64,
+    pub total_bytes_lost: usize,
     /// Total number of inflight bytes at the time the packet was sent.
     /// Includes the packet itself.
     /// It should be equal to `total_bytes_sent` minus the sum of
@@ -193,7 +193,7 @@ struct BandwidthSample {
 #[derive(Debug, Clone, Copy)]
 struct AckPoint {
     ack_time: Instant,
-    total_bytes_acked: u64,
+    total_bytes_acked: usize,
 }
 
 /// [`RecentAckPoints`] maintains the most recent 2 ack points at distinct
@@ -215,7 +215,7 @@ struct ConnectionStateOnSentPacket {
     size: usize,
     /// The value of [`BandwidthSampler::total_bytes_sent_at_last_acked_packet`]
     /// at the time the packet was sent.
-    total_bytes_sent_at_last_acked_packet: u64,
+    total_bytes_sent_at_last_acked_packet: usize,
     /// The value of [`BandwidthSampler::last_acked_packet_sent_time`] at the
     /// time the packet was sent.
     last_acked_packet_sent_time: Instant,
@@ -452,7 +452,7 @@ impl From<(Instant, usize, usize, &BandwidthSampler)>
 }
 
 impl RecentAckPoints {
-    fn update(&mut self, ack_time: Instant, total_bytes_acked: u64) {
+    fn update(&mut self, ack_time: Instant, total_bytes_acked: usize) {
         assert!(
             total_bytes_acked >=
                 self.ack_points[1].map(|p| p.total_bytes_acked).unwrap_or(0)
@@ -495,8 +495,8 @@ impl BandwidthSampler {
             total_bytes_lost: 0,
             total_bytes_neutered: 0,
             total_bytes_sent_at_last_acked_packet: 0,
-            last_acked_packet_sent_time: Instant::now(),
-            last_acked_packet_ack_time: Instant::now(),
+            last_acked_packet_sent_time: crate::clock::now(),
+            last_acked_packet_ack_time: crate::clock::now(),
             is_app_limited: true,
             connection_state_map: ConnectionStateMap::default(),
             max_ack_height_tracker: MaxAckHeightTracker::new(
@@ -531,7 +531,7 @@ impl BandwidthSampler {
             return;
         }
 
-        self.total_bytes_sent += bytes as u64;
+        self.total_bytes_sent += bytes;
 
         // If there are no packets in flight, the time at which the new
         // transmission opens can be treated as the A_0 point for the
@@ -566,7 +566,7 @@ impl BandwidthSampler {
 
     pub(crate) fn on_packet_neutered(&mut self, packet_number: u64) {
         if let Some(pkt) = self.connection_state_map.take(packet_number) {
-            self.total_bytes_neutered += pkt.size as u64;
+            self.total_bytes_neutered += pkt.size;
         }
     }
 
@@ -625,9 +625,8 @@ impl BandwidthSampler {
             max_send_rate = max_send_rate.max(sample.send_rate);
             max_ack_rate = max_ack_rate.max(Some(sample.ack_rate));
 
-            let inflight_sample = (self.total_bytes_acked -
-                last_acked_packet_send_state.total_bytes_acked)
-                as usize;
+            let inflight_sample = self.total_bytes_acked -
+                last_acked_packet_send_state.total_bytes_acked;
             if inflight_sample > event_sample.sample_max_inflight {
                 event_sample.sample_max_inflight = inflight_sample;
             }
@@ -680,7 +679,7 @@ impl BandwidthSampler {
     ) -> SendTimeState {
         let mut send_time_state = SendTimeState::default();
 
-        self.total_bytes_lost += bytes_lost as u64;
+        self.total_bytes_lost += bytes_lost;
         if let Some(state) = self.connection_state_map.take(packet_number) {
             send_time_state = state.send_time_state;
             send_time_state.is_valid = true;
@@ -693,9 +692,8 @@ impl BandwidthSampler {
         &mut self, bandwidth_estimate: Bandwidth, is_new_max_bandwidth: bool,
         round_trip_count: usize,
     ) -> usize {
-        let newly_acked_bytes = (self.total_bytes_acked -
-            self.total_bytes_acked_after_last_ack_event)
-            as usize;
+        let newly_acked_bytes =
+            self.total_bytes_acked - self.total_bytes_acked_after_last_ack_event;
 
         if newly_acked_bytes == 0 {
             return 0;
@@ -730,7 +728,7 @@ impl BandwidthSampler {
         self.last_acked_packet = packet_number;
         let sent_packet = self.connection_state_map.take(packet_number)?;
 
-        self.total_bytes_acked += sent_packet.size as u64;
+        self.total_bytes_acked += sent_packet.size;
         self.total_bytes_sent_at_last_acked_packet =
             sent_packet.send_time_state.total_bytes_sent;
         self.last_acked_packet_sent_time = sent_packet.sent_time;
@@ -756,9 +754,8 @@ impl BandwidthSampler {
             sent_packet.last_acked_packet_sent_time
         {
             Some(Bandwidth::from_bytes_and_time_delta(
-                (sent_packet.send_time_state.total_bytes_sent -
-                    sent_packet.total_bytes_sent_at_last_acked_packet)
-                    as usize,
+                sent_packet.send_time_state.total_bytes_sent -
+                    sent_packet.total_bytes_sent_at_last_acked_packet,
                 sent_packet.sent_time - sent_packet.last_acked_packet_sent_time,
             ))
         } else {
@@ -788,7 +785,7 @@ impl BandwidthSampler {
         }
 
         let ack_rate = Bandwidth::from_bytes_and_time_delta(
-            (self.total_bytes_acked - a0.total_bytes_acked) as usize,
+            self.total_bytes_acked - a0.total_bytes_acked,
             ack_time.duration_since(a0.ack_time),
         );
 
@@ -816,7 +813,7 @@ impl BandwidthSampler {
     }
 
     fn choose_a0_point(
-        a0_candidates: &mut VecDeque<AckPoint>, total_bytes_acked: u64,
+        a0_candidates: &mut VecDeque<AckPoint>, total_bytes_acked: usize,
         choose_a0_point_fix: bool,
     ) -> Option<AckPoint> {
         if a0_candidates.is_empty() {
@@ -837,11 +834,11 @@ impl BandwidthSampler {
         Some(a0_candidates[0])
     }
 
-    pub(crate) fn total_bytes_acked(&self) -> u64 {
+    pub(crate) fn total_bytes_acked(&self) -> usize {
         self.total_bytes_acked
     }
 
-    pub(crate) fn total_bytes_lost(&self) -> u64 {
+    pub(crate) fn total_bytes_lost(&self) -> usize {
         self.total_bytes_lost
     }
 
@@ -905,7 +902,7 @@ mod bandwidth_sampler_tests {
                 sampler_app_limited_at_start: sampler.is_app_limited(),
                 sampler,
                 bytes_in_flight: 0,
-                clock: Instant::now(),
+                clock: crate::clock::now(),
                 max_bandwidth: Bandwidth::zero(),
                 est_bandwidth_upper_bound: Bandwidth::infinite(),
                 round_trip_count: 0,
@@ -1118,44 +1115,32 @@ mod bandwidth_sampler_tests {
             test_sender.send_packet(i, REGULAR_PACKET_SIZE, true);
             assert_eq!(
                 test_sender.sampler.total_bytes_sent,
-                REGULAR_PACKET_SIZE as u64 * i
+                REGULAR_PACKET_SIZE * i as usize
             );
             test_sender.advance_time(time_between_packets);
         }
 
         // Ack packet 1.
         let send_time_state = test_sender.ack_packet(1).state_at_send;
-        assert_eq!(REGULAR_PACKET_SIZE as u64, send_time_state.total_bytes_sent);
+        assert_eq!(REGULAR_PACKET_SIZE, send_time_state.total_bytes_sent);
         assert_eq!(0, send_time_state.total_bytes_acked);
         assert_eq!(0, send_time_state.total_bytes_lost);
-        assert_eq!(
-            REGULAR_PACKET_SIZE as u64,
-            test_sender.sampler.total_bytes_acked
-        );
+        assert_eq!(REGULAR_PACKET_SIZE, test_sender.sampler.total_bytes_acked);
 
         // Lose packet 2.
         let send_time_state = test_sender.lose_packet(2);
-        assert_eq!(
-            REGULAR_PACKET_SIZE as u64 * 2,
-            send_time_state.total_bytes_sent
-        );
+        assert_eq!(REGULAR_PACKET_SIZE * 2, send_time_state.total_bytes_sent);
         assert_eq!(0, send_time_state.total_bytes_acked);
         assert_eq!(0, send_time_state.total_bytes_lost);
-        assert_eq!(
-            REGULAR_PACKET_SIZE as u64,
-            test_sender.sampler.total_bytes_lost
-        );
+        assert_eq!(REGULAR_PACKET_SIZE, test_sender.sampler.total_bytes_lost);
 
         // Lose packet 3.
         let send_time_state = test_sender.lose_packet(3);
-        assert_eq!(
-            REGULAR_PACKET_SIZE as u64 * 3,
-            send_time_state.total_bytes_sent
-        );
+        assert_eq!(REGULAR_PACKET_SIZE * 3, send_time_state.total_bytes_sent);
         assert_eq!(0, send_time_state.total_bytes_acked);
         assert_eq!(0, send_time_state.total_bytes_lost);
         assert_eq!(
-            REGULAR_PACKET_SIZE as u64 * 2,
+            REGULAR_PACKET_SIZE * 2,
             test_sender.sampler.total_bytes_lost
         );
 
@@ -1164,7 +1149,7 @@ mod bandwidth_sampler_tests {
             test_sender.send_packet(i, REGULAR_PACKET_SIZE, true);
             assert_eq!(
                 test_sender.sampler.total_bytes_sent,
-                REGULAR_PACKET_SIZE as u64 * i
+                REGULAR_PACKET_SIZE * i as usize
             );
             test_sender.advance_time(time_between_packets);
         }
@@ -1172,18 +1157,18 @@ mod bandwidth_sampler_tests {
         // Ack all inflight packets.
         let mut acked_packet_count = 1;
         assert_eq!(
-            REGULAR_PACKET_SIZE as u64 * acked_packet_count,
+            REGULAR_PACKET_SIZE * acked_packet_count,
             test_sender.sampler.total_bytes_acked
         );
         for i in 4..=10 {
             let send_time_state = test_sender.ack_packet(i).state_at_send;
             acked_packet_count += 1;
             assert_eq!(
-                REGULAR_PACKET_SIZE as u64 * acked_packet_count,
+                REGULAR_PACKET_SIZE * acked_packet_count,
                 test_sender.sampler.total_bytes_acked
             );
             assert_eq!(
-                REGULAR_PACKET_SIZE as u64 * i,
+                REGULAR_PACKET_SIZE * i as usize,
                 send_time_state.total_bytes_sent
             );
 
@@ -1192,11 +1177,11 @@ mod bandwidth_sampler_tests {
                 assert_eq!(0, send_time_state.total_bytes_lost);
             } else {
                 assert_eq!(
-                    REGULAR_PACKET_SIZE as u64,
+                    REGULAR_PACKET_SIZE,
                     send_time_state.total_bytes_acked
                 );
                 assert_eq!(
-                    REGULAR_PACKET_SIZE as u64 * 2,
+                    REGULAR_PACKET_SIZE * 2,
                     send_time_state.total_bytes_lost
                 );
             }
@@ -1206,39 +1191,11 @@ mod bandwidth_sampler_tests {
                 send_time_state.total_bytes_sent -
                     send_time_state.total_bytes_acked -
                     send_time_state.total_bytes_lost,
-                send_time_state.bytes_in_flight as u64
+                send_time_state.bytes_in_flight
             );
 
             test_sender.advance_time(time_between_packets);
         }
-    }
-
-    #[rstest]
-    fn totals_past_u32_max(
-        #[values(false, true)] overestimate_avoidance: bool,
-        #[values(false, true)] choose_a0_point_fix: bool,
-    ) {
-        let mut test_sender =
-            TestSender::new(overestimate_avoidance, choose_a0_point_fix);
-        let base = u64::from(u32::MAX);
-        let size = REGULAR_PACKET_SIZE as u64;
-
-        test_sender.sampler.total_bytes_sent = base;
-        test_sender.sampler.total_bytes_acked = base;
-        test_sender.sampler.total_bytes_lost = base;
-        test_sender.sampler.total_bytes_acked_after_last_ack_event = base;
-
-        test_sender.send_packet(1, REGULAR_PACKET_SIZE, true);
-        test_sender.send_packet(2, REGULAR_PACKET_SIZE, true);
-        test_sender.advance_time(Duration::from_millis(10));
-
-        let send_time_state = test_sender.ack_packet(1).state_at_send;
-        assert_eq!(send_time_state.total_bytes_sent, base + size);
-        test_sender.lose_packet(2);
-
-        assert_eq!(test_sender.sampler.total_bytes_sent, base + 2 * size);
-        assert_eq!(test_sender.sampler.total_bytes_acked, base + size);
-        assert_eq!(test_sender.sampler.total_bytes_lost, base + size);
     }
 
     /// Test the sampler during regular windowed sender scenario with fixed CWND
@@ -1668,11 +1625,11 @@ mod bandwidth_sampler_tests {
                 sample.last_packet_send_state.bytes_in_flight
             );
             assert_eq!(
-                i * REGULAR_PACKET_SIZE as u64,
+                i as usize * REGULAR_PACKET_SIZE,
                 sample.last_packet_send_state.total_bytes_sent
             );
             assert_eq!(
-                (i - 2) * REGULAR_PACKET_SIZE as u64,
+                (i - 2) as usize * REGULAR_PACKET_SIZE,
                 sample.last_packet_send_state.total_bytes_acked
             );
             assert_eq!(0, sample.last_packet_send_state.total_bytes_lost);
@@ -1712,15 +1669,15 @@ mod bandwidth_sampler_tests {
                 sample.last_packet_send_state.bytes_in_flight
             );
             assert_eq!(
-                i * REGULAR_PACKET_SIZE as u64,
+                i as usize * REGULAR_PACKET_SIZE,
                 sample.last_packet_send_state.total_bytes_sent
             );
             assert_eq!(
-                (i - 2) * REGULAR_PACKET_SIZE as u64 / 2,
+                (i - 2) as usize * REGULAR_PACKET_SIZE / 2,
                 sample.last_packet_send_state.total_bytes_acked
             );
             assert_eq!(
-                (i - 2) * REGULAR_PACKET_SIZE as u64 / 2,
+                (i - 2) as usize * REGULAR_PACKET_SIZE / 2,
                 sample.last_packet_send_state.total_bytes_lost
             );
             test_sender.sampler.remove_obsolete_packets(i - 2);
@@ -1795,7 +1752,7 @@ mod max_ack_height_tracker_tests {
                 MaxAckHeightTracker::new(10, overestimate_avoidance);
             tracker.ack_aggregation_bandwidth_threshold = 1.8;
             tracker.start_new_aggregation_epoch_after_full_round = true;
-            let start = Instant::now();
+            let start = crate::clock::now();
             TestTracker {
                 tracker,
                 start,

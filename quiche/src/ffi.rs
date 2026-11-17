@@ -33,7 +33,6 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV4;
 use std::net::SocketAddrV6;
-use std::num::NonZeroUsize;
 
 #[cfg(unix)]
 use std::os::unix::io::FromRawFd;
@@ -138,6 +137,19 @@ pub extern "C" fn quiche_enable_debug_logging(
     log::set_max_level(log::LevelFilter::Trace);
 
     0
+}
+
+/// Drives quiche's internal clock from an external simulator (e.g. ns-3),
+/// instead of the real OS clock. `time_us` is microseconds since this
+/// process' simulated epoch (the first call to this function, or the
+/// first call to `crate::clock::now()`, whichever happens first).
+///
+/// Call this before any quiche API that depends on current time
+/// (quiche_conn_recv, quiche_conn_send, quiche_conn_on_timeout, etc.)
+/// whenever the external simulator's clock has advanced.
+#[no_mangle]
+pub extern "C" fn quiche_set_simulated_time_us(time_us: u64) {
+    crate::clock::set_simulated_time_us(time_us);
 }
 
 #[no_mangle]
@@ -367,24 +379,6 @@ pub extern "C" fn quiche_config_set_initial_congestion_window_packets(
     config: &mut Config, packets: size_t,
 ) {
     config.set_initial_congestion_window_packets(packets);
-}
-
-/// Sets the fixed congestion window in bytes for `congestion_window_unchecked`.
-///
-/// Defaults to `usize::MAX`. Other congestion control algorithms are unchanged.
-/// Recovery probes can bypass the fixed window.
-#[no_mangle]
-pub extern "C" fn quiche_config_set_unchecked_congestion_window(
-    config: &mut Config, window: size_t,
-) {
-    config.set_unchecked_congestion_window(window);
-}
-
-#[no_mangle]
-pub extern "C" fn quiche_config_set_max_outstanding_sent_packets(
-    config: &mut Config, max_packets: size_t,
-) {
-    config.set_max_outstanding_sent_packets(NonZeroUsize::new(max_packets));
 }
 
 #[no_mangle]

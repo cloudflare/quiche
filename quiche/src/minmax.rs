@@ -79,7 +79,7 @@ impl<T: PartialOrd + Copy> Minmax<T> {
     pub fn new(val: T) -> Self {
         Minmax {
             estimate: [MinmaxSample {
-                time: Instant::now(),
+                time: crate::clock::now(),
                 value: val,
             }; 3],
         }
