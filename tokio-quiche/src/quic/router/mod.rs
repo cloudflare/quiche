@@ -227,9 +227,11 @@ where
                 reusable_cmsg_space: nix::cmsg_space!(
                     u32, // GRO
                     nix::sys::time::TimeSpec, // timestamp
-                    u16, // drop count
+                    u32, // SO_RXQ_OVFL
                     sockaddr_in, // IP_RECVORIGDSTADDR
                     sockaddr_in6, // IPV6_RECVORIGDSTADDR
+                    libc::in_pktinfo, // IP_PKTINFO
+                    libc::in6_pktinfo, // IPV6_PKTINFO
                     u32 // SO_MARK
                 ),
 
@@ -1276,5 +1278,122 @@ mod tests {
         // processed
         let ipr = ipr.join().unwrap();
         assert!(ipr.conn_map_cmd_rx.is_empty());
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
+    #[rstest::rstest]
+    #[case::ipv4("0.0.0.0:0", "127.0.0.1:0")]
+    #[case::ipv6("[::]:0", "[::1]:0")]
+    #[case::ipv4_mapped("[::]:0", "127.0.0.1:0")]
+    #[tokio::test]
+    async fn test_gro_survives_full_cmsg_set_after_drops(
+        #[case] bind_addr: &str, #[case] sender_addr: &str,
+    ) {
+        use crate::socket::SocketCapabilitiesBuilder;
+        use nix::sys::socket::bind;
+        use nix::sys::socket::setsockopt;
+        use nix::sys::socket::socket;
+        use nix::sys::socket::sockopt;
+        use nix::sys::socket::AddressFamily;
+        use nix::sys::socket::SockFlag;
+        use nix::sys::socket::SockType;
+        use nix::sys::socket::SockaddrStorage;
+        use std::os::fd::AsRawFd;
+
+        const SEGMENT_SIZE: u16 = 1200;
+
+        let bind_addr: SocketAddr = bind_addr.parse().unwrap();
+        let family = if bind_addr.is_ipv6() {
+            AddressFamily::Inet6
+        } else {
+            AddressFamily::Inet
+        };
+        let receiver = socket(
+            family,
+            SockType::Datagram,
+            SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
+            None,
+        )
+        .unwrap();
+        if bind_addr.is_ipv6() {
+            setsockopt(&receiver, sockopt::Ipv6V6Only, &false).unwrap();
+        }
+        bind(receiver.as_raw_fd(), &SockaddrStorage::from(bind_addr)).unwrap();
+        let receiver =
+            UdpSocket::from_std(std::net::UdpSocket::from(receiver)).unwrap();
+        setsockopt(&receiver, sockopt::RcvBuf, &8192).unwrap();
+        setsockopt(&receiver, sockopt::ReceiveTimestampns, &true).unwrap();
+        let mut capabilities = SocketCapabilitiesBuilder::new(&receiver);
+        match capabilities.gro().and_then(|_| capabilities.rcvmark()) {
+            Ok(()) => (),
+            Err(error) if error.raw_os_error() == Some(libc::ENOPROTOOPT) => {
+                eprintln!(
+                    "skipping GRO test: UDP_GRO or SO_RCVMARK unsupported: {error}"
+                );
+                return;
+            },
+            Err(error) => panic!("failed to configure GRO test: {error}"),
+        }
+        capabilities.check_udp_drop().unwrap();
+        capabilities.ipv4_pktinfo().unwrap();
+        capabilities.ipv4_recvorigdstaddr().unwrap();
+        if bind_addr.is_ipv6() {
+            capabilities.ipv6_pktinfo().unwrap();
+            capabilities.ipv6_recvorigdstaddr().unwrap();
+        }
+        let local_addr = receiver.local_addr().unwrap();
+        let sender = UdpSocket::bind(sender_addr).await.unwrap();
+        let sender_addr = sender.local_addr().unwrap();
+        let destination = SocketAddr::new(sender_addr.ip(), local_addr.port());
+
+        // Overflow and drain the queue so the GRO datagram has SO_RXQ_OVFL.
+        let mut scratch = [0x41; SEGMENT_SIZE as usize];
+        for _ in 0..128 {
+            sender.send_to(&scratch, destination).await.unwrap();
+        }
+        receiver.readable().await.unwrap();
+        loop {
+            match receiver.try_recv_from(&mut scratch) {
+                Ok(_) => (),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("failed to drain receive queue: {error}"),
+            }
+        }
+
+        let config = Config::new(
+            &ConnectionParams::default(),
+            SocketCapabilities::default(),
+        )
+        .unwrap();
+        let (mut router, _accept_stream) = InboundPacketRouter::new(
+            config,
+            Arc::new(NoopDatagramSender),
+            receiver,
+            local_addr,
+            NoopInitialHandler,
+            DefaultMetrics,
+        );
+
+        setsockopt(&sender, sockopt::UdpGsoSegment, &i32::from(SEGMENT_SIZE))
+            .unwrap();
+        let payload = [0x42; 3 * SEGMENT_SIZE as usize];
+        sender.send_to(&payload, destination).await.unwrap();
+
+        let packet = time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| router.poll_recv_and_rx_time(cx)),
+        )
+        .await
+        .expect("timed out receiving the GRO datagram")
+        .unwrap();
+
+        assert_eq!(packet.buf, payload);
+        assert_eq!(packet.gro, Some(i32::from(SEGMENT_SIZE)));
+        assert!(router.udp_drop_count > 0, "receive queue did not overflow");
+        assert!(packet.rx_time.is_some());
+        assert_eq!(packet.so_mark_data, Some(0u32.to_ne_bytes()));
+        let dst_addr = packet.dst_addr_override.unwrap();
+        assert_eq!(dst_addr.ip().to_canonical(), destination.ip());
+        assert_eq!(dst_addr.port(), destination.port());
     }
 }
