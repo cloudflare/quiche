@@ -165,5 +165,5 @@ controlled by the final binary:
 [q-h3-connection]: https://docs.quic.tech/quiche/h3/struct.Connection.html
 [connect]: https://docs.rs/tokio-quiche/latest/tokio_quiche/quic/fn.connect.html
 [ApplicationOverQuic]: https://docs.rs/tokio-quiche/latest/tokio_quiche/trait.ApplicationOverQuic.html
-[H3Driver]: https://docs.rs/tokio-quiche/latest/tokio-quiche/http3/driver/struct.H3Driver.html
+[H3Driver]: https://docs.rs/tokio-quiche/latest/tokio_quiche/http3/driver/struct.H3Driver.html
 [boring]: https://docs.rs/boring/latest/boring/
