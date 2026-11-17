@@ -601,8 +601,9 @@ impl ReferenceTime {
     /// If `wall_clock_time` is specified, it will be added as the optional
     /// `wall_clock_time` field of `ReferenceTime`.
     pub fn new_monotonic(wall_clock_time: Option<SystemTime>) -> Self {
-        let wall_clock_time =
-            wall_clock_time.map(|t| humantime::format_rfc3339(t).to_string());
+        let wall_clock_time = wall_clock_time
+            .and_then(|t| jiff::Timestamp::try_from(t).ok())
+            .map(|t| t.to_string());
         ReferenceTime {
             clock_type: "monotonic".to_string(),
             // per draft-ietf-quic-qlog-main-schema-13 epoch must be "unknown"
