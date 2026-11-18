@@ -35,7 +35,7 @@ foundations = ["dep:foundations"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
-humantime = { workspace = true }
+jiff = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 serde_with = { workspace = true, features = ["macros"] }
 
