@@ -281,7 +281,11 @@ impl Path {
                         .unwrap_or(c.max_send_udp_payload_size),
                     c.max_send_udp_payload_size,
                 );
-                Some(pmtud::Pmtud::new(maximum_supported_mtu, c.pmtud_max_probes))
+                Some(pmtud::Pmtud::new(
+                    maximum_supported_mtu,
+                    c.pmtud_max_probes,
+                    c.pmtud_raise_timer,
+                ))
             } else {
                 None
             }
@@ -946,8 +950,8 @@ impl PathMap {
 
     /// Configures path MTU discovery on all existing paths.
     pub fn set_discover_pmtu_on_existing_paths(
-        &mut self, discover: bool, max_send_udp_payload_size: usize,
-        pmtud_max_probes: u8,
+        &mut self, params: pmtud::PmtudParams, raise_interval: Option<Duration>,
+        max_send_udp_payload_size: usize,
     ) {
         for (_, path) in self.paths.iter_mut() {
             let old_pmtu = path
@@ -957,10 +961,11 @@ impl PathMap {
                     pmtud.get_current_mtu()
                 });
 
-            path.pmtud = if discover {
+            path.pmtud = if params.enable {
                 Some(pmtud::Pmtud::new(
                     max_send_udp_payload_size,
-                    pmtud_max_probes,
+                    params.max_probes,
+                    raise_interval,
                 ))
             } else {
                 None
@@ -1184,13 +1189,30 @@ mod tests {
             true,
             Some(&config),
         );
-        path.pmtud.as_mut().unwrap().successful_probe(1400);
+        path.pmtud
+            .as_mut()
+            .unwrap()
+            .successful_probe(1400, Instant::now());
         let mut paths = PathMap::new(path, 1, false);
 
-        paths.set_discover_pmtu_on_existing_paths(false, 1400, 1);
+        paths.set_discover_pmtu_on_existing_paths(
+            pmtud::PmtudParams {
+                enable: false,
+                max_probes: 1,
+            },
+            None,
+            1400,
+        );
         assert_eq!(paths.pop_event(), None);
 
-        paths.set_discover_pmtu_on_existing_paths(true, 1400, 1);
+        paths.set_discover_pmtu_on_existing_paths(
+            pmtud::PmtudParams {
+                enable: true,
+                max_probes: 1,
+            },
+            None,
+            1400,
+        );
         assert_eq!(
             paths.pop_event(),
             Some(PathEvent::PmtuUpdated {
