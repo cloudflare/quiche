@@ -1254,7 +1254,9 @@ extern "C" {
     // ERR
     fn ERR_peek_error() -> c_uint;
 
-    fn ERR_error_string_n(err: c_uint, buf: *mut c_char, len: usize);
+    fn ERR_error_string_n(
+        err: c_uint, buf: *mut c_char, len: usize,
+    ) -> *mut c_char;
 
     // OPENSSL
     #[allow(dead_code)]
