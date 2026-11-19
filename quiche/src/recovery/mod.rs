@@ -2660,6 +2660,85 @@ mod tests {
 
         assert_eq!(r.get_largest_acked_on_epoch(epoch).unwrap(), 9);
         assert_eq!(r.largest_sent_pkt_num_on_path(epoch).unwrap(), 3);
+
+        // Send 4 more packets
+        for pkt_num in 10..14 {
+            let sent = test_utils::helper_packet_sent(pkt_num, now, pkt_size);
+            r.on_packet_sent(sent, epoch, HandshakeStatus::default(), now, "");
+        }
+
+        // ACK only a packet sent on another path: nothing is newly acked, but
+        // the packets sent on this path are lost.
+        let mut acked = RangeSet::default();
+        acked.insert(20..21);
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                epoch,
+                HandshakeStatus::default(),
+                now,
+                None,
+                "",
+            )
+            .unwrap(),
+            OnAckReceivedOutcome {
+                lost_packets: 4,
+                lost_bytes: 4 * 1000,
+                acked_bytes: 0,
+                spurious_losses: 0,
+            }
+        );
+        assert_eq!(r.bytes_in_flight(), 0);
+        assert_eq!(r.get_largest_acked_on_epoch(epoch).unwrap(), 20);
+    }
+
+    /// Losses detected on ACKs that only cover packets sent on another path
+    /// are accounted by BBR: enough of them in a round end startup.
+    #[test]
+    fn bbr_startup_exit_on_losses_without_newly_acked_packets() {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm_name("bbr2_gcongestion").unwrap();
+
+        let epoch = packet::Epoch::Application;
+        let handshake_status = HandshakeStatus::default();
+        let mut r = Recovery::new(&cfg);
+        let mut now = Instant::now();
+        let pkt_size = 1000;
+
+        let ack = |r: &mut Recovery, pkt_num: u64, now: Instant| {
+            let mut acked = RangeSet::default();
+            acked.insert(pkt_num..pkt_num + 1);
+            r.on_ack_received(&acked, 25, epoch, handshake_status, now, None, "")
+                .unwrap();
+        };
+
+        // A first round provides a bandwidth sample.
+        let sent = test_utils::helper_packet_sent(0, now, pkt_size);
+        r.on_packet_sent(sent, epoch, handshake_status, now, "");
+        now += Duration::from_millis(10);
+        ack(&mut r, 0, now);
+
+        // Packet numbers in between are sent on another path.
+        let loss_events = gcongestion::STARTUP_FULL_LOSS_COUNT as u64;
+        let lost_pkt_nums = (1..=loss_events).map(|i| i * 10);
+        let last_pkt_num = (loss_events + 1) * 10;
+        for pkt_num in lost_pkt_nums.clone().chain([last_pkt_num]) {
+            let sent = test_utils::helper_packet_sent(pkt_num, now, pkt_size);
+            r.on_packet_sent(sent, epoch, handshake_status, now, "");
+        }
+
+        // Each ACK of another path's packet is a loss event of one packet.
+        for pkt_num in lost_pkt_nums {
+            ack(&mut r, pkt_num + INITIAL_PACKET_THRESHOLD, now);
+        }
+        assert_eq!(r.startup_exit(), None);
+
+        // The round ends.
+        now += Duration::from_millis(10);
+        ack(&mut r, last_pkt_num, now);
+
+        assert_eq!(r.startup_exit().unwrap().reason, StartupExitReason::Loss);
     }
 
     #[rstest]

@@ -706,19 +706,19 @@ impl RecoveryOps for LegacyRecovery {
             .max(largest_ack_received);
         self.epochs[epoch].largest_acked_packet = Some(largest_acked_pkt_num);
 
-        if let Some(largest_newly_acked) = self.newly_acked.last() {
-            // Check if largest packet is newly acked.
-            if largest_newly_acked.pkt_num == largest_acked_pkt_num &&
-                has_ack_eliciting
-            {
-                let latest_rtt = now - largest_newly_acked.time_sent;
-                self.rtt_stats.update_rtt(
-                    latest_rtt,
-                    Duration::from_micros(ack_delay),
-                    now,
-                    handshake_status.completed,
-                );
-            }
+        // Check if largest packet is newly acked.
+        let rtt_sample_packet = self.newly_acked.last().filter(|acked| {
+            acked.pkt_num == largest_acked_pkt_num && has_ack_eliciting
+        });
+
+        if let Some(acked) = rtt_sample_packet {
+            let latest_rtt = now - acked.time_sent;
+            self.rtt_stats.update_rtt(
+                latest_rtt,
+                Duration::from_micros(ack_delay),
+                now,
+                handshake_status.completed,
+            );
         }
 
         // Detect and mark lost packets without removing them from the sent

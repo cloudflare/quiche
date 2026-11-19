@@ -278,6 +278,9 @@ impl Params {
     }
 }
 
+/// The number of loss events in a round that end startup.
+pub(crate) const STARTUP_FULL_LOSS_COUNT: usize = 8;
+
 const DEFAULT_PARAMS: Params = Params {
     startup_cwnd_gain: 2.0,
 
@@ -289,7 +292,7 @@ const DEFAULT_PARAMS: Params = Params {
 
     max_startup_queue_rounds: 0,
 
-    startup_full_loss_count: 8,
+    startup_full_loss_count: STARTUP_FULL_LOSS_COUNT,
 
     drain_cwnd_gain: 2.0,
 

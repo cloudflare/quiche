@@ -33,6 +33,8 @@ use std::fmt::Debug;
 use std::str::FromStr;
 use std::time::Instant;
 
+#[cfg(test)]
+pub(crate) use self::bbr2::STARTUP_FULL_LOSS_COUNT;
 pub use self::recovery::GRecovery;
 use crate::recovery::bandwidth::Bandwidth;
 

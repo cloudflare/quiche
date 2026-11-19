@@ -839,27 +839,26 @@ impl RecoveryOps for GRecovery {
             .max(largest_ack_received);
         self.epochs[epoch].largest_acked_packet = Some(largest_acked_pkt_num);
 
-        let mut update_rtt = false;
+        // Check if largest packet is newly acked.
+        let rtt_sample_packet = self.newly_acked.last().filter(|acked| {
+            acked.pkt_num == largest_acked_pkt_num && has_ack_eliciting
+        });
+        let update_rtt = rtt_sample_packet.is_some();
 
-        if let Some(largest_newly_acked) = self.newly_acked.last() {
-            // Check if largest packet is newly acked.
-            update_rtt = largest_newly_acked.pkt_num == largest_acked_pkt_num &&
-                has_ack_eliciting;
-            if update_rtt {
-                let latest_rtt = now - largest_newly_acked.time_sent;
-                self.rtt_stats.update_rtt(
-                    latest_rtt,
-                    Duration::from_micros(ack_delay),
-                    now,
-                    handshake_status.completed,
-                );
-            }
+        if let Some(acked) = rtt_sample_packet {
+            let latest_rtt = now - acked.time_sent;
+            self.rtt_stats.update_rtt(
+                latest_rtt,
+                Duration::from_micros(ack_delay),
+                now,
+                handshake_status.completed,
+            );
         }
 
         let (lost_bytes, lost_packets) =
             self.detect_and_remove_lost_packets(epoch, now);
 
-        if !self.newly_acked.is_empty() {
+        if !self.newly_acked.is_empty() || !self.lost_reuse.is_empty() {
             self.pacer.on_congestion_event(
                 update_rtt,
                 prior_in_flight,
@@ -871,7 +870,9 @@ impl RecoveryOps for GRecovery {
                 &self.rtt_stats,
                 &mut self.recovery_stats,
             );
+        }
 
+        if !self.newly_acked.is_empty() {
             self.pto_count = 0;
         }
         self.lost_count += lost_packets;
