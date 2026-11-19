@@ -226,7 +226,7 @@ fn on_packet_acked(
         return;
     }
 
-    if r.app_limited {
+    if r.app_limited && !r.rate_limited_increase_applies() {
         return;
     }
 
@@ -263,7 +263,9 @@ fn on_packet_acked(
                 r.congestion_window +=
                     r.hystart.css_cwnd_inc(r.max_datagram_size);
             } else {
-                r.congestion_window += r.max_datagram_size;
+                r.congestion_window = r.rate_limited_slow_start_cwnd(
+                    r.congestion_window + r.max_datagram_size,
+                );
             }
 
             r.bytes_acked_sl -= r.max_datagram_size;
@@ -378,6 +380,8 @@ fn congestion_event(
             cmp::max(ssthresh, r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
         r.ssthresh.update(ssthresh, r.hystart.in_css());
         r.congestion_window = ssthresh;
+
+        r.max_fs = 0;
 
         r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {
             0.0

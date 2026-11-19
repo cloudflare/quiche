@@ -404,6 +404,13 @@ pub extern "C" fn quiche_config_set_enable_cubic_idle_restart_fix(
     config.set_enable_cubic_idle_restart_fix(v);
 }
 
+#[no_mangle]
+pub extern "C" fn quiche_config_set_rate_limited_increase(
+    config: &mut Config, mode: RateLimitedIncrease,
+) {
+    config.set_rate_limited_increase(mode);
+}
+
 /// Deprecated: this is now always enabled and this function is a no-op.
 #[no_mangle]
 pub extern "C" fn quiche_config_set_use_initial_max_data_as_flow_control_win(

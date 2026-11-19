@@ -24,6 +24,7 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use std::cmp;
 use std::time::Instant;
 
 use self::recovery::Acked;
@@ -33,6 +34,7 @@ use super::Sent;
 use crate::recovery::rtt;
 use crate::recovery::rtt::RttStats;
 use crate::recovery::CongestionControlAlgorithm;
+use crate::recovery::RateLimitedIncrease;
 use crate::StartupExit;
 use crate::StartupExitReason;
 
@@ -122,6 +124,12 @@ pub struct Congestion {
     pub(crate) lost_count: usize,
 
     pub(crate) enable_cubic_idle_restart_fix: bool,
+
+    pub(crate) rate_limited_increase: RateLimitedIncrease,
+
+    /// Largest FlightSize observed since the last cwnd reduction (maxFS in
+    /// draft-ietf-ccwg-ratelimited-increase).
+    max_fs: usize,
 }
 
 impl Congestion {
@@ -166,6 +174,10 @@ impl Congestion {
 
             enable_cubic_idle_restart_fix: recovery_config
                 .enable_cubic_idle_restart_fix,
+
+            rate_limited_increase: recovery_config.rate_limited_increase,
+
+            max_fs: initial_congestion_window,
         };
 
         (cc.cc_ops.on_init)(&mut cc);
@@ -199,6 +211,34 @@ impl Congestion {
         self.app_limited = v;
     }
 
+    /// Returns true if Rate-Limited Increase is enabled and the sender is in
+    /// traditional Slow Start (excluding HyStart++ Conservative Slow Start).
+    ///
+    /// This is the only condition under which Rate-Limited Increase changes
+    /// behavior: when it is false, an app limited sender doesn't grow cwnd
+    /// and [`Congestion::rate_limited_slow_start_cwnd()`] is a no-op.
+    fn rate_limited_increase_applies(&self) -> bool {
+        match self.rate_limited_increase {
+            RateLimitedIncrease::Disabled => false,
+            RateLimitedIncrease::SlowStart =>
+                self.congestion_window < self.ssthresh.get() &&
+                    !self.hystart.in_css(),
+        }
+    }
+
+    /// Returns `new_cwnd` capped to limit(maxFS) = 2 * maxFS when
+    /// [`Congestion::rate_limited_increase_applies()`]. The cap never reduces
+    /// cwnd.
+    fn rate_limited_slow_start_cwnd(&self, new_cwnd: usize) -> usize {
+        if !self.rate_limited_increase_applies() {
+            return new_cwnd;
+        }
+
+        let limit = self.max_fs.saturating_mul(2);
+
+        cmp::max(self.congestion_window, cmp::min(new_cwnd, limit))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn on_packet_sent(
         &mut self, bytes_in_flight: usize, sent_bytes: usize, now: Instant,
@@ -208,6 +248,8 @@ impl Congestion {
             self.update_app_limited(
                 (bytes_in_flight + sent_bytes) < self.congestion_window,
             );
+
+            self.max_fs = cmp::max(self.max_fs, bytes_in_flight + sent_bytes);
 
             (self.cc_ops.on_packet_sent)(self, sent_bytes, bytes_in_flight, now);
 
@@ -452,6 +494,175 @@ mod tests {
         ssthresh.update(500, false);
         assert_eq!(ssthresh.get(), 500);
         assert_eq!(ssthresh.startup_exit(), Some(expected_startup_exit));
+    }
+}
+
+#[cfg(test)]
+mod rate_limited_increase_tests {
+    use std::time::Duration;
+
+    use rstest::rstest;
+
+    use super::test_sender::TestSender;
+    use crate::CongestionControlAlgorithm;
+    use crate::RateLimitedIncrease;
+
+    const RTT: Duration = Duration::from_millis(100);
+
+    /// A `Disabled` and a `SlowStart` sender driven through the same events.
+    struct Pair {
+        disabled: TestSender,
+        slow_start: TestSender,
+    }
+
+    impl Pair {
+        fn new(algo: CongestionControlAlgorithm) -> Self {
+            let sender = |mode| {
+                let mut sender = TestSender::new(algo, true);
+                sender.rate_limited_increase = mode;
+                sender
+            };
+
+            Pair {
+                disabled: sender(RateLimitedIncrease::Disabled),
+                slow_start: sender(RateLimitedIncrease::SlowStart),
+            }
+        }
+
+        fn for_each(&mut self, f: impl Fn(&mut TestSender)) {
+            f(&mut self.disabled);
+            f(&mut self.slow_start);
+        }
+
+        /// Sends `n(sender)` full-sized packets on each sender, advances time
+        /// by one RTT and ACKs them.
+        fn round(&mut self, n: impl Fn(&TestSender) -> usize) {
+            self.for_each(|sender| {
+                let size = sender.max_datagram_size;
+                let n = n(sender);
+
+                for _ in 0..n {
+                    sender.send_packet(size);
+                }
+
+                sender.advance_time(RTT);
+                sender.ack_n_packets(n, size);
+            });
+        }
+
+        /// cwnd of the `Disabled` and `SlowStart` senders, in packets.
+        fn cwnd(&self) -> (usize, usize) {
+            (cwnd_packets(&self.disabled), cwnd_packets(&self.slow_start))
+        }
+    }
+
+    fn cwnd_packets(sender: &TestSender) -> usize {
+        sender.congestion_window / sender.max_datagram_size
+    }
+
+    /// Reproduces the example in Appendix A of
+    /// draft-ietf-ccwg-ratelimited-increase. This is the only case where the
+    /// two modes differ: a rate-limited sender in traditional Slow Start.
+    #[rstest]
+    fn slow_start(
+        #[values(
+            CongestionControlAlgorithm::Reno,
+            CongestionControlAlgorithm::CUBIC
+        )]
+        algo: CongestionControlAlgorithm,
+    ) {
+        let mut pair = Pair::new(algo);
+        assert_eq!(pair.cwnd(), (10, 10));
+
+        // `SlowStart` grows cwnd up to 2 * maxFS = 20, `Disabled` doesn't.
+        pair.round(|_| 4);
+        assert_eq!(pair.cwnd(), (10, 14));
+
+        pair.round(|_| 8);
+        assert_eq!(pair.cwnd(), (10, 20));
+
+        pair.round(|_| 4);
+        assert_eq!(pair.cwnd(), (10, 20));
+
+        // Once cwnd-limited, both double cwnd as usual.
+        pair.round(cwnd_packets);
+        assert_eq!(pair.cwnd(), (20, 40));
+        assert_eq!(
+            pair.slow_start.max_fs,
+            pair.slow_start.congestion_window / 2
+        );
+    }
+
+    /// Outside of rate-limited traditional Slow Start, a `SlowStart` sender
+    /// behaves exactly like a `Disabled` one: in traditional Slow Start while
+    /// cwnd-limited, and in HyStart++ Conservative Slow Start and congestion
+    /// avoidance whether rate-limited or not.
+    #[rstest]
+    fn same_as_disabled_outside_rate_limited_slow_start(
+        #[values(
+            CongestionControlAlgorithm::Reno,
+            CongestionControlAlgorithm::CUBIC
+        )]
+        algo: CongestionControlAlgorithm,
+    ) {
+        let mut pair = Pair::new(algo);
+
+        let rate_limited = |sender: &TestSender| cwnd_packets(sender) / 2;
+
+        // Traditional Slow Start, cwnd-limited.
+        for _ in 0..2 {
+            pair.round(cwnd_packets);
+            assert_eq!(pair.cwnd().0, pair.cwnd().1);
+        }
+
+        // HyStart++ Conservative Slow Start.
+        pair.for_each(|sender| {
+            let now = sender.time;
+            sender.hystart.enter_css_for_test(now);
+        });
+
+        for cwnd_limited in [false, true, false] {
+            pair.round(if cwnd_limited {
+                cwnd_packets
+            } else {
+                rate_limited
+            });
+            assert!(pair.slow_start.hystart.in_css());
+            assert_eq!(pair.cwnd().0, pair.cwnd().1);
+        }
+
+        // A loss moves both senders to congestion avoidance.
+        pair.for_each(|sender| {
+            let size = sender.max_datagram_size;
+
+            sender.send_packet(size);
+            sender.advance_time(RTT);
+            sender.lose_n_packets(1, size, None);
+            sender.advance_time(RTT);
+        });
+
+        assert_eq!(pair.cwnd().0, pair.cwnd().1);
+        assert_eq!(pair.slow_start.max_fs, 0);
+
+        let post_loss_cwnd = pair.cwnd().1;
+
+        // Congestion avoidance.
+        for i in 0..40 {
+            let cwnd_limited = i % 2 == 1;
+
+            pair.round(if cwnd_limited {
+                cwnd_packets
+            } else {
+                rate_limited
+            });
+            assert!(
+                pair.slow_start.congestion_window >=
+                    pair.slow_start.ssthresh.get()
+            );
+            assert_eq!(pair.cwnd().0, pair.cwnd().1);
+        }
+
+        assert!(pair.cwnd().1 > post_loss_cwnd);
     }
 }
 
