@@ -64,6 +64,7 @@ impl ModeImpl for Drain {
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize, params: &Params,
         _recovery_stats: &mut RecoveryStats, _cwnd: usize,
+        _cwnd_lower_bound: usize,
     ) -> Mode {
         self.model.set_pacing_gain(params.drain_pacing_gain);
         // Only STARTUP can transition to DRAIN, both of them use the same cwnd
