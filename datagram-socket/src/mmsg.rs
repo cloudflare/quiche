@@ -223,17 +223,21 @@ fn iovec(buf: &[u8]) -> libc::iovec {
 #[macro_export]
 macro_rules! poll_recvmmsg {
     ($self: expr, $cx: ident, $bufs: ident) => {
-        loop {
-            match $self.poll_recv_ready($cx)? {
-                Poll::Ready(()) => {
-                    match $self.try_io(tokio::io::Interest::READABLE, || {
-                        $crate::mmsg::recvmmsg($self.as_fd(), $bufs)
-                    }) {
-                        Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}  // Have to poll for recv ready
-                        res => break Poll::Ready(res),
+        if $bufs.is_empty() {
+            Poll::Ready(Ok(0))
+        } else {
+            loop {
+                match $self.poll_recv_ready($cx)? {
+                    Poll::Ready(()) => {
+                        match $self.try_io(tokio::io::Interest::READABLE, || {
+                            $crate::mmsg::recvmmsg($self.as_fd(), $bufs)
+                        }) {
+                            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}  // Have to poll for recv ready
+                            res => break Poll::Ready(res),
+                        }
                     }
+                    Poll::Pending => break Poll::Pending,
                 }
-                Poll::Pending => break Poll::Pending,
             }
         }
     };
@@ -242,17 +246,21 @@ macro_rules! poll_recvmmsg {
 #[macro_export]
 macro_rules! poll_sendmmsg {
     ($self: expr, $cx: ident, $bufs: ident) => {
-        loop {
-            match $self.poll_send_ready($cx)? {
-                Poll::Ready(()) => {
-                    match $self.try_io(tokio::io::Interest::WRITABLE, || {
-                        $crate::mmsg::sendmmsg($self.as_fd(), $bufs)
-                    }) {
-                        Err(err) if err.kind() == io::ErrorKind::WouldBlock => {} // Have to poll for send ready
-                        res => break Poll::Ready(res),
+        if $bufs.is_empty() {
+            Poll::Ready(Ok(0))
+        } else {
+            loop {
+                match $self.poll_send_ready($cx)? {
+                    Poll::Ready(()) => {
+                        match $self.try_io(tokio::io::Interest::WRITABLE, || {
+                            $crate::mmsg::sendmmsg($self.as_fd(), $bufs)
+                        }) {
+                            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {} // Have to poll for send ready
+                            res => break Poll::Ready(res),
+                        }
                     }
+                    Poll::Pending => break Poll::Pending,
                 }
-                Poll::Pending => break Poll::Pending,
             }
         }
     };
@@ -271,6 +279,24 @@ mod tests {
     use super::MAX_MMSG;
     use crate::DatagramSocketRecvExt;
     use crate::DatagramSocketSendExt;
+
+    #[tokio::test]
+    async fn empty_socket_recv_batch_is_immediately_ready() -> io::Result<()> {
+        let (_sender, mut receiver) = UnixDatagram::pair()?;
+        let mut bufs = [];
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+
+        assert!(matches!(
+            crate::DatagramSocketRecv::poll_recv_many(
+                &mut receiver,
+                &mut cx,
+                &mut bufs,
+            ),
+            std::task::Poll::Ready(Ok(0))
+        ));
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn recvmmsg() -> io::Result<()> {
