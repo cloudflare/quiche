@@ -479,6 +479,7 @@ pub enum QuicFrameTypeName {
     Ping,
     Ack,
     ResetStream,
+    ResetStreamAt,
     StopSending,
     Crypto,
     NewToken,
@@ -534,6 +535,17 @@ pub enum QuicFrame {
         error: ApplicationError,
         error_code: Option<u64>,
         final_size: u64,
+
+        raw: Option<Box<RawInfo>>,
+    },
+
+    /// See https://datatracker.ietf.org/doc/html/draft-ietf-quic-reliable-stream-reset/#section-4
+    ResetStreamAt {
+        stream_id: u64,
+        error: ApplicationError,
+        error_code: Option<u64>,
+        final_size: u64,
+        reliable_size: u64,
 
         raw: Option<Box<RawInfo>>,
     },
