@@ -35,6 +35,8 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
+#[cfg(feature = "custom-client-dcid")]
+use tokio_quiche::quiche::ConnectionId;
 use tokio_quiche::settings::Hooks;
 use tokio_quiche::settings::TlsCertificatePaths;
 use tokio_quiche::ConnectionParams;
@@ -265,6 +267,75 @@ async fn test_connect_with_custom_dcid() {
     .await
     .expect("connection timed out")
     .is_ok());
+}
+
+/// Connects a client that picks `dcid` for its first Initial and returns the
+/// `original_dcid` the server's `InitialQuicConnection` reports.
+#[cfg(feature = "custom-client-dcid")]
+async fn server_original_dcid(
+    disable_client_ip_validation: bool, dcid: ConnectionId<'static>,
+) -> Option<ConnectionId<'static>> {
+    use tokio_quiche::quic::connect_with_config;
+    use tokio_quiche::socket::Socket;
+    use tokio_quiche::ClientH3Driver;
+
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = socket.local_addr().unwrap();
+
+    let mut quic_settings = QuicSettings::default();
+    quic_settings.disable_client_ip_validation = disable_client_ip_validation;
+    let params = ConnectionParams::new_server(
+        quic_settings,
+        TlsCertificatePaths {
+            cert: TEST_CERT_FILE,
+            private_key: TEST_KEY_FILE,
+            kind: tokio_quiche::settings::CertificateKind::X509,
+        },
+        Hooks::default(),
+    );
+    let mut stream = listen(vec![socket], params, DefaultMetrics)
+        .unwrap()
+        .remove(0);
+
+    let client_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    client_socket.connect(addr).await.unwrap();
+    let client_socket = Socket::try_from(client_socket).unwrap();
+    let mut client_params = ConnectionParams::default();
+    client_params.dcid = Some(dcid);
+    let (h3_driver, _h3_controller) =
+        ClientH3Driver::new(Http3Settings::default());
+    tokio::spawn(async move {
+        let _ = connect_with_config(
+            client_socket,
+            Some("127.0.0.1"),
+            &client_params,
+            h3_driver,
+        )
+        .await;
+    });
+
+    let conn = timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("no connection accepted")
+        .unwrap()
+        .unwrap();
+    conn.original_dcid().cloned()
+}
+
+#[tokio::test]
+#[cfg(feature = "custom-client-dcid")]
+async fn test_original_dcid_without_retry() {
+    let dcid = ConnectionId::from_vec(vec![0x02; 20]);
+    assert_eq!(server_original_dcid(true, dcid.clone()).await, Some(dcid));
+}
+
+#[tokio::test]
+#[cfg(feature = "custom-client-dcid")]
+async fn test_original_dcid_after_retry() {
+    // The client's retried Initial carries the server's Retry SCID; the
+    // original DCID must still be the one the client picked first.
+    let dcid = ConnectionId::from_vec(vec![0x02; 20]);
+    assert_eq!(server_original_dcid(false, dcid.clone()).await, Some(dcid));
 }
 
 #[tokio::test]

@@ -322,6 +322,7 @@ where
         let NewConnection {
             conn,
             pending_cid,
+            original_dcid,
             cid_generator,
             handshake_start_time,
             initial_pkt,
@@ -373,6 +374,7 @@ where
         let conn = InitialQuicConnection::new(QuicConnectionParams {
             writer_cfg,
             pending_cid,
+            original_dcid,
             initial_pkt,
             dscp_handle: enable_per_connection_dscp.then(DscpHandle::new),
             shutdown_tx: shutdown_tx.clone(),
@@ -883,6 +885,8 @@ pub struct NewConnection {
     /// See [`QuicConnectionParams::quiche_conn`].
     conn: Box<QuicheConnection>,
     pending_cid: Option<ConnectionId<'static>>,
+    /// See [`InitialQuicConnection::original_dcid`].
+    original_dcid: Option<ConnectionId<'static>>,
     initial_pkt: Option<Incoming>,
     enable_per_connection_dscp: bool,
     cid_generator: Option<SharedConnectionIdGenerator>,

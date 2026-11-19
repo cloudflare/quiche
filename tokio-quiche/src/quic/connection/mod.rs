@@ -361,6 +361,20 @@ where
         self.params.quiche_conn.source_id()
     }
 
+    /// The destination connection ID the client chose for its first Initial
+    /// packet (the original destination connection ID in RFC 9000).
+    ///
+    /// This is client-chosen and therefore untrusted data. After a stateless
+    /// retry it is recovered from the retry token, not taken from the retried
+    /// Initial; retry tokens do not expire, so it may be the DCID of an
+    /// earlier attempt replayed from the same IP address.
+    ///
+    /// `None` for connections created with
+    /// [`wrap_quiche_conn`](crate::quic::raw::wrap_quiche_conn).
+    pub fn original_dcid(&self) -> Option<&ConnectionId<'static>> {
+        self.params.original_dcid.as_ref()
+    }
+
     /// [boring]'s SSL object for this connection.
     #[doc(hidden)]
     pub fn ssl_mut(&mut self) -> &mut SslRef {
@@ -569,6 +583,8 @@ where
 {
     pub writer_cfg: WriterConfig,
     pub pending_cid: Option<ConnectionId<'static>>,
+    /// See [`InitialQuicConnection::original_dcid`].
+    pub original_dcid: Option<ConnectionId<'static>>,
     pub initial_pkt: Option<Incoming>,
     pub dscp_handle: Option<DscpHandle>,
     pub shutdown_tx: mpsc::Sender<()>,
