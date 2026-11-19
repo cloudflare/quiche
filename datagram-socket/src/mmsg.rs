@@ -135,6 +135,18 @@ pub fn sendmmsg_with_suffix(
     sendmmsg_impl(fd, bufs, Some(suffix))
 }
 
+fn checked_iovlen<T>(len: usize) -> io::Result<T>
+where
+    T: TryFrom<usize>,
+{
+    T::try_from(len).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "sendmmsg iovec count exceeds platform ABI",
+        )
+    })
+}
+
 fn sendmmsg_impl(
     fd: BorrowedFd, bufs: &[ReadBuf<'_>], suffix: Option<&[u8]>,
 ) -> io::Result<usize> {
@@ -168,7 +180,7 @@ fn sendmmsg_impl(
                     msg_name: std::ptr::null_mut(),
                     msg_namelen: 0,
                     msg_iov: message_iovecs.as_mut_ptr(),
-                    msg_iovlen: iovecs_per_message as _,
+                    msg_iovlen: checked_iovlen(message_iovecs.len())?,
                     msg_control: std::ptr::null_mut(),
                     msg_controllen: 0,
                     msg_flags: 0,
