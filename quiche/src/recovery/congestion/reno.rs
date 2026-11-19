@@ -77,7 +77,7 @@ fn on_packet_acked(
         return;
     }
 
-    if r.app_limited {
+    if r.app_limited && !r.rate_limited_increase_applies() {
         return;
     }
 
@@ -89,7 +89,9 @@ fn on_packet_acked(
         if r.hystart.in_css() {
             r.congestion_window += r.hystart.css_cwnd_inc(r.max_datagram_size);
         } else {
-            r.congestion_window += r.max_datagram_size;
+            r.congestion_window = r.rate_limited_slow_start_cwnd(
+                r.congestion_window + r.max_datagram_size,
+            );
         }
 
         if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
@@ -125,6 +127,8 @@ fn congestion_event(
             r.congestion_window,
             r.max_datagram_size * MINIMUM_WINDOW_PACKETS,
         );
+
+        r.max_fs = 0;
 
         r.bytes_acked_ca =
             (r.congestion_window as f64 * LOSS_REDUCTION_FACTOR) as usize;

@@ -143,6 +143,7 @@ pub struct RecoveryConfig {
     pub unchecked_congestion_window: usize,
     pub enable_relaxed_loss_threshold: bool,
     pub enable_cubic_idle_restart_fix: bool,
+    pub rate_limited_increase: RateLimitedIncrease,
 }
 
 impl RecoveryConfig {
@@ -161,6 +162,7 @@ impl RecoveryConfig {
             unchecked_congestion_window: config.unchecked_congestion_window,
             enable_relaxed_loss_threshold: config.enable_relaxed_loss_threshold,
             enable_cubic_idle_restart_fix: config.enable_cubic_idle_restart_fix,
+            rate_limited_increase: config.rate_limited_increase,
         }
     }
 
@@ -437,6 +439,37 @@ impl FromStr for CongestionControlAlgorithm {
             _ => Err(crate::Error::CongestionControl),
         }
     }
+}
+
+/// Rate-Limited Increase modes.
+///
+/// Controls how the CUBIC and Reno congestion controllers increase the
+/// congestion window while the sender is rate-limited (e.g. by the
+/// application or by flow control), as described in
+/// [draft-ietf-ccwg-ratelimited-increase].
+///
+/// With Rate-Limited Increase, instead of freezing the congestion window
+/// while rate-limited, the window is allowed to grow, but never beyond what
+/// would result from acknowledging one window of the largest flight size
+/// (maxFS) observed since the last window reduction.
+///
+/// Other congestion control algorithms ignore this setting.
+///
+/// [draft-ietf-ccwg-ratelimited-increase]: https://datatracker.ietf.org/doc/draft-ietf-ccwg-ratelimited-increase/
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
+pub enum RateLimitedIncrease {
+    /// The congestion window is not increased while rate-limited (RFC 9002
+    /// Section 7.8, RFC 9438 Section 5.8). This is the default.
+    #[default]
+    Disabled  = 0,
+    /// Rate-Limited Increase is applied in traditional Slow Start only,
+    /// capping the congestion window to 2 * maxFS.
+    ///
+    /// HyStart++ Conservative Slow Start and congestion avoidance are not
+    /// affected: in those phases the congestion window is not increased
+    /// while rate-limited, as with [`RateLimitedIncrease::Disabled`].
+    SlowStart = 1,
 }
 
 #[derive(Clone)]

@@ -591,6 +591,7 @@ pub struct Config {
     unchecked_congestion_window: usize,
     enable_relaxed_loss_threshold: bool,
     enable_cubic_idle_restart_fix: bool,
+    rate_limited_increase: RateLimitedIncrease,
     enable_send_streams_blocked: bool,
 
     pmtud: bool,
@@ -676,6 +677,7 @@ impl Config {
             unchecked_congestion_window: usize::MAX,
             enable_relaxed_loss_threshold: false,
             enable_cubic_idle_restart_fix: true,
+            rate_limited_increase: RateLimitedIncrease::Disabled,
             enable_send_streams_blocked: false,
             pmtud: false,
             pmtud_max_probes: pmtud::MAX_PROBES_DEFAULT,
@@ -1208,6 +1210,17 @@ impl Config {
     /// The default value is `true`.
     pub fn set_enable_cubic_idle_restart_fix(&mut self, enable: bool) {
         self.enable_cubic_idle_restart_fix = enable;
+    }
+
+    /// Configure how the CUBIC and Reno congestion controllers use
+    /// Rate-Limited Increase.
+    ///
+    /// See [`RateLimitedIncrease`] for the available modes. This setting has
+    /// no effect on other congestion control algorithms.
+    ///
+    /// The default value is [`RateLimitedIncrease::Disabled`].
+    pub fn set_rate_limited_increase(&mut self, mode: RateLimitedIncrease) {
+        self.rate_limited_increase = mode;
     }
 
     /// Configure whether to enable sending STREAMS_BLOCKED frames.
@@ -9757,6 +9770,7 @@ pub use crate::recovery::BbrParams;
 #[cfg(feature = "internal")]
 pub use crate::recovery::BbrRttJumpDetector;
 pub use crate::recovery::CongestionControlAlgorithm;
+pub use crate::recovery::RateLimitedIncrease;
 pub use crate::recovery::StartupExit;
 pub use crate::recovery::StartupExitReason;
 

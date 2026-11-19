@@ -197,6 +197,14 @@ impl Hystart {
         self.window_end = None;
         self.css_start_time = None;
     }
+
+    /// Enters Conservative Slow Start directly, as if an RTT increase had
+    /// been detected at `now`.
+    #[cfg(test)]
+    pub fn enter_css_for_test(&mut self, now: Instant) {
+        self.css_baseline_min_rtt = Duration::ZERO;
+        self.css_start_time = Some(now);
+    }
 }
 
 #[cfg(test)]
