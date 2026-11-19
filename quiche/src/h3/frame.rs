@@ -335,6 +335,24 @@ impl Frame {
     }
 
     #[cfg(feature = "qlog")]
+    pub(crate) fn frame_type_id(&self) -> u64 {
+        match self {
+            Frame::Data { .. } => DATA_FRAME_TYPE_ID,
+            Frame::Headers { .. } => HEADERS_FRAME_TYPE_ID,
+            Frame::CancelPush { .. } => CANCEL_PUSH_FRAME_TYPE_ID,
+            Frame::Settings { .. } => SETTINGS_FRAME_TYPE_ID,
+            Frame::PushPromise { .. } => PUSH_PROMISE_FRAME_TYPE_ID,
+            Frame::GoAway { .. } => GOAWAY_FRAME_TYPE_ID,
+            Frame::MaxPushId { .. } => MAX_PUSH_FRAME_TYPE_ID,
+            Frame::PriorityUpdateRequest { .. } =>
+                PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID,
+            Frame::PriorityUpdatePush { .. } =>
+                PRIORITY_UPDATE_FRAME_PUSH_TYPE_ID,
+            Frame::Unknown { raw_type, .. } => *raw_type,
+        }
+    }
+
+    #[cfg(feature = "qlog")]
     pub fn to_qlog(&self) -> Http3Frame {
         use qlog::events::RawInfo;
 
@@ -368,7 +386,7 @@ impl Frame {
 
                 if let Some(v) = max_field_section_size {
                     settings.push(qlog::events::http3::Setting {
-                        name: Some("MAX_FIELD_SECTION_SIZE".to_string()),
+                        name: Some("settings_max_field_section_size".to_string()),
                         name_bytes: None,
                         value: *v,
                     });
@@ -376,7 +394,9 @@ impl Frame {
 
                 if let Some(v) = qpack_max_table_capacity {
                     settings.push(qlog::events::http3::Setting {
-                        name: Some("QPACK_MAX_TABLE_CAPACITY".to_string()),
+                        name: Some(
+                            "settings_qpack_max_table_capacity".to_string(),
+                        ),
                         name_bytes: None,
                         value: *v,
                     });
@@ -384,7 +404,7 @@ impl Frame {
 
                 if let Some(v) = qpack_blocked_streams {
                     settings.push(qlog::events::http3::Setting {
-                        name: Some("QPACK_BLOCKED_STREAMS".to_string()),
+                        name: Some("settings_qpack_blocked_streams".to_string()),
                         name_bytes: None,
                         value: *v,
                     });
@@ -393,7 +413,7 @@ impl Frame {
                 if let Some(v) = connect_protocol_enabled {
                     settings.push(qlog::events::http3::Setting {
                         name: Some(
-                            "SETTINGS_ENABLE_CONNECT_PROTOCOL".to_string(),
+                            "settings_enable_connect_protocol".to_string(),
                         ),
                         name_bytes: None,
                         value: *v,
@@ -402,7 +422,7 @@ impl Frame {
 
                 if let Some(v) = h3_datagram {
                     settings.push(qlog::events::http3::Setting {
-                        name: Some("H3_DATAGRAM".to_string()),
+                        name: Some("settings_h3_datagram".to_string()),
                         name_bytes: None,
                         value: *v,
                     });
@@ -410,17 +430,24 @@ impl Frame {
 
                 if let Some((k, v)) = grease {
                     settings.push(qlog::events::http3::Setting {
-                        name: Some(k.to_string()),
-                        name_bytes: None,
+                        name: Some("reserved".to_string()),
+                        name_bytes: Some(*k),
                         value: *v,
                     });
                 }
 
                 if let Some(additional_settings) = additional_settings {
                     for (k, v) in additional_settings {
+                        // Reserved identifiers have the form 31 * N + 33.
+                        let name = if *k >= 33 && (*k - 33) % 31 == 0 {
+                            "reserved"
+                        } else {
+                            "unknown"
+                        };
+
                         settings.push(qlog::events::http3::Setting {
-                            name: Some(k.to_string()),
-                            name_bytes: None,
+                            name: Some(name.to_string()),
+                            name_bytes: Some(*k),
                             value: *v,
                         });
                     }
@@ -562,6 +589,23 @@ impl std::fmt::Debug for Frame {
         }
 
         Ok(())
+    }
+}
+
+/// Returns the qlog `RawInfo` for a frame with the given type and payload
+/// length.
+#[cfg(feature = "qlog")]
+pub(crate) fn qlog_raw_info(
+    frame_type: u64, payload_len: u64,
+) -> qlog::events::RawInfo {
+    let length = octets::varint_len(frame_type) as u64 +
+        octets::varint_len(payload_len) as u64 +
+        payload_len;
+
+    qlog::events::RawInfo {
+        length: Some(length),
+        payload_length: Some(payload_len),
+        data: None,
     }
 }
 
@@ -1399,5 +1443,34 @@ mod tests {
                 payload: vec![42; 12]
             })
         );
+    }
+
+    #[cfg(feature = "qlog")]
+    #[test]
+    fn settings_qlog_additional_names() {
+        let frame = Frame::Settings {
+            max_field_section_size: None,
+            qpack_max_table_capacity: None,
+            qpack_blocked_streams: None,
+            connect_protocol_enabled: None,
+            h3_datagram: None,
+            grease: None,
+            raw: None,
+            additional_settings: Some(vec![(31 * 5 + 33, 1), (0x50, 2)]),
+        };
+
+        let Http3Frame::Settings { settings, .. } = frame.to_qlog() else {
+            panic!("expected SETTINGS");
+        };
+
+        let names: Vec<_> = settings
+            .iter()
+            .map(|s| (s.name.as_deref(), s.name_bytes))
+            .collect();
+
+        assert_eq!(names, [
+            (Some("reserved"), Some(31 * 5 + 33)),
+            (Some("unknown"), Some(0x50)),
+        ]);
     }
 }

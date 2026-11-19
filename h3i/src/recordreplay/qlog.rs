@@ -89,7 +89,6 @@ impl From<&Action> for QlogEvents {
                 let frame_ev = EventData::Http3FrameCreated(FrameCreated {
                     stream_id: *stream_id,
                     frame: frame.to_qlog(),
-                    ..Default::default()
                 });
 
                 let mut ex = BTreeMap::new();
@@ -133,7 +132,6 @@ impl From<&Action> for QlogEvents {
                 let frame_ev = EventData::Http3FrameCreated(FrameCreated {
                     stream_id: *stream_id,
                     frame,
-                    ..Default::default()
                 });
 
                 let mut ex = BTreeMap::new();
@@ -510,15 +508,20 @@ impl From<H3FrameCreatedEx> for Action {
                 for s in settings {
                     let name = s.name.as_deref().unwrap_or("");
                     match name {
+                        "settings_max_field_section_size" |
                         "MAX_FIELD_SECTION_SIZE" =>
                             raw_settings.push((0x6, s.value)),
+                        "settings_qpack_max_table_capacity" |
                         "QPACK_MAX_TABLE_CAPACITY" =>
                             raw_settings.push((0x1, s.value)),
+                        "settings_qpack_blocked_streams" |
                         "QPACK_BLOCKED_STREAMS" =>
                             raw_settings.push((0x7, s.value)),
+                        "settings_enable_connect_protocol" |
                         "SETTINGS_ENABLE_CONNECT_PROTOCOL" =>
                             raw_settings.push((0x8, s.value)),
-                        "H3_DATAGRAM" => raw_settings.push((0x33, s.value)),
+                        "settings_h3_datagram" | "H3_DATAGRAM" =>
+                            raw_settings.push((0x33, s.value)),
 
                         _ =>
                             if let Some(ty) = s.name_bytes {

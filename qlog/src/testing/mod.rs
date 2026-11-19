@@ -44,7 +44,6 @@ pub fn make_pkt_hdr(packet_type: PacketType) -> PacketHeader {
         packet_type,
         Some(0),
         None,
-        None,
         Some(0x0000_0001),
         Some(&scid),
         Some(&dcid),

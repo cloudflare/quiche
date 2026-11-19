@@ -50,6 +50,8 @@ fn stream_ids(event: &Event) -> TypedArray<'_, i64> {
                         match frame {
                             QuicFrame::ResetStream { stream_id, .. } =>
                                 ids.push(*stream_id as i64),
+                            QuicFrame::ResetStreamAt { stream_id, .. } =>
+                                ids.push(*stream_id as i64),
                             QuicFrame::StopSending { stream_id, .. } =>
                                 ids.push(*stream_id as i64),
                             QuicFrame::Stream { stream_id, .. } =>
@@ -73,6 +75,12 @@ fn stream_ids(event: &Event) -> TypedArray<'_, i64> {
                 ids.push(v.stream_id as i64);
             },
             EventData::Http3FrameParsed(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::HttpCapsuleCreated(v) => {
+                ids.push(v.stream_id as i64);
+            },
+            EventData::HttpCapsuleParsed(v) => {
                 ids.push(v.stream_id as i64);
             },
 
@@ -195,7 +203,6 @@ mod tests {
             Initial,
             Some(0),
             None,
-            None,
             Some(1),
             Some(&scid),
             Some(&dcid),
@@ -230,7 +237,7 @@ mod tests {
             stateless_reset_token: None,
             supported_versions: None,
             raw: Some(raw.clone()),
-            datagram_id: None,
+            datagram_payload_checksum: None,
             is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
@@ -252,7 +259,7 @@ mod tests {
             stateless_reset_token: None,
             supported_versions: None,
             raw: Some(raw.clone()),
-            datagram_id: None,
+            datagram_payload_checksum: None,
             is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
@@ -273,7 +280,7 @@ mod tests {
             stateless_reset_token: None,
             supported_versions: None,
             raw: Some(raw),
-            datagram_id: None,
+            datagram_payload_checksum: None,
             is_mtu_probe_packet: None,
             send_at_time: None,
             trigger: None,
