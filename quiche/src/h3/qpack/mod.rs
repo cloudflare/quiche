@@ -240,5 +240,13 @@ pub use decoder::Decoder;
 pub use encoder::Encoder;
 
 mod decoder;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "not used until the decoder processes encoder instructions"
+    )
+)]
+mod dynamic_table;
 mod encoder;
 mod static_table;
