@@ -27,10 +27,12 @@
 use quiche::h3;
 use std::future::Future;
 
+use super::DgramFlowId;
 use super::H3Command;
 use super::H3ConnectionResult;
 use super::H3Driver;
 use super::H3Event;
+use super::InboundFrame;
 use crate::http3::settings::Http3Settings;
 use crate::quic::HandshakeInfo;
 use crate::quic::QuicheConnection;
@@ -75,6 +77,28 @@ pub trait DriverHooks: Sized + Send + 'static {
         headers: InboundHeaders,
     ) -> H3ConnectionResult<()>;
 
+    /// Performs endpoint-specific cleanup when the receive direction is
+    /// terminated by a peer FIN or reset. The stream can remain in the driver's
+    /// stream map until its write direction is also finished.
+    fn stream_recv_closed(driver: &mut H3Driver<Self>, stream_id: u64);
+
+    /// Performs endpoint-specific cleanup after a stream is removed from the
+    /// driver's stream map.
+    fn stream_closed(driver: &mut H3Driver<Self>, stream_id: u64);
+
+    /// Called for each inbound HTTP/3 DATAGRAM frame after the Quarter Stream
+    /// ID has been validated. The implementation must either deliver the
+    /// datagram to an established flow or handle it according to
+    /// endpoint-specific policy (buffer on server, drop on client).
+    fn handle_incoming_dgram(
+        driver: &mut H3Driver<Self>, flow_id: DgramFlowId, dgram: InboundFrame,
+    );
+
+    /// Called opportunistically from read and outbound-datagram paths
+    /// to expire pending datagrams. No-op for clients, since clients don't
+    /// buffer pending dgrams.
+    fn expire_pending_dgrams(&mut self) {}
+
     /// Processes any command received from the
     /// [`H3Controller`](super::H3Controller). May use
     /// `H3Driver::handle_core_command` to handle regular [`H3Command`]s.
@@ -82,12 +106,6 @@ pub trait DriverHooks: Sized + Send + 'static {
         driver: &mut H3Driver<Self>, qconn: &mut QuicheConnection,
         cmd: Self::Command,
     ) -> H3ConnectionResult<()>;
-
-    /// Whether the extended CONNECT protocol is enabled. Used to gate
-    /// datagram flow creation.
-    fn extended_connect_enabled(&self) -> bool {
-        false
-    }
 
     /// Determines whether the hook's `wait_for_action` future will be polled
     /// as part of `ApplicationOverQuic::wait_for_data`. Defaults to `false` and

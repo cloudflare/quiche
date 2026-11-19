@@ -53,6 +53,13 @@ pub struct ConnectionParams<'a> {
     pub tls_cert: Option<TlsCertificatePaths<'a>>,
     /// Hooks to use for the connection.
     pub hooks: Hooks,
+    /// Expose a per-connection DSCP handle for server connections.
+    ///
+    /// The handle initially omits per-packet marking, so packets inherit the
+    /// UDP socket's TOS/TClass until the application selects a value. Only
+    /// Linux UDP sockets support marking; client connections ignore this
+    /// setting.
+    pub enable_per_connection_dscp: bool,
     /// Set the session to attempt resumption.
     pub session: Option<Vec<u8>>,
     /// Custom destination connection ID to use for client connections.
@@ -74,7 +81,11 @@ impl core::fmt::Debug for ConnectionParams<'_> {
         let mut s = f.debug_struct("ConnectionParams");
         s.field("settings", &self.settings)
             .field("tls_cert", &self.tls_cert)
-            .field("hooks", &self.hooks);
+            .field("hooks", &self.hooks)
+            .field(
+                "enable_per_connection_dscp",
+                &self.enable_per_connection_dscp,
+            );
 
         #[cfg(feature = "custom-client-dcid")]
         s.field("dcid", &self.dcid);
@@ -94,6 +105,7 @@ impl<'a> ConnectionParams<'a> {
             settings,
             tls_cert: Some(tls_cert),
             hooks,
+            enable_per_connection_dscp: false,
             session: None,
             #[cfg(feature = "custom-client-dcid")]
             dcid: None,
@@ -111,6 +123,7 @@ impl<'a> ConnectionParams<'a> {
             settings,
             tls_cert,
             hooks,
+            enable_per_connection_dscp: false,
             session: None,
             #[cfg(feature = "custom-client-dcid")]
             dcid: None,

@@ -27,10 +27,13 @@
 use foundations::telemetry::log;
 use std::borrow::Cow;
 use std::fs::File;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::time::Duration;
 
 use qlog::writer::QlogCompression;
 
+use crate::quic::ConnectionHook;
 use crate::result::QuicResult;
 use crate::settings::CertificateKind;
 use crate::settings::ConnectionParams;
@@ -57,6 +60,7 @@ pub(crate) struct Config {
     pub has_ippktinfo: bool,
     pub has_ipv6pktinfo: bool,
     pub pool_send_buffer: bool,
+    pub connection_hook: Option<Arc<dyn ConnectionHook + Send + Sync + 'static>>,
 }
 
 impl AsMut<quiche::Config> for Config {
@@ -112,6 +116,7 @@ impl Config {
             has_ippktinfo,
             has_ipv6pktinfo,
             pool_send_buffer: quic_settings.pool_send_buffer,
+            connection_hook: params.hooks.connection_hook.clone(),
         })
     }
 }
@@ -176,6 +181,9 @@ fn make_quiche_config(
     config.set_initial_congestion_window_packets(
         quic_settings.initial_congestion_window_packets,
     );
+    config.set_unchecked_congestion_window(
+        quic_settings.unchecked_congestion_window,
+    );
     config.set_enable_relaxed_loss_threshold(
         quic_settings.enable_relaxed_loss_threshold,
     );
@@ -199,6 +207,11 @@ fn make_quiche_config(
     );
     config.grease(quic_settings.grease);
     config.set_max_amplification_factor(quic_settings.max_amplification_factor);
+    config.set_max_outstanding_sent_packets(
+        quic_settings
+            .max_outstanding_sent_packets
+            .and_then(NonZeroUsize::new),
+    );
     config.set_send_capacity_factor(quic_settings.send_capacity_factor);
     config.set_ack_delay_exponent(quic_settings.ack_delay_exponent);
     config.set_max_ack_delay(quic_settings.max_ack_delay);
@@ -239,8 +252,11 @@ fn quiche_config_with_tls(
             // TODO: Gate this variant on the `rpk` feature.
             panic!("Can't use RPK when compiled without rpk feature");
         },
-        #[cfg(feature = "rpk")]
+        #[cfg(all(feature = "rpk", not(boring_v5)))]
         CertificateKind::RawPublicKey => {
+            // boring 4.x (the default) exposes a dedicated
+            // `SslContextBuilder::new_rpk()` constructor plus
+            // `set_rpk_certificate` / `set_null_chain_private_key`.
             let mut ssl_ctx_builder = boring::ssl::SslContextBuilder::new_rpk()?;
             let raw_public_key = read_file(tls.cert)?;
             ssl_ctx_builder.set_rpk_certificate(&raw_public_key)?;
@@ -249,6 +265,33 @@ fn quiche_config_with_tls(
             let pkey =
                 boring::pkey::PKey::private_key_from_pem(&raw_private_key)?;
             ssl_ctx_builder.set_null_chain_private_key(&pkey)?;
+
+            Ok(quiche::Config::with_boring_ssl_ctx_builder(
+                quiche::PROTOCOL_VERSION,
+                ssl_ctx_builder,
+            )?)
+        },
+        #[cfg(all(feature = "rpk", boring_v5))]
+        CertificateKind::RawPublicKey => {
+            // boring 5.x replaced the dedicated `SslContextBuilder::new_rpk()`
+            // entry point with a credential-based API: build an
+            // `SslCredential` configured for raw public keys and add it
+            // to a regular `SslContextBuilder` via `add_credential`.
+            let raw_public_key = read_file(tls.cert)?;
+            let raw_private_key = read_file(tls.private_key)?;
+            let pkey =
+                boring::pkey::PKey::private_key_from_pem(&raw_private_key)?;
+
+            let mut credential_builder =
+                boring::ssl::SslCredential::new_raw_public_key()?;
+            credential_builder.set_spki_bytes(Some(&raw_public_key))?;
+            credential_builder.set_private_key(&pkey)?;
+            let credential = credential_builder.build();
+
+            let mut ssl_ctx_builder = boring::ssl::SslContextBuilder::new(
+                boring::ssl::SslMethod::tls(),
+            )?;
+            ssl_ctx_builder.add_credential(&credential)?;
 
             Ok(quiche::Config::with_boring_ssl_ctx_builder(
                 quiche::PROTOCOL_VERSION,
@@ -271,4 +314,102 @@ fn read_file(path: &str) -> QuicResult<Vec<u8>> {
     std::fs::read(path)
         .with_context(|| format!("read {path}"))
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use quiche::CongestionControlAlgorithm;
+    use quiche::Error;
+
+    use super::make_quiche_config;
+    use crate::settings::ConnectionParams;
+    use crate::settings::QuicSettings;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn unchecked_congestion_window_reaches_connections() {
+        let local = SocketAddr::from(([127, 0, 0, 1], 443));
+        let peer = SocketAddr::from(([127, 0, 0, 1], 1234));
+        let connection_id = quiche::ConnectionId::from_ref(&[0xba; 16]);
+
+        for algorithm in [
+            "reno",
+            "cubic",
+            "bbr2_gcongestion",
+            "congestion_window_unchecked",
+        ] {
+            let unsupported_algorithm =
+                algorithm.parse::<CongestionControlAlgorithm>().err();
+            for window in [
+                QuicSettings::default().unchecked_congestion_window,
+                0,
+                7,
+                40 * 1024 * 1024,
+            ] {
+                let settings = QuicSettings {
+                    cc_algorithm: algorithm.to_string(),
+                    unchecked_congestion_window: window,
+                    ..QuicSettings::default()
+                };
+                let expected_window =
+                    if algorithm == "congestion_window_unchecked" {
+                        window
+                    } else {
+                        settings.max_send_udp_payload_size *
+                            settings.initial_congestion_window_packets
+                    };
+                let params = ConnectionParams::new_client(
+                    settings,
+                    None,
+                    Default::default(),
+                );
+                let config = make_quiche_config(&params, false);
+                if let Some(expected_error) = &unsupported_algorithm {
+                    let error = config
+                        .err()
+                        .expect("unsupported controller must be rejected");
+                    assert_eq!(
+                        error.downcast_ref::<Error>(),
+                        Some(expected_error),
+                    );
+                    continue;
+                }
+                let mut config = config.expect("build shared QUIC configuration");
+
+                for (endpoint, connection) in [
+                    (
+                        "client",
+                        quiche::connect(
+                            None,
+                            &connection_id,
+                            local,
+                            peer,
+                            &mut config,
+                        )
+                        .expect("create client connection"),
+                    ),
+                    (
+                        "server",
+                        quiche::accept(
+                            &connection_id,
+                            None,
+                            local,
+                            peer,
+                            &mut config,
+                        )
+                        .expect("create server connection"),
+                    ),
+                ] {
+                    let path = connection
+                        .path_stats()
+                        .next()
+                        .expect("connection has an initial path");
+                    assert_eq!(
+                        path.cwnd, expected_window,
+                        "{endpoint}: {algorithm}, configured window {window}",
+                    );
+                }
+            }
+        }
+    }
 }

@@ -37,7 +37,10 @@ use super::QuicheConnection;
 use crate::metrics::labels;
 use crate::metrics::quic_expensive_metrics_ip_reduce;
 use crate::metrics::Metrics;
+use crate::quic::connection::CidOwned;
+use crate::quic::connection::IncomingPacketReceiver;
 use crate::quic::connection::SharedConnectionIdGenerator;
+use crate::quic::DscpHandle;
 use crate::settings::Config;
 use datagram_socket::DatagramSocketRecv;
 use datagram_socket::DatagramSocketSend;
@@ -121,10 +124,17 @@ struct PollRecvData {
 /// removed.
 pub enum ConnectionMapCommand {
     MapCid {
-        existing_cid: ConnectionId<'static>,
-        new_cid: ConnectionId<'static>,
+        existing_cid: CidOwned,
+        new_cid: CidOwned,
     },
-    UnmapCid(ConnectionId<'static>),
+
+    UnmapCid(CidOwned),
+
+    #[cfg(all(test, unix))]
+    TestFetchSender {
+        cid: ConnectionId<'static>,
+        resp_tx: tokio::sync::oneshot::Sender<mpsc::Sender<Incoming>>,
+    },
 }
 
 /// An `InboundPacketRouter` maintains a map of quic connections and routes
@@ -217,9 +227,11 @@ where
                 reusable_cmsg_space: nix::cmsg_space!(
                     u32, // GRO
                     nix::sys::time::TimeSpec, // timestamp
-                    u16, // drop count
+                    u32, // SO_RXQ_OVFL
                     sockaddr_in, // IP_RECVORIGDSTADDR
                     sockaddr_in6, // IPV6_RECVORIGDSTADDR
+                    libc::in_pktinfo, // IP_PKTINFO
+                    libc::in6_pktinfo, // IPV6_PKTINFO
                     u32 // SO_MARK
                 ),
 
@@ -313,6 +325,7 @@ where
             cid_generator,
             handshake_start_time,
             initial_pkt,
+            enable_per_connection_dscp,
         } = new_connection;
 
         let Some(ref shutdown_tx) = self.shutdown_tx else {
@@ -326,11 +339,22 @@ where
             );
         };
 
-        let scid = conn.source_id().into_owned();
+        let scid = conn.source_id();
+        let (incoming_tx, mut incoming_pkt_receiver) =
+            IncomingPacketReceiver::new(&scid, self.conn_map_cmd_tx.clone());
+        self.conns.insert((&scid).into(), incoming_tx.clone());
+
+        // Add the client-generated "pending" connection ID to the map as well.
+        // This is only required for QUIC servers, because clients can send
+        // Initial packets with arbitrary DCIDs to servers.
+        if let Some(pending_cid) = &pending_cid {
+            incoming_pkt_receiver.prior_knowledge(pending_cid);
+            self.conns.insert(pending_cid.into(), incoming_tx);
+        }
+
         let writer_cfg = WriterConfig {
             peer_addr,
             local_addr,
-            pending_cid: pending_cid.clone(),
             with_gso: self.config.has_gso,
             pacing_offload: self.config.pacing_offload,
             with_pktinfo: if self.local_addr.is_ipv4() {
@@ -348,34 +372,25 @@ where
 
         let conn = InitialQuicConnection::new(QuicConnectionParams {
             writer_cfg,
+            pending_cid,
             initial_pkt,
+            dscp_handle: enable_per_connection_dscp.then(DscpHandle::new),
             shutdown_tx: shutdown_tx.clone(),
-            conn_map_cmd_tx: self.conn_map_cmd_tx.clone(),
-            scid: scid.clone(),
+            incoming_pkt_receiver,
             cid_generator,
             metrics: self.metrics.clone(),
+            connection_hook: self.config.connection_hook.clone(),
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time,
             handshake_info,
             quiche_conn: conn,
             socket: Arc::clone(&self.socket_tx),
-            local_addr,
-            peer_addr,
         });
 
         conn.audit_log_stats
             .set_transport_handshake_start(instant_to_system(
                 handshake_start_time,
             ));
-
-        self.conns.insert(&scid, &conn);
-
-        // Add the client-generated "pending" connection ID to the map as well.
-        // This is only required for QUIC servers, because clients can send
-        // Initial packets with arbitrary DCIDs to servers.
-        if let Some(pending_cid) = pending_cid {
-            self.conns.map_cid(&scid, &pending_cid);
-        }
 
         self.metrics.accepted_initial_packet_count().inc();
         if self.config.enable_expensive_packet_count_metrics {
@@ -717,9 +732,16 @@ where
                     ConnectionMapCommand::MapCid {
                         existing_cid,
                         new_cid,
-                    } => self.conns.map_cid(&existing_cid, &new_cid),
+                    } => self.conns.map_cid(&existing_cid, new_cid),
+
                     ConnectionMapCommand::UnmapCid(cid) =>
                         self.conns.unmap_cid(&cid),
+
+                    #[cfg(all(test, unix))]
+                    ConnectionMapCommand::TestFetchSender { cid, resp_tx } =>
+                        if let Some(incoming_tx) = self.conns.get(&cid) {
+                            let _ = resp_tx.send(incoming_tx.clone());
+                        },
                 }
             }
         }
@@ -862,6 +884,7 @@ pub struct NewConnection {
     conn: Box<QuicheConnection>,
     pending_cid: Option<ConnectionId<'static>>,
     initial_pkt: Option<Incoming>,
+    enable_per_connection_dscp: bool,
     cid_generator: Option<SharedConnectionIdGenerator>,
     /// When the handshake started. Should be called before [`quiche::accept`]
     /// or [`quiche::connect`].
@@ -879,6 +902,7 @@ mod tests {
     use crate::http3::settings::Http3Settings;
     use crate::metrics::DefaultMetrics;
     use crate::quic::connection::SimpleConnectionIdGenerator;
+    use crate::quic::Dscp;
     use crate::settings::Config;
     use crate::settings::Hooks;
     use crate::settings::QuicSettings;
@@ -891,6 +915,7 @@ mod tests {
     use datagram_socket::MAX_DATAGRAM_SIZE;
     use futures::FutureExt as _;
     use h3i::actions::h3::Action;
+    use h3i::actions::h3::WaitType;
     use std::net::Ipv4Addr;
     use std::sync::Arc;
     use std::time::Duration;
@@ -908,7 +933,7 @@ mod tests {
         "../quiche/examples/cert.key"
     );
 
-    fn test_connect(host_port: String) {
+    fn test_connect(host_port: String, wait_before_close: Option<Duration>) {
         let h3i_config = h3i::config::Config::new()
             .with_host_port("test.com".to_string())
             .with_idle_timeout(2000)
@@ -922,9 +947,30 @@ mod tests {
             error_code: h3i::quiche::WireErrorCode::NoError as _,
             reason: Vec::new(),
         };
-        let actions = vec![Action::ConnectionClose { error: conn_close }];
+        let mut actions = Vec::new();
+        if let Some(duration) = wait_before_close {
+            actions.push(Action::Wait {
+                wait_type: WaitType::WaitDuration(duration),
+            });
+        }
+        actions.push(Action::ConnectionClose { error: conn_close });
 
         let _ = h3i::client::sync_client::connect(h3i_config, actions, None);
+    }
+
+    /// If `cid` is not present in the ConnectionMap, the `oneshot::Sender` is
+    /// dropped without a result and we return `None` here.
+    async fn fetch_sender_for_cid(
+        conn_map_cmd_tx: &mpsc::UnboundedSender<ConnectionMapCommand>,
+        cid: ConnectionId<'static>,
+    ) -> Option<mpsc::Sender<Incoming>> {
+        let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+
+        conn_map_cmd_tx
+            .send(ConnectionMapCommand::TestFetchSender { cid, resp_tx })
+            .expect("InboundPacketRouter should be alive");
+
+        resp_rx.await.ok()
     }
 
     #[tokio::test]
@@ -944,11 +990,12 @@ mod tests {
             kind: crate::settings::CertificateKind::X509,
         };
 
-        let params = ConnectionParams::new_server(
+        let mut params = ConnectionParams::new_server(
             quic_settings,
             tls_cert_settings,
             Hooks::default(),
         );
+        params.enable_per_connection_dscp = true;
         let config = Config::new(&params, SocketCapabilities::default()).unwrap();
 
         let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -960,6 +1007,7 @@ mod tests {
         let acceptor = ConnectionAcceptor::new(
             ConnectionAcceptorConfig {
                 disable_client_ip_validation: config.disable_client_ip_validation,
+                enable_per_connection_dscp: params.enable_per_connection_dscp,
                 qlog_dir: config.qlog_dir.clone(),
                 qlog_compression: config.qlog_compression,
                 keylog_file: config
@@ -983,26 +1031,150 @@ mod tests {
             acceptor,
             DefaultMetrics,
         );
+        let conn_map_cmd_tx = socket_driver.conn_map_cmd_tx.clone();
         tokio::spawn(socket_driver);
 
         // Start a request and drop it after connection establishment
-        std::thread::spawn(move || test_connect(host_port));
+        std::thread::spawn(move || test_connect(host_port, None));
 
         // Wait for a new connection
         time::pause();
 
         let (h3_driver, _) = ServerH3Driver::new(Http3Settings::default());
-        let conn = incoming.recv().await.unwrap().unwrap();
-        let drop_check = conn.incoming_ev_sender.clone();
-        let _conn = conn.start(h3_driver);
+        let iqc = incoming.recv().await.unwrap().unwrap();
+        let dscp_handle = iqc.dscp_handle().unwrap().clone();
+        assert_eq!(dscp_handle.get(), None);
+        dscp_handle.set(Dscp::new(0));
+        assert_eq!(iqc.dscp_handle().unwrap().get(), Dscp::new(0));
 
-        // Poll incoming events until the connection is dropped.
+        let scid = iqc.scid().into_owned();
+        let incoming_tx = fetch_sender_for_cid(&conn_map_cmd_tx, scid)
+            .await
+            .expect(
+            "InitialQuicConnection should be registered in IPR's ConnectionMap",
+        );
+
+        let _conn = iqc.start(h3_driver);
+
+        // Advance time til well after the handshake deadline
         time::advance(Duration::new(30, 0)).await;
         time::resume();
 
-        // This is a smoke test. A failure leaves `notified()` unresolved and
-        // hangs the test.
-        drop_check.closed().await;
+        // NOTE: this is a smoke test - in case of issues `closed()` future will
+        // never resolve hanging the test.
+        incoming_tx.closed().await;
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
+    #[tokio::test]
+    async fn test_worker_dscp_across_handshake_ipv4() {
+        check_worker_dscp_across_handshake("127.0.0.1:0").await;
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
+    #[tokio::test]
+    async fn test_worker_dscp_across_handshake_ipv6() {
+        check_worker_dscp_across_handshake("[::1]:0").await;
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
+    async fn check_worker_dscp_across_handshake(bind_addr: &str) {
+        use crate::quic::io::gso::test::enable_tos;
+        use crate::quic::io::gso::test::recv_tos;
+        use futures::StreamExt;
+        use nix::sys::socket::setsockopt;
+        use nix::sys::socket::sockopt;
+
+        let socket = std::net::UdpSocket::bind(bind_addr).unwrap();
+        let server_addr = socket.local_addr().unwrap();
+        if server_addr.is_ipv4() {
+            setsockopt(&socket, sockopt::Ipv4Tos, &0).unwrap();
+        } else {
+            setsockopt(&socket, sockopt::Ipv6TClass, &0).unwrap();
+        }
+
+        let mut settings = QuicSettings::default();
+        settings.disable_client_ip_validation = true;
+        let tls_cert = TlsCertificatePaths {
+            cert: TEST_CERT_FILE,
+            private_key: TEST_KEY_FILE,
+            kind: crate::settings::CertificateKind::X509,
+        };
+        let mut params =
+            ConnectionParams::new_server(settings, tls_cert, Hooks::default());
+        params.enable_per_connection_dscp = true;
+        let mut incoming = crate::listen(vec![socket], params, DefaultMetrics)
+            .unwrap()
+            .remove(0);
+
+        let frontend = UdpSocket::bind(bind_addr).await.unwrap();
+        let backend = UdpSocket::bind(bind_addr).await.unwrap();
+        enable_tos(&backend);
+        let host_port = frontend.local_addr().unwrap().to_string();
+        let (marks_tx, mut marks_rx) = tokio::sync::mpsc::unbounded_channel();
+        let relay = tokio::spawn(async move {
+            let mut client_addr = None;
+            let mut buf = [0u8; 2048];
+            loop {
+                tokio::select! {
+                    received = frontend.recv_from(&mut buf) => {
+                        let (len, addr) = received.unwrap();
+                        client_addr = Some(addr);
+                        backend.send_to(&buf[..len], server_addr).await.unwrap();
+                    }
+                    (packet, tos) = recv_tos(&backend) => {
+                        marks_tx.send(tos >> 2).unwrap();
+                        frontend.send_to(&packet, client_addr.unwrap()).await.unwrap();
+                    }
+                }
+            }
+        });
+        let client = tokio::task::spawn_blocking(move || {
+            test_connect(host_port, Some(Duration::from_secs(1)))
+        });
+
+        let conn = time::timeout(Duration::from_secs(5), incoming.next())
+            .await
+            .expect("no initial packet")
+            .expect("listener closed")
+            .expect("initial packet rejected");
+        let dscp = conn.dscp_handle().unwrap().clone();
+        dscp.set(Dscp::new(34));
+        let (driver, controller) = ServerH3Driver::new(Http3Settings::default());
+        let (_, mut worker) =
+            time::timeout(Duration::from_secs(5), conn.handshake(driver))
+                .await
+                .expect("handshake timed out")
+                .expect("handshake failed");
+
+        // No stateless packets are sent when client IP validation is disabled.
+        assert_eq!(
+            time::timeout(Duration::from_secs(5), marks_rx.recv())
+                .await
+                .expect("no handshake packet"),
+            Some(34)
+        );
+
+        // Force a packet in the running worker to verify the handle survives
+        // handshake() and resume(), not just the initial atomic clone.
+        dscp.set(Dscp::new(28));
+        worker.qconn.send_ack_eliciting().unwrap();
+        InitialQuicConnection::resume(worker);
+        time::timeout(Duration::from_secs(5), async {
+            loop {
+                match marks_rx.recv().await.expect("UDP relay closed") {
+                    34 => (), // Handshake packets already in flight.
+                    28 => break,
+                    mark => panic!("unexpected post-handshake DSCP {mark}"),
+                }
+            }
+        })
+        .await
+        .expect("no post-handshake packet with DSCP 28");
+
+        client.await.unwrap();
+        drop(controller);
+        relay.abort();
     }
 
     struct NoopDatagramSender;
@@ -1084,6 +1256,7 @@ mod tests {
         // Fill the `conn_map_cmd` channel with some messages to process
         for _ in 0..20 {
             let random_cid = SimpleConnectionIdGenerator.new_connection_id();
+            let random_cid = CidOwned::from(&random_cid);
             conn_map_cmd_tx
                 .send(ConnectionMapCommand::UnmapCid(random_cid))
                 .unwrap();
@@ -1105,5 +1278,122 @@ mod tests {
         // processed
         let ipr = ipr.join().unwrap();
         assert!(ipr.conn_map_cmd_rx.is_empty());
+    }
+
+    #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
+    #[rstest::rstest]
+    #[case::ipv4("0.0.0.0:0", "127.0.0.1:0")]
+    #[case::ipv6("[::]:0", "[::1]:0")]
+    #[case::ipv4_mapped("[::]:0", "127.0.0.1:0")]
+    #[tokio::test]
+    async fn test_gro_survives_full_cmsg_set_after_drops(
+        #[case] bind_addr: &str, #[case] sender_addr: &str,
+    ) {
+        use crate::socket::SocketCapabilitiesBuilder;
+        use nix::sys::socket::bind;
+        use nix::sys::socket::setsockopt;
+        use nix::sys::socket::socket;
+        use nix::sys::socket::sockopt;
+        use nix::sys::socket::AddressFamily;
+        use nix::sys::socket::SockFlag;
+        use nix::sys::socket::SockType;
+        use nix::sys::socket::SockaddrStorage;
+        use std::os::fd::AsRawFd;
+
+        const SEGMENT_SIZE: u16 = 1200;
+
+        let bind_addr: SocketAddr = bind_addr.parse().unwrap();
+        let family = if bind_addr.is_ipv6() {
+            AddressFamily::Inet6
+        } else {
+            AddressFamily::Inet
+        };
+        let receiver = socket(
+            family,
+            SockType::Datagram,
+            SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
+            None,
+        )
+        .unwrap();
+        if bind_addr.is_ipv6() {
+            setsockopt(&receiver, sockopt::Ipv6V6Only, &false).unwrap();
+        }
+        bind(receiver.as_raw_fd(), &SockaddrStorage::from(bind_addr)).unwrap();
+        let receiver =
+            UdpSocket::from_std(std::net::UdpSocket::from(receiver)).unwrap();
+        setsockopt(&receiver, sockopt::RcvBuf, &8192).unwrap();
+        setsockopt(&receiver, sockopt::ReceiveTimestampns, &true).unwrap();
+        let mut capabilities = SocketCapabilitiesBuilder::new(&receiver);
+        match capabilities.gro().and_then(|_| capabilities.rcvmark()) {
+            Ok(()) => (),
+            Err(error) if error.raw_os_error() == Some(libc::ENOPROTOOPT) => {
+                eprintln!(
+                    "skipping GRO test: UDP_GRO or SO_RCVMARK unsupported: {error}"
+                );
+                return;
+            },
+            Err(error) => panic!("failed to configure GRO test: {error}"),
+        }
+        capabilities.check_udp_drop().unwrap();
+        capabilities.ipv4_pktinfo().unwrap();
+        capabilities.ipv4_recvorigdstaddr().unwrap();
+        if bind_addr.is_ipv6() {
+            capabilities.ipv6_pktinfo().unwrap();
+            capabilities.ipv6_recvorigdstaddr().unwrap();
+        }
+        let local_addr = receiver.local_addr().unwrap();
+        let sender = UdpSocket::bind(sender_addr).await.unwrap();
+        let sender_addr = sender.local_addr().unwrap();
+        let destination = SocketAddr::new(sender_addr.ip(), local_addr.port());
+
+        // Overflow and drain the queue so the GRO datagram has SO_RXQ_OVFL.
+        let mut scratch = [0x41; SEGMENT_SIZE as usize];
+        for _ in 0..128 {
+            sender.send_to(&scratch, destination).await.unwrap();
+        }
+        receiver.readable().await.unwrap();
+        loop {
+            match receiver.try_recv_from(&mut scratch) {
+                Ok(_) => (),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("failed to drain receive queue: {error}"),
+            }
+        }
+
+        let config = Config::new(
+            &ConnectionParams::default(),
+            SocketCapabilities::default(),
+        )
+        .unwrap();
+        let (mut router, _accept_stream) = InboundPacketRouter::new(
+            config,
+            Arc::new(NoopDatagramSender),
+            receiver,
+            local_addr,
+            NoopInitialHandler,
+            DefaultMetrics,
+        );
+
+        setsockopt(&sender, sockopt::UdpGsoSegment, &i32::from(SEGMENT_SIZE))
+            .unwrap();
+        let payload = [0x42; 3 * SEGMENT_SIZE as usize];
+        sender.send_to(&payload, destination).await.unwrap();
+
+        let packet = time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| router.poll_recv_and_rx_time(cx)),
+        )
+        .await
+        .expect("timed out receiving the GRO datagram")
+        .unwrap();
+
+        assert_eq!(packet.buf, payload);
+        assert_eq!(packet.gro, Some(i32::from(SEGMENT_SIZE)));
+        assert!(router.udp_drop_count > 0, "receive queue did not overflow");
+        assert!(packet.rx_time.is_some());
+        assert_eq!(packet.so_mark_data, Some(0u32.to_ne_bytes()));
+        let dst_addr = packet.dst_addr_override.unwrap();
+        assert_eq!(dst_addr.ip().to_canonical(), destination.ip());
+        assert_eq!(dst_addr.port(), destination.port());
     }
 }

@@ -185,7 +185,7 @@ impl HeaderProtectionKey {
             Algorithm::AES128_GCM | Algorithm::AES256_GCM => unsafe {
                 let key_len_bits = alg.key_len() as u32 * 8;
 
-                let mut aes_key = MaybeUninit::<AES_KEY>::uninit();
+                let mut aes_key = MaybeUninit::<AES_KEY>::zeroed();
 
                 let rc = AES_set_encrypt_key(
                     hp_key.as_ptr(),

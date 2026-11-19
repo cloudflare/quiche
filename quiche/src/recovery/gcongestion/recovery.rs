@@ -474,8 +474,6 @@ pub struct GRecovery {
 
     bytes_in_flight: BytesInFlight,
 
-    bytes_sent: usize,
-
     pub bytes_lost: u64,
 
     max_datagram_size: usize,
@@ -538,7 +536,6 @@ impl GRecovery {
 
             loss_thresh: LossThreshold::new(recovery_config),
             bytes_in_flight: Default::default(),
-            bytes_sent: 0,
             bytes_lost: 0,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
@@ -798,8 +795,6 @@ impl RecoveryOps for GRecovery {
             self.set_loss_detection_timer(handshake_status, time_sent);
         }
 
-        self.bytes_sent += sent_bytes;
-
         trace!("{trace_id} {self:?}");
     }
 
@@ -1033,11 +1028,6 @@ impl RecoveryOps for GRecovery {
     }
 
     fn cwnd_available(&self) -> usize {
-        // Ignore cwnd when sending probe packets.
-        if self.epochs.iter().any(|e| e.loss_probes > 0) {
-            return usize::MAX;
-        }
-
         self.cwnd().saturating_sub(self.bytes_in_flight.get())
     }
 
@@ -1100,7 +1090,6 @@ impl RecoveryOps for GRecovery {
         self.pacer.on_app_limited(self.bytes_in_flight.get())
     }
 
-    #[cfg(test)]
     fn sent_packets_len(&self, epoch: packet::Epoch) -> usize {
         self.epochs[epoch].sent_packets.len()
     }
@@ -1159,7 +1148,7 @@ impl RecoveryOps for GRecovery {
         self.epochs[epoch].test_largest_sent_pkt_num_on_path
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "qlog"))]
     fn app_limited(&self) -> bool {
         self.pacer.is_app_limited(self.bytes_in_flight.get())
     }
@@ -1213,6 +1202,7 @@ impl RecoveryOps for GRecovery {
             lost_packets: Some(self.lost_count as u64),
             lost_bytes: Some(self.bytes_lost),
             pto_count: Some(self.pto_count),
+            app_limited: Some(self.app_limited()),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)

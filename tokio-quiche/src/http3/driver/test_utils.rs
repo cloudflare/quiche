@@ -56,6 +56,15 @@ pub fn default_quiche_config() -> quiche::Config {
     config
 }
 
+/// Like [`default_quiche_config`] but with QUIC DATAGRAM support enabled.
+/// Allows both endpoints to send and receive `dgram_send`/`dgram_recv` frames.
+pub fn default_quiche_config_with_dgram() -> quiche::Config {
+    let mut config = default_quiche_config();
+    // recv_queue_len = send_queue_len = 100; enough for all unit tests.
+    config.enable_dgram(true, 100, 100);
+    config
+}
+
 pub fn make_request_headers(method: &str) -> Vec<Header> {
     vec![
         Header::new(b":method", method.as_bytes()),
@@ -74,6 +83,26 @@ pub fn make_response_headers() -> Vec<Header> {
 
 pub fn make_response_trailers() -> Vec<Header> {
     vec![Header::new(b"trailers", b"1")]
+}
+
+/// Build a minimal RFC 9298 CONNECT-UDP / MASQUE request header list.
+/// The `:protocol` header triggers datagram flow creation in tokio-quiche.
+pub fn make_connect_udp_headers() -> Vec<Header> {
+    vec![
+        Header::new(b":method", b"CONNECT"),
+        Header::new(b":scheme", b"https"),
+        Header::new(b":authority", b"quic.tech"),
+        Header::new(b":path", b"/test"),
+        Header::new(b":protocol", b"connect-udp"),
+    ]
+}
+
+/// Build a response with a given numeric status code.
+pub fn make_response_headers_with_status(status: u16) -> Vec<Header> {
+    vec![
+        Header::new(b":status", status.to_string().as_bytes()),
+        Header::new(b"server", b"quiche-test"),
+    ]
 }
 
 /// Helper trait to get the either right `quiche::Connection` for
@@ -234,6 +263,23 @@ impl<H: DriverHooks + GetConnectionForHook> DriverTestHelper<H> {
             .send_body(H::peer_qconn(&mut self.pipe), stream_id, body, fin)
     }
 
+    /// Send a raw QUIC DATAGRAM frame from the peer with the given
+    /// `quarter_stream_id` varint prefix followed by `payload`.
+    /// Returns an error if the peer's QUIC connection has datagram support
+    /// disabled or the datagram queue is full.
+    pub fn peer_send_dgram(
+        &mut self, quarter_stream_id: u64, payload: &[u8],
+    ) -> quiche::Result<()> {
+        // Encode quarter_stream_id as a QUIC varint prefix.
+        let mut prefix_buf = [0u8; 8];
+        let mut enc = octets::OctetsMut::with_slice(&mut prefix_buf);
+        let prefix = enc.put_varint(quarter_stream_id)?;
+        let mut dgram = Vec::with_capacity(prefix.len() + payload.len());
+        dgram.extend_from_slice(prefix);
+        dgram.extend_from_slice(payload);
+        H::peer_qconn(&mut self.pipe).dgram_send(&dgram)
+    }
+
     /// Call `h3::Connection::recv_body()` on the peer and read at most
     /// `max_read` bytes into a Vector, returns the Vec.
     fn peer_recv_body_vec(
@@ -378,7 +424,23 @@ impl DriverTestHelper<ClientHooks> {
     }
 }
 
+impl DriverTestHelper<ClientHooks> {
+    /// Send a QUIC DATAGRAM from the peer (server) towards the client driver.
+    pub fn peer_server_send_dgram(
+        &mut self, quarter_stream_id: u64, payload: &[u8],
+    ) -> quiche::Result<()> {
+        self.peer_send_dgram(quarter_stream_id, payload)
+    }
+}
+
 impl DriverTestHelper<ServerHooks> {
+    /// Send a QUIC DATAGRAM from the peer (client) towards the server driver.
+    pub fn peer_client_send_dgram(
+        &mut self, quarter_stream_id: u64, payload: &[u8],
+    ) -> quiche::Result<()> {
+        self.peer_send_dgram(quarter_stream_id, payload)
+    }
+
     /// Sends a new client request
     pub fn peer_client_send_request(
         &mut self, headers: Vec<Header>, fin: bool,

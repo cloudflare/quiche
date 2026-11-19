@@ -63,9 +63,9 @@ struct TaskKillswitch {
     /// their next yield, which may be after this triggers.
     all_killed: watch::Receiver<()>,
     // NOTE: All we want here is to take ownership of `signal_killed` when
-    // activating the killswitch. That code path only runs once per instance, but
-    // requires interior mutability. Using `Mutex` is easier than bothering with
-    // an `UnsafeCell`. The mutex is guaranteed to be unlocked.
+    // activating the killswitch. That code path only runs once per instance,
+    // but requires interior mutability. Using `Mutex` is easier than bothering
+    // with an `UnsafeCell`. The mutex is guaranteed to be unlocked.
     signal_killed: Mutex<Option<watch::Sender<()>>>,
 }
 

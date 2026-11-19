@@ -89,7 +89,7 @@ impl RecvBuf {
     /// This also takes care of enforcing stream flow control limits, as well
     /// as handling incoming data that overlaps data that is already in the
     /// buffer.
-    pub fn write(&mut self, buf: RangeBuf) -> Result<()> {
+    pub fn write(&mut self, mut buf: RangeBuf) -> Result<()> {
         if buf.max_off() > self.max_data() {
             return Err(Error::FlowControl);
         }
@@ -117,26 +117,36 @@ impl RecvBuf {
             return Ok(());
         }
 
-        if buf.fin() {
+        let new_fin = buf.fin() && self.fin_off.is_none();
+
+        if new_fin {
             self.fin_off = Some(buf.max_off());
         }
 
-        // No need to store empty buffer that doesn't carry the fin flag.
+        // No need to store empty buffer that doesn't carry the fin flag, but
+        // its offset still advances the largest received offset used by flow
+        // control (RFC 9000 Section 19.8).
         if !buf.fin() && buf.is_empty() {
+            self.len = cmp::max(self.len, buf.max_off());
+
+            if self.drain {
+                // we are not storing any data, off == len
+                self.off = self.len;
+            }
+
             return Ok(());
         }
 
-        // Check if data is fully duplicate, that is the buffer's max offset is
-        // lower or equal to the offset already stored in the recv buffer.
-        if self.off >= buf.max_off() {
-            // An exception is applied to empty range buffers, because an empty
-            // buffer's max offset matches the max offset of the recv buffer.
-            //
-            // By this point all spurious empty buffers should have already been
-            // discarded, so allowing empty buffers here should be safe.
-            if !buf.is_empty() {
+        // Discard consumed data unless it carries the first FIN. Such data is
+        // replaced with an empty buffer at the final size, so the application
+        // reads the FIN without receiving duplicate data and the queued buffer
+        // does not keep the duplicate payload alive.
+        if self.off >= buf.max_off() && !buf.is_empty() {
+            if !new_fin {
                 return Ok(());
             }
+
+            buf = RangeBuf::from(b"", buf.max_off(), true);
         }
 
         let mut tmp_bufs = VecDeque::with_capacity(2);
@@ -247,13 +257,17 @@ impl RecvBuf {
             return Err(Error::StreamReset(e));
         }
 
-        while cap > 0 && self.ready() {
+        while self.ready() {
             let mut entry = match self.data.first_entry() {
                 Some(entry) => entry,
                 None => break,
             };
 
             let buf = entry.get_mut();
+
+            if cap == 0 && !buf.is_empty() {
+                break;
+            }
 
             let buf_len = cmp::min(buf.len(), cap);
 
@@ -307,6 +321,10 @@ impl RecvBuf {
             return Err(Error::FinalSize);
         }
 
+        if final_size > self.max_data() {
+            return Err(Error::FlowControl);
+        }
+
         if self.error.is_some() {
             // We already verified that the final size matches
             return Ok(RecvBufResetReturn::zero());
@@ -319,17 +337,23 @@ impl RecvBuf {
             consumed_flowcontrol: final_size - self.off,
         };
 
+        let notify = !self.drain && (!self.is_fin() || self.ready());
+
         self.error = Some(error_code);
+        self.fin_off = Some(final_size);
+        self.len = final_size;
 
         // Clear all data already buffered.
         self.off = final_size;
 
         self.data.clear();
 
-        // In order to ensure the application is notified when the stream is
-        // reset, enqueue a zero-length buffer at the final size offset.
-        let buf = RangeBuf::from(b"", final_size, true);
-        self.write(buf)?;
+        // Preserve an unread terminal notification even if FIN already
+        // established the final size, but do not notify again after EOF.
+        if notify {
+            let buf = RangeBuf::from(b"", final_size, true);
+            self.data.insert(final_size, buf);
+        }
 
         Ok(result)
     }
@@ -397,11 +421,7 @@ impl RecvBuf {
     /// This happens when the stream's receive final size is known, and the
     /// application has read all data from the stream.
     pub fn is_fin(&self) -> bool {
-        if self.fin_off == Some(self.off) {
-            return true;
-        }
-
-        false
+        self.fin_off == Some(self.off)
     }
 
     /// Returns true if the stream is not storing incoming data.
@@ -542,10 +562,10 @@ mod tests {
 
         assert_emit_discard(&mut recv, emit, 32, 5, false, None);
 
-        // Don't store non-fin empty buffer.
+        // Don't store non-fin empty buffer, but track its offset.
         let buf = RangeBuf::from(b"", 10, false);
         assert!(recv.write(buf).is_ok());
-        assert_eq!(recv.len, 5);
+        assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 0);
 
@@ -553,34 +573,45 @@ mod tests {
         let buf = RangeBuf::from(b"", 16, false);
         assert_eq!(recv.write(buf), Err(Error::FlowControl));
 
-        // Store fin empty buffer.
+        // A final size below the advanced largest offset is an error
+        // (RFC 9000 Section 4.5).
         let buf = RangeBuf::from(b"", 5, true);
+        assert_eq!(recv.write(buf), Err(Error::FinalSize));
+
+        // Store fin empty buffer at the largest received offset.
+        let buf = RangeBuf::from(b"", 10, true);
         assert!(recv.write(buf).is_ok());
-        assert_eq!(recv.len, 5);
+        assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 1);
 
         // Don't store additional fin empty buffers.
-        let buf = RangeBuf::from(b"", 5, true);
+        let buf = RangeBuf::from(b"", 10, true);
         assert!(recv.write(buf).is_ok());
-        assert_eq!(recv.len, 5);
+        assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 1);
 
-        // Don't store additional fin non-empty buffers.
-        let buf = RangeBuf::from(b"aa", 3, true);
+        // Accept another fin buffer with the same final size.
+        let buf = RangeBuf::from(b"aa", 8, true);
         assert!(recv.write(buf).is_ok());
-        assert_eq!(recv.len, 5);
+        assert_eq!(recv.len, 10);
         assert_eq!(recv.off, 5);
         assert_eq!(recv.data.len(), 1);
+
+        // A fin buffer whose end disagrees with the known final size errors.
+        let buf = RangeBuf::from(b"aa", 3, true);
+        assert_eq!(recv.write(buf), Err(Error::FinalSize));
 
         // Validate final size with fin empty buffers.
-        let buf = RangeBuf::from(b"", 6, true);
+        let buf = RangeBuf::from(b"", 11, true);
         assert_eq!(recv.write(buf), Err(Error::FinalSize));
-        let buf = RangeBuf::from(b"", 4, true);
+        let buf = RangeBuf::from(b"", 9, true);
         assert_eq!(recv.write(buf), Err(Error::FinalSize));
 
-        assert_emit_discard(&mut recv, emit, 32, 0, true, None);
+        // The range (5..10) was never received, so the stream cannot reach
+        // its fin and nothing further is readable.
+        assert_emit_discard_done(&mut recv, emit);
     }
 
     #[rstest]
@@ -695,6 +726,105 @@ mod tests {
         assert_eq!(recv.data.len(), 0);
 
         assert_emit_discard_done(&mut recv, emit);
+    }
+
+    /// An empty non-fin buffer advances the largest received offset, which the
+    /// connection charges to flow control on arrival, so a draining stream must
+    /// consume it too and a later reset must not credit it again.
+    #[test]
+    fn shutdown_empty_stream_frame() {
+        let mut recv =
+            RecvBuf::new(u64::MAX, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
+
+        assert!(recv.write(RangeBuf::from(b"hello", 0, false)).is_ok());
+        assert_eq!(recv.shutdown(), Ok(5));
+
+        assert!(recv.write(RangeBuf::from(b"", 10, false)).is_ok());
+        assert_eq!(recv.len, 10);
+        assert_eq!(recv.off, 10);
+        assert_eq!(recv.data.len(), 0);
+
+        assert_eq!(
+            recv.reset(42, 10),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 0,
+                consumed_flowcontrol: 0,
+            })
+        );
+    }
+
+    #[rstest]
+    fn reset_after_fin(
+        #[values("unread", "partial", "gap", "empty", "consumed", "draining")]
+        state: &str,
+    ) {
+        let mut recv =
+            RecvBuf::new(15, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
+        let mut out = [0; 5];
+        let (data, offset) = if state == "gap" {
+            (b"llo".as_slice(), 2)
+        } else {
+            (b"hello".as_slice(), 0)
+        };
+        recv.write(RangeBuf::from(data, offset, state != "empty"))
+            .unwrap();
+
+        match state {
+            "partial" => assert_eq!(recv.emit(&mut out[..2]), Ok((2, false))),
+            "consumed" => assert_eq!(recv.emit(&mut out), Ok((5, true))),
+            "empty" => {
+                assert_eq!(recv.emit(&mut out), Ok((5, false)));
+                recv.write(RangeBuf::from(b"", 5, true)).unwrap();
+            },
+            "draining" => assert_eq!(recv.shutdown(), Ok(5)),
+            _ => (),
+        }
+
+        let consumed = 5 - recv.off_front();
+        assert_eq!(
+            recv.reset(42, 5),
+            Ok(RecvBufResetReturn {
+                max_data_delta: 0,
+                consumed_flowcontrol: consumed,
+            })
+        );
+        assert!(recv.is_fin());
+        assert_eq!(recv.max_off(), 5);
+        assert_eq!(recv.ready(), state != "consumed" && state != "draining");
+        if recv.ready() {
+            assert_eq!(recv.emit(&mut out), Err(Error::StreamReset(42)));
+        }
+        assert_eq!(recv.emit(&mut out), Err(Error::Done));
+        assert_eq!(recv.reset(42, 5), Ok(RecvBufResetReturn::zero()));
+        recv.write(RangeBuf::from(b"hello", 0, true)).unwrap();
+        assert!(!recv.ready());
+    }
+
+    #[rstest]
+    fn duplicate_data_first_fin(#[values(true, false)] drain: bool) {
+        let mut recv =
+            RecvBuf::new(15, DEFAULT_STREAM_WINDOW, DEFAULT_STREAM_WINDOW);
+        let mut out = [0; 5];
+        recv.write(RangeBuf::from(b"hello", 0, false)).unwrap();
+        assert_eq!(recv.emit(&mut out), Ok((5, false)));
+        if drain {
+            assert_eq!(recv.shutdown(), Ok(0));
+        }
+
+        recv.write(RangeBuf::from(b"hello", 0, false)).unwrap();
+        assert!(!recv.ready());
+        recv.write(RangeBuf::from(b"hello", 0, true)).unwrap();
+        assert!(recv.is_fin());
+        assert_eq!(recv.ready(), !drain);
+        assert!(recv.data.values().all(|buf| buf.data.as_ref().is_empty()));
+        if !drain {
+            assert_eq!(recv.emit(&mut out), Ok((0, true)));
+        }
+
+        recv.write(RangeBuf::from(b"hello", 0, true)).unwrap();
+        recv.write(RangeBuf::from(b"", 5, true)).unwrap();
+        assert!(!recv.ready());
+        assert_eq!(recv.emit(&mut out), Err(Error::Done));
     }
 
     #[rstest]
@@ -869,8 +999,9 @@ mod tests {
         assert!(recv.write(fourth).is_ok());
         assert_eq!(recv.len, 9);
         assert_eq!(recv.off, 9);
-        assert_eq!(recv.data.len(), 0);
+        assert_eq!(recv.data.len(), 1);
 
+        assert_emit_discard(&mut recv, emit, 32, 0, true, Some(b""));
         assert_emit_discard_done(&mut recv, emit);
     }
 

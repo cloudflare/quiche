@@ -25,20 +25,134 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use h3i::quiche;
+use h3i::quiche::test_utils::Pipe;
 use std::net::SocketAddr;
+use std::time::Duration;
+use tokio_quiche::buf_factory::BufFactory;
+use tokio_quiche::quic::QuicCommand;
 use tokio_quiche::quic::SimpleConnectionIdGenerator;
 use tokio_quiche::ConnectionIdGenerator as _;
 
 use crate::fixtures::*;
 
+#[test]
+fn connection_stats_use_active_path() {
+    let mut config = Pipe::default_config("cubic").unwrap();
+    config.set_active_connection_id_limit(2);
+
+    let mut pipe = Pipe::<BufFactory>::with_config_and_scid_lengths_and_buf(
+        &mut config,
+        0,
+        0,
+    )
+    .unwrap();
+    pipe.handshake().unwrap();
+
+    let migrated_addr: SocketAddr = "127.0.0.1:5678".parse().unwrap();
+    pipe.client.migrate_source(migrated_addr).unwrap();
+
+    assert!(!pipe.client.path_stats().next().unwrap().active);
+
+    let (stats_tx, stats_rx) = std::sync::mpsc::channel();
+    QuicCommand::ConnectionStats(Box::new(move |stats| {
+        stats_tx.send(stats).unwrap();
+    }))
+    .execute(&mut pipe.client);
+
+    let path_stats = stats_rx.recv().unwrap().path_stats.unwrap();
+
+    assert!(path_stats.active);
+    assert_eq!(path_stats.local_addr, migrated_addr);
+}
+
 #[tokio::test]
 async fn test_passive_migration() {
-    run_migration_test(false, 12345).await;
+    let _ = run_migration_test(false, 12345).await;
 }
 
 #[tokio::test]
 async fn test_active_migration() {
-    run_migration_test(true, 23456).await;
+    let _ = run_migration_test(true, 23456).await;
+}
+
+#[test]
+fn process_h3_event_returns_between_response_flights() {
+    let mut config = Pipe::default_config("cubic").unwrap();
+    config.set_application_protos(&[b"h3"]).unwrap();
+    config.set_initial_max_data(1500);
+    config.set_initial_max_stream_data_bidi_local(1500);
+    config.set_initial_max_stream_data_bidi_remote(1500);
+    config.set_initial_max_stream_data_uni(1500);
+
+    let mut pipe = Pipe::with_config(&mut config).unwrap();
+    pipe.handshake().unwrap();
+
+    let h3_config = quiche::h3::Config::new().unwrap();
+    let mut client =
+        quiche::h3::Connection::with_transport(&mut pipe.client, &h3_config)
+            .unwrap();
+    let mut server =
+        quiche::h3::Connection::with_transport(&mut pipe.server, &h3_config)
+            .unwrap();
+
+    let req = [
+        quiche::h3::Header::new(b":method", b"GET"),
+        quiche::h3::Header::new(b":scheme", b"https"),
+        quiche::h3::Header::new(b":authority", b"test.com"),
+        quiche::h3::Header::new(b":path", b"/"),
+    ];
+    let stream_id = client.send_request(&mut pipe.client, &req, true).unwrap();
+    pipe.advance().unwrap();
+    assert!(matches!(
+        server.poll(&mut pipe.server),
+        Ok((id, quiche::h3::Event::Headers { .. })) if id == stream_id
+    ));
+
+    // The body is deliberately withheld until the headers-only polls return.
+    server
+        .send_response(
+            &mut pipe.server,
+            stream_id,
+            &[quiche::h3::Header::new(b":status", b"200")],
+            false,
+        )
+        .unwrap();
+    pipe.advance().unwrap();
+    assert!(matches!(
+        process_h3_event(&mut client, &mut pipe.client),
+        Ok(quiche::h3::Event::Headers { .. })
+    ));
+    assert_eq!(
+        process_h3_event(&mut client, &mut pipe.client),
+        Err(quiche::h3::Error::Done)
+    );
+
+    server
+        .send_body(&mut pipe.server, stream_id, b"response", false)
+        .unwrap();
+    pipe.advance().unwrap();
+    assert_eq!(
+        process_h3_event(&mut client, &mut pipe.client),
+        Ok(quiche::h3::Event::Data)
+    );
+    assert_eq!(
+        process_h3_event(&mut client, &mut pipe.client),
+        Err(quiche::h3::Error::Done)
+    );
+
+    // FIN arrives in a third flight, after DATA has been drained.
+    server
+        .send_body(&mut pipe.server, stream_id, b"", true)
+        .unwrap();
+    pipe.advance().unwrap();
+    assert_eq!(
+        process_h3_event(&mut client, &mut pipe.client),
+        Ok(quiche::h3::Event::Data)
+    );
+    assert_eq!(
+        process_h3_event(&mut client, &mut pipe.client),
+        Ok(quiche::h3::Event::Finished)
+    );
 }
 
 /// Tests that the client can migrate either actively or passively.
@@ -62,16 +176,19 @@ async fn test_active_migration() {
 ///
 /// This requires using "plain" quiche as a client to properly control when and
 /// where packets are sent to, which is not possible using h3i.
-async fn run_migration_test(active: bool, base_port: u16) {
+pub(crate) async fn run_migration_test(
+    active: bool, base_port: u16,
+) -> (Vec<quiche::PathEvent>, SocketAddr, SocketAddr) {
     let mut quic_settings = QuicSettings::default();
     quic_settings.active_connection_id_limit = 2;
     quic_settings.disable_active_migration = !active;
     quic_settings.disable_dcid_reuse = false;
 
+    let hook = TestConnectionHook::new();
     let (url, _) = start_server_with_settings(
         quic_settings,
         Http3Settings::default(),
-        TestConnectionHook::new(),
+        hook.clone(),
         handle_connection,
     );
     let server_addr = extract_host_ipv4(&url);
@@ -132,10 +249,10 @@ async fn run_migration_test(active: bool, base_port: u16) {
     ];
 
     h3_conn.send_request(&mut conn, &req, true).unwrap();
-    emit_flight(&socket, &mut conn).await;
-    process_flight(&socket, client_addr, &mut conn).await;
-
-    assert_eq!(process_h3_events(&mut h3_conn, &mut conn), (true, true));
+    assert_eq!(
+        await_h3_response(&socket, client_addr, &mut h3_conn, &mut conn).await,
+        (true, true)
+    );
 
     // Client migrates to new address.
     let migrated_addr = SocketAddr::new(client_addr.ip(), base_port + 1);
@@ -170,9 +287,18 @@ async fn run_migration_test(active: bool, base_port: u16) {
     emit_flight(&migrated_socket, &mut conn).await;
 
     // Client receives response for the second request.
-    process_flight(&migrated_socket, client_addr, &mut conn).await;
+    assert_eq!(
+        await_h3_response(
+            &migrated_socket,
+            client_addr,
+            &mut h3_conn,
+            &mut conn,
+        )
+        .await,
+        (true, true)
+    );
 
-    assert_eq!(process_h3_events(&mut h3_conn, &mut conn), (true, true));
+    (hook.path_events(), server_addr, migrated_addr)
 }
 
 async fn emit_flight(
@@ -222,28 +348,59 @@ async fn process_flight(
     }
 }
 
-fn process_h3_events(
+async fn await_h3_response(
+    socket: &tokio::net::UdpSocket, client_addr: SocketAddr,
     h3_conn: &mut quiche::h3::Connection, conn: &mut quiche::Connection,
 ) -> (bool, bool) {
-    let mut buf = [0; 65535];
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut got_headers = false;
 
-    let mut got_headers = false;
+        loop {
+            // Buffered events also yield cooperatively so the deadline can
+            // interrupt a response loop that makes no progress.
+            tokio::task::coop::consume_budget().await;
 
-    loop {
-        match h3_conn.poll(conn) {
-            Ok((_, quiche::h3::Event::Headers { .. })) => got_headers = true,
+            match process_h3_event(h3_conn, conn) {
+                Ok(quiche::h3::Event::Headers { .. }) => got_headers = true,
 
-            Ok((stream_id, quiche::h3::Event::Data)) => {
-                // Drain stream and drop the data.
-                while h3_conn.recv_body(conn, stream_id, &mut buf).is_ok() {}
-            },
+                Ok(quiche::h3::Event::Finished) => return (got_headers, true),
 
-            Ok((_, quiche::h3::Event::Finished)) => {
-                // Request is complete, return.
-                return (got_headers, true);
-            },
+                Ok(quiche::h3::Event::Reset(error_code)) =>
+                    panic!("response stream reset: {error_code}"),
 
-            _ => {},
+                Ok(_) => {},
+
+                Err(quiche::h3::Error::Done) => {
+                    // Done only exhausts buffered events, not the response.
+                    // Flush ACKs and control frames before awaiting packets.
+                    emit_flight(socket, conn).await;
+                    process_flight(socket, client_addr, conn).await;
+                },
+
+                Err(e) => panic!("failed to poll HTTP/3 response: {e:?}"),
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for the HTTP/3 response")
+}
+
+fn process_h3_event(
+    h3_conn: &mut quiche::h3::Connection, conn: &mut quiche::Connection,
+) -> quiche::h3::Result<quiche::h3::Event> {
+    let (stream_id, event) = h3_conn.poll(conn)?;
+
+    if matches!(event, quiche::h3::Event::Data) {
+        let mut buf = [0; 65535];
+        // Drain the buffered body so later polling can report response FIN.
+        loop {
+            match h3_conn.recv_body(conn, stream_id, &mut buf) {
+                Ok(_) => {},
+                Err(quiche::h3::Error::Done) => break,
+                Err(e) => return Err(e),
+            }
         }
     }
+
+    Ok(event)
 }

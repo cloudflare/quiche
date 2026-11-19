@@ -57,6 +57,16 @@ BoringSSL itself is built by `boring-sys` (no in-tree submodule).
 
 ## ANTI-PATTERNS
 
+- Model mutually exclusive lifecycle phases with enums, rather than related
+  booleans or overlapping completion predicates. Derive state enums from
+  authoritative buffers and acknowledgement data instead of duplicating it.
+  Boolean queries remain suitable for independent properties and compatibility
+  APIs.
+- Match lifecycle enums exhaustively in transitions and in cleanup or validation
+  decisions where a new variant could require a different outcome. Use simple
+  predicates for yes/no decisions with an obvious safe default for new variants.
+  A single derived helper can centralize a repeated exhaustive decision. Do not
+  combine independent flags into an enum; payload wildcards are fine.
 - **h3::Error != quiche::Error** — don't mix or convert carelessly; they have different variant sets.
 - **`Error::Done` is a success signal** in many read/write loops — not a failure.
 - **Don't add new CC impls** outside `recovery/` — two parallel impls (congestion + gcongestion) already exist.

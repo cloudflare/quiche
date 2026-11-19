@@ -43,6 +43,7 @@ src/
 ## NOTES
 
 - **Feature gate**: `async` feature swaps sync mio client for tokio-quiche async client. Also changes quiche re-export path (`quiche` vs `tokio_quiche::quiche`).
+- **`cli` feature** (default): gates the binary, `prompts` module, and `clap`/`env_logger`/`inquire`. The workspace dep sets `default-features = false`, so library consumers don't build them.
 - **quiche `internal` feature**: always enabled -- accesses `quiche::h3::frame::Frame` internals for raw frame construction.
 - **Stream type constants**: `HTTP3_CONTROL_STREAM_TYPE_ID` (0x0), `QPACK_ENCODER_STREAM_TYPE_ID` (0x2), `QPACK_DECODER_STREAM_TYPE_ID` (0x3) in `lib.rs`.
 - **Action execution**: `client/mod.rs::execute_action()` matches on `Action` variants, writes directly to `quiche::Connection` streams -- no H3 connection layer.
