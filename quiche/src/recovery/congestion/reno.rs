@@ -82,14 +82,19 @@ fn on_packet_acked(
     }
 
     if r.congestion_window < r.ssthresh.get() {
-        // In Slow slart, bytes_acked_sl is used for counting
+        // In Slow start, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
 
-        if r.hystart.in_css() {
-            r.congestion_window += r.hystart.css_cwnd_inc(r.max_datagram_size);
-        } else {
-            r.congestion_window += r.max_datagram_size;
+        if r.bytes_acked_sl >= r.max_datagram_size {
+            if r.hystart.in_css() {
+                r.congestion_window +=
+                    r.hystart.css_cwnd_inc(r.max_datagram_size);
+            } else {
+                r.congestion_window += r.max_datagram_size;
+            }
+
+            r.bytes_acked_sl -= r.max_datagram_size;
         }
 
         if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
@@ -221,6 +226,38 @@ mod tests {
 
         // Acked 3 packets.
         assert_eq!(sender.congestion_window, cwnd_prev + size * 3);
+    }
+
+    #[test]
+    fn reno_slow_start_small_packets() {
+        let mut sender = test_sender();
+        let size = sender.max_datagram_size;
+
+        // Send initcwnd full MSS packets to become no longer app limited.
+        for _ in 0..sender.initial_congestion_window_packets {
+            sender.send_packet(size);
+        }
+
+        // Send packets that are half the MSS.
+        for _ in 0..4 {
+            sender.send_packet(size / 2);
+        }
+
+        sender.ack_n_packets(sender.initial_congestion_window_packets, size);
+
+        let cwnd_prev = sender.congestion_window;
+
+        // Acking half an MSS worth of bytes doesn't increase cwnd.
+        sender.ack_n_packets(1, size / 2);
+        assert_eq!(sender.congestion_window, cwnd_prev);
+
+        // Acking a full MSS worth of bytes increases cwnd by one MSS.
+        sender.ack_n_packets(1, size / 2);
+        assert_eq!(sender.congestion_window, cwnd_prev + size);
+
+        // Ack the remaining half-MSS packets.
+        sender.ack_n_packets(2, size / 2);
+        assert_eq!(sender.congestion_window, cwnd_prev + 2 * size);
     }
 
     #[test]
