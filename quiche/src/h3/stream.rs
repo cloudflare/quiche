@@ -303,6 +303,26 @@ impl Stream {
         Ok(())
     }
 
+    /// Hands the stream over to the upper layer as a WebTransport stream.
+    pub fn set_webtransport(&mut self) {
+        self.ty = Some(Type::WebTransport);
+        self.state = State::Ignore;
+    }
+
+    /// Handles the peer's WebTransport stream signal, which is only valid as
+    /// the first frame of a stream the peer initiated.
+    pub fn set_webtransport_signalled(&mut self) -> Result<()> {
+        assert_eq!(self.state, State::FrameType);
+
+        if self.is_local || self.remote_initialized {
+            return Err(Error::FrameUnexpected);
+        }
+
+        self.set_webtransport();
+
+        Ok(())
+    }
+
     /// Sets the frame type and transitions to the next state.
     pub fn set_frame_type(&mut self, ty: u64) -> Result<()> {
         assert_eq!(self.state, State::FrameType);
@@ -343,16 +363,6 @@ impl Stream {
             },
 
             Some(Type::Request) => {
-                // A WebTransport stream is signalled by its first frame,
-                // regardless of which endpoint opened the request stream.
-                if ty == frame::WEBTRANSPORT_STREAM_FRAME_TYPE_ID {
-                    self.ty = Some(Type::WebTransport);
-                    self.frame_type =
-                        Some(frame::WEBTRANSPORT_STREAM_FRAME_TYPE_ID);
-                    self.state = State::Ignore;
-                    return Ok(());
-                }
-
                 self.validate_request_frame_type(ty)?;
             },
 

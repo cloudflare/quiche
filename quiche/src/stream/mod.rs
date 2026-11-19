@@ -1167,7 +1167,7 @@ impl StreamIter {
     /// the closure returns true. This function copies the values to a new
     /// buffer.
     #[inline]
-    pub fn filter<P>(&self, mut predicate: P) -> Self
+    pub(crate) fn filter<P>(&self, mut predicate: P) -> Self
     where
         P: FnMut(&u64) -> bool,
     {
