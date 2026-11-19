@@ -35,6 +35,8 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
+#[cfg(feature = "custom-client-dcid")]
+use tokio_quiche::quiche::ConnectionId;
 use tokio_quiche::settings::Hooks;
 use tokio_quiche::settings::TlsCertificatePaths;
 use tokio_quiche::ConnectionParams;
@@ -271,10 +273,9 @@ async fn test_connect_with_custom_dcid() {
 /// `original_dcid` the server's `InitialQuicConnection` reports.
 #[cfg(feature = "custom-client-dcid")]
 async fn server_original_dcid(
-    disable_client_ip_validation: bool, dcid: Vec<u8>,
-) -> Option<Vec<u8>> {
+    disable_client_ip_validation: bool, dcid: ConnectionId<'static>,
+) -> Option<ConnectionId<'static>> {
     use tokio_quiche::quic::connect_with_config;
-    use tokio_quiche::quiche::ConnectionId;
     use tokio_quiche::socket::Socket;
     use tokio_quiche::ClientH3Driver;
 
@@ -300,7 +301,7 @@ async fn server_original_dcid(
     client_socket.connect(addr).await.unwrap();
     let client_socket = Socket::try_from(client_socket).unwrap();
     let mut client_params = ConnectionParams::default();
-    client_params.dcid = Some(ConnectionId::from_vec(dcid));
+    client_params.dcid = Some(dcid);
     let (h3_driver, _h3_controller) =
         ClientH3Driver::new(Http3Settings::default());
     tokio::spawn(async move {
@@ -318,13 +319,13 @@ async fn server_original_dcid(
         .expect("no connection accepted")
         .unwrap()
         .unwrap();
-    conn.original_dcid().map(|cid| cid.to_vec())
+    conn.original_dcid().cloned()
 }
 
 #[tokio::test]
 #[cfg(feature = "custom-client-dcid")]
 async fn test_original_dcid_without_retry() {
-    let dcid = vec![0x02; 20];
+    let dcid = ConnectionId::from_vec(vec![0x02; 20]);
     assert_eq!(server_original_dcid(true, dcid.clone()).await, Some(dcid));
 }
 
@@ -333,7 +334,7 @@ async fn test_original_dcid_without_retry() {
 async fn test_original_dcid_after_retry() {
     // The client's retried Initial carries the server's Retry SCID; the
     // original DCID must still be the one the client picked first.
-    let dcid = vec![0x02; 20];
+    let dcid = ConnectionId::from_vec(vec![0x02; 20]);
     assert_eq!(server_original_dcid(false, dcid.clone()).await, Some(dcid));
 }
 

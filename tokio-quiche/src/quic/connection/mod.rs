@@ -364,8 +364,13 @@ where
     /// The destination connection ID the client chose for its first Initial
     /// packet (the original destination connection ID in RFC 9000).
     ///
-    /// After a stateless retry this is recovered from the retry token, not
-    /// taken from the retried Initial. `None` for client-side connections.
+    /// This is client-chosen and therefore untrusted data. After a stateless
+    /// retry it is recovered from the retry token, not taken from the retried
+    /// Initial; retry tokens do not expire, so it may be the DCID of an
+    /// earlier attempt replayed from the same IP address.
+    ///
+    /// `None` for connections created with
+    /// [`wrap_quiche_conn`](crate::quic::raw::wrap_quiche_conn).
     pub fn original_dcid(&self) -> Option<&ConnectionId<'static>> {
         self.params.original_dcid.as_ref()
     }
