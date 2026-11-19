@@ -45,10 +45,13 @@ use crate::metrics::labels;
 use crate::metrics::Metrics;
 use crate::quic::connection::ApplicationOverQuic;
 use crate::quic::connection::HandshakeError;
+use crate::quic::connection::HandshakeInfo;
 use crate::quic::connection::Incoming;
+use crate::quic::connection::IncomingPacketReceiver;
 use crate::quic::connection::QuicConnectionStats;
 use crate::quic::connection::SharedConnectionIdGenerator;
-use crate::quic::router::ConnectionMapCommand;
+use crate::quic::hooks::ConnectionHook;
+use crate::quic::DscpHandle;
 use crate::quic::QuicheConnection;
 use crate::QuicResult;
 
@@ -58,7 +61,8 @@ use datagram_socket::DatagramSocketSendExt;
 use datagram_socket::MaybeConnectedSocket;
 use datagram_socket::QuicAuditStats;
 use foundations::telemetry::log;
-use quiche::ConnectionId;
+use foundations::telemetry::metrics::Gauge;
+use foundations::telemetry::metrics::GaugeGuard;
 use quiche::Error as QuicheError;
 use quiche::SendInfo;
 use tokio::select;
@@ -235,7 +239,6 @@ impl AsMut<[u8]> for TransientSendBuf {
 }
 
 pub struct WriterConfig {
-    pub pending_cid: Option<ConnectionId<'static>>,
     pub peer_addr: SocketAddr,
     pub local_addr: SocketAddr,
     pub with_gso: bool,
@@ -271,11 +274,24 @@ pub(crate) struct IoWorkerParams<Tx, M> {
     pub(crate) cfg: WriterConfig,
     pub(crate) audit_log_stats: Arc<QuicAuditStats>,
     pub(crate) write_state: WriteState,
-    pub(crate) conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>,
+    pub(crate) dscp_handle: Option<DscpHandle>,
     pub(crate) cid_generator: Option<SharedConnectionIdGenerator>,
     #[cfg(feature = "perf-quic-listener-metrics")]
     pub(crate) init_rx_time: Option<SystemTime>,
     pub(crate) metrics: M,
+    pub(crate) handshake_info: HandshakeInfo,
+    pub(crate) active_conn_guard: GaugeGuard<Gauge>,
+}
+
+fn notify_path_events(
+    connection_hook: Option<&(dyn ConnectionHook + Send + Sync + 'static)>,
+    qconn: &mut QuicheConnection,
+) {
+    while let Some(path_event) = qconn.path_event_next() {
+        if let Some(hook) = connection_hook {
+            hook.on_path_event(qconn, &path_event);
+        }
+    }
 }
 
 pub(crate) struct IoWorker<Tx, M, S> {
@@ -287,13 +303,21 @@ pub(crate) struct IoWorker<Tx, M, S> {
     cfg: WriterConfig,
     audit_log_stats: Arc<QuicAuditStats>,
     write_state: WriteState,
-    conn_map_cmd_tx: mpsc::UnboundedSender<ConnectionMapCommand>,
+    dscp_handle: Option<DscpHandle>,
     cid_generator: Option<SharedConnectionIdGenerator>,
     #[cfg(feature = "perf-quic-listener-metrics")]
     init_rx_time: Option<SystemTime>,
     metrics: M,
+    /// The handshake deadline is enforced by the worker until the handshake
+    /// completes, regardless of the connection stage. With 0-RTT early data,
+    /// the application is started before the handshake completes, and a peer
+    /// that never completes it could otherwise keep the connection in early
+    /// data indefinitely.
+    handshake_info: HandshakeInfo,
     conn_stage: S,
     bw_estimator: BandwidthReporter,
+    /// Guard to decrement the `connections_in_memory` gauge on drop.
+    active_conn_guard: GaugeGuard<Gauge>,
 }
 
 impl<Tx, M, S> IoWorker<Tx, M, S>
@@ -314,17 +338,22 @@ where
             cfg: params.cfg,
             audit_log_stats: params.audit_log_stats,
             write_state: params.write_state,
-            conn_map_cmd_tx: params.conn_map_cmd_tx,
+            dscp_handle: params.dscp_handle,
             cid_generator: params.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: params.init_rx_time,
             metrics: params.metrics,
+            handshake_info: params.handshake_info,
             conn_stage,
             bw_estimator,
+            active_conn_guard: params.active_conn_guard,
         }
     }
 
-    fn fill_available_scids(&self, qconn: &mut QuicheConnection) {
+    fn fill_available_scids(
+        &self, qconn: &mut QuicheConnection,
+        incoming_pkt_receiver: &mut IncomingPacketReceiver,
+    ) {
         if qconn.scids_left() == 0 {
             return;
         }
@@ -332,20 +361,12 @@ where
             return;
         };
 
-        let current_cid = qconn.source_id().into_owned();
         for _ in 0..qconn.scids_left() {
             // We don't emit stateless resets, so any unguessable value is fine
             let reset_token = random_u128();
             let new_cid = cid_generator.new_connection_id();
 
-            if self
-                .conn_map_cmd_tx
-                .send(ConnectionMapCommand::MapCid {
-                    existing_cid: current_cid.clone(),
-                    new_cid: new_cid.clone(),
-                })
-                .is_err()
-            {
+            if !incoming_pkt_receiver.map_cid(&new_cid) {
                 // Can't do anything if the connection map is gone
                 return;
             }
@@ -357,20 +378,16 @@ where
         }
     }
 
-    fn unmap_cid(&self, cid: ConnectionId<'static>) {
-        // If the connection map is gone, the ID is already "unmapped"
-        let _ = self
-            .conn_map_cmd_tx
-            .send(ConnectionMapCommand::UnmapCid(cid));
-    }
-
-    fn refresh_connection_ids(&self, qconn: &mut QuicheConnection) {
+    fn refresh_connection_ids(
+        &self, qconn: &mut QuicheConnection,
+        incoming_pkt_receiver: &mut IncomingPacketReceiver,
+    ) {
         // Top up the connection's active CIDs
-        self.fill_available_scids(qconn);
+        self.fill_available_scids(qconn, incoming_pkt_receiver);
 
         // Remove retired CIDs from the ingress router
         while let Some(retired_cid) = qconn.retired_scid_next() {
-            self.unmap_cid(retired_cid);
+            incoming_pkt_receiver.unmap_cid(&retired_cid);
         }
     }
 
@@ -410,14 +427,24 @@ where
                 while let Some(pkt) = ctx
                     .in_pkt
                     .take()
-                    .or_else(|| ctx.incoming_pkt_receiver.try_recv().ok())
+                    .or_else(|| ctx.incoming_pkt_receiver.rx.try_recv().ok())
                 {
                     self.process_incoming(qconn, pkt)?;
                     did_recv = true;
                 }
 
+                // Deliver transport-generated events before the application can
+                // consume them.
+                notify_path_events(ctx.connection_hook.as_deref(), qconn);
+
                 self.conn_stage.on_read(did_recv, qconn, ctx)?;
-                self.refresh_connection_ids(qconn);
+
+                // Deliver events generated by application reads or writes.
+                notify_path_events(ctx.connection_hook.as_deref(), qconn);
+                self.refresh_connection_ids(
+                    qconn,
+                    &mut ctx.incoming_pkt_receiver,
+                );
 
                 let can_release = match self.write_state.next_release_time {
                     None => true,
@@ -490,7 +517,7 @@ where
                 self.write_state.next_release_time,
             );
             let new_deadline =
-                min_of_some(new_deadline, self.conn_stage.wait_deadline());
+                min_of_some(new_deadline, self.handshake_deadline(qconn));
 
             if new_deadline != current_deadline {
                 current_deadline = new_deadline;
@@ -500,7 +527,7 @@ where
                     .reset(new_deadline.unwrap_or(now + DEFAULT_SLEEP).into());
             }
 
-            let incoming_recv = &mut ctx.incoming_pkt_receiver;
+            let incoming_recv = &mut ctx.incoming_pkt_receiver.rx;
             let application = &mut ctx.application;
 
             select! {
@@ -533,9 +560,7 @@ where
                 },
             };
 
-            if let ControlFlow::Break(reason) = self.conn_stage.post_wait(qconn) {
-                return reason;
-            }
+            self.enforce_handshake_deadline(qconn)?;
         }
     }
 
@@ -684,7 +709,8 @@ where
         let tx_time = if gcongestion_enabled {
             initial_release_decision
                 .filter(|_| self.pacing_enabled(qconn))
-                // Return the time from the release decision if release_decision.time > now, else None.
+                // Return the time from the release decision if
+                // release_decision.time > now, else None.
                 .and_then(|v| v.time(now))
         } else {
             send_info
@@ -837,17 +863,33 @@ where
             let to = to.unwrap_or(self.cfg.peer_addr);
             let from = from.filter(|_| self.cfg.with_pktinfo);
 
-            let send_res = if let (Some(udp_socket), true) =
-                (self.socket.as_udp_socket(), self.cfg.with_gso)
-            {
-                // Only UDP supports GSO.
+            let dscp = self.dscp_handle.as_ref().and_then(DscpHandle::get);
+            // Don't bypass the socket wrapper when DSCP cannot be applied.
+            let needs_dscp_cmsg =
+                cfg!(all(target_os = "linux", not(feature = "fuzzing"))) &&
+                    dscp.is_some();
+
+            let send_res = if let (Some(udp_socket), true) = (
+                self.socket.as_udp_socket(),
+                self.cfg.with_gso || needs_dscp_cmsg,
+            ) {
+                // Only UDP supports GSO and per-packet DSCP control messages.
+                let (segment_size, tx_time) = if self.cfg.with_gso {
+                    (
+                        Some(self.write_state.segment_size),
+                        self.write_state.tx_time,
+                    )
+                } else {
+                    (None, None)
+                };
                 send_to(
                     udp_socket,
                     to,
                     from,
                     current_send_buf,
-                    self.write_state.segment_size,
-                    self.write_state.tx_time,
+                    segment_size,
+                    tx_time,
+                    dscp,
                     self.metrics
                         .write_errors(labels::QuicWriteError::WouldBlock),
                     self.metrics.send_to_wouldblock_duration_s(),
@@ -875,10 +917,38 @@ where
         }
     }
 
+    /// The deadline before which the handshake must complete, if it hasn't
+    /// completed yet.
+    fn handshake_deadline(&self, qconn: &QuicheConnection) -> Option<Instant> {
+        if qconn.is_established() {
+            return None;
+        }
+
+        self.handshake_info.deadline()
+    }
+
+    /// Closes the connection if the handshake didn't complete before its
+    /// deadline.
+    fn enforce_handshake_deadline(
+        &self, qconn: &mut QuicheConnection,
+    ) -> QuicResult<()> {
+        if !qconn.is_established() && self.handshake_info.is_expired() {
+            let err = quiche::WireErrorCode::ApplicationError as u64;
+            let _ = qconn.close(false, err, &[]);
+            return Err(HandshakeError::Timeout.into());
+        }
+
+        Ok(())
+    }
+
     /// Process the incoming packet
     fn process_incoming(
         &mut self, qconn: &mut QuicheConnection, mut pkt: Incoming,
     ) -> QuicResult<()> {
+        // Checked for every packet, so that a peer flooding packets can't keep
+        // the worker busy past the handshake deadline.
+        self.enforce_handshake_deadline(qconn)?;
+
         let recv_info = quiche::RecvInfo {
             from: pkt.peer_addr,
             to: pkt.local_addr,
@@ -1057,6 +1127,7 @@ where
         }
 
         let mut work_loop_result = self.work_loop(&mut qconn, &mut ctx).await;
+        notify_path_events(ctx.connection_hook.as_deref(), &mut qconn);
         if work_loop_result.is_ok() && qconn.is_closed() {
             work_loop_result = Err(HandshakeError::ConnectionClosed.into());
         }
@@ -1072,7 +1143,11 @@ where
             });
         };
 
-        match self.on_conn_established(&mut qconn, &mut ctx.application) {
+        let on_conn_established_result =
+            self.on_conn_established(&mut qconn, &mut ctx);
+        notify_path_events(ctx.connection_hook.as_deref(), &mut qconn);
+
+        match on_conn_established_result {
             Ok(()) => RunningOrClosing::Running(Running {
                 params: self.into(),
                 context: ctx,
@@ -1093,24 +1168,25 @@ where
         }
     }
 
-    fn on_conn_established<App: ApplicationOverQuic>(
-        &mut self, qconn: &mut QuicheConnection, driver: &mut App,
+    fn on_conn_established<A: ApplicationOverQuic>(
+        &mut self, qconn: &mut QuicheConnection,
+        ctx: &mut ConnectionStageContext<A>,
     ) -> QuicResult<()> {
         // Only calculate the QUIC handshake duration and call the driver's
         // on_conn_established hook if this is the first time
         // is_established == true.
         if self.audit_log_stats.transport_handshake_duration_us() == -1 {
-            self.conn_stage.handshake_info.set_elapsed();
-            let handshake_info = &self.conn_stage.handshake_info;
+            self.handshake_info.set_elapsed();
+            let handshake_info = &self.handshake_info;
 
             self.audit_log_stats
                 .set_transport_handshake_duration(handshake_info.elapsed());
 
-            driver.on_conn_established(qconn, handshake_info)?;
+            ctx.application.on_conn_established(qconn, handshake_info)?;
         }
 
-        if let Some(cid) = self.cfg.pending_cid.take() {
-            self.unmap_cid(cid);
+        if let Some(cid) = self.conn_stage.pending_cid.take() {
+            ctx.incoming_pkt_receiver.unmap_cid(&cid);
         }
 
         Ok(())
@@ -1125,11 +1201,13 @@ impl<Tx, M, S> From<IoWorker<Tx, M, S>> for IoWorkerParams<Tx, M> {
             cfg: value.cfg,
             audit_log_stats: value.audit_log_stats,
             write_state: value.write_state,
-            conn_map_cmd_tx: value.conn_map_cmd_tx,
+            dscp_handle: value.dscp_handle,
             cid_generator: value.cid_generator,
             #[cfg(feature = "perf-quic-listener-metrics")]
             init_rx_time: value.init_rx_time,
             metrics: value.metrics,
+            handshake_info: value.handshake_info,
+            active_conn_guard: value.active_conn_guard,
         }
     }
 }
@@ -1143,20 +1221,36 @@ where
         mut self, mut qconn: Box<QuicheConnection>,
         mut ctx: ConnectionStageContext<A>,
     ) -> Closing<Tx, M, A> {
-        // Perform a single call to process_reads()/process_writes(),
-        // unconditionally, to ensure that any application data (e.g.
-        // STREAM frames or datagrams) processed by the Handshake
-        // stage are properly passed to the application.
-        if let Err(e) = self.conn_stage.on_read(true, &mut qconn, &mut ctx) {
-            return Closing {
-                params: self.into(),
-                context: ctx,
-                work_loop_result: Err(e),
-                qconn,
-            };
-        };
+        // With 0-RTT early data, the application may be resumed after the
+        // handshake deadline, in which case no data must be passed to it.
+        let mut work_loop_result = self.enforce_handshake_deadline(&mut qconn);
 
-        let work_loop_result = self.work_loop(&mut qconn, &mut ctx).await;
+        if work_loop_result.is_ok() {
+            // Perform a single call to process_reads()/process_writes(),
+            // unconditionally, to ensure that any application data (e.g.
+            // STREAM frames or datagrams) processed by the Handshake
+            // stage are properly passed to the application.
+            work_loop_result =
+                self.conn_stage.on_read(true, &mut qconn, &mut ctx);
+            notify_path_events(ctx.connection_hook.as_deref(), &mut qconn);
+        }
+
+        if work_loop_result.is_ok() {
+            work_loop_result = self.work_loop(&mut qconn, &mut ctx).await;
+            notify_path_events(ctx.connection_hook.as_deref(), &mut qconn);
+        }
+
+        // Only connections started with 0-RTT early data can get here before
+        // the handshake completes, in which case this is a failed handshake,
+        // as in the Handshake stage.
+        if !qconn.is_established() {
+            let reason = match &work_loop_result {
+                Err(err) => err.into(),
+                Ok(()) => labels::HandshakeError::Disconnect,
+            };
+
+            self.metrics.failed_handshakes(reason).inc();
+        }
 
         Closing {
             params: self.into(),
@@ -1196,6 +1290,7 @@ where
                 &self.metrics,
                 &self.conn_stage.work_loop_result,
             );
+            notify_path_events(ctx.connection_hook.as_deref(), qconn);
         }
 
         // TODO: this assumes that the tidy_up operation can be completed in one
@@ -1240,7 +1335,7 @@ where
             }
         }
 
-        self.close_connection(qconn);
+        self.close_connection(qconn, &mut ctx.incoming_pkt_receiver);
 
         if let Err(work_loop_error) = self.conn_stage.work_loop_result {
             self.audit_log_stats
@@ -1248,18 +1343,16 @@ where
         }
     }
 
-    fn close_connection(&mut self, qconn: &mut QuicheConnection) {
-        if let Some(cid) = self.cfg.pending_cid.take() {
-            self.unmap_cid(cid);
-        }
+    fn close_connection(
+        &mut self, qconn: &mut QuicheConnection,
+        incoming_pkt_receiver: &mut IncomingPacketReceiver,
+    ) {
         while let Some(retired_cid) = qconn.retired_scid_next() {
-            self.unmap_cid(retired_cid);
+            incoming_pkt_receiver.unmap_cid(&retired_cid);
         }
-        for cid in qconn.source_ids().cloned() {
-            self.unmap_cid(cid.into_owned());
+        for cid in qconn.source_ids() {
+            incoming_pkt_receiver.unmap_cid(cid);
         }
-
-        self.metrics.connections_in_memory().dec();
     }
 }
 
@@ -1310,7 +1403,7 @@ fn random_u128() -> u128 {
 mod pooled_send_buf_tests {
     use super::*;
 
-    // Each test runs on a freshly spawned thread so the thread-local
+    // Each pool test runs on a freshly spawned thread so the thread-local
     // `SEND_BUF_POOL` starts empty (const-initialized) and cannot interfere
     // with other tests sharing the harness's worker threads.
 

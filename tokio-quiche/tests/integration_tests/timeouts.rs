@@ -102,12 +102,12 @@ async fn test_handshake_duration_ioworker() {
     quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
     quic_settings.handshake_timeout = Some(HANDSHAKE_TIMEOUT);
 
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.post_accept_timeout = Some(HANDSHAKE_TIMEOUT);
+
     let (url, _) = start_server_with_settings(
         quic_settings,
-        Http3Settings {
-            post_accept_timeout: Some(HANDSHAKE_TIMEOUT),
-            ..Default::default()
-        },
+        http3_settings,
         hook.clone(),
         handle_connection,
     );
@@ -233,12 +233,12 @@ async fn test_post_accept_timeout() {
     // post-accept timeout rather than Quiche's idle timeout.
     quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
 
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.post_accept_timeout = Some(POST_ACCEPT_TIMEOUT);
+
     let (url, _) = start_server_with_settings(
         quic_settings,
-        Http3Settings {
-            post_accept_timeout: Some(POST_ACCEPT_TIMEOUT),
-            ..Default::default()
-        },
+        http3_settings,
         hook,
         move |mut h3_conn| {
             let counter = Arc::clone(&clone);
@@ -293,12 +293,12 @@ async fn test_post_accept_timeout_is_reset() {
     // post-accept timeout rather than Quiche's idle timeout.
     quic_settings.max_idle_timeout = Some(Duration::from_secs(5));
 
+    let mut http3_settings = Http3Settings::default();
+    http3_settings.post_accept_timeout = Some(POST_ACCEPT_TIMEOUT);
+
     let (url, _) = start_server_with_settings(
         quic_settings,
-        Http3Settings {
-            post_accept_timeout: Some(POST_ACCEPT_TIMEOUT),
-            ..Default::default()
-        },
+        http3_settings,
         hook,
         move |mut h3_conn| {
             let counter = Arc::clone(&clone);

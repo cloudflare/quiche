@@ -25,10 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use super::Incoming;
-use super::InitialQuicConnection;
-use crate::metrics::Metrics;
 
-use datagram_socket::DatagramSocketSend;
 use quiche::ConnectionId;
 use quiche::MAX_CONN_ID_LEN;
 use std::collections::BTreeMap;
@@ -53,8 +50,8 @@ const fn min_usize(v1: usize, v2: usize) -> usize {
 
 /// A non unique connection identifier, multiple Cids can map to the same
 /// conenction.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum CidOwned {
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum CidOwned {
     /// The QUIC connections IDs theoretically have unbounded length, so for the
     /// generic case a boxed slice is used to store the ID.
     Generic(Box<[u8]>),
@@ -105,26 +102,20 @@ pub(crate) struct ConnectionMap {
 }
 
 impl ConnectionMap {
-    pub(crate) fn insert<Tx, M>(
-        &mut self, cid: &ConnectionId<'_>, conn: &InitialQuicConnection<Tx, M>,
-    ) where
-        Tx: DatagramSocketSend + Send + 'static,
-        M: Metrics,
-    {
-        let ev_sender = conn.incoming_ev_sender.clone();
-        self.quic_id_map.insert(cid.into(), ev_sender);
+    pub(crate) fn insert(
+        &mut self, cid: CidOwned, sender: mpsc::Sender<Incoming>,
+    ) {
+        self.quic_id_map.insert(cid, sender);
     }
 
-    pub(crate) fn map_cid(
-        &mut self, existing_cid: &ConnectionId<'_>, new_cid: &ConnectionId<'_>,
-    ) {
-        if let Some(ev_sender) = self.quic_id_map.get(&existing_cid.into()) {
-            self.quic_id_map.insert(new_cid.into(), ev_sender.clone());
+    pub(crate) fn map_cid(&mut self, existing_cid: &CidOwned, new_cid: CidOwned) {
+        if let Some(incoming_tx) = self.quic_id_map.get(existing_cid) {
+            self.quic_id_map.insert(new_cid, incoming_tx.clone());
         }
     }
 
-    pub(crate) fn unmap_cid(&mut self, cid: &ConnectionId<'_>) {
-        self.quic_id_map.remove(&cid.into());
+    pub(crate) fn unmap_cid(&mut self, cid: &CidOwned) {
+        self.quic_id_map.remove(cid);
     }
 
     pub(crate) fn get(

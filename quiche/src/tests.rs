@@ -32,6 +32,48 @@ use crate::Header;
 
 use rstest::rstest;
 
+/// Pick a numeric expectation based on the active `boring` major version.
+///
+/// `boring` 5.x ships BoringSSL with post-quantum (X25519MLKEM768) key
+/// shares enabled by default, which inflates the ClientHello and ripples
+/// through into byte counts and per-epoch packet numbers in several
+/// handshake-adjacent assertions below. `boring` 4.x doesn't, so each
+/// such assertion has two flavours. Wrap them in this macro so the
+/// per-version values stay side-by-side at the call site. The active
+/// version is detected by `build.rs` (see `cfg(boring_v5)`); 4.x is
+/// the assumed default.
+macro_rules! by_boring {
+    (b4: $b4:expr, b5: $b5:expr $(,)?) => {{
+        #[cfg(not(boring_v5))]
+        {
+            $b4
+        }
+        #[cfg(boring_v5)]
+        {
+            $b5
+        }
+    }};
+}
+
+/// Returns the congestion window `conn` is expected to have after the
+/// handshake, without hardcoding the handshake size (which depends on the TLS
+/// stack and on the certificate in use).
+///
+/// Cubic leaves the initial window (10 packets of 1200 bytes) untouched,
+/// while BBR2 in STARTUP grows it by the number of bytes acked. This assumes
+/// that every acked in-flight packet carried CRYPTO, STREAM or DATAGRAM
+/// frames. BBR2 ignores other packets, such as one carrying only
+/// HANDSHAKE_DONE, when growing cwnd, but `Stats::acked_bytes` still counts
+/// them.
+fn cwnd_after_handshake(conn: &Connection, cc_algorithm_name: &str) -> usize {
+    const INITIAL_CWND: usize = 10 * 1200;
+
+    match cc_algorithm_name {
+        "cubic" => INITIAL_CWND,
+        _ => INITIAL_CWND + conn.stats().acked_bytes as usize,
+    }
+}
+
 #[test]
 fn transport_params() {
     // Server encodes, client decodes.
@@ -367,8 +409,6 @@ fn verify_client_anonymous() {
 fn missing_initial_source_connection_id(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut buf = [0; 65535];
-
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Reset initial_source_connection_id.
@@ -377,12 +417,14 @@ fn missing_initial_source_connection_id(
         .initial_source_connection_id = None;
     assert_eq!(pipe.client.encode_transport_params(), Ok(()));
 
-    // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    // Client sends initial flight. The ClientHello may span multiple Initial
+    // packets (e.g. when post-quantum key shares are advertised), so deliver
+    // the whole flight before checking the server's reaction.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server rejects transport parameters.
     assert_eq!(
-        pipe.server_recv(&mut buf[..len]),
+        test_utils::process_flight(&mut pipe.server, flight),
         Err(Error::InvalidTransportParam)
     );
 }
@@ -391,8 +433,6 @@ fn missing_initial_source_connection_id(
 fn invalid_initial_source_connection_id(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut buf = [0; 65535];
-
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
 
     // Scramble initial_source_connection_id.
@@ -401,12 +441,14 @@ fn invalid_initial_source_connection_id(
         .initial_source_connection_id = Some(b"bogus value".to_vec().into());
     assert_eq!(pipe.client.encode_transport_params(), Ok(()));
 
-    // Client sends initial flight.
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    // Client sends initial flight. The ClientHello may span multiple Initial
+    // packets (e.g. when post-quantum key shares are advertised), so deliver
+    // the whole flight before checking the server's reaction.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server rejects transport parameters.
     assert_eq!(
-        pipe.server_recv(&mut buf[..len]),
+        test_utils::process_flight(&mut pipe.server, flight),
         Err(Error::InvalidTransportParam)
     );
 }
@@ -636,7 +678,9 @@ fn handshake_0rtt(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // Test assumes the server transitions to early-data state after a
+    // single `server_recv`, which requires a single-Initial ClientHello.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -700,7 +744,9 @@ fn handshake_0rtt_reordered(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // Test assumes the server transitions to early-data state after a
+    // single `server_recv`, which requires a single-Initial ClientHello.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -902,7 +948,12 @@ fn crypto_limit(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) 
 fn limit_handshake_data(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // This test relies on `cert-big.crt` forcing the server's handshake
+    // flight above the default `client_sent * MAX_AMPLIFICATION_FACTOR`
+    // anti-amplification cap, which in turn relies on the ClientHello
+    // fitting in a single Initial packet (so `client_sent` stays small).
+    // Use a no-PQ client config to guarantee that.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert-big.crt")
@@ -914,7 +965,7 @@ fn limit_handshake_data(
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
 
-    let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
     let client_sent = flight.iter().fold(0, |out, p| out + p.0.len());
@@ -959,7 +1010,11 @@ fn custom_limit_handshake_data(
 
 #[rstest]
 fn amplification_limited_stat() {
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // `cert-big.crt` is sized so the server's handshake flight exceeds the
+    // default `client_sent * MAX_AMPLIFICATION_FACTOR` anti-amplification
+    // cap; that only holds when the ClientHello fits in a single Initial,
+    // so use a no-PQ config.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     config
         .load_cert_chain_from_pem_file("examples/cert-big.crt")
         .unwrap();
@@ -970,7 +1025,7 @@ fn amplification_limited_stat() {
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
 
-    let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
     test_utils::process_flight(&mut pipe.server, flight).unwrap();
@@ -993,7 +1048,13 @@ fn amplification_limited_stat() {
 }
 
 #[rstest]
-fn streamio(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
+#[case::cubic("cubic")]
+#[case::bbr2_gcongestion("bbr2_gcongestion")]
+#[cfg_attr(
+    feature = "congestion_window_unchecked_available",
+    case::congestion_window_unchecked("congestion_window_unchecked")
+)]
+fn streamio(#[case] cc_algorithm_name: &str) {
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -1164,7 +1225,9 @@ fn streamio_mixed_actions(
 fn zero_rtt(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // Test assumes the server transitions to early-data state after a
+    // single `server_recv`, which requires a single-Initial ClientHello.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert.crt")
@@ -1551,6 +1614,241 @@ fn flow_control_limit_dup(
 
     let pkt_type = Type::Short;
     assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+}
+
+#[rstest]
+fn flow_control_empty_stream_frame_not_double_counted(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // The connection-level limit is 30 bytes, the stream-level limit 15.
+    assert_eq!(pipe.server.max_rx_data(), 30);
+
+    // The empty frame advances the largest received offset to 15, which is
+    // charged to connection flow control before the data covering 5..15
+    // arrives.
+    let frames = [
+        frame::Frame::Stream {
+            stream_id: 0,
+            data: <RangeBuf>::from(b"aaaaa", 0, false),
+        },
+        frame::Frame::Stream {
+            stream_id: 0,
+            data: <RangeBuf>::from(b"", 15, false),
+        },
+    ];
+
+    let pkt_type = Type::Short;
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+    assert_eq!(pipe.server.rx_data, 15);
+
+    // Filling the gap must not be charged again: the remaining 15 bytes of
+    // credit go entirely to the second stream.
+    let frames = [
+        frame::Frame::Stream {
+            stream_id: 0,
+            data: <RangeBuf>::from(b"aaaaaaaaaa", 5, false),
+        },
+        frame::Frame::Stream {
+            stream_id: 4,
+            data: <RangeBuf>::from(b"aaaaaaaaaaaaaaa", 0, false),
+        },
+    ];
+
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+    assert_eq!(pipe.server.rx_data, 30);
+}
+
+#[rstest]
+fn flow_control_empty_stream_frame_after_shutdown(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let pkt_type = Type::Short;
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let frames = [frame::Frame::Stream {
+        stream_id: 0,
+        data: <RangeBuf>::from(b"aaaaa", 0, false),
+    }];
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    // A draining stream counts incoming data as consumed as it arrives.
+    assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+    assert_eq!(pipe.server.rx_data, 5);
+    assert_eq!(pipe.server.flow_control.consumed(), 5);
+
+    let frames = [frame::Frame::Stream {
+        stream_id: 0,
+        data: <RangeBuf>::from(b"", 10, false),
+    }];
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+    assert_eq!(pipe.server.rx_data, 10);
+    assert_eq!(pipe.server.flow_control.consumed(), 10);
+
+    // The reset charges and consumes only the bytes beyond the largest
+    // received offset; 5..10 was already consumed above.
+    let frames = [frame::Frame::ResetStream {
+        stream_id: 0,
+        error_code: 42,
+        final_size: 15,
+    }];
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+    assert_eq!(pipe.server.rx_data, 15);
+    assert_eq!(pipe.server.flow_control.consumed(), 15);
+}
+
+#[rstest]
+fn zero_length_stream_frame_not_sent(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const STREAM_ID: u64 = 1 << 14;
+
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(4_000_000_000);
+    config.set_initial_max_stream_data_bidi_local(2_000_000_000);
+    config.set_initial_max_stream_data_bidi_remote(2_000_000_000);
+    config.set_initial_max_streams_bidi((STREAM_ID >> 2) + 1);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Use four-byte stream ID and eight-byte offset varints, producing a
+    // 15-byte STREAM header. Seed the offset rather than transferring a
+    // gigabyte.
+    assert_eq!(pipe.client.stream_send(STREAM_ID, b"", false), Ok(0));
+    pipe.client
+        .streams
+        .get_mut(STREAM_ID)
+        .unwrap()
+        .send
+        .seed_offsets_for_test(1 << 30);
+
+    let data = [0xa; 4096];
+    assert_eq!(pipe.client.stream_send(STREAM_ID, &data, false), Ok(4096));
+
+    // Sweep output buffer sizes across the range where the packet has room
+    // for the STREAM frame header but not for any payload.
+    for cap in 25..80 {
+        match pipe.client.send(&mut buf[..cap]) {
+            Ok((written, _)) => {
+                let frames =
+                    test_utils::decode_pkt(&mut pipe.server, &mut buf[..written])
+                        .unwrap();
+
+                for frame in &frames {
+                    if let frame::Frame::Stream { data, .. } = frame {
+                        assert!(
+                            !data.is_empty() || data.fin(),
+                            "zero-length non-fin STREAM frame sent at cap {cap}",
+                        );
+                    }
+                }
+            },
+
+            Err(Error::Done) | Err(Error::BufferTooShort) => (),
+
+            Err(e) => panic!("unexpected send error: {e:?}"),
+        }
+    }
+
+    // The skipped data is delivered once packets have room.
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(
+        pipe.server.streams.get(STREAM_ID).unwrap().recv.max_off(),
+        (1 << 30) + 4096
+    );
+}
+
+#[rstest]
+fn zero_length_stream_frame_skip_rotates_incremental(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(4_000_000_000);
+    config.set_initial_max_stream_data_bidi_local(2_000_000_000);
+    config.set_initial_max_stream_data_bidi_remote(2_000_000_000);
+    config.set_initial_max_streams_bidi(20);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Stream 64 heads the flushable queue with a 13-byte STREAM header;
+    // stream 0 follows with a 5-byte one.
+    assert_eq!(pipe.client.stream_send(64, b"", false), Ok(0));
+    pipe.client
+        .streams
+        .get_mut(64)
+        .unwrap()
+        .send
+        .seed_offsets_for_test(1 << 30);
+
+    let data = [0xa; 4096];
+    assert_eq!(pipe.client.stream_send(64, &data, false), Ok(4096));
+    assert_eq!(pipe.client.stream_send(0, &data, false), Ok(4096));
+
+    // Growing the output buffer one byte at a time first reaches the size
+    // where only stream 64's header fits. Skipping it must rotate it behind
+    // stream 0, so the first STREAM frame produced is stream 0's, not 64's.
+    let mut first_stream_id = None;
+
+    for cap in 25..80 {
+        match pipe.client.send(&mut buf[..cap]) {
+            Ok((written, _)) => {
+                let frames =
+                    test_utils::decode_pkt(&mut pipe.server, &mut buf[..written])
+                        .unwrap();
+
+                first_stream_id = frames.iter().find_map(|frame| match frame {
+                    frame::Frame::Stream { stream_id, .. } => Some(*stream_id),
+                    _ => None,
+                });
+
+                if first_stream_id.is_some() {
+                    break;
+                }
+            },
+
+            Err(Error::Done) | Err(Error::BufferTooShort) => (),
+
+            Err(e) => panic!("unexpected send error: {e:?}"),
+        }
+    }
+
+    assert_eq!(first_stream_id, Some(0));
 }
 
 #[rstest]
@@ -3022,7 +3320,7 @@ fn reset_stream_data_recvd(
 /// been read, discards all buffered data and notifies the application.
 fn reset_stream_data_not_recvd(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
-    #[values(true, false)] discard: bool,
+    #[values(true, false)] discard: bool, #[values(true, false)] fin_known: bool,
 ) {
     let mut buf = [0; 65535];
 
@@ -3059,6 +3357,12 @@ fn reset_stream_data_not_recvd(
         Ok((0, true))
     );
     assert!(pipe.client.stream_finished(0));
+
+    if fin_known {
+        assert_eq!(pipe.client.stream_send(0, b"ello", true), Ok(4));
+        assert_eq!(pipe.advance(), Ok(()));
+        assert!(pipe.server.stream_readable(0));
+    }
 
     // Client sends RESET_STREAM, closing stream.
     let frames = [frame::Frame::ResetStream {
@@ -3347,8 +3651,8 @@ fn stop_sending(
         Err(Error::StreamStopped(42)),
     );
 
-    // Returning `StreamStopped` causes the stream to be collected.
-    assert_eq!(pipe.server.streams.len(), 0);
+    // Reporting STOP leaves the stream alive until RESET_STREAM is ACKed.
+    assert_eq!(pipe.server.streams.len(), 1);
 
     // Client acks RESET_STREAM frame.
     let mut ranges = ranges::RangeSet::default();
@@ -3361,6 +3665,7 @@ fn stop_sending(
     }];
 
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
+    assert!(pipe.server.streams.is_collected(0));
 
     // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
     let frames = [frame::Frame::StopSending {
@@ -3457,6 +3762,423 @@ fn stop_sending_fin(
 
     // No more frames are sent by the server.
     assert_eq!(iter.next(), None);
+
+    let max_streams = pipe.server.streams.max_streams_bidi_next();
+    assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.server.streams.is_collected(4));
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams + 1);
+}
+
+#[rstest]
+/// A completed receive side must not discard an unreported STOP error.
+fn stop_sending_recv_completion_preserves_unreported_error(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] discard: bool,
+    #[values(true, false)] stop_first: bool,
+    #[values("data_fin", "empty_fin", "reset")] receive_end: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    let stop = frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    };
+    let receive = match receive_end {
+        "data_fin" => frame::Frame::Stream {
+            stream_id: 0,
+            data: RangeBuf::from(b"req", 0, true),
+        },
+
+        "empty_fin" => frame::Frame::Stream {
+            stream_id: 0,
+            data: RangeBuf::from(b"", 0, true),
+        },
+
+        "reset" => frame::Frame::ResetStream {
+            stream_id: 0,
+            error_code: 77,
+            final_size: 0,
+        },
+
+        _ => unreachable!(),
+    };
+    let frames = if stop_first {
+        [stop, receive]
+    } else {
+        [receive, stop]
+    };
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+    let expected = match receive_end {
+        "data_fin" => Ok((3, true)),
+        "empty_fin" => Ok((0, true)),
+        "reset" => Err(Error::StreamReset(77)),
+        _ => unreachable!(),
+    };
+    assert_eq!(stream_recv_discard(&mut pipe.server, discard, 0), expected);
+    assert_eq!(pipe.server.streams.len(), 1);
+    let max_streams = pipe.server.streams.max_streams_bidi_next();
+
+    assert_eq!(
+        pipe.server.stream_capacity(0),
+        Err(Error::StreamStopped(42))
+    );
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    pipe.server.send(&mut buf).unwrap();
+    let mut ranges = ranges::RangeSet::default();
+    ranges.insert(pipe.server.next_pkt_num - 1..pipe.server.next_pkt_num);
+    let frames = [frame::Frame::ACK {
+        ack_delay: 0,
+        ranges,
+        ecn_counts: None,
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+    assert_eq!(pipe.server.streams.len(), 0);
+    assert!(pipe.server.streams.is_collected(0));
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams + 1);
+}
+
+/// A first FIN on consumed data remains readable before stream collection.
+#[rstest]
+fn stop_sending_duplicate_data_fin_requires_read(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] discard: bool,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.client.stream_send(0, b"req", false), Ok(3));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((3, false)));
+
+    assert_eq!(pipe.client.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    assert_eq!(
+        pipe.server.stream_capacity(0),
+        Err(Error::StreamStopped(42))
+    );
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(!pipe.server.stream_readable(0));
+    assert_eq!(pipe.server.writable().next(), None);
+    let max_streams = pipe.server.streams.max_streams_bidi_next();
+
+    // The consumed data is discarded, but its FIN still needs to be delivered.
+    let frames = [frame::Frame::Stream {
+        stream_id: 0,
+        data: RangeBuf::from(b"req", 0, true),
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+    assert!(pipe.server.stream_finished(0));
+    assert!(pipe.server.stream_readable(0));
+    assert_eq!(pipe.server.writable().next(), None);
+    assert!(!pipe.server.streams.is_collected(0));
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams);
+
+    assert_eq!(
+        stream_recv_discard(&mut pipe.server, discard, 0),
+        Ok((0, true))
+    );
+    assert!(!pipe.server.stream_readable(0));
+    assert!(pipe.server.streams.is_collected(0));
+    assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams + 1);
+}
+
+/// Read-side completion collects completed streams without dropping queued
+/// FINs.
+#[rstest]
+fn stream_shutdown_read_collects_completed_streams(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(
+        "fin_before_shutdown",
+        "fin_after_shutdown",
+        "reset_after_shutdown"
+    )]
+    receive_end: &str,
+    #[values("stopped", "fin_acked", "fin_queued")] send_end: &str,
+) {
+    let fin_before_shutdown = receive_end == "fin_before_shutdown";
+    let collected = send_end != "fin_queued";
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(
+        pipe.client.stream_send(0, b"req", fin_before_shutdown),
+        Ok(3)
+    );
+    assert_eq!(pipe.advance(), Ok(()));
+
+    if send_end == "stopped" {
+        assert_eq!(pipe.client.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+        assert_eq!(
+            pipe.server.stream_capacity(0),
+            Err(Error::StreamStopped(42))
+        );
+
+        // ACK the reset while the request remains unread.
+        assert_eq!(pipe.advance(), Ok(()));
+    } else {
+        let fin_acked = send_end == "fin_acked";
+        assert_eq!(pipe.server.stream_send(0, b"rsp", fin_acked), Ok(3));
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(pipe.client.stream_recv(0, &mut [0; 3]), Ok((3, fin_acked)));
+
+        if !fin_acked {
+            // Queue FIN after its preceding data was ACKed, but do not send it
+            // yet.
+            assert_eq!(pipe.server.stream_send(0, b"", true), Ok(0));
+        }
+    }
+
+    assert!(pipe.server.stream_readable(0));
+    let max_streams = pipe.server.streams.max_streams_bidi_next();
+
+    assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 77), Ok(()));
+    match receive_end {
+        "fin_before_shutdown" => (),
+
+        "fin_after_shutdown" => {
+            assert_eq!(pipe.client.stream_send(0, b"", true), Ok(0));
+        },
+
+        "reset_after_shutdown" => {
+            assert_eq!(
+                pipe.client.stream_shutdown(0, Shutdown::Write, 77),
+                Ok(())
+            );
+        },
+
+        _ => unreachable!(),
+    }
+
+    if !fin_before_shutdown {
+        assert!(!pipe.server.streams.is_collected(0));
+        assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams);
+
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    }
+
+    assert_eq!(pipe.server.streams.is_collected(0), collected);
+    assert_eq!(
+        pipe.server.streams.max_streams_bidi_next(),
+        max_streams + u64::from(collected)
+    );
+
+    if !collected {
+        let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+        test_utils::process_flight(&mut pipe.client, flight).unwrap();
+        assert_eq!(pipe.client.stream_recv(0, &mut []), Ok((0, true)));
+        assert_eq!(pipe.advance(), Ok(()));
+        assert!(pipe.server.streams.is_collected(0));
+        assert_eq!(pipe.server.streams.max_streams_bidi_next(), max_streams + 1);
+    }
+}
+
+#[rstest]
+/// A stopped stream remains writable when the peer grants no send credit.
+fn stop_sending_writable_with_no_connection_capacity(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut client_config =
+        test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    client_config.set_initial_max_data(0);
+    let mut server_config =
+        test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    let mut pipe = test_utils::Pipe::with_client_and_server_config(
+        &mut client_config,
+        &mut server_config,
+    )
+    .unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"req", false), Ok(3));
+    assert_eq!(pipe.client.stream_send(4, b"req", false), Ok(3));
+    assert_eq!(pipe.client.stream_send(8, b"req", false), Ok(3));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let stop = [
+        frame::Frame::StopSending {
+            stream_id: 0,
+            error_code: 42,
+        },
+        frame::Frame::StopSending {
+            stream_id: 8,
+            error_code: 43,
+        },
+    ];
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &stop, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+    assert_eq!(pipe.server.stream_priority(0, 42, false), Ok(()));
+    assert_eq!(pipe.server.stream_priority(8, 10, false), Ok(()));
+
+    assert_eq!(pipe.server.stream_capacity(4), Ok(0));
+
+    assert_eq!(pipe.server.writable().collect::<Vec<_>>(), vec![8, 0]);
+    assert_eq!(pipe.server.stream_writable_next(), Some(8));
+    assert_eq!(pipe.server.writable().collect::<Vec<_>>(), vec![0]);
+    assert_eq!(pipe.server.stream_writable_next(), Some(0));
+    assert_eq!(pipe.server.stream_writable_next(), None);
+    assert_eq!(pipe.server.writable().next(), None);
+    assert_eq!(
+        pipe.server.stream_capacity(0),
+        Err(Error::StreamStopped(42))
+    );
+    assert_eq!(
+        pipe.server.stream_capacity(8),
+        Err(Error::StreamStopped(43))
+    );
+}
+
+#[rstest]
+/// A peer can stop a local stream opened implicitly by a higher stream ID.
+fn stop_sending_implicitly_opened_local_stream(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(0, 2)] stream_id: u64,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(
+        pipe.client.stream_send(stream_id + 4, b"data", false),
+        Ok(4)
+    );
+    assert!(pipe.client.streams.get(stream_id).is_none());
+
+    let stop = [frame::Frame::StopSending {
+        stream_id,
+        error_code: 42,
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.server, Type::Short, &stop, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.client_recv(&mut buf[..written]), Ok(written));
+    assert_eq!(
+        pipe.client.stream_capacity(stream_id),
+        Err(Error::StreamStopped(42))
+    );
+
+    if stream_id == 2 {
+        assert!(!pipe.client.streams.is_collected(stream_id));
+        pipe.client.send(&mut buf).unwrap();
+        let mut ranges = ranges::RangeSet::default();
+        ranges.insert(pipe.client.next_pkt_num - 1..pipe.client.next_pkt_num);
+        let frames = [frame::Frame::ACK {
+            ack_delay: 0,
+            ranges,
+            ecn_counts: None,
+        }];
+        let written = test_utils::encode_pkt(
+            &mut pipe.server,
+            Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+        assert_eq!(pipe.client_recv(&mut buf[..written]), Ok(written));
+        assert!(pipe.client.streams.is_collected(stream_id));
+        let written = test_utils::encode_pkt(
+            &mut pipe.server,
+            Type::Short,
+            &stop,
+            &mut buf,
+        )
+        .unwrap();
+        assert_eq!(pipe.client_recv(&mut buf[..written]), Ok(written));
+        assert!(pipe.client.streams.is_collected(stream_id));
+    } else {
+        assert!(pipe.client.streams.get(stream_id).is_some());
+    }
+}
+
+#[rstest]
+/// Peer frames may reference local streams without an existing Stream object.
+fn peer_frames_on_implicitly_opened_local_streams(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(8, b"a", false), Ok(1));
+    assert_eq!(pipe.client.stream_send(6, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!([0, 2, 4]
+        .iter()
+        .all(|&id| pipe.client.streams.get(id).is_none()));
+
+    let frames = [
+        frame::Frame::Stream {
+            stream_id: 0,
+            data: RangeBuf::from(b"response", 0, false),
+        },
+        frame::Frame::ResetStream {
+            stream_id: 4,
+            error_code: 77,
+            final_size: 0,
+        },
+        frame::Frame::MaxStreamData {
+            stream_id: 2,
+            max: 1024,
+        },
+    ];
+    let written =
+        test_utils::encode_pkt(&mut pipe.server, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.client_recv(&mut buf[..written]), Ok(written));
+
+    assert_eq!(pipe.client.stream_recv(0, &mut buf), Ok((8, false)));
+    assert_eq!(
+        pipe.client.stream_recv(4, &mut buf),
+        Err(Error::StreamReset(77))
+    );
+    assert_eq!(pipe.client.streams.get(2).unwrap().send.cap(), Ok(1024));
+}
+
+#[rstest]
+/// Peer frames cannot open a local stream beyond those opened by the app.
+fn stop_sending_unopened_local_stream_rejected(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(2, 8)] stream_id: u64,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"data", false), Ok(4));
+
+    let stop = [frame::Frame::StopSending {
+        stream_id,
+        error_code: 42,
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.server, Type::Short, &stop, &mut buf)
+            .unwrap();
+    assert_eq!(
+        pipe.client_recv(&mut buf[..written]),
+        Err(Error::InvalidStreamState(stream_id))
+    );
+    assert!(pipe.client.streams.get(stream_id).is_none());
 }
 
 #[rstest]
@@ -3521,8 +4243,13 @@ fn stop_sending_unsent_tx_cap(
     }];
 
     let pkt_type = Type::Short;
-    pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
-        .unwrap();
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, pkt_type, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+
+    // The stopped stream has nothing left to flush.
+    assert!(!pipe.server.streams.has_flushable());
 
     // Server can now send more data (on a different stream).
     assert_eq!(pipe.client.stream_send(8, b"hello", true), Ok(5));
@@ -3538,12 +4265,11 @@ fn stop_sending_unsent_tx_cap(
 }
 
 #[rstest]
-/// Tests that the `StreamStopped` error is propagated even if the RESET_STREAM
-/// in response to STOP_SENDING is acked before the application processes
-/// writable streams.
+/// Tests that RESET_STREAM ACK preserves an unreported STOP until the
+/// application observes it or shuts down the write side.
 fn stop_sending_ack_race(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
-    #[values(true, false)] discard: bool,
+    #[values(true, false)] discard: bool, #[values(true, false)] shutdown: bool,
 ) {
     let mut buf = [0; 65535];
 
@@ -3628,12 +4354,16 @@ fn stop_sending_ack_race(
     assert_eq!(r.next(), Some(0));
     assert_eq!(r.next(), None);
 
-    assert_eq!(
-        pipe.server.stream_send(0, b"world", true),
-        Err(Error::StreamStopped(42)),
-    );
+    if shutdown {
+        assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Write, 42), Ok(()));
+    } else {
+        assert_eq!(
+            pipe.server.stream_send(0, b"world", true),
+            Err(Error::StreamStopped(42)),
+        );
+    }
 
-    // Stream is collected on the server after `StreamStopped` is returned.
+    // Reporting or dismissing STOP collects the already acknowledged stream.
     assert_eq!(pipe.server.streams.len(), 0);
 
     // Sending STOP_SENDING again shouldn't trigger RESET_STREAM again.
@@ -3785,6 +4515,55 @@ fn stop_sending_stream_ack_race(
 }
 
 #[rstest]
+fn uni_stream_local_shutdown_before_read(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] send_fin: bool,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    pipe.handshake().unwrap();
+
+    let mut buf = [0u8; 32];
+
+    // Client sends some data.
+    assert_eq!(pipe.client.stream_send(2, b"hello", send_fin), Ok(5));
+    pipe.advance().unwrap();
+
+    if !send_fin {
+        // Client resets the stream.
+        pipe.client.stream_shutdown(2, Shutdown::Write, 0).unwrap();
+        pipe.advance().unwrap();
+    }
+
+    // Client state is cleaned up, while the server retains the stream until a
+    // local operation.
+    assert_eq!(pipe.client.streams.len(), 0);
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // Server shuts down stream before any read.
+    pipe.server.stream_shutdown(2, Shutdown::Read, 0).unwrap();
+
+    // Server state is correctly cleaned up.
+    assert_eq!(pipe.server.streams.len(), 0);
+    assert_eq!(pipe.server.stream_readable_next(), None);
+    assert_eq!(
+        pipe.server.stream_recv(2, &mut buf),
+        Err(Error::InvalidStreamState(2))
+    );
+    assert_eq!(pipe.server.streams.len(), 0);
+
+    // State remains cleaned up even after packet exchange.
+    pipe.advance().unwrap();
+
+    assert_eq!(pipe.server.stream_readable_next(), None);
+    assert_eq!(
+        pipe.server.stream_recv(2, &mut buf),
+        Err(Error::InvalidStreamState(2))
+    );
+    assert_eq!(pipe.server.streams.len(), 0);
+}
+
+#[rstest]
 fn stream_shutdown_read(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
     #[values(true, false)] discard: bool,
@@ -3838,6 +4617,18 @@ fn stream_shutdown_read(
         pipe.client.stream_send(4, b"bye", false),
         Err(Error::StreamStopped(42))
     );
+    assert_eq!(pipe.client.streams.len(), 1);
+    assert!(!pipe.client.writable().any(|id| id == 4));
+
+    // A duplicate STOP must not replace the reported code or rearm readiness.
+    pipe.server.streams.insert_stopped(4, 99);
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    assert_eq!(
+        pipe.client.stream_capacity(4),
+        Err(Error::StreamStopped(42))
+    );
+    assert!(!pipe.client.writable().any(|id| id == 4));
 
     // Server sends some data, without reading the incoming data, and closes
     // the stream.
@@ -4281,6 +5072,16 @@ fn stream_shutdown_write_unsent_tx_cap(
     assert_eq!(pipe.server.stream_shutdown(4, Shutdown::Write, 42), Ok(()));
     // Unsend data is dropped and returned to flow control credit
     assert_eq!(pipe.server.tx_data, 5);
+
+    // The abandoned data is not sent.
+    assert!(!pipe.server.streams.has_flushable());
+    let mut buf = [0; 65535];
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+    assert!(!frames
+        .iter()
+        .any(|frame| matches!(frame, frame::Frame::Stream { .. })));
 
     // Server can now send more data (on a different stream).
     assert_eq!(pipe.client.stream_send(8, b"hello", true), Ok(5));
@@ -4901,12 +5702,12 @@ fn stop_sending_before_flushed_packets(
         Err(Error::StreamStopped(42)),
     );
 
-    // Returning `StreamStopped` causes the stream to be collected.
-    assert_eq!(pipe.server.streams.len(), 0);
+    // Reporting STOP leaves the stream alive until RESET_STREAM is ACKed.
+    assert_eq!(pipe.server.streams.len(), 1);
 
     // Client acks RESET_STREAM frame.
     let mut ranges = ranges::RangeSet::default();
-    ranges.insert(0..6);
+    ranges.insert(pipe.server.next_pkt_num - 1..pipe.server.next_pkt_num);
 
     let frames = [frame::Frame::ACK {
         ack_delay: 15,
@@ -4915,6 +5716,7 @@ fn stop_sending_before_flushed_packets(
     }];
 
     assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(0));
+    assert!(pipe.server.streams.is_collected(0));
 }
 
 #[rstest]
@@ -5450,7 +6252,15 @@ fn stream_zero_length_fin_deferred_collection(
     assert_eq!(r.next(), Some(0));
     assert!(r.next().is_none());
 
-    stream_recv_discard(&mut pipe.server, discard, 0).unwrap();
+    // Use zero capacity to exercise FIN consumption. stream_recv_discard()
+    // always uses a capacity of 65535.
+    let fin = if discard {
+        pipe.server.stream_discard(0, 0)
+    } else {
+        pipe.server.stream_recv(0, &mut [])
+    };
+    assert_eq!(fin, Ok((0, true)));
+    assert!(pipe.server.streams.is_collected(0));
     assert_eq!(pipe.advance(), Ok(()));
 
     // Client sends zero-length frame (again).
@@ -5769,7 +6579,7 @@ fn retry_missing_original_destination_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server accepts connection and send first flight. But original
     // destination connection ID is ignored.
@@ -5782,7 +6592,7 @@ fn retry_missing_original_destination_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -5831,7 +6641,7 @@ fn retry_invalid_original_destination_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, _) = pipe.client.send(&mut buf).unwrap();
+    let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Server accepts connection and send first flight. But original
     // destination connection ID is invalid.
@@ -5845,7 +6655,7 @@ fn retry_invalid_original_destination_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -5963,7 +6773,10 @@ fn retry_invalid_source_connection_id(
     // Client receives Retry and sends new Initial.
     assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
 
-    let (len, send_info) = pipe.client.send(&mut buf).unwrap();
+    let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    // `accept_with_retry` below needs a client source address; take it from
+    // the first client-emitted datagram of the flight.
+    let send_info = client_flight[0].1;
 
     // Server accepts connection and send first flight. But retry source
     // connection ID is invalid.
@@ -5981,7 +6794,7 @@ fn retry_invalid_source_connection_id(
         &mut config,
     )
     .unwrap();
-    assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
+    test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
 
     let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
 
@@ -6456,15 +7269,19 @@ fn client_rst_stream_while_bytes_in_flight(
 
     // Server sends stream data bigger than cwnd.
     let send_buf = [0; 50000];
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let initial_cwnd = cwnd_after_handshake(&pipe.server, cc_algorithm_name);
+    assert_eq!(recovery.cwnd(), initial_cwnd);
+    assert_eq!(pipe.server.tx_cap, initial_cwnd);
+    assert!(initial_cwnd < send_buf.len());
     assert_eq!(
         pipe.server.stream_send(4, &send_buf, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(13878)
-        }
+        Ok(initial_cwnd)
     );
     let server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let flight_bytes: usize =
+        server_flight.iter().map(|(pkt, _)| pkt.len()).sum();
 
     // And generate a stop sending or reset at the client.
     assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
@@ -6481,26 +7298,17 @@ fn client_rst_stream_while_bytes_in_flight(
 
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
-    let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => 27756,
-        _ => 24000,
-    };
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let cwnd = recovery.cwnd();
+    // The whole flight was acked while in slow start (cubic) or STARTUP
+    // (BBR2), so cwnd grew by the number of bytes sent.
+    assert_eq!(cwnd, initial_cwnd + flight_bytes);
+    assert_eq!(pipe.server.tx_cap, cwnd);
 
     assert_eq!(pipe.server.streams.tx_buffered(), 0);
-    assert_eq!(
-        pipe.server.stream_send(8, &send_buf, false),
-        Ok(expected_cwnd)
-    );
-    assert_eq!(pipe.server.streams.tx_buffered(), expected_cwnd);
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .cwnd(),
-        expected_cwnd
-    );
+    assert_eq!(pipe.server.stream_send(8, &send_buf, false), Ok(cwnd));
+    assert_eq!(pipe.server.streams.tx_buffered(), cwnd);
     assert_eq!(pipe.advance(), Ok(()));
 }
 
@@ -6545,22 +7353,26 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
 
     // Server sends stream data bigger than cwnd.
     let send_buf = [0; 50000];
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let initial_cwnd = cwnd_after_handshake(&pipe.server, cc_algorithm_name);
+    assert_eq!(recovery.cwnd(), initial_cwnd);
+    assert_eq!(pipe.server.tx_cap, initial_cwnd);
+    assert!(initial_cwnd < send_buf.len());
     assert_eq!(
         pipe.server.stream_send(4, &send_buf, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(13878)
-        }
+        Ok(initial_cwnd)
     );
     let mut server_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let flight_bytes: usize =
+        server_flight.iter().map(|(pkt, _)| pkt.len()).sum();
 
     // And generate a STOP_SENDING at the client.
     assert_eq!(pipe.client.stream_shutdown(4, Shutdown::Read, 42), Ok(()));
     let client_flight = test_utils::emit_flight(&mut pipe.client).unwrap();
 
     // Lose the first packet of the server flight.
-    server_flight.remove(0);
+    let (lost_pkt, _) = server_flight.remove(0);
 
     test_utils::process_flight(&mut pipe.server, client_flight).unwrap();
     test_utils::process_flight(&mut pipe.client, server_flight).unwrap();
@@ -6570,8 +7382,12 @@ fn client_rst_stream_while_bytes_in_flight_with_packet_loss(
     // tx_buffered goes down to 0 after the reset and acks are
     // processed.  A full cwnd's worth of packets can be sent.
     let expected_cwnd = match cc_algorithm_name {
-        "bbr2" | "bbr2_gcongestion" => 26556,
-        _ => 8400,
+        // BBR2 in STARTUP ignores a single loss and grows by bytes acked,
+        // i.e. everything except the lost packet.
+        "bbr2" | "bbr2_gcongestion" =>
+            initial_cwnd + flight_bytes - lost_pkt.len(),
+        // Cubic reduces cwnd by its multiplicative decrease factor (0.7).
+        _ => initial_cwnd * 7 / 10,
     };
 
     assert_eq!(pipe.server.streams.tx_buffered(), 0);
@@ -6626,14 +7442,12 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
     // Client sends stream data bigger than cwnd (it will never arrive to the
     // server).
     let send_buf1 = [0; 20000];
-    assert_eq!(
-        pipe.client.stream_send(0, &send_buf1, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(12299)
-        }
-    );
+    let recovery = &pipe.client.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let cwnd = cwnd_after_handshake(&pipe.client, cc_algorithm_name);
+    assert_eq!(recovery.cwnd(), cwnd);
+    assert!(cwnd < send_buf1.len());
+    assert_eq!(pipe.client.stream_send(0, &send_buf1, false), Ok(cwnd));
 
     test_utils::emit_flight(&mut pipe.client).ok();
 
@@ -6701,14 +7515,12 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
     // Client sends stream data bigger than cwnd (it will never arrive to the
     // server). This exhausts the congestion window.
     let send_buf1 = [0; 20000];
-    assert_eq!(
-        pipe.client.stream_send(0, &send_buf1, false),
-        if cc_algorithm_name == "cubic" {
-            Ok(12000)
-        } else {
-            Ok(12299)
-        }
-    );
+    let recovery = &pipe.client.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let cwnd = cwnd_after_handshake(&pipe.client, cc_algorithm_name);
+    assert_eq!(recovery.cwnd(), cwnd);
+    assert!(cwnd < send_buf1.len());
+    assert_eq!(pipe.client.stream_send(0, &send_buf1, false), Ok(cwnd));
 
     test_utils::emit_flight(&mut pipe.client).ok();
 
@@ -6791,13 +7603,21 @@ fn validate_peer_sent_ack_range(
     let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
     test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
-    let expected_max_active_pkt_sent = 3;
+    // Expected pkt counts below reflect the post-handshake state. When the
+    // ClientHello spans multiple Initial packets (as with post-quantum
+    // keyshares, on boring 5) the handshake exchanges one extra packet
+    // per side compared to the classical (boring 4) case, which is why
+    // these counts are one higher under boring 5.
+    let expected_max_active_pkt_sent = by_boring!(b4: 3, b5: 4);
     let recovery = &pipe.server.paths.get_active().unwrap().recovery;
     assert_eq!(
         recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_active_pkt_sent
     );
-    assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 3);
+    assert_eq!(
+        recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 3, b5: 4)
+    );
     assert_eq!(recovery.sent_packets_len(epoch), 0);
     // Verify largest sent on the connection
     assert_eq!(
@@ -6816,8 +7636,14 @@ fn validate_peer_sent_ack_range(
     pipe.send_pkt_to_server(pkt_type, &frames, &mut buf)
         .unwrap();
     let recovery = &pipe.server.paths.get_active().unwrap().recovery;
-    assert_eq!(recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 4);
-    assert_eq!(recovery.get_largest_acked_on_epoch(epoch).unwrap(), 3);
+    assert_eq!(
+        recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        by_boring!(b4: 4, b5: 5)
+    );
+    assert_eq!(
+        recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 3, b5: 4)
+    );
     assert_eq!(recovery.sent_packets_len(epoch), 1);
 
     // Send an invalid ACK range to the server and expect server error
@@ -6876,26 +7702,34 @@ fn validate_peer_sent_ack_range_for_multi_path(
     let epoch = packet::Epoch::Application;
     let pkt_type = Type::Short;
 
-    // active path
-    let expected_max_active_pkt_sent = 7;
+    // active path. Pkt counts are one higher under boring 5 because the
+    // ClientHello spans two Initial packets (post-quantum keyshares);
+    // see `validate_peer_sent_ack_range` above for details.
+    let expected_max_active_pkt_sent = by_boring!(b4: 7, b5: 8);
     let active_path = &pipe.server.paths.get_mut(0).unwrap();
     let p1_recovery = &active_path.recovery;
     assert_eq!(
         p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_active_pkt_sent
     );
-    assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 6);
+    assert_eq!(
+        p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 6, b5: 7)
+    );
     assert_eq!(p1_recovery.sent_packets_len(epoch), 1);
 
     // non-active path
-    let expected_max_second_pkt_sent = 5;
+    let expected_max_second_pkt_sent = by_boring!(b4: 5, b5: 6);
     let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
     let p2_recovery = &second_path.recovery;
     assert_eq!(
         p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
         expected_max_second_pkt_sent
     );
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 5);
+    assert_eq!(
+        p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 5, b5: 6)
+    );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Verify largest sent on the connection is the max of the two paths
@@ -6923,15 +7757,27 @@ fn validate_peer_sent_ack_range_for_multi_path(
     let active_path = &pipe.server.paths.get_mut(0).unwrap();
     assert!(active_path.active());
     let p1_recovery = &active_path.recovery;
-    assert_eq!(p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 7);
-    assert_eq!(p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 7);
+    assert_eq!(
+        p1_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        by_boring!(b4: 7, b5: 8)
+    );
+    assert_eq!(
+        p1_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 7, b5: 8)
+    );
     assert_eq!(p1_recovery.sent_packets_len(epoch), 0);
 
     // non-active path
     let second_path = &pipe.server.paths.get_mut(probed_pid).unwrap();
     let p2_recovery = &second_path.recovery;
-    assert_eq!(p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(), 5);
-    assert_eq!(p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(), 5);
+    assert_eq!(
+        p2_recovery.largest_sent_pkt_num_on_path(epoch).unwrap(),
+        by_boring!(b4: 5, b5: 6)
+    );
+    assert_eq!(
+        p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
+        by_boring!(b4: 5, b5: 6)
+    );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
     // Send a large invalid ACK range to the server. Range is not inclusive so
@@ -7274,6 +8120,177 @@ fn limit_ack_ranges(
         pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.last(),
         Some(last_packet_sent)
     );
+}
+
+#[rstest]
+/// The server closes the connection once it tracks more than the maximum
+/// number of outstanding sent packets.
+fn max_outstanding_sent_packets(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const MAX_OUTSTANDING_SENT_PACKETS: usize = 100;
+
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_max_outstanding_sent_packets(NonZeroUsize::new(
+        MAX_OUTSTANDING_SENT_PACKETS,
+    ));
+    config.set_initial_max_data(100_000);
+    config.set_initial_max_stream_data_bidi_local(100_000);
+    config.set_initial_max_stream_data_bidi_remote(100_000);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // The client sends a request, which the server answers with stream data
+    // that the client never receives, and so never acknowledges.
+    assert_eq!(pipe.client.stream_send(0, b"GET /", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let response = [42; 65535];
+    assert!(pipe.server.stream_send(0, &response, false).unwrap() > 0);
+    assert!(test_utils::emit_flight(&mut pipe.server).is_ok());
+
+    // The client drops all the packets sent by the server.
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+    let mut peer_pkts = 0;
+
+    while pipe.server.local_error().is_none() {
+        assert!(peer_pkts <= MAX_OUTSTANDING_SENT_PACKETS);
+
+        pipe.send_pkt_to_server(Type::Short, &frames, &mut buf)
+            .unwrap();
+
+        peer_pkts += 1;
+    }
+
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    let tracked_sent_packets: usize = packet::Epoch::epochs(
+        packet::Epoch::Initial..=packet::Epoch::Application,
+    )
+    .iter()
+    .map(|&e| recovery.sent_packets_len(e))
+    .sum();
+    assert_eq!(tracked_sent_packets, MAX_OUTSTANDING_SENT_PACKETS + 1);
+
+    let error = ConnectionError {
+        is_app: false,
+        error_code: WireErrorCode::ProtocolViolation as u64,
+        reason: b"too many outstanding sent packets".to_vec(),
+    };
+    assert_eq!(pipe.server.local_error(), Some(&error));
+
+    // The CONNECTION_CLOSE frame is sent right away, even though the
+    // congestion window is full of unacknowledged packets.
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    let cwnd_available = recovery.cwnd_available();
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    assert!(len > cwnd_available);
+    assert!(pipe.server.is_draining());
+
+    assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
+    assert_eq!(pipe.client.peer_error(), Some(&error));
+}
+
+#[rstest]
+/// The limit on outstanding sent packets applies to all the paths of the
+/// connection.
+fn max_outstanding_sent_packets_multiple_paths(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    const MAX_OUTSTANDING_SENT_PACKETS: usize = 1000;
+
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(3);
+    config.set_max_outstanding_sent_packets(NonZeroUsize::new(
+        MAX_OUTSTANDING_SENT_PACKETS,
+    ));
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 2);
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let server_addr = test_utils::Pipe::server_addr();
+    let client_addr = test_utils::Pipe::client_addr();
+    let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+
+    // The client drops all the packets sent by the server, and sends packets
+    // from two addresses, so the server sends packets on two paths.
+    let frames = [
+        frame::Frame::Ping { mtu_probe: None },
+        frame::Frame::Padding { len: 100 },
+    ];
+
+    let mut peer_pkts = 0;
+
+    while pipe.server.local_error().is_none() {
+        assert!(peer_pkts <= MAX_OUTSTANDING_SENT_PACKETS * 2);
+
+        let from = if peer_pkts < MAX_OUTSTANDING_SENT_PACKETS * 2 / 3 {
+            client_addr
+        } else {
+            client_addr_2
+        };
+
+        let len = test_utils::encode_pkt(
+            &mut pipe.client,
+            Type::Short,
+            &frames,
+            &mut buf,
+        )
+        .unwrap();
+
+        let info = RecvInfo {
+            from,
+            to: server_addr,
+        };
+        assert_eq!(pipe.server.recv(&mut buf[..len], info), Ok(len));
+
+        while pipe.server.send(&mut buf).is_ok() {}
+
+        peer_pkts += 1;
+    }
+
+    assert_eq!(
+        pipe.server.local_error(),
+        Some(&ConnectionError {
+            is_app: false,
+            error_code: WireErrorCode::ProtocolViolation as u64,
+            reason: b"too many outstanding sent packets".to_vec(),
+        })
+    );
+
+    // None of the paths exceeded the limit on its own.
+    let mut tracked_sent_packets = 0;
+
+    for (_, p) in pipe.server.paths.iter() {
+        let path_sent_packets: usize = packet::Epoch::epochs(
+            packet::Epoch::Initial..=packet::Epoch::Application,
+        )
+        .iter()
+        .map(|&e| p.recovery.sent_packets_len(e))
+        .sum();
+
+        assert!(path_sent_packets < MAX_OUTSTANDING_SENT_PACKETS);
+
+        tracked_sent_packets += path_sent_packets;
+    }
+
+    assert!(tracked_sent_packets > MAX_OUTSTANDING_SENT_PACKETS);
 }
 
 #[rstest]
@@ -7760,6 +8777,60 @@ fn stream_datagram_priority(
     }
 }
 
+#[cfg(feature = "congestion_window_unchecked_available")]
+#[test]
+fn congestion_window_unchecked_pto_probe() -> Result<()> {
+    let window =
+        DEFAULT_INITIAL_CONGESTION_WINDOW_PACKETS * MAX_SEND_UDP_PAYLOAD_SIZE;
+    let mut config =
+        test_utils::Pipe::default_config("congestion_window_unchecked")?;
+    config.set_unchecked_congestion_window(window);
+    config.discover_pmtu(false);
+    config.set_initial_max_data(100_000);
+    config.set_initial_max_stream_data_bidi_local(100_000);
+    config.set_initial_max_stream_data_bidi_remote(100_000);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config)?;
+    pipe.handshake()?;
+    pipe.advance()?;
+
+    let data = vec![0; window];
+    assert_eq!(pipe.client.stream_send(0, &data, false), Ok(window));
+    test_utils::emit_flight(&mut pipe.client)?;
+
+    let recovery = &pipe.client.paths.get_active()?.recovery;
+    assert_eq!(recovery.bytes_in_flight(), window);
+    assert_eq!(recovery.cwnd(), window);
+    assert!(pipe.client.streams.tx_buffered() > 0);
+
+    let mut buffer = [0; MAX_SEND_UDP_PAYLOAD_SIZE];
+    assert_eq!(pipe.client.send(&mut buffer), Err(Error::Done));
+
+    let timeout = pipe.client.timeout().expect("PTO timer is armed");
+    std::thread::sleep(timeout + Duration::from_millis(1));
+    pipe.client.on_timeout();
+
+    let epoch = packet::Epoch::Application;
+    assert_eq!(
+        pipe.client.paths.get_active()?.recovery.loss_probes(epoch),
+        1
+    );
+
+    let (probe_len, _) = pipe.client.send(&mut buffer)?;
+    let frames =
+        test_utils::decode_pkt(&mut pipe.server, &mut buffer[..probe_len])?;
+    assert!(frames.iter().any(frame::Frame::ack_eliciting));
+
+    let recovery = &pipe.client.paths.get_active()?.recovery;
+    assert_eq!(recovery.loss_probes(epoch), 0);
+    assert_eq!(recovery.cwnd(), window);
+    assert!(recovery.bytes_in_flight() > window);
+    assert!(pipe.client.streams.tx_buffered() > 0);
+    assert_eq!(pipe.client.send(&mut buffer), Err(Error::Done));
+
+    Ok(())
+}
+
 #[rstest]
 /// Tests that old data is retransmitted on PTO.
 fn early_retransmit(
@@ -7794,6 +8865,18 @@ fn early_retransmit(
             .loss_probes(epoch),
         1,
     );
+    // The PTO exception is local to packet generation. Other users, including
+    // send-capacity and PMTUD calculations, observe the actual congestion
+    // window.
+    assert_ne!(
+        pipe.client
+            .paths
+            .get_active()
+            .expect("no active")
+            .recovery
+            .cwnd_available(),
+        usize::MAX,
+    );
 
     // Client retransmits stream data in PTO probe.
     let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -7823,6 +8906,76 @@ fn early_retransmit(
         })
     );
     assert_eq!(pipe.client.stats().retrans, 1);
+}
+
+#[rstest]
+fn pto_probe_not_stranded_by_earlier_epoch_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(0, 1, 2_400)] remaining_cwnd: usize,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    // Advance until the client has Application keys but retains Handshake
+    // state.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    assert!(pipe.client.is_established());
+    assert!(!pipe.client.handshake_confirmed);
+
+    // Queue Handshake CRYPTO data ahead of an Application PTO probe.
+    let handshake_send = &mut pipe.client.crypto_ctx[packet::Epoch::Handshake]
+        .crypto_stream
+        .send;
+    let handshake_len = handshake_send.off_back() as usize;
+    assert!(handshake_send.retransmit(0, handshake_len) > 0);
+
+    let active_pid = pipe.client.paths.get_active_path_id().expect("no active");
+    let handshake_status = pipe.client.handshake_status();
+    let pkt_num = pipe.client.next_pkt_num;
+    pipe.client.next_pkt_num += 1;
+    let now = Instant::now();
+    let path = pipe.client.paths.get_mut(active_pid).expect("no active");
+    let cwnd_available = path.recovery.cwnd_available();
+    assert!(cwnd_available > remaining_cwnd);
+
+    path.recovery.on_packet_sent(
+        test_utils::helper_packet_sent(
+            pkt_num,
+            now,
+            cwnd_available - remaining_cwnd,
+        ),
+        packet::Epoch::Application,
+        handshake_status,
+        now,
+        "",
+    );
+    assert_eq!(path.recovery.cwnd_available(), remaining_cwnd);
+    path.recovery.inc_loss_probes(packet::Epoch::Application);
+
+    // The Application probe bypasses cwnd instead of being stranded behind
+    // the earlier Handshake data.
+    let (ty, _) = pipe
+        .client
+        .send_single(&mut buf, active_pid, false, Instant::now())
+        .unwrap();
+    assert_eq!(ty, Type::Short);
+    assert_eq!(
+        pipe.client
+            .paths
+            .get(active_pid)
+            .expect("no active")
+            .recovery
+            .loss_probes(packet::Epoch::Application),
+        0,
+    );
 }
 
 #[rstest]
@@ -7895,6 +9048,10 @@ fn retransmit_data_acked_before_fully_retransmitted(
         0,
         "tx_buffered should be 0 after ACK"
     );
+    assert!(!pipe.client.streams.has_flushable());
+
+    assert_eq!(pipe.client.stream_send(0, b"more", false), Ok(4));
+    assert!(pipe.client.streams.has_flushable());
 }
 
 #[rstest]
@@ -8086,7 +9243,11 @@ fn coalesce_padding_short(
 ) {
     let mut buf = [0; 65535];
 
-    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    // Test asserts a specific coalesce/pad shape that assumes a
+    // single-Initial ClientHello.
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     // Client sends first flight.
     let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -8122,7 +9283,10 @@ fn handshake_anti_deadlock(
 ) {
     let mut buf = [0; 65535];
 
-    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    // Test drives the handshake one packet at a time and expects the
+    // server to have handshake keys after a single `server_recv`; that
+    // requires a single-Initial ClientHello.
+    let mut config = test_utils::config_no_pq(PROTOCOL_VERSION).unwrap();
     assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
     config
         .load_cert_chain_from_pem_file("examples/cert-big.crt")
@@ -8134,7 +9298,7 @@ fn handshake_anti_deadlock(
         .set_application_protos(&[b"proto1", b"proto2"])
         .unwrap();
 
-    let mut pipe = test_utils::Pipe::with_server_config(&mut config).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     assert!(!pipe.client.handshake_status().has_handshake_keys);
     assert!(!pipe.client.handshake_status().peer_verified_address);
@@ -8177,7 +9341,11 @@ fn handshake_packet_type_corruption(
 ) {
     let mut buf = [0; 65535];
 
-    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    // Test drives the handshake one packet at a time, which assumes a
+    // single-Initial ClientHello.
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
 
     // Client sends padded Initial.
     let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -8751,11 +9919,50 @@ fn close(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
 #[rstest]
 fn app_close_by_client(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] simulate_pto: bool,
 ) {
     let mut buf = [0; 65535];
 
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
-    assert_eq!(pipe.handshake(), Ok(()));
+
+    if simulate_pto {
+        // Advance the handshake until the client is established, but has not
+        // yet received HANDSHAKE_DONE from the server.
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+        let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+        test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+        assert!(pipe.client.is_established());
+        assert!(!pipe.client.handshake_confirmed);
+
+        // Exhaust cwnd and model a Handshake PTO expiring before the client
+        // closes the connection.
+        let active_pid = pipe.client.paths.get_active_path_id().unwrap();
+        let handshake_status = pipe.client.handshake_status();
+        let pkt_num = pipe.client.next_pkt_num;
+        pipe.client.next_pkt_num += 1;
+        let now = Instant::now();
+        let path = pipe.client.paths.get_mut(active_pid).unwrap();
+        let cwnd_available = path.recovery.cwnd_available();
+        assert!(cwnd_available > 0);
+
+        path.recovery.on_packet_sent(
+            test_utils::helper_packet_sent(pkt_num, now, cwnd_available),
+            packet::Epoch::Application,
+            handshake_status,
+            now,
+            "",
+        );
+        assert_eq!(path.recovery.cwnd_available(), 0);
+        path.recovery.inc_loss_probes(packet::Epoch::Handshake);
+    } else {
+        assert_eq!(pipe.handshake(), Ok(()));
+    }
 
     assert_eq!(pipe.client.close(true, 0x1234, b"hello!"), Ok(()));
 
@@ -8773,6 +9980,11 @@ fn app_close_by_client(
             reason: b"hello!".to_vec(),
         })
     );
+    assert!(pipe.client.is_draining());
+
+    // A pending Handshake PTO does not cause ACK-only packets after
+    // the application close is sent.
+    assert_eq!(pipe.client.send(&mut buf), Err(Error::Done));
 }
 
 #[rstest]
@@ -9044,6 +10256,76 @@ fn local_error(#[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str) {
 }
 
 #[rstest]
+fn skip_ping_ack_while_closing_in_early_data(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config =
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
+    config.enable_early_data();
+
+    // Establish an initial connection to obtain a resumption ticket.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    let session = pipe.client.session().unwrap();
+
+    // Start a resumed connection and advance the server into early data.
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.client.set_session(session), Ok(()));
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+    assert!(pipe.server.is_in_early_data());
+    assert!(!pipe.server.is_established());
+
+    // Leave the server's Handshake CRYPTO unacknowledged.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    // Send a valid Handshake PING without the client's queued Finished. This
+    // gives the server something to ACK without completing its handshake.
+    let mut out = [0u8; 65535];
+    let frames = [frame::Frame::Ping { mtu_probe: None }];
+    let len = test_utils::encode_pkt(
+        &mut pipe.client,
+        Type::Handshake,
+        &frames,
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(pipe.server_recv(&mut out[..len]), Ok(len));
+
+    // Send and discard the resulting ACK so ack_elicited is clear while the
+    // received packet remains in the server's ACK ranges.
+    pipe.server.send(&mut out).unwrap();
+
+    let epoch = packet::Epoch::Handshake;
+    assert!(!pipe.server.pkt_num_spaces[epoch].ack_elicited);
+    assert!(pipe.server.pkt_num_spaces[epoch].recv_pkt_need_ack.len() > 0);
+
+    // The server detects the lost client response through the PTO path.
+    let timer = pipe.server.timeout().unwrap();
+    std::thread::sleep(timer + Duration::from_millis(1));
+    pipe.server.on_timeout();
+
+    assert!(
+        pipe.server
+            .paths
+            .get_active()
+            .unwrap()
+            .recovery
+            .loss_probes(epoch) >
+            0
+    );
+
+    // An application close is valid during early data
+    assert_eq!(pipe.server.close(true, 0x1234, b"app close"), Ok(()));
+    assert!(pipe.server.is_in_early_data());
+    assert!(!pipe.server.is_established());
+
+    assert_eq!(pipe.server.send(&mut out), Err(Error::Done));
+}
+
+#[rstest]
 fn update_max_datagram_size(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
@@ -9108,42 +10390,26 @@ fn update_max_datagram_size(
     };
 
     // Before handshake
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .max_datagram_size(),
-        1500,
-    );
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.max_datagram_size(), 1500);
+    assert_eq!(recovery.cwnd(), 10 * 1500);
 
-    assert_eq!(pipe.handshake(), Ok(()));
+    // Deliver the client's first flight, carrying its transport parameters.
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
 
-    // After handshake, max_datagram_size should match to client's
-    // max_recv_udp_payload_size which is smaller
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .max_datagram_size(),
-        1200,
-    );
-    assert_eq!(
-        pipe.server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .cwnd(),
-        if cc_algorithm_name == "cubic" {
-            12000
-        } else {
-            13421
-        },
-    );
+    // max_datagram_size should match to client's max_recv_udp_payload_size
+    // which is smaller, and since nothing the server sent has been acked
+    // yet, cwnd is exactly the initial window rescaled to the new size.
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.max_datagram_size(), 1200);
+    assert_eq!(recovery.cwnd(), 10 * 1200);
+
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.server.is_established());
+
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.max_datagram_size(), 1200);
 }
 
 #[rstest]
@@ -9211,24 +10477,21 @@ fn send_capacity(
         Ok((6, true))
     );
 
-    assert_eq!(
-        pipe.server.tx_cap,
-        if cc_algorithm_name == "cubic" {
-            12000
-        } else {
-            13873
-        }
-    );
+    // Send capacity is bounded by the congestion window (connection flow
+    // control is not the binding limit here).
+    let cap = cwnd_after_handshake(&pipe.server, cc_algorithm_name);
+    assert_eq!(pipe.server.tx_cap, cap);
+    // Two 5000 byte writes fit, and the remainder fits in a third stream's
+    // flow control window (10000), so it is tx_cap that runs out.
+    assert!(cap > 10000 && cap < 20000);
 
     assert_eq!(pipe.server.stream_send(0, &buf[..5000], false), Ok(5000));
+    assert_eq!(pipe.server.tx_cap, cap - 5000);
     assert_eq!(pipe.server.stream_send(4, &buf[..5000], false), Ok(5000));
+    assert_eq!(pipe.server.tx_cap, cap - 10000);
     assert_eq!(
-        pipe.server.stream_send(8, &buf[..5000], false),
-        if cc_algorithm_name == "cubic" {
-            Ok(2000)
-        } else {
-            Ok(3873)
-        }
+        pipe.server.stream_send(8, &buf[..10000], false),
+        Ok(cap - 10000)
     );
 
     // No more connection send capacity.
@@ -9296,12 +10559,21 @@ fn user_provided_boring_ctx(
 #[rstest]
 fn in_handshake_config(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] use_session: bool,
+    #[values(false, true)] enable_early_data: bool,
 ) -> Result<()> {
     let mut buf = [0; 65535];
 
     const CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS: usize = 30;
     const CUSTOM_INITIAL_MAX_STREAMS_BIDI: u64 = 30;
     const CUSTOM_MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
+    const CUSTOM_MAX_OUTSTANDING_SENT_PACKETS: usize = 1000;
+
+    let custom_cc_algorithm = if cc_algorithm_name == "cubic" {
+        CongestionControlAlgorithm::Bbr2Gcongestion
+    } else {
+        CongestionControlAlgorithm::CUBIC
+    };
 
     // Manually construct `SslContextBuilder` for the server so we can modify
     // CWND during the handshake.
@@ -9314,7 +10586,13 @@ fn in_handshake_config(
     server_tls_ctx_builder
         .set_private_key_file("examples/cert.key", boring::ssl::SslFiletype::PEM)
         .unwrap();
-    server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
+    server_tls_ctx_builder.set_select_certificate_callback(move |mut hello| {
+        <Connection>::set_cc_algorithm_in_handshake(
+            hello.ssl_mut(),
+            custom_cc_algorithm,
+        )
+        .unwrap();
+
         <Connection>::set_initial_congestion_window_packets_in_handshake(
             hello.ssl_mut(),
             CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS,
@@ -9333,6 +10611,12 @@ fn in_handshake_config(
         )
         .unwrap();
 
+        <Connection>::set_max_outstanding_sent_packets_in_handshake(
+            hello.ssl_mut(),
+            NonZeroUsize::new(CUSTOM_MAX_OUTSTANDING_SENT_PACKETS),
+        )
+        .unwrap();
+
         Ok(())
     });
 
@@ -9345,7 +10629,9 @@ fn in_handshake_config(
         Ok(())
     );
 
-    let mut client_config = Config::new(PROTOCOL_VERSION)?;
+    // Test drives the handshake one packet at a time; requires a
+    // single-Initial ClientHello.
+    let mut client_config = test_utils::config_no_pq(PROTOCOL_VERSION)?;
     client_config.load_cert_chain_from_pem_file("examples/cert.crt")?;
     client_config.load_priv_key_from_pem_file("examples/cert.key")?;
 
@@ -9360,12 +10646,33 @@ fn in_handshake_config(
         config.set_max_idle_timeout(180_000);
         config.verify_peer(false);
         config.set_ack_delay_exponent(8);
+
+        if enable_early_data {
+            config.enable_early_data();
+        }
     }
+
+    let session = if use_session {
+        let mut pipe = test_utils::Pipe::with_client_and_server_config(
+            &mut client_config,
+            &mut server_config,
+        )?;
+
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        Some(pipe.client.session().unwrap().to_vec())
+    } else {
+        None
+    };
 
     let mut pipe = test_utils::Pipe::with_client_and_server_config(
         &mut client_config,
         &mut server_config,
     )?;
+
+    if let Some(session) = session {
+        pipe.client.set_session(&session)?;
+    }
 
     // Client sends initial flight.
     let (len, _) = pipe.client.send(&mut buf).unwrap();
@@ -9376,11 +10683,29 @@ fn in_handshake_config(
     pipe.server_recv(&mut buf[..len]).unwrap();
 
     assert_eq!(
+        pipe.server.is_in_early_data(),
+        use_session && enable_early_data
+    );
+    assert_eq!(
+        pipe.server.recovery_config.cc_algorithm,
+        custom_cc_algorithm
+    );
+    assert_eq!(
+        pipe.server.paths.get_active().unwrap().recovery.cwnd(),
+        CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
+    );
+
+    assert_eq!(
         pipe.server.tx_cap,
         CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
     );
 
     assert_eq!(pipe.server.idle_timeout(), Some(CUSTOM_MAX_IDLE_TIMEOUT));
+
+    assert_eq!(
+        pipe.server.max_outstanding_sent_packets,
+        NonZeroUsize::new(CUSTOM_MAX_OUTSTANDING_SENT_PACKETS)
+    );
 
     // Server sends initial flight.
     let (len, _) = pipe.server.send(&mut buf).unwrap();
@@ -9395,6 +10720,7 @@ fn in_handshake_config(
     );
 
     assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.server.is_resumed(), use_session);
 
     Ok(())
 }
@@ -9432,8 +10758,10 @@ fn max_streams_threshold_after_handshake_callback_update(
     )
     .unwrap();
 
+    // Test drives the handshake one packet at a time; requires a
+    // single-Initial ClientHello.
     let mut client_config =
-        test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+        test_utils::Pipe::default_config_no_pq(cc_algorithm_name).unwrap();
 
     for config in [&mut client_config, &mut server_config] {
         config
@@ -9606,30 +10934,29 @@ fn initial_cwnd(
     config.set_ack_delay_exponent(8);
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+
+    // Before anything is sent or acked, cwnd is exactly the configured
+    // initial window.
+    assert_eq!(
+        pipe.server.paths.get_active().unwrap().recovery.cwnd(),
+        CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
+    );
+
     assert_eq!(pipe.handshake(), Ok(()));
 
+    // After the handshake, cubic's window is untouched, while BBR2 in
+    // STARTUP grows cwnd by exactly the bytes acked (the handshake size, and
+    // thus the amount acked, depends on the TLS stack and certificate).
+    let initial_cwnd = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200;
+    let cwnd = pipe.server.paths.get_active().unwrap().recovery.cwnd();
     if cc_algorithm_name == "cubic" {
-        assert_eq!(
-            pipe.server.tx_cap,
-            CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200
-        );
+        assert_eq!(cwnd, initial_cwnd);
+        assert_eq!(pipe.server.tx_cap, initial_cwnd);
     } else {
-        // TODO understand where these adjustments come from and why they vary
-        // by OS target.
-        let expected = CUSTOM_INITIAL_CONGESTION_WINDOW_PACKETS * 1200 + 1447;
-
-        assert!(
-            pipe.server.tx_cap >= expected,
-            "{} vs {}",
-            pipe.server.tx_cap,
-            expected
-        );
-        assert!(
-            pipe.server.tx_cap <= expected + 1,
-            "{} vs {}",
-            pipe.server.tx_cap,
-            expected + 1
-        );
+        let acked_bytes = pipe.server.stats().acked_bytes as usize;
+        assert!(acked_bytes > 0);
+        assert_eq!(cwnd, initial_cwnd + acked_bytes);
+        assert_eq!(pipe.server.tx_cap, cwnd);
     }
 
     Ok(())
@@ -11331,6 +12658,58 @@ fn connection_migration_reordered_non_probing(
 }
 
 #[rstest]
+fn connection_migration_max_udp_payload_size(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(1200, 1800)] max_recv_udp_payload_size: usize,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config.set_application_protos(&[b"proto1"]).unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(2);
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(15);
+    config.set_initial_max_stream_data_bidi_remote(15);
+    config.set_initial_max_stream_data_uni(10);
+    config.set_initial_max_streams_bidi(3);
+    config.set_max_send_udp_payload_size(1500);
+    config.set_max_recv_udp_payload_size(max_recv_udp_payload_size);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
+    let expected_size = 1500.min(max_recv_udp_payload_size);
+
+    assert_eq!(pipe.client.max_send_udp_payload_size(), expected_size);
+    assert_eq!(pipe.server.max_send_udp_payload_size(), expected_size);
+
+    let server_addr = test_utils::Pipe::server_addr();
+    let client_addr = "127.0.0.1:5678".parse().unwrap();
+
+    // Migrate directly so the client creates a path and the server discovers
+    // it.
+    assert_eq!(pipe.client.migrate(client_addr, server_addr), Ok(1));
+    assert_eq!(pipe.client.max_send_udp_payload_size(), expected_size);
+    assert_eq!(pipe.client.stream_send(0, b"data", true), Ok(4));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(
+        pipe.server.paths.get_active().unwrap().peer_addr(),
+        client_addr
+    );
+    assert_eq!(
+        pipe.server.is_path_validated(server_addr, client_addr),
+        Ok(true)
+    );
+    assert_eq!(pipe.client.max_send_udp_payload_size(), expected_size);
+    assert_eq!(pipe.server.max_send_udp_payload_size(), expected_size);
+}
+
+#[rstest]
 fn resilience_against_migration_attack(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
@@ -11361,12 +12740,17 @@ fn resilience_against_migration_attack(
     const DATA_BYTES: usize = 24000;
     let buf = [42; DATA_BYTES];
     let mut recv_buf = [0; DATA_BYTES];
+    // The first write is limited by the congestion window, so the rest of
+    // the data is sent after the (spoofed) migration.
+    //
+    // The window also depends on the (TLS-dependent) amount of data acked
+    // while exchanging CIDs, so read it back instead of hardcoding it.
+    let recovery = &pipe.server.paths.get_active().unwrap().recovery;
+    assert_eq!(recovery.bytes_in_flight(), 0);
+    let cwnd = recovery.cwnd();
+    assert!(cwnd < DATA_BYTES);
     let send1_bytes = pipe.server.stream_send(1, &buf, true).unwrap();
-    assert_eq!(send1_bytes, match cc_algorithm_name {
-        "bbr2" => 13880,
-        "bbr2_gcongestion" => 13880,
-        _ => 12000,
-    });
+    assert_eq!(send1_bytes, cwnd);
     assert_eq!(
         test_utils::process_flight(
             &mut pipe.client,
@@ -11769,13 +13153,13 @@ fn stop_sending_stream_send_after_reset_stream_ack(
         Err(Error::StreamStopped(42))
     );
 
-    // Returning `StreamStopped` causes the stream to be collected.
-    assert_eq!(pipe.server.streams.len(), 9);
+    // Reporting STOP removes writability but still waits for RESET_STREAM ACK.
+    assert_eq!(pipe.server.streams.len(), 10);
     assert_eq!(pipe.server.writable().len(), 9);
 
     // Client acks RESET_STREAM frame.
     let mut ranges = ranges::RangeSet::default();
-    ranges.insert(0..12);
+    ranges.insert(pipe.server.next_pkt_num - 1..pipe.server.next_pkt_num);
 
     let frames = [frame::Frame::ACK {
         ack_delay: 15,
@@ -11824,6 +13208,78 @@ fn stop_sending_stream_send_after_reset_stream_ack(
     let mut w = pipe.server.writable();
     assert_eq!(w.len(), 9);
     assert!(!w.any(|s| s == 0));
+}
+
+/// Verify that a stream stopped by the peer still surfaces `StreamStopped`
+/// to the application when it was unlinked from the writable queue before
+/// the RESET_STREAM ack arrived.
+///
+/// Poll `stream_writable_next()` to unlink the stopped stream, then deliver
+/// the RESET_STREAM ack. The stream stays uncollected and the next
+/// `stream_send()` returns `StreamStopped`.
+#[test]
+fn stop_sending_signal_survives_writable_unlink_before_ack() {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(999999999);
+    config.set_initial_max_stream_data_bidi_local(30);
+    config.set_initial_max_stream_data_bidi_remote(30);
+    config.set_initial_max_streams_bidi(10);
+    config.set_initial_max_streams_uni(0);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    // Client opens a bidi stream with fin; the server reads the whole
+    // request so the stream's receive side is complete.
+    assert_eq!(pipe.client.stream_send(0, b"req", true), Ok(3));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((3, true)));
+    // Ordinary readiness can be consumed before STOP arrives.
+    assert_eq!(pipe.server.stream_writable_next(), Some(0));
+    assert_eq!(pipe.server.stream_writable_next(), None);
+
+    // Client no longer wants the response and sends STOP_SENDING. Deliver
+    // only that packet to the server, without letting the server's
+    // RESET_STREAM reply or its ack go anywhere yet.
+    assert_eq!(pipe.client.stream_shutdown(0, Shutdown::Read, 42), Ok(()));
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // STOP restores the queue entry even though the stream was writable.
+    assert_eq!(pipe.server.writable().collect::<Vec<_>>(), vec![0]);
+
+    // Polling the stopped entry unlinks it without consuming the error.
+    assert_eq!(pipe.server.stream_writable_next(), Some(0));
+
+    // Let the RESET_STREAM reach the client and its ack come back to the
+    // server, which processes the ack with the stream already unlinked.
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    // The stream must not have been collected yet: the application has not
+    // observed the STOP_SENDING.
+    assert_eq!(pipe.server.streams.len(), 1);
+
+    // The application finally writes its response and must see
+    // StreamStopped, not Done.
+    assert_eq!(
+        pipe.server.stream_send(0, b"resp", true),
+        Err(Error::StreamStopped(42))
+    );
 }
 
 #[rstest]
@@ -11947,6 +13403,7 @@ fn pmtud_probe_success(
 
     let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.client.path_event_next(), None);
 
     // Send probe and let it be acknowledged
     assert_eq!(pipe.advance(), Ok(()));
@@ -11968,6 +13425,30 @@ fn pmtud_probe_success(
 
     let path_stats = pipe.client.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, current_mtu);
+    let expected_valid = PathEvent::PmtuUpdated {
+        local: path_stats.local_addr,
+        peer: path_stats.peer_addr,
+        pmtu: current_mtu,
+    };
+    assert_eq!(pipe.client.path_event_next(), Some(expected_valid.clone()));
+    assert_eq!(pipe.client.path_event_next(), None);
+
+    pipe.client.revalidate_pmtu();
+    assert_eq!(
+        pipe.client.path_event_next(),
+        Some(PathEvent::PmtuUpdated {
+            local: path_stats.local_addr,
+            peer: path_stats.peer_addr,
+            pmtu: MIN_CLIENT_INITIAL_LEN,
+        })
+    );
+
+    pipe.client.revalidate_pmtu();
+    assert_eq!(pipe.client.path_event_next(), None);
+
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.client.path_event_next(), Some(expected_valid));
+    assert_eq!(pipe.client.path_event_next(), None);
 }
 
 #[rstest]
@@ -12129,6 +13610,7 @@ fn pmtud_probe_retry_after_loss(
 
     let path_stats = pipe.client.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, 1200);
+    assert_eq!(pipe.client.path_event_next(), None);
 
     // Make probes succeed til pmtu is found
     assert_eq!(pipe.advance(), Ok(()));
@@ -12151,6 +13633,22 @@ fn pmtud_probe_retry_after_loss(
 
     let path_stats = pipe.client.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, current_mtu);
+    let pmtu_events: Vec<_> =
+        std::iter::from_fn(|| pipe.client.path_event_next()).collect();
+    let pmtus: Vec<_> = pmtu_events
+        .iter()
+        .map(|event| match event {
+            PathEvent::PmtuUpdated { local, peer, pmtu } => {
+                assert_eq!(*local, path_stats.local_addr);
+                assert_eq!(*peer, path_stats.peer_addr);
+                *pmtu
+            },
+            event => panic!("unexpected path event: {event:?}"),
+        })
+        .collect();
+    assert!(pmtus.len() > 1);
+    assert!(pmtus.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(pmtus.last(), Some(&current_mtu));
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
@@ -12225,6 +13723,17 @@ fn enable_pmtud_mid_handshake(
     assert!(active_path.pmtud.is_some());
     assert_eq!(active_path.pmtud.as_mut().unwrap().get_current_mtu(), 1200);
 
+    let path_stats = pipe.server.path_stats().next().unwrap();
+    assert_eq!(
+        pipe.server.path_event_next(),
+        Some(PathEvent::PmtuUpdated {
+            local: path_stats.local_addr,
+            peer: path_stats.peer_addr,
+            pmtu: MIN_CLIENT_INITIAL_LEN,
+        })
+    );
+    assert_eq!(pipe.server.path_event_next(), None);
+
     assert_eq!(pipe.advance(), Ok(()));
 
     let current_mtu = pipe
@@ -12240,6 +13749,15 @@ fn enable_pmtud_mid_handshake(
 
     let path_stats = pipe.server.path_stats().next().unwrap();
     assert_eq!(path_stats.pmtu, current_mtu);
+    assert_eq!(
+        pipe.server.path_event_next(),
+        Some(PathEvent::PmtuUpdated {
+            local: path_stats.local_addr,
+            peer: path_stats.peer_addr,
+            pmtu: current_mtu,
+        })
+    );
+    assert_eq!(pipe.server.path_event_next(), None);
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
@@ -12308,16 +13826,19 @@ fn disable_pmtud_mid_handshake(
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
     assert!(active_path.pmtud.is_some());
+    assert_eq!(pipe.server.path_event_next(), None);
 
     assert_eq!(pipe.handshake(), Ok(()));
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
     assert!(active_path.pmtud.is_none());
+    assert_eq!(pipe.server.path_event_next(), None);
 
     assert_eq!(pipe.advance(), Ok(()));
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
     assert!(active_path.pmtud.is_none());
+    assert_eq!(pipe.server.path_event_next(), None);
 }
 
 #[rstest]
@@ -12514,9 +14035,54 @@ fn connect_custom_client_dcid() {
 }
 
 #[rstest]
-/// Tests that RESET_STREAM is retransmitted when the packet containing it is
-/// lost, even if the stream has been collected.
-fn reset_stream_retransmit_after_stream_collected(
+fn reset_stream_ack_cancels_retransmission(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] receive_fin: bool,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.client.stream_send(0, b"req", receive_fin), Ok(3));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((3, receive_fin)));
+    assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Write, 42), Ok(()));
+
+    pipe.server.send(&mut buf).unwrap();
+    let reset_packet = pipe.server.next_pkt_num - 1;
+    pipe.server.streams.insert_reset(0, 42, 0);
+    pipe.server.send(&mut buf).unwrap();
+    pipe.server.streams.insert_reset(0, 42, 0);
+    assert!(pipe.server.streams.has_reset());
+
+    let mut ranges = ranges::RangeSet::default();
+    ranges.insert(reset_packet..reset_packet + 1);
+    let frames = [frame::Frame::ACK {
+        ack_delay: 0,
+        ranges,
+        ecn_counts: None,
+    }];
+    let written =
+        test_utils::encode_pkt(&mut pipe.client, Type::Short, &frames, &mut buf)
+            .unwrap();
+    assert_eq!(pipe.server_recv(&mut buf[..written]), Ok(written));
+    assert!(!pipe.server.streams.has_reset());
+    assert_eq!(pipe.server.streams.is_collected(0), receive_fin);
+
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+    pipe.server.send_ack_eliciting().unwrap();
+    let (written, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..written]).unwrap();
+    assert!(!frames
+        .iter()
+        .any(|frame| matches!(frame, frame::Frame::ResetStream { .. })));
+    assert!(!pipe.server.streams.has_reset());
+}
+
+#[rstest]
+/// Tests that a reset stream is retained for retransmission until RESET_STREAM
+/// is acknowledged.
+fn reset_stream_retransmit_before_collection(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
 ) {
     let mut buf = [0; 65535];
@@ -12566,15 +14132,13 @@ fn reset_stream_retransmit_after_stream_collected(
     });
     assert!(has_reset_stream, "Expected RESET_STREAM in response");
 
-    // Now the application tries to write to the stream, which will return
-    // StreamStopped error and cause the stream to be collected.
+    // Reporting STOP does not collect the stream before RESET_STREAM is ACKed.
     assert_eq!(
         pipe.server.stream_writable(0, 1),
         Err(Error::StreamStopped(42))
     );
 
-    // Stream 0 should now be collected.
-    assert_eq!(pipe.server.streams.len(), 0);
+    assert_eq!(pipe.server.streams.len(), 1);
 
     // Trigger loss detection for the first RESET_STREAM packet and subsequent
     // retransmission. Confirm the new packet contains RESET_STREAM.
@@ -12582,7 +14146,8 @@ fn reset_stream_retransmit_after_stream_collected(
 
     let (len, _) = pipe.server.send(&mut buf).unwrap();
     let frames =
-        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len].to_vec())
+            .unwrap();
     let has_reset_stream = frames.iter().any(|f| {
         matches!(f, frame::Frame::ResetStream {
             stream_id: 0,
@@ -12593,8 +14158,11 @@ fn reset_stream_retransmit_after_stream_collected(
 
     assert!(
         has_reset_stream,
-        "RESET_STREAM should be retransmitted even after stream is collected"
+        "RESET_STREAM should be retransmitted before stream collection"
     );
+    assert_eq!(pipe.client_recv(&mut buf[..len]), Ok(len));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(pipe.server.streams.is_collected(0));
 }
 
 #[rstest]
@@ -12697,6 +14265,190 @@ fn stop_sending_no_retransmit_after_fin(
     // Server should have nothing to send since STOP_SENDING should not be
     // retransmitted after FIN.
     assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+}
+
+#[rstest]
+/// Tests that a zero-length FIN is sent and acknowledged before the stream is
+/// collected.
+fn stream_empty_fin_is_not_complete_until_fin_acked(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((5, true)));
+
+    assert_eq!(pipe.server.stream_send(4, b"response", false), Ok(8));
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+
+    assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((8, false)));
+
+    assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    test_utils::process_flight(&mut pipe.server, flight).unwrap();
+
+    assert!(!pipe.server.streams.is_collected(4));
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let mut frames = Vec::new();
+
+    for (mut pkt, _) in flight {
+        frames
+            .extend(test_utils::decode_pkt(&mut pipe.client, &mut pkt).unwrap());
+    }
+
+    assert!(frames.iter().any(|f| matches!(
+        f,
+        frame::Frame::Stream { stream_id: 4, data }
+            if data.off() == 8 && data.is_empty() && data.fin()
+    )));
+}
+
+#[rstest]
+/// Tests that a lost FIN is retransmitted after its data was already
+/// acknowledged, whether the lost frame carried data or not.
+fn stream_empty_fin_is_retransmitted(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] fin_with_data: bool,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((5, true)));
+
+    assert_eq!(pipe.server.stream_send(4, b"response", false), Ok(8));
+
+    if fin_with_data {
+        // The PTO probe retransmits the data together with the FIN.
+        let data_flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+
+        let timer = pipe.server.timeout().unwrap();
+        std::thread::sleep(timer + Duration::from_millis(1));
+        pipe.server.on_timeout();
+
+        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+        let frames =
+            test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+        assert!(frames.iter().any(|f| matches!(
+            f,
+            frame::Frame::Stream { stream_id: 4, data }
+                if data.off() == 0 && data.len() == 8 && data.fin()
+        )));
+
+        // Lose the probe, but deliver and acknowledge the original data.
+        test_utils::process_flight(&mut pipe.client, data_flight).unwrap();
+        assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((8, false)));
+
+        let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+        test_utils::process_flight(&mut pipe.server, flight).unwrap();
+        assert_eq!(pipe.server.streams.get(4).unwrap().send.ack_off(), 8);
+    } else {
+        assert_eq!(pipe.advance(), Ok(()));
+        assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((8, false)));
+
+        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+
+        let (len, _) = pipe.server.send(&mut buf).unwrap();
+        let frames =
+            test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+        assert!(frames.iter().any(|f| matches!(
+            f,
+            frame::Frame::Stream { stream_id: 4, data }
+                if data.off() == 8 && data.is_empty() && data.fin()
+        )));
+    }
+
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    assert!(frames.iter().any(|f| matches!(
+        f,
+        frame::Frame::Stream { stream_id: 4, data }
+            if data.off() == 8 && data.is_empty() && data.fin()
+    )));
+}
+
+#[rstest]
+/// Tests that a FIN is sent when retransmitted data ends before an already
+/// acknowledged tail, unless the FIN was already sent with that tail.
+fn stream_fin_is_sent_after_retransmission_before_acked_tail(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(true, false)] fin_with_tail: bool,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_initial_max_data(4096);
+    config.set_initial_max_stream_data_bidi_local(1024);
+    config.set_initial_max_stream_data_bidi_remote(1024);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.stream_recv(4, &mut buf), Ok((5, true)));
+
+    let data = vec![42; 256];
+    assert_eq!(pipe.server.stream_send(4, &data, fin_with_tail), Ok(256));
+
+    let mut flight =
+        test_utils::emit_flight_with_max_buffer(&mut pipe.server, 64, None, None)
+            .unwrap();
+    assert!(flight.len() > 3);
+
+    // Only deliver the last packet. Its ACK declares all the others lost.
+    let tail = flight.pop().unwrap();
+    test_utils::process_flight(&mut pipe.client, vec![tail]).unwrap();
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    if !fin_with_tail {
+        assert_eq!(pipe.server.stream_send(4, b"", true), Ok(0));
+    }
+
+    let flight = test_utils::emit_flight(&mut pipe.server).unwrap();
+    let mut frames = Vec::new();
+
+    for (mut pkt, _) in flight.clone() {
+        frames
+            .extend(test_utils::decode_pkt(&mut pipe.client, &mut pkt).unwrap());
+    }
+
+    assert!(frames.iter().any(|f| matches!(
+        f,
+        frame::Frame::Stream { stream_id: 4, data } if data.off() == 0
+    )));
+
+    // The FIN must be sent only when it wasn't already sent with the tail.
+    assert_eq!(
+        frames.iter().any(|f| matches!(
+            f,
+            frame::Frame::Stream { stream_id: 4, data } if data.fin()
+        )),
+        !fin_with_tail,
+        "unexpected FIN in {frames:?}"
+    );
+
+    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+    assert_eq!(pipe.client.stream_recv(4, &mut buf), Ok((256, true)));
 }
 
 #[rstest]

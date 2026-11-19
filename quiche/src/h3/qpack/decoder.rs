@@ -122,7 +122,13 @@ impl FieldListSizeTracker {
 
 /// A QPACK decoder.
 #[derive(Default)]
-pub struct Decoder {}
+pub struct Decoder {
+    // TODO: hold a dynamic table whose maximum capacity is the
+    // SETTINGS_QPACK_MAX_TABLE_CAPACITY value advertised to the peer.
+    //
+    // TODO: queue decoder instructions (RFC 9204, Section 4.4) for the
+    // connection to send on the decoder stream.
+}
 
 impl Decoder {
     /// Creates a new QPACK decoder.
@@ -132,7 +138,12 @@ impl Decoder {
 
     /// Processes control instructions from the encoder.
     pub fn control(&mut self, _buf: &mut [u8]) -> Result<()> {
-        // TODO: process control instructions
+        // TODO: parse encoder instructions (RFC 9204, Section 4.3), including
+        // ones split across calls, and apply them to the dynamic table. Their
+        // errors are connection errors of type QPACK_ENCODER_STREAM_ERROR.
+        // TODO: if the advertised maximum table capacity is zero, reject
+        // all encoder instructions (even Set Dynamic Table Capacity 0) before
+        // dispatching them to the table (RFC 9204, Section 3.2.3).
         Ok(())
     }
 
@@ -146,6 +157,11 @@ impl Decoder {
 
         let req_insert_count = decode_int(&mut b, 8)?;
         let base = decode_int(&mut b, 7)?;
+
+        // TODO: decode the Required Insert Count and Base (RFC 9204, Section
+        // 4.5.1). With SETTINGS_QPACK_BLOCKED_STREAMS set to 0, a Required
+        // Insert Count above the dynamic table's insert count is a connection
+        // error of type QPACK_DECOMPRESSION_FAILED (RFC 9204, Section 2.1.2).
 
         trace!("Header count={req_insert_count} base={base}");
 
@@ -354,7 +370,7 @@ mod tests {
     }
 
     /// LiteralWithNameRef with the dynamic table flag (S=0) must be
-    /// rejected since the dynamic table is not implemented.
+    /// rejected since dynamic table references are not decoded yet.
     #[test]
     fn literal_with_name_ref_dynamic_table_rejected() {
         let mut dec = Decoder::new();

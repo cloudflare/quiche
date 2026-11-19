@@ -79,6 +79,93 @@ impl<F: BufFactory> Drop for SendReserve<'_, F> {
     }
 }
 
+/// A received STOP_SENDING error and its application notification state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PeerStopSendingState {
+    /// No STOP_SENDING has been received.
+    #[default]
+    NotReceived,
+
+    /// STOP_SENDING was received but has not been reported to the application.
+    NotReported(u64),
+
+    /// STOP_SENDING was reported; retain its code for subsequent write errors.
+    Reported(u64),
+}
+
+impl PeerStopSendingState {
+    /// Returns whether a STOP_SENDING has been received, regardless of
+    /// delivery.
+    pub(crate) fn is_stopped(self) -> bool {
+        match self {
+            Self::NotReceived => false,
+            Self::NotReported(_) | Self::Reported(_) => true,
+        }
+    }
+
+    /// Returns the peer's error without consuming its application notification.
+    fn check_not_stopped(self) -> Result<()> {
+        match self {
+            Self::NotReceived => Ok(()),
+            Self::NotReported(code) | Self::Reported(code) =>
+                Err(Error::StreamStopped(code)),
+        }
+    }
+
+    /// Records application delivery and retains the code for later errors.
+    fn report(&mut self) -> Result<()> {
+        match *self {
+            Self::NotReceived => Ok(()),
+            Self::NotReported(code) => {
+                *self = Self::Reported(code);
+                Err(Error::StreamStopped(code))
+            },
+            Self::Reported(code) => Err(Error::StreamStopped(code)),
+        }
+    }
+}
+
+/// The lifecycle of the stream's final size.
+///
+/// This is only meaningful once `fin_off` is set.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum FinState {
+    /// The final size still needs to be sent in a STREAM frame carrying FIN,
+    /// because no such frame was sent yet, or the last one was lost.
+    #[default]
+    Pending,
+
+    /// No STREAM frame carrying FIN needs to be sent, because one was already
+    /// sent, or because RESET_STREAM carries the final size instead.
+    Sent,
+
+    /// A STREAM frame carrying FIN was acknowledged.
+    Acked,
+}
+
+impl FinState {
+    /// Returns true if the final size still needs to be sent.
+    fn is_pending(self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    /// Returns true if a STREAM frame carrying FIN was acknowledged.
+    fn is_acked(self) -> bool {
+        matches!(self, Self::Acked)
+    }
+
+    /// Records that a STREAM frame carrying FIN was sent.
+    ///
+    /// An acknowledged FIN stays acknowledged, as the peer may have already
+    /// acknowledged a retransmitted range that ends at the final offset.
+    fn sent(self) -> Self {
+        match self {
+            Self::Acked => Self::Acked,
+            Self::Pending | Self::Sent => Self::Sent,
+        }
+    }
+}
+
 /// Send-side stream buffer.
 ///
 /// Stream data scheduled to be sent to the peer is buffered in a list of data
@@ -122,14 +209,21 @@ where
     /// The final stream offset written to the stream, if any.
     fin_off: Option<u64>,
 
+    /// The lifecycle of the final size, only meaningful once `fin_off` is set.
+    fin_state: FinState,
+
+    /// Whether a RESET_STREAM frame has been acknowledged, or is not needed
+    /// because the send side was already complete when it was reset.
+    reset_acked: bool,
+
     /// Whether the stream's send-side has been shut down.
     shutdown: bool,
 
     /// Ranges of data offsets that have been acked.
     acked: ranges::RangeSet,
 
-    /// The error code received via STOP_SENDING.
-    error: Option<u64>,
+    /// The STOP_SENDING error and whether it was returned to the application.
+    peer_stop_sending: PeerStopSendingState,
 }
 
 impl<F: BufFactory> SendBuf<F> {
@@ -297,6 +391,10 @@ impl<F: BufFactory> SendBuf<F> {
         // propagate the final size.
         let fin = self.fin_off == Some(next_off);
 
+        if fin {
+            self.fin_state = self.fin_state.sent();
+        }
+
         // Record the largest offset that has been sent so we can accurately
         // report final_size
         self.emit_off = cmp::max(self.emit_off, next_off);
@@ -322,6 +420,16 @@ impl<F: BufFactory> SendBuf<F> {
     /// Increments the acked data offset.
     pub fn ack(&mut self, off: u64, len: usize) {
         self.acked.insert(off..off + len as u64);
+    }
+
+    /// Marks the stream's final size as acknowledged by the peer.
+    pub(crate) fn ack_fin(&mut self) {
+        self.fin_state = FinState::Acked;
+    }
+
+    /// Marks the stream's reset as acknowledged by the peer.
+    pub(crate) fn ack_reset_stream(&mut self) {
+        self.reset_acked = true;
     }
 
     pub fn ack_and_drop(&mut self, off: u64, len: usize) -> usize {
@@ -434,12 +542,33 @@ impl<F: BufFactory> SendBuf<F> {
         total_retransmitted as usize
     }
 
+    /// Marks the final size for retransmission after a STREAM frame carrying
+    /// FIN was lost.
+    ///
+    /// This is needed even when the frame's data was acknowledged in another
+    /// packet, as the FIN still has to reach the peer.
+    pub(crate) fn retransmit_fin(&mut self) {
+        if self.fin_state.is_acked() {
+            return;
+        }
+
+        self.fin_state = FinState::Pending;
+    }
+
     /// Resets the stream at the current offset and clears all buffered data.
     pub fn reset(&mut self) -> (u64, u64) {
+        // A send side whose data and FIN were already acknowledged needs no
+        // RESET_STREAM and stays complete. This must run before the caller
+        // marks the stream as stopped or shut down.
+        self.reset_acked |= self.is_complete();
+
         let unsent_off = cmp::max(self.off_front(), self.emit_off);
         let unsent_len = self.off_back().saturating_sub(unsent_off);
 
         self.fin_off = Some(unsent_off);
+
+        // The final size is sent in RESET_STREAM instead.
+        self.fin_state = self.fin_state.sent();
 
         // Drop all buffered data.
         self.data.clear();
@@ -458,13 +587,13 @@ impl<F: BufFactory> SendBuf<F> {
     ///
     /// Calling this again after the first time has no effect.
     pub fn stop(&mut self, error_code: u64) -> Result<(u64, u64)> {
-        if self.error.is_some() {
+        if self.peer_stop_sending.is_stopped() {
             return Err(Error::Done);
         }
 
         let (max_off, unsent) = self.reset();
 
-        self.error = Some(error_code);
+        self.peer_stop_sending = PeerStopSendingState::NotReported(error_code);
 
         Ok((max_off, unsent))
     }
@@ -475,9 +604,19 @@ impl<F: BufFactory> SendBuf<F> {
             return Err(Error::Done);
         }
 
+        let (max_off, unsent) = self.reset();
+
         self.shutdown = true;
 
-        Ok(self.reset())
+        Ok((max_off, unsent))
+    }
+
+    /// Seeds send offsets without buffering the preceding data.
+    #[cfg(test)]
+    pub fn seed_offsets_for_test(&mut self, off: u64) {
+        assert!(self.data.is_empty());
+        self.off = off;
+        self.emit_off = off;
     }
 
     /// Returns the largest offset of data buffered.
@@ -501,6 +640,11 @@ impl<F: BufFactory> SendBuf<F> {
         self.off
     }
 
+    /// Returns true if the next call to [`Self::emit`] will emit an empty FIN.
+    pub fn empty_fin_next(&self) -> bool {
+        self.fin_off == Some(self.off_front())
+    }
+
     /// The maximum offset we are allowed to send to the peer.
     pub fn max_off(&self) -> u64 {
         self.max_data
@@ -511,20 +655,25 @@ impl<F: BufFactory> SendBuf<F> {
     /// This happens when the stream's send final size is known, and the
     /// application has already written data up to that point.
     pub fn is_fin(&self) -> bool {
-        if self.fin_off == Some(self.off) {
-            return true;
-        }
+        self.fin_off == Some(self.off)
+    }
 
-        false
+    /// Returns true if the final size still needs to be sent to the peer.
+    pub(crate) fn is_fin_pending(&self) -> bool {
+        self.fin_off.is_some() && self.fin_state.is_pending()
     }
 
     /// Returns true if the send-side of the stream is complete.
     ///
-    /// This happens when the stream's send final size is known, and the peer
-    /// has already acked all stream data up to that point.
+    /// This happens when the peer has acknowledged the stream's final size and
+    /// all stream data up to that point, or has acknowledged RESET_STREAM.
     pub fn is_complete(&self) -> bool {
+        if self.is_reset() {
+            return self.reset_acked;
+        }
+
         if let Some(fin_off) = self.fin_off {
-            if self.acked == (0..fin_off) {
+            if self.fin_state.is_acked() && self.acked == (0..fin_off) {
                 return true;
             }
         }
@@ -532,14 +681,20 @@ impl<F: BufFactory> SendBuf<F> {
         false
     }
 
-    /// Returns true if the stream was stopped before completion.
-    pub fn is_stopped(&self) -> bool {
-        self.error.is_some()
+    /// Returns the received STOP_SENDING error's notification state.
+    pub(crate) fn peer_stop_sending_state(&self) -> PeerStopSendingState {
+        self.peer_stop_sending
     }
 
     /// Returns true if the stream was shut down.
     pub fn is_shutdown(&self) -> bool {
         self.shutdown
+    }
+
+    /// Returns true if the send side was shut down by the application or
+    /// stopped by the peer.
+    pub(crate) fn is_reset(&self) -> bool {
+        self.shutdown || self.peer_stop_sending.is_stopped()
     }
 
     /// Returns true if there is no data.
@@ -561,11 +716,16 @@ impl<F: BufFactory> SendBuf<F> {
     /// Returns the outgoing flow control capacity.
     pub fn cap(&self) -> Result<usize> {
         // The stream was stopped, so return the error code instead.
-        if let Some(e) = self.error {
-            return Err(Error::StreamStopped(e));
-        }
+        self.peer_stop_sending.check_not_stopped()?;
 
         Ok((self.max_data - self.off) as usize)
+    }
+
+    /// Returns capacity, reporting a received STOP_SENDING to the application.
+    /// Internal writability checks use `cap()` without consuming notification.
+    pub fn cap_and_report_stop_sending(&mut self) -> Result<usize> {
+        self.peer_stop_sending.report()?;
+        self.cap()
     }
 
     /// Returns the number of separate buffers stored.
@@ -586,7 +746,40 @@ impl<F: BufFactory> SendBuf<F> {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
+
+    #[rstest]
+    fn reset_waits_for_ack(
+        #[values(true, false)] local_reset: bool,
+        #[values(true, false)] acked_before_reset: bool,
+    ) {
+        let mut send = <SendBuf>::new(15);
+        let mut out = [0; 5];
+        assert_eq!(send.write(b"hello", true), Ok(5));
+        assert_eq!(send.emit(&mut out), Ok((5, true)));
+
+        if acked_before_reset {
+            send.ack_and_drop(0, 5);
+            send.ack_fin();
+        }
+
+        let result = if local_reset {
+            send.shutdown()
+        } else {
+            send.stop(42)
+        };
+        assert_eq!(result, Ok((5, 0)));
+        assert_eq!(send.is_complete(), acked_before_reset);
+
+        send.ack_and_drop(0, 5);
+        send.ack_fin();
+        assert_eq!(send.is_complete(), acked_before_reset);
+
+        send.ack_reset_stream();
+        assert!(send.is_complete());
+    }
 
     #[test]
     fn empty_write() {
@@ -874,5 +1067,47 @@ mod tests {
         let (fin_off, unsent) = send.stop(0).unwrap();
         assert_eq!(fin_off, 50);
         assert_eq!(unsent, 0);
+    }
+
+    #[test]
+    fn peer_stop_sending_notification_lifecycle() {
+        let mut send = <SendBuf>::new(100);
+        assert_eq!(send.cap_and_report_stop_sending(), Ok(100));
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::NotReceived
+        );
+
+        send.stop(0).unwrap();
+        assert!(!send.is_fin_pending());
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::NotReported(0)
+        );
+        assert_eq!(send.cap(), Err(Error::StreamStopped(0)));
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::NotReported(0)
+        );
+        assert_eq!(
+            send.cap_and_report_stop_sending(),
+            Err(Error::StreamStopped(0))
+        );
+        assert_eq!(
+            send.cap_and_report_stop_sending(),
+            Err(Error::StreamStopped(0))
+        );
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::Reported(0)
+        );
+        // Reporting preserves the code for subsequent writes and duplicate
+        // STOP_SENDING must not replace it or create another notification.
+        assert_eq!(send.stop(42), Err(Error::Done));
+        assert_eq!(send.cap(), Err(Error::StreamStopped(0)));
+        assert_eq!(
+            send.peer_stop_sending_state(),
+            PeerStopSendingState::Reported(0)
+        );
     }
 }
