@@ -2414,7 +2414,7 @@ impl<F: BufFactory> Connection<F> {
     pub fn set_qlog_with_level_and_name_filter(
         &mut self, writer: Box<dyn std::io::Write + Send + Sync>, title: String,
         description: String, qlog_level: QlogLevel,
-        name_filter: Option<fn(&str) -> bool>,
+        name_filter: Option<qlog::streamer::EventNameFilter>,
     ) {
         use qlog::events::quic::TransportInitiator;
         use qlog::events::HTTP3_URI;
@@ -2458,7 +2458,7 @@ impl<F: BufFactory> Connection<F> {
             vec![QUIC_URI.to_string(), HTTP3_URI.to_string()],
         );
 
-        let mut streamer = qlog::streamer::QlogStreamer::with_name_filter(
+        let mut streamer = qlog::streamer::QlogStreamer::new(
             Some(title),
             Some(description),
             now,
@@ -2466,8 +2466,11 @@ impl<F: BufFactory> Connection<F> {
             self.qlog.level,
             qlog::streamer::EventTimePrecision::MicroSeconds,
             writer,
-            name_filter,
         );
+
+        if let Some(name_filter) = name_filter {
+            streamer.set_name_filter(name_filter);
+        }
 
         streamer.start_log().ok();
 
