@@ -120,6 +120,7 @@ where
     let conn_params = QuicConnectionParams {
         writer_cfg,
         pending_cid: None, // only used for unmapping in IPR
+        original_dcid: None,
         initial_pkt: None,
         dscp_handle: None,
         shutdown_tx,

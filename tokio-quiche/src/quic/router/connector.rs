@@ -186,6 +186,7 @@ where
             Ok(Some(NewConnection {
                 conn,
                 pending_cid: None,
+                original_dcid: None,
                 initial_pkt: None,
                 enable_per_connection_dscp: false,
                 cid_generator: None,

@@ -97,6 +97,16 @@ where
         let handshake_start_time = Instant::now();
         let scid = self.cid_generator.new_connection_id();
 
+        // The DCID the client picked for its first Initial packet. After a
+        // stateless retry, the client's second Initial uses the server's Retry
+        // SCID instead, so the original comes from the retry token.
+        let original_dcid = match &retry_cids {
+            Some(retry_cids) => ConnectionId::from_vec(
+                retry_cids.original_destination_cid.to_vec(),
+            ),
+            None => pending_cid.clone(),
+        };
+
         let mut conn = if let Some(retry_cids) = retry_cids {
             quiche::accept_with_retry(
                 &scid,
@@ -141,6 +151,7 @@ where
             conn: Box::new(conn),
             handshake_start_time,
             pending_cid: Some(pending_cid),
+            original_dcid: Some(original_dcid),
             cid_generator: Some(Arc::clone(&self.cid_generator)),
             initial_pkt: Some(incoming),
             enable_per_connection_dscp: self.config.enable_per_connection_dscp,
