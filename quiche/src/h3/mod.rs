@@ -590,6 +590,8 @@ pub struct Config {
     /// additional settings are settings that are not part of the H3
     /// settings explicitly handled above
     additional_settings: Option<Vec<(u64, u64)>>,
+    /// make WebTransport streams available to the upper layer.
+    webtransport_streams_enabled: bool,
 
     max_priority_update_size: u64,
 }
@@ -603,6 +605,7 @@ impl Config {
             qpack_blocked_streams: None,
             connect_protocol_enabled: None,
             additional_settings: None,
+            webtransport_streams_enabled: false,
             max_priority_update_size:
                 PRIORITY_UPDATE_FRAME_PAYLOAD_MAX_SIZE_DEFAULT,
         })
@@ -694,6 +697,13 @@ impl Config {
         }
         self.additional_settings = Some(additional_settings);
         Ok(())
+    }
+
+    /// Make WebTransport streams available to the upper layer.
+    ///
+    /// The default value is `false`.
+    pub fn enable_webtransport_streams(&mut self, enabled: bool) {
+        self.webtransport_streams_enabled = enabled;
     }
 
     /// Sets the maximum size for the payload of PRIORITY_UPDATE frames.
@@ -1034,6 +1044,11 @@ pub struct Connection {
 
     local_goaway_id: Option<u64>,
     peer_goaway_id: Option<u64>,
+    webtransport_streams_enabled: bool,
+
+    /// WebTransport streams the application shut down before they were
+    /// closed, whose H3 state `poll()` frees once they are.
+    shutdown_webtransport_streams: crate::stream::StreamIdHashSet,
 
     max_priority_update_size: u64,
 }
@@ -1043,12 +1058,13 @@ impl Connection {
         config: &Config, is_server: bool, enable_dgram: bool,
     ) -> Result<Connection> {
         let initial_uni_stream_id = if is_server { 0x3 } else { 0x2 };
+        let initial_bidi_stream_id = if is_server { 0x1 } else { 0x0 };
         let h3_datagram = if enable_dgram { Some(1) } else { None };
 
         Ok(Connection {
             is_server,
 
-            next_request_stream_id: 0,
+            next_request_stream_id: initial_bidi_stream_id,
 
             next_uni_stream_id: initial_uni_stream_id,
 
@@ -1091,6 +1107,8 @@ impl Connection {
 
             local_goaway_id: None,
             peer_goaway_id: None,
+            webtransport_streams_enabled: config.webtransport_streams_enabled,
+            shutdown_webtransport_streams: Default::default(),
 
             max_priority_update_size: config.max_priority_update_size,
         })
@@ -1221,6 +1239,72 @@ impl Connection {
             .next_request_stream_id
             .checked_add(4)
             .ok_or(Error::IdError)?;
+
+        Ok(stream_id)
+    }
+
+    /// Open a new WebTransport stream.
+    /// The `bidi` argument specifies whether it is bidirectional or not.
+    /// This function already adds the frame or stream type.
+    /// The session id must be sent by the upper layer.
+    ///
+    /// If successful, the ID of the stream is returned.
+    /// `InternalError` is returned when `webtransport_streams_enabled` is not
+    /// set.
+    pub fn open_webtransport_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, bidi: bool,
+    ) -> Result<u64> {
+        if !self.webtransport_streams_enabled {
+            return Err(Error::InternalError);
+        }
+
+        // A bidirectional stream starts with the signal value, a
+        // unidirectional one with the stream type.
+        let (stream_id, prefix) = if bidi {
+            (
+                self.next_request_stream_id,
+                frame::WEBTRANSPORT_STREAM_FRAME_TYPE_ID,
+            )
+        } else {
+            (self.next_uni_stream_id, stream::WEBTRANSPORT_STREAM_TYPE_ID)
+        };
+
+        let mut prefix_buf = [0u8; 8];
+        let prefix_len = octets::varint_len(prefix);
+        octets::OctetsMut::with_slice(&mut prefix_buf).put_varint(prefix)?;
+
+        // Force the creation of the QUIC stream state, as in
+        // `send_request()`.
+        match conn.stream_send(stream_id, b"", false) {
+            Ok(_) => (),
+            Err(super::Error::Done) => return Err(Error::StreamBlocked),
+            Err(e) => return Err(e.into()),
+        }
+
+        if conn.stream_capacity(stream_id)? < prefix_len {
+            return Err(Error::StreamBlocked);
+        }
+        conn.stream_send(stream_id, &prefix_buf[..prefix_len], false)?;
+
+        let mut stream = stream::Stream::new(
+            stream_id,
+            true,
+            self.local_settings
+                .max_field_section_size
+                .unwrap_or(SETTINGS_MAX_FIELD_SECTION_SIZE_DEFAULT),
+            self.max_priority_update_size,
+        );
+        stream.set_webtransport();
+        self.streams.insert(stream_id, stream);
+
+        // To avoid skipping stream IDs, we only calculate the next available
+        // stream ID when the stream has been successfully opened.
+        let next_stream_id = if bidi {
+            &mut self.next_request_stream_id
+        } else {
+            &mut self.next_uni_stream_id
+        };
+        *next_stream_id = next_stream_id.checked_add(4).ok_or(Error::IdError)?;
 
         Ok(stream_id)
     }
@@ -2133,6 +2217,8 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        self.collect_shutdown_webtransport_streams(conn);
+
         // Process control streams first.
         if let Some(stream_id) = self.peer_control_stream_id {
             match self.process_control_stream(conn, stream_id) {
@@ -2636,7 +2722,14 @@ impl Connection {
                         Err(_) => continue,
                     };
 
-                    let ty = stream::Type::deserialize(varint)?;
+                    let mut ty = stream::Type::deserialize(varint)?;
+
+                    if matches!(ty, stream::Type::WebTransport) &&
+                        !self.webtransport_streams_enabled
+                    {
+                        // downgrade to `Unknown`
+                        ty = stream::Type::Unknown
+                    }
 
                     if let Err(e) = stream.set_ty(ty) {
                         conn.close(true, e.to_wire(), b"")?;
@@ -2743,6 +2836,8 @@ impl Connection {
                                 Some(stream_id);
                         },
 
+                        stream::Type::WebTransport => {},
+
                         stream::Type::Unknown => {
                             // Unknown stream types are ignored.
                             // TODO: we MAY send STOP_SENDING
@@ -2776,7 +2871,20 @@ impl Connection {
                         Err(_) => continue,
                     };
 
-                    match stream.set_frame_type(varint) {
+                    // Without WebTransport streams enabled, the signal is
+                    // an unknown frame type like any other.
+                    let is_webtransport_signal = self
+                        .webtransport_streams_enabled &&
+                        varint == frame::WEBTRANSPORT_STREAM_FRAME_TYPE_ID &&
+                        stream.ty() == Some(stream::Type::Request);
+
+                    let frame_type_result = if is_webtransport_signal {
+                        stream.set_webtransport_signalled()
+                    } else {
+                        stream.set_frame_type(varint)
+                    };
+
+                    match frame_type_result {
                         Err(Error::FrameUnexpected) => {
                             let msg = format!("Unexpected frame type {varint}");
 
@@ -2963,6 +3071,8 @@ impl Connection {
                 },
 
                 stream::State::Finished => break,
+
+                stream::State::Ignore => break,
             }
         }
 
@@ -2989,6 +3099,11 @@ impl Connection {
             Some(stream::Type::Unknown) | None => {
                 self.streams.remove(&stream_id);
             },
+            // WebTransport has its own collection path
+            // (`collect_webtransport_stream_if_closed`): on a reset,
+            // `stream_finished()` goes true before the app reads it, so
+            // collecting here would race `readable_webtransport_streams`.
+            Some(stream::Type::WebTransport) => (),
             // Closing any of the critical streams leads to connection close,
             // so there is no need for any cleanup actions here.
             Some(stream::Type::Control) |
@@ -3398,6 +3513,130 @@ impl Connection {
             qpack_decoder_stream_recv_bytes: self
                 .peer_qpack_streams
                 .decoder_stream_bytes,
+        }
+    }
+
+    /// Returns an iterator over WebTransport streams that have outstanding data
+    /// to read. Iterator is always empty if `webtransport_streams_enabled`
+    /// is not set.
+    pub fn readable_webtransport_streams<F: BufFactory>(
+        &self, conn: &super::Connection<F>,
+    ) -> super::StreamIter {
+        super::StreamIter::filter(&conn.readable(), |stream_id| {
+            let Some(stream) = self.streams.get(stream_id) else {
+                return false;
+            };
+            let Some(ty) = stream.ty() else {
+                return false;
+            };
+
+            ty == stream::Type::WebTransport
+        })
+    }
+
+    /// Reads data from a WebTransport stream.
+    ///
+    /// Must be used instead of [`Connection::stream_recv`]: this also frees
+    /// the stream's H3 state once it is closed and fully drained.
+    ///
+    /// [`Connection::stream_recv`]: struct.Connection.html#method.stream_recv
+    pub fn recv_webtransport_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        out: &mut [u8],
+    ) -> Result<(usize, bool)> {
+        let res = conn.stream_recv(stream_id, out).map_err(Error::from);
+
+        self.collect_webtransport_stream_if_closed(conn, stream_id);
+
+        res
+    }
+
+    /// Writes data to a WebTransport stream.
+    ///
+    /// Must be used instead of [`Connection::stream_send`], for the same
+    /// reason as [`Self::recv_webtransport_stream`].
+    ///
+    /// [`Connection::stream_send`]: struct.Connection.html#method.stream_send
+    pub fn send_webtransport_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64, buf: &[u8],
+        fin: bool,
+    ) -> Result<usize> {
+        let res = conn.stream_send(stream_id, buf, fin).map_err(Error::from);
+
+        self.collect_webtransport_stream_if_closed(conn, stream_id);
+
+        res
+    }
+
+    /// Shuts down reading or writing of a WebTransport stream.
+    ///
+    /// This differs from request streams, which are shut down with
+    /// [`Connection::stream_shutdown`] directly: their H3 state is freed
+    /// when [`poll()`] reports [`Event::Finished`] or [`Event::Reset`].
+    /// WebTransport streams produce no events, so this method must be used
+    /// instead, to let the H3 state be freed:
+    ///
+    /// - right away, if the shutdown closes the stream, i.e. the other
+    ///   direction is already finished;
+    /// - otherwise by a later [`poll()`], once the peer finished its side, e.g.
+    ///   by answering STOP_SENDING with a reset.
+    ///
+    /// A bidirectional stream that is only shut down for reading stays open,
+    /// and keeps its H3 state, until its send side is finished as well.
+    ///
+    /// [`Connection::stream_shutdown`]: ../struct.Connection.html#method.stream_shutdown
+    /// [`poll()`]: struct.Connection.html#method.poll
+    /// [`Event::Finished`]: enum.Event.html#variant.Finished
+    /// [`Event::Reset`]: enum.Event.html#variant.Reset
+    pub fn shutdown_webtransport_stream<F: BufFactory>(
+        &mut self, conn: &mut super::Connection<F>, stream_id: u64,
+        direction: super::Shutdown, err: u64,
+    ) -> Result<()> {
+        let res = conn
+            .stream_shutdown(stream_id, direction, err)
+            .map_err(Error::from);
+
+        self.collect_webtransport_stream_if_closed(conn, stream_id);
+
+        if self.is_webtransport_stream(stream_id) {
+            self.shutdown_webtransport_streams.insert(stream_id);
+        }
+
+        res
+    }
+
+    fn is_webtransport_stream(&self, stream_id: u64) -> bool {
+        self.streams.get(&stream_id).and_then(stream::Stream::ty) ==
+            Some(stream::Type::WebTransport)
+    }
+
+    /// Frees `stream_id`'s H3 state once closed (both directions for bidi,
+    /// the local direction for uni) and fully drained.
+    fn collect_webtransport_stream_if_closed<F: BufFactory>(
+        &mut self, conn: &super::Connection<F>, stream_id: u64,
+    ) {
+        if self.is_webtransport_stream(stream_id) &&
+            conn.stream_closed(stream_id) &&
+            !conn.stream_readable(stream_id)
+        {
+            self.streams.remove(&stream_id);
+        }
+    }
+
+    /// Frees the H3 state of WebTransport streams that closed after the
+    /// application shut them down, as it may never touch them again.
+    fn collect_shutdown_webtransport_streams<F: BufFactory>(
+        &mut self, conn: &super::Connection<F>,
+    ) {
+        let shutdown_streams =
+            std::mem::take(&mut self.shutdown_webtransport_streams);
+
+        for stream_id in shutdown_streams {
+            self.collect_webtransport_stream_if_closed(conn, stream_id);
+
+            if self.is_webtransport_stream(stream_id) {
+                self.shutdown_webtransport_streams.insert(stream_id);
+            }
         }
     }
 }
@@ -8754,6 +8993,585 @@ mod tests {
         // The server stream should be gone now
         assert_eq!(s.client.streams.len(), init_streams_client);
         assert_eq!(s.server.streams.len(), init_streams_server);
+    }
+
+    fn webtransport_session() -> Session {
+        let (mut config, mut h3_config) = Session::default_configs().unwrap();
+        h3_config.enable_webtransport_streams(true);
+
+        let mut s = Session::with_configs(&mut config, &h3_config).unwrap();
+        s.handshake().unwrap();
+        s
+    }
+
+    #[test]
+    fn webtransport_bidi_stream_finish_and_gc() {
+        let mut s = webtransport_session();
+
+        let init_streams_client = s.client.streams.len();
+        let init_streams_server = s.server.streams.len();
+
+        let stream_id = s
+            .client
+            .open_webtransport_stream(&mut s.pipe.client, true)
+            .unwrap();
+
+        let sent = s.client.send_webtransport_stream(
+            &mut s.pipe.client,
+            stream_id,
+            b"hello",
+            false,
+        );
+        assert_eq!(sent, Ok(5));
+
+        s.advance().ok();
+
+        // No generic H3 event for WebTransport data; discover it via
+        // `readable_webtransport_streams()` after polling.
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        let mut readable = s.server.readable_webtransport_streams(&s.pipe.server);
+        assert_eq!(readable.next(), Some(stream_id));
+        assert_eq!(readable.next(), None);
+
+        // Drain it in two partial reads rather than all at once.
+        let mut buf = [0; 3];
+        let recvd = s.server.recv_webtransport_stream(
+            &mut s.pipe.server,
+            stream_id,
+            &mut buf,
+        );
+        assert_eq!(recvd, Ok((3, false)));
+        assert_eq!(&buf, b"hel");
+
+        let mut buf = [0; 2];
+        let recvd = s.server.recv_webtransport_stream(
+            &mut s.pipe.server,
+            stream_id,
+            &mut buf,
+        );
+        assert_eq!(recvd, Ok((2, false)));
+        assert_eq!(&buf, b"lo");
+
+        assert_eq!(s.client.streams.len(), init_streams_client + 1);
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        // Client closes its send side. Doesn't close either copy yet: bidi
+        // `stream_closed()` needs both directions, and neither side has
+        // seen the other's fin.
+        let sent = s.client.send_webtransport_stream(
+            &mut s.pipe.client,
+            stream_id,
+            b"",
+            true,
+        );
+        assert_eq!(sent, Ok(0));
+        assert_eq!(s.client.streams.len(), init_streams_client + 1);
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        let mut buf = [0; 5];
+        let recvd = s.server.recv_webtransport_stream(
+            &mut s.pipe.server,
+            stream_id,
+            &mut buf,
+        );
+        assert_eq!(recvd, Ok((0, true)));
+
+        // Server has seen the client's fin but not sent its own yet: still
+        // not closed either side.
+        assert_eq!(s.client.streams.len(), init_streams_client + 1);
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        // Server's recv side is already finished, so sending its own fin
+        // closes (and collects) its copy immediately, no ack needed.
+        let sent = s.server.send_webtransport_stream(
+            &mut s.pipe.server,
+            stream_id,
+            b"",
+            true,
+        );
+        assert_eq!(sent, Ok(0));
+        assert_eq!(s.server.streams.len(), init_streams_server);
+
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Err(Error::Done));
+        let mut buf = [0; 5];
+        let recvd = s.client.recv_webtransport_stream(
+            &mut s.pipe.client,
+            stream_id,
+            &mut buf,
+        );
+        assert_eq!(recvd, Ok((0, true)));
+
+        // Both sides collected now.
+        assert_eq!(s.client.streams.len(), init_streams_client);
+        assert_eq!(s.server.streams.len(), init_streams_server);
+    }
+
+    #[test]
+    fn webtransport_uni_stream_finish_and_gc() {
+        let mut s = webtransport_session();
+
+        let init_streams_client = s.client.streams.len();
+        let init_streams_server = s.server.streams.len();
+
+        let stream_id = s
+            .client
+            .open_webtransport_stream(&mut s.pipe.client, false)
+            .unwrap();
+
+        let sent = s.client.send_webtransport_stream(
+            &mut s.pipe.client,
+            stream_id,
+            b"hello",
+            true,
+        );
+        assert_eq!(sent, Ok(5));
+
+        // Uni + locally-initiated: closing only needs the local send side
+        // finished, no peer ack, so this collects immediately.
+        assert_eq!(s.client.streams.len(), init_streams_client);
+
+        s.advance().ok();
+
+        // Needs a poll to let H3 detect and type the incoming stream first.
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        let mut readable = s.server.readable_webtransport_streams(&s.pipe.server);
+        assert_eq!(readable.next(), Some(stream_id));
+        assert_eq!(readable.next(), None);
+
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        let mut buf = [0; 5];
+        let recvd = s.server.recv_webtransport_stream(
+            &mut s.pipe.server,
+            stream_id,
+            &mut buf,
+        );
+        assert_eq!(recvd, Ok((5, true)));
+        assert_eq!(&buf, b"hello");
+
+        // Reading through the fin collects the receiving end too.
+        assert_eq!(s.server.streams.len(), init_streams_server);
+    }
+
+    const WEBTRANSPORT_SIGNAL: [u8; 2] = [0x40, 0x41];
+
+    #[test]
+    fn webtransport_signal_after_headers_is_rejected() {
+        let mut s = webtransport_session();
+
+        let (stream_id, _) = s.send_request(false).unwrap();
+        s.pipe
+            .client
+            .stream_send(stream_id, &WEBTRANSPORT_SIGNAL, false)
+            .unwrap();
+        s.advance().ok();
+
+        assert!(matches!(
+            s.poll_server(),
+            Ok((id, Event::Headers { .. })) if id == stream_id
+        ));
+        assert_eq!(s.poll_server(), Err(Error::FrameUnexpected));
+    }
+
+    #[test]
+    fn webtransport_signal_on_local_request_is_rejected() {
+        let mut s = webtransport_session();
+
+        let (stream_id, _) = s.send_request(false).unwrap();
+        s.advance().ok();
+        assert!(matches!(s.poll_server(), Ok((_, Event::Headers { .. }))));
+
+        s.pipe
+            .server
+            .stream_send(stream_id, &WEBTRANSPORT_SIGNAL, false)
+            .unwrap();
+        s.advance().ok();
+
+        assert_eq!(s.poll_client(), Err(Error::FrameUnexpected));
+    }
+
+    #[test]
+    fn webtransport_signal_is_unknown_frame_when_disabled() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        // The signal value followed by a zero frame length.
+        let stream_id = 0;
+        s.pipe
+            .client
+            .stream_send(stream_id, &[0x40, 0x41, 0x00], false)
+            .unwrap();
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(
+            s.server.streams.get(&stream_id).unwrap().ty(),
+            Some(stream::Type::Request)
+        );
+        assert_eq!(
+            s.server
+                .readable_webtransport_streams(&s.pipe.server)
+                .next(),
+            None
+        );
+    }
+
+    #[test]
+    fn webtransport_stream_shutdown_and_gc() {
+        let mut s = webtransport_session();
+
+        let stream_id = s
+            .client
+            .open_webtransport_stream(&mut s.pipe.client, true)
+            .unwrap();
+        s.client
+            .send_webtransport_stream(
+                &mut s.pipe.client,
+                stream_id,
+                b"hello",
+                true,
+            )
+            .unwrap();
+        s.advance().ok();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        let recvd = s.server.recv_webtransport_stream(
+            &mut s.pipe.server,
+            stream_id,
+            &mut [0; 5],
+        );
+        assert_eq!(recvd, Ok((5, true)));
+        assert!(s.server.streams.contains_key(&stream_id));
+
+        // The peer's side is finished, so cancelling ours closes the stream.
+        s.server
+            .shutdown_webtransport_stream(
+                &mut s.pipe.server,
+                stream_id,
+                crate::Shutdown::Write,
+                42,
+            )
+            .unwrap();
+        assert!(!s.server.streams.contains_key(&stream_id));
+    }
+
+    /// Shut down in both directions before the peer finished its side, the
+    /// stream only closes once the peer's reset arrives.
+    #[rstest::rstest]
+    fn webtransport_stream_shutdown_before_peer_finished_and_gc(
+        #[values(true, false)] bidi: bool,
+    ) {
+        let mut s = webtransport_session();
+
+        let init_streams_server = s.server.streams.len();
+
+        let stream_id = s
+            .client
+            .open_webtransport_stream(&mut s.pipe.client, bidi)
+            .unwrap();
+        s.client
+            .send_webtransport_stream(
+                &mut s.pipe.client,
+                stream_id,
+                b"hello",
+                false,
+            )
+            .unwrap();
+        s.advance().ok();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        s.server
+            .shutdown_webtransport_stream(
+                &mut s.pipe.server,
+                stream_id,
+                crate::Shutdown::Read,
+                42,
+            )
+            .unwrap();
+        if bidi {
+            s.server
+                .shutdown_webtransport_stream(
+                    &mut s.pipe.server,
+                    stream_id,
+                    crate::Shutdown::Write,
+                    42,
+                )
+                .unwrap();
+        }
+        assert!(!s.pipe.server.stream_closed(stream_id));
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        // The client answers STOP_SENDING with a reset.
+        s.advance().ok();
+        assert!(s.pipe.server.stream_closed(stream_id));
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.server.streams.len(), init_streams_server);
+        assert!(s.server.shutdown_webtransport_streams.is_empty());
+    }
+
+    #[test]
+    fn webtransport_open_at_stream_limit() {
+        let mut s = webtransport_session();
+
+        // `Session::default_configs()` allows 5 bidirectional streams.
+        for _ in 0..5 {
+            s.client
+                .open_webtransport_stream(&mut s.pipe.client, true)
+                .unwrap();
+        }
+        let streams = s.client.streams.len();
+
+        assert_eq!(
+            s.client.open_webtransport_stream(&mut s.pipe.client, true),
+            Err(Error::TransportError(crate::Error::StreamLimit))
+        );
+        assert_eq!(s.client.streams.len(), streams);
+    }
+
+    /// Peer cancels its side; our side finishes cleanly. Must not be
+    /// collected until the reset is actually read, surviving polls
+    /// in between.
+    #[test]
+    fn webtransport_bidi_stream_cancel_and_gc() {
+        let mut s = webtransport_session();
+
+        let stream_id = s
+            .client
+            .open_webtransport_stream(&mut s.pipe.client, true)
+            .unwrap();
+        s.client
+            .send_webtransport_stream(
+                &mut s.pipe.client,
+                stream_id,
+                b"hello",
+                false,
+            )
+            .unwrap();
+        s.advance().ok();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Client cancels (resets) its send side instead of a clean fin.
+        s.pipe
+            .client
+            .stream_shutdown(stream_id, crate::Shutdown::Write, 42)
+            .unwrap();
+        s.advance().ok();
+
+        // Polling alone must not collect it: the reset is still unread.
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert!(s.server.streams.contains_key(&stream_id));
+
+        // Server closes its own send side. `stream_closed()` (fin-based)
+        // now reports true, but the reset above still hasn't been read.
+        let sent = s.server.send_webtransport_stream(
+            &mut s.pipe.server,
+            stream_id,
+            b"",
+            true,
+        );
+        assert_eq!(sent, Ok(0));
+        assert!(s.pipe.server.stream_closed(stream_id));
+        assert!(s.server.streams.contains_key(&stream_id));
+
+        // Must not panic, and must still surface the stream.
+        let mut readable = s.server.readable_webtransport_streams(&s.pipe.server);
+        assert_eq!(readable.next(), Some(stream_id));
+
+        // Draining it delivers the reset; only now is it collected.
+        let recvd = s.server.recv_webtransport_stream(
+            &mut s.pipe.server,
+            stream_id,
+            &mut [0; 5],
+        );
+        assert_eq!(
+            recvd,
+            Err(Error::TransportError(crate::Error::StreamReset(42)))
+        );
+        assert!(!s.server.streams.contains_key(&stream_id));
+    }
+
+    /// Same as the bidi case, but for a uni stream: the sender cancels
+    /// instead of finishing, and only the receiving end ever sees it.
+    #[test]
+    fn webtransport_uni_stream_cancel_and_gc() {
+        let mut s = webtransport_session();
+
+        let stream_id = s
+            .client
+            .open_webtransport_stream(&mut s.pipe.client, false)
+            .unwrap();
+        s.client
+            .send_webtransport_stream(
+                &mut s.pipe.client,
+                stream_id,
+                b"hello",
+                false,
+            )
+            .unwrap();
+        s.advance().ok();
+        assert_eq!(s.poll_server(), Err(Error::Done));
+
+        // Discover it, but deliberately don't read it yet.
+        let mut readable = s.server.readable_webtransport_streams(&s.pipe.server);
+        assert_eq!(readable.next(), Some(stream_id));
+
+        // Client cancels instead of finishing the uni stream.
+        s.pipe
+            .client
+            .stream_shutdown(stream_id, crate::Shutdown::Write, 7)
+            .unwrap();
+        s.advance().ok();
+
+        // A generic poll must not silently collect the still-unread entry.
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert!(s.server.streams.contains_key(&stream_id));
+
+        // Must not panic, and must still surface the stream.
+        let mut readable = s.server.readable_webtransport_streams(&s.pipe.server);
+        assert_eq!(readable.next(), Some(stream_id));
+
+        // Draining it delivers the reset; only now is it collected.
+        let recvd = s.server.recv_webtransport_stream(
+            &mut s.pipe.server,
+            stream_id,
+            &mut [0; 5],
+        );
+        assert_eq!(
+            recvd,
+            Err(Error::TransportError(crate::Error::StreamReset(7)))
+        );
+        assert!(!s.server.streams.contains_key(&stream_id));
+    }
+
+    /// Receiver abandons the stream by shutting it down rather than reading
+    /// it. The stream ends up closed without `recv` ever reporting a fin or a
+    /// reset, so freeing the H3 state must not be keyed on that.
+    #[test]
+    fn webtransport_uni_stream_abandon_and_gc() {
+        let mut s = webtransport_session();
+
+        let init_streams_server = s.server.streams.len();
+
+        let stream_id = s
+            .client
+            .open_webtransport_stream(&mut s.pipe.client, false)
+            .unwrap();
+        s.client
+            .send_webtransport_stream(
+                &mut s.pipe.client,
+                stream_id,
+                b"hello",
+                true,
+            )
+            .unwrap();
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        assert_eq!(s.server.streams.len(), init_streams_server + 1);
+
+        s.server
+            .shutdown_webtransport_stream(
+                &mut s.pipe.server,
+                stream_id,
+                crate::Shutdown::Read,
+                5,
+            )
+            .unwrap();
+        assert!(s.pipe.server.stream_closed(stream_id));
+
+        assert_eq!(s.server.streams.len(), init_streams_server);
+    }
+
+    /// Sets up a bidirectional WebTransport stream: client sends "hi" and
+    /// fins, server reads it. `reply_fin` controls how the server then
+    /// closes its own side of the stream: with a fin (and reply message) if
+    /// true, or with a reset (code 99) if false. Client hasn't read the
+    /// server's side yet when this returns.
+    fn webtransport_bidi_stream_with_server_reply(
+        reply_fin: bool,
+    ) -> (Session, u64) {
+        let mut s = webtransport_session();
+
+        let bidi_id = s
+            .client
+            .open_webtransport_stream(&mut s.pipe.client, true)
+            .unwrap();
+        s.client
+            .send_webtransport_stream(&mut s.pipe.client, bidi_id, b"hi", true)
+            .unwrap();
+        s.advance().ok();
+
+        assert_eq!(s.poll_server(), Err(Error::Done));
+        let mut readable = s.server.readable_webtransport_streams(&s.pipe.server);
+        assert_eq!(readable.next(), Some(bidi_id));
+        let mut buf = [0; 2];
+        let recvd = s.server.recv_webtransport_stream(
+            &mut s.pipe.server,
+            bidi_id,
+            &mut buf,
+        );
+        assert_eq!(recvd, Ok((2, true)));
+
+        if reply_fin {
+            let sent = s.server.send_webtransport_stream(
+                &mut s.pipe.server,
+                bidi_id,
+                b"ok",
+                true,
+            );
+            assert_eq!(sent, Ok(2));
+        } else {
+            s.pipe
+                .server
+                .stream_shutdown(bidi_id, crate::Shutdown::Write, 99)
+                .unwrap();
+        }
+        s.advance().ok();
+
+        (s, bidi_id)
+    }
+
+    /// The opener's own copy of a stream is created and typed locally, so
+    /// unlike the peer, it never needs a `poll()` to learn of it — including
+    /// to notice a clean fin and get collected.
+    #[test]
+    fn webtransport_opener_side_notices_fin_without_poll() {
+        let (mut s, bidi_id) = webtransport_bidi_stream_with_server_reply(true);
+
+        assert!(s.client.streams.contains_key(&bidi_id));
+        let mut buf = [0; 2];
+        let recvd = s.client.recv_webtransport_stream(
+            &mut s.pipe.client,
+            bidi_id,
+            &mut buf,
+        );
+        assert_eq!(recvd, Ok((2, true)));
+        assert_eq!(&buf, b"ok");
+        assert!(!s.client.streams.contains_key(&bidi_id));
+    }
+
+    /// Same, but the peer cancels instead of sending a clean fin.
+    #[test]
+    fn webtransport_opener_side_notices_cancel_without_poll() {
+        let (mut s, bidi_id) = webtransport_bidi_stream_with_server_reply(false);
+
+        assert!(s.client.streams.contains_key(&bidi_id));
+        let mut buf = [0; 2];
+        let recvd = s.client.recv_webtransport_stream(
+            &mut s.pipe.client,
+            bidi_id,
+            &mut buf,
+        );
+        assert_eq!(
+            recvd,
+            Err(Error::TransportError(crate::Error::StreamReset(99)))
+        );
+        assert!(!s.client.streams.contains_key(&bidi_id));
     }
 }
 
