@@ -412,4 +412,34 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn invalid_alpn_is_reported_as_configuration_error() {
+        let mut settings = QuicSettings::default();
+        settings.alpn = vec![vec![b'x'; 256]];
+        let params =
+            ConnectionParams::new_client(settings, None, Default::default());
+
+        assert!(make_quiche_config(&params, false).is_err());
+    }
+
+    #[cfg(not(feature = "rpk"))]
+    #[test]
+    fn raw_public_key_without_feature_is_unsupported() {
+        let tls = TlsCertificatePaths {
+            cert: "unused-rpk-cert",
+            private_key: "unused-rpk-key",
+            kind: CertificateKind::RawPublicKey,
+        };
+
+        let Err(err) = quiche_config_with_tls(Some(tls)) else {
+            panic!("RPK without the rpk feature must return an error");
+        };
+
+        let io_err = err
+            .downcast_ref::<std::io::Error>()
+            .expect("unsupported RPK error should be an io::Error");
+        assert_eq!(io_err.kind(), std::io::ErrorKind::Unsupported);
+    }
+
 }
