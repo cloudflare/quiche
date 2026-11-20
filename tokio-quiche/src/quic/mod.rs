@@ -119,6 +119,7 @@ use self::router::connector::ClientConnector;
 use self::router::InboundPacketRouter;
 
 pub use self::connection::ConnectionShutdownBehaviour;
+pub use self::connection::HandshakeClosed;
 pub use self::connection::HandshakeError;
 pub use self::connection::HandshakeInfo;
 pub use self::connection::Incoming;
@@ -172,7 +173,9 @@ where
 ///
 /// When the future resolves, the connection has completed its handshake and
 /// `app` is running in the worker task. In case the handshake failed, we close
-/// the connection automatically and the future will resolve with an error.
+/// the connection automatically and the future will resolve with an error. If
+/// the connection closed before its handshake completed, that error carries a
+/// [`HandshakeClosed`] with the close details.
 ///
 /// # Note
 /// tokio-quiche currently only supports one client connection per socket.

@@ -14,7 +14,7 @@ addr_validation_token.rs      # RETRY token generation/validation for server
 
 connection/
   mod.rs                      # InitialQuicConnection, QuicConnection, ApplicationOverQuic trait
-  error.rs                    # HandshakeError enum, make_handshake_result()
+  error.rs                    # HandshakeError enum, HandshakeClosed, make_handshake_result()
   id.rs                       # ConnectionIdGenerator trait, SimpleConnectionIdGenerator
   map.rs                      # ConnectionMap: BTreeMap<CidOwned, mpsc::Sender<Incoming>>
 

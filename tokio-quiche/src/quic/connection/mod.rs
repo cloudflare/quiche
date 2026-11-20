@@ -28,6 +28,7 @@ mod error;
 mod id;
 mod map;
 
+pub use self::error::HandshakeClosed;
 pub use self::error::HandshakeError;
 pub use self::id::ConnectionIdGenerator;
 pub use self::id::SharedConnectionIdGenerator;

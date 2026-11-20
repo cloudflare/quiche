@@ -325,6 +325,38 @@ fn verify_custom_root() {
 }
 
 #[test]
+fn verify_server_invalid_tls_alert() {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+
+    // The client can't verify the server's certificate without its CA.
+    config.verify_peer(true);
+
+    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Err(Error::TlsFail));
+
+    // The client sent an `unknown_ca` alert.
+    let local_error = pipe.client.local_error().unwrap();
+    assert_eq!(local_error.tls_alert(), Some(48));
+}
+
+#[test]
+fn connection_error_tls_alert() {
+    let error = |is_app, error_code| ConnectionError {
+        is_app,
+        error_code,
+        reason: Vec::new(),
+    };
+
+    assert_eq!(error(false, 0x12a).tls_alert(), Some(0x2a));
+    assert_eq!(error(true, 0x12a).tls_alert(), None);
+    assert_eq!(error(false, 0x0a).tls_alert(), None);
+    assert_eq!(error(false, 0x200).tls_alert(), None);
+}
+
+#[test]
 fn verify_client_invalid() {
     let mut server_config = Config::new(PROTOCOL_VERSION).unwrap();
     server_config

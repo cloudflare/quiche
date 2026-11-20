@@ -261,3 +261,18 @@ pub struct ConnectionError {
     /// The reason carried by the `CONNECTION_CLOSE` frame.
     pub reason: Vec<u8>,
 }
+
+impl ConnectionError {
+    /// Returns the TLS alert this error carries, if it is a `CRYPTO_ERROR`.
+    ///
+    /// QUIC carries a TLS alert as a transport error code of `0x100` plus the
+    /// alert (RFC 9001, Section 4.8).
+    pub fn tls_alert(&self) -> Option<u8> {
+        if self.is_app {
+            return None;
+        }
+
+        let alert = self.error_code.checked_sub(crate::tls::TLS_ALERT_ERROR)?;
+        u8::try_from(alert).ok()
+    }
+}
