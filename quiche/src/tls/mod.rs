@@ -49,7 +49,7 @@ use crate::crypto;
 use crate::packet;
 
 const TLS1_3_VERSION: u16 = 0x0304;
-const TLS_ALERT_ERROR: u64 = 0x100;
+pub(crate) const TLS_ALERT_ERROR: u64 = 0x100;
 const INTERNAL_ERROR: u64 = 0x01;
 
 #[allow(non_camel_case_types)]

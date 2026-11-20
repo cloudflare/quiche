@@ -24,7 +24,9 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+use crate::quic::QuicheConnection;
 use crate::result::QuicResult;
+use std::fmt;
 use std::io;
 
 /// Additional error types that can occur during a QUIC handshake.
@@ -40,6 +42,77 @@ pub enum HandshakeError {
     #[error("connection closed during Handshake stage")]
     ConnectionClosed,
 }
+
+/// A client connection closed before its handshake completed.
+///
+/// A failed [`connect`](crate::quic::connect) or
+/// [`connect_with_config`](crate::quic::connect_with_config) returns this
+/// inside an [`io::Error`] of kind [`io::ErrorKind::TimedOut`]: downcast the
+/// returned error to [`io::Error`], then downcast [`io::Error::get_ref`] to
+/// `HandshakeClosed`.
+///
+/// It carries the `CONNECTION_CLOSE` details, so a caller can tell a handshake
+/// its own TLS stack rejected (a local `CRYPTO_ERROR` carrying the TLS alert)
+/// from one the peer closed or one that timed out.
+///
+/// A handshake that runs in the connection's worker, as a server's does,
+/// reports a close as [`HandshakeError::ConnectionClosed`] instead. A client's
+/// handshake runs before its worker starts, so a client connect reports this.
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct HandshakeClosed {
+    /// The connection's source connection ID.
+    pub scid: quiche::ConnectionId<'static>,
+    /// The error this endpoint closed the connection with, if it closed it.
+    pub local_error: Option<quiche::ConnectionError>,
+    /// The error the peer closed the connection with, if it closed it.
+    pub peer_error: Option<quiche::ConnectionError>,
+    /// Whether the connection closed because its idle timeout expired.
+    pub timed_out: bool,
+}
+
+impl HandshakeClosed {
+    pub(crate) fn from_conn(conn: &QuicheConnection) -> Self {
+        Self {
+            scid: conn.source_id().into_owned(),
+            local_error: conn.local_error().cloned(),
+            peer_error: conn.peer_error().cloned(),
+            timed_out: conn.is_timed_out(),
+        }
+    }
+
+    /// Wraps this in the [`io::Error`] a failed client connect returns.
+    pub(crate) fn into_io_error(self) -> io::Error {
+        io::Error::new(io::ErrorKind::TimedOut, self)
+    }
+}
+
+impl fmt::Display for HandshakeClosed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "connection {:?} closed during handshake", self.scid)?;
+
+        if self.timed_out {
+            write!(f, ", idle timeout expired")?;
+        }
+
+        for (side, err) in
+            [("local", &self.local_error), ("peer", &self.peer_error)]
+        {
+            if let Some(err) = err {
+                let layer = if err.is_app {
+                    "application"
+                } else {
+                    "transport"
+                };
+                write!(f, ", {side} {layer} error {:#x}", err.error_code)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl std::error::Error for HandshakeClosed {}
 
 // We use io::Result for `IQC::handshake` to provide a uniform interface with
 // handshakes of other connection types, for example TLS. This is a best-effort

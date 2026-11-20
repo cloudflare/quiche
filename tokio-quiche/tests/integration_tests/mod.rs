@@ -35,8 +35,12 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tokio_quiche::listen;
 use tokio_quiche::metrics::DefaultMetrics;
+use tokio_quiche::quic::connect_with_config;
+use tokio_quiche::quic::HandshakeClosed;
 use tokio_quiche::settings::Hooks;
 use tokio_quiche::settings::TlsCertificatePaths;
+use tokio_quiche::socket::Socket;
+use tokio_quiche::ClientH3Driver;
 use tokio_quiche::ConnectionParams;
 use tokio_quiche::InitialQuicConnection;
 
@@ -265,6 +269,43 @@ async fn test_connect_with_custom_dcid() {
     .await
     .expect("connection timed out")
     .is_ok());
+}
+
+#[tokio::test]
+async fn test_connect_reports_rejected_server_certificate() {
+    let (url, _hook, _audit_stats_rx) = start_server();
+    let addr = extract_host_ipv4(&url);
+
+    let tokio_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    tokio_socket.connect(addr).await.unwrap();
+    let socket = Socket::try_from(tokio_socket).unwrap();
+    let (h3_driver, _h3_controller) =
+        ClientH3Driver::new(Http3Settings::default());
+
+    // The client has no CA for the test server's certificate.
+    let mut params = ConnectionParams::default();
+    params.settings.verify_peer = true;
+
+    let Err(err) = timeout(
+        Duration::from_secs(5),
+        connect_with_config(socket, Some("127.0.0.1"), &params, h3_driver),
+    )
+    .await
+    .expect("connection timed out") else {
+        panic!("connected without verifying the server");
+    };
+
+    let closed = err
+        .downcast_ref::<std::io::Error>()
+        .and_then(|err| err.get_ref())
+        .and_then(|err| err.downcast_ref::<HandshakeClosed>())
+        .expect("error carries the handshake close");
+
+    // The client sent an `unknown_ca` alert.
+    let local_error = closed.local_error.as_ref().unwrap();
+    assert_eq!(local_error.tls_alert(), Some(48));
+    assert_eq!(closed.peer_error, None);
+    assert!(!closed.timed_out);
 }
 
 #[tokio::test]

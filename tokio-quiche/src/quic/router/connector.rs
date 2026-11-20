@@ -44,6 +44,7 @@ use tokio_util::time::DelayQueue;
 
 use crate::quic::router::InitialPacketHandler;
 use crate::quic::router::NewConnection;
+use crate::quic::HandshakeClosed;
 use crate::quic::Incoming;
 use crate::quic::QuicheConnection;
 
@@ -192,13 +193,9 @@ where
                 handshake_start_time,
             }))
         } else if conn.is_closed() {
-            let scid = conn.source_id();
             log::error!("QUIC connection closed on_incoming"; "scid" => ?scid);
 
-            Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!("connection {scid:?} timed out"),
-            ))
+            Err(HandshakeClosed::from_conn(&conn).into_io_error())
         } else {
             self.set_connection_to_pending(conn).map(|()| None)
         }
@@ -222,10 +219,7 @@ where
         if pending.conn.is_closed() {
             log::error!("pending connection closed on_timeout"; "scid" => ?scid);
 
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!("connection {scid:?} timed out"),
-            ));
+            return Err(HandshakeClosed::from_conn(&pending.conn).into_io_error());
         }
 
         self.set_connection_to_pending(pending.conn)
