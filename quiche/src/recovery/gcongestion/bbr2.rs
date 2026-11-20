@@ -462,6 +462,8 @@ pub(crate) struct BBRv2 {
 }
 
 struct BBRv2CongestionEvent {
+    // Current path packet size, including changes from PMTU discovery.
+    max_datagram_size: usize,
     event_time: Instant,
 
     /// The congestion window prior to the processing of the ack/loss events.
@@ -499,9 +501,10 @@ struct BBRv2CongestionEvent {
 impl BBRv2CongestionEvent {
     fn new(
         event_time: Instant, prior_cwnd: usize, prior_bytes_in_flight: usize,
-        is_probing_for_bandwidth: bool,
+        is_probing_for_bandwidth: bool, max_datagram_size: usize,
     ) -> Self {
         BBRv2CongestionEvent {
+            max_datagram_size,
             event_time,
             prior_cwnd,
             prior_bytes_in_flight,
@@ -717,6 +720,7 @@ impl CongestionControl for BBRv2 {
             self.cwnd,
             prior_in_flight,
             self.mode.is_probing_for_bandwidth(),
+            self.mss,
         );
 
         let network_model = self.mode.network_model_mut();
