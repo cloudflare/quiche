@@ -1666,6 +1666,10 @@ where
     max_outstanding_sent_packets: Option<NonZeroUsize>,
 }
 
+// SAFETY: Connection is currently thread-safe, however this needs to be reconsidered
+// when the API is expanded.
+unsafe impl Sync for Connection {}
+
 /// Creates a new server-side connection.
 ///
 /// The `scid` parameter represents the server's source connection ID, while
