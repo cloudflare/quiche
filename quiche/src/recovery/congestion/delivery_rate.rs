@@ -404,6 +404,7 @@ mod tests {
                 pkt_num: pn,
                 time_sent: now,
                 size: mss,
+                in_flight: true,
                 rtt,
                 delivered: base,
                 delivered_time: now,
