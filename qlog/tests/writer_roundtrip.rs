@@ -288,3 +288,37 @@ fn rejects_unknown_extension() {
     std::fs::write(&path, b"not a qlog file").expect("write");
     assert_with_file_err(&path, "does not match a known qlog extension");
 }
+
+/// Regression test: a `.sqlog.gz` file that is not valid gzip must
+/// surface an error from `QlogSeqReader::with_file` instead of
+/// panicking while the header is read.
+#[cfg(feature = "gzip")]
+#[test]
+fn rejects_corrupt_gzip_payload() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("corrupt.sqlog.gz");
+    std::fs::write(&path, b"not a qlog file").expect("write");
+    assert_with_file_err(&path, "error reading file header bytes");
+}
+
+/// Regression test: a gzip stream cut short after the header (e.g. the
+/// writer was killed before the trailer was flushed) must end iteration
+/// instead of panicking.
+#[cfg(feature = "gzip")]
+#[test]
+fn truncated_gzip_stops_iteration() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = emit_one_event(QlogCompression::Gzip, dir.path());
+
+    // Drop the 8-byte gzip trailer (CRC32 + ISIZE) so the decoder hits
+    // an unexpected EOF after all the records have been decompressed.
+    let bytes = std::fs::read(&path).expect("read");
+    std::fs::write(&path, &bytes[..bytes.len() - 8]).expect("write");
+
+    let mut reader =
+        QlogSeqReader::with_file(&path).expect("QlogSeqReader::with_file");
+    let events: Vec<Event> = (&mut reader).collect();
+
+    assert_eq!(reader.qlog.serialization_format, "JSON-SEQ");
+    assert!(!events.is_empty(), "expected the event read before the EOF");
+}
