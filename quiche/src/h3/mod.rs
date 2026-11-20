@@ -4179,6 +4179,42 @@ mod tests {
         assert_eq!(s.poll_client(), Ok((stream, Event::Finished)));
     }
 
+    /// A server polling concurrent requests sees the headers of every request
+    /// before the body of any of them, so it can route or reject on headers
+    /// alone.
+    ///
+    /// HTTP/3 does not arrange this itself: `poll()` parses frames through
+    /// `stream_recv`, which cycles an incremental stream to the back of its
+    /// priority group each time it is read. Without that, requests arrive one
+    /// at a time, headers and body together.
+    #[test]
+    fn poll_yields_headers_of_all_requests_before_any_body() {
+        let mut s = Session::new().unwrap();
+        s.handshake().unwrap();
+
+        let mut streams = Vec::new();
+
+        for _ in 0..3 {
+            let (stream, _) = s.send_request(false).unwrap();
+            s.send_body_client(stream, true).unwrap();
+            streams.push(stream);
+        }
+
+        let mut headers = Vec::new();
+
+        for _ in 0..streams.len() {
+            match s.poll_server() {
+                Ok((stream, Event::Headers { .. })) => headers.push(stream),
+
+                other => panic!(
+                    "expected Headers for every request before any body, got {other:?}"
+                ),
+            }
+        }
+
+        assert_eq!(headers, streams);
+    }
+
     #[test]
     /// Send a request with multiple DATA frames, get a response with one DATA
     /// frame.
