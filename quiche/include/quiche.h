@@ -425,6 +425,34 @@ size_t quiche_conn_send_quantum_on_path(const quiche_conn *conn,
                                         const struct sockaddr *local_addr, socklen_t local_len,
                                         const struct sockaddr *peer_addr, socklen_t peer_len);
 
+// Returns true if pacing delays the next packet, and writes the time to send
+// it out to "out", using the same clock as quiche_send_info.at. Like
+// quiche_send_info.at, this time is currently always zero on macOS, iOS and
+// Windows.
+//
+// Returns false if the next packet can be sent out immediately, or if the
+// connection has no active path, in which case "out" is left unchanged.
+//
+// "can_burst" is set to whether the next packet can be sent out together with
+// the previous ones as a single burst (e.g. in the same GSO batch), even if
+// its own send time is later than theirs.
+//
+// Only the QUICHE_CC_BBR2_GCONGESTION congestion control algorithm paces
+// packets. If pacing is disabled (see quiche_config_enable_pacing()) this
+// returns false and sets "can_burst" to true. With other congestion control
+// algorithms it returns false and sets "can_burst" to false.
+bool quiche_conn_next_release_time(const quiche_conn *conn,
+                                   struct timespec *out, bool *can_burst);
+
+// Returns how far in the future, in nanoseconds, the send time of the next
+// packet (see quiche_conn_next_release_time()) can be for the packet to still
+// be sent out now, e.g. to be delayed until its send time by the kernel or the
+// network card (such as with SO_TXTIME). If the send time is further away the
+// application should wait before sending the packet.
+//
+// This is 1/8 of the smoothed RTT, but at least 1ms and at most 5ms.
+uint64_t quiche_conn_max_release_into_future_as_nanos(const quiche_conn *conn);
+
 
 // Reads contiguous data from a stream.
 // out_error_code is only set when STREAM_STOPPED or STREAM_RESET are returned.
