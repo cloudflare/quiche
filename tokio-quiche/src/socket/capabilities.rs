@@ -65,6 +65,7 @@ use linux_imports::*;
 
 #[cfg(windows)]
 mod windows_imports {
+    pub(super) use crate::socket::windows::set_max_coalesced_size;
     pub use std::mem;
     pub use std::os::windows::io::AsRawSocket;
     pub use std::os::windows::io::AsSocket;
@@ -76,6 +77,14 @@ mod windows_imports {
 
 #[cfg(windows)]
 use windows_imports::*;
+
+/// Largest coalesced receive a socket opted into UDP receive offload (URO)
+/// asks Windows for: the largest UDP payload, which is what msquic asks for.
+/// A receive buffer of
+/// [`BufFactory::MAX_BUF_SIZE`](crate::buf_factory::BufFactory::MAX_BUF_SIZE)
+/// holds it.
+#[cfg(windows)]
+const MAX_COALESCED_SIZE: u32 = u16::MAX as u32 - 8;
 
 #[cfg(target_os = "linux")]
 #[derive(Clone)]
@@ -361,7 +370,8 @@ pub struct SocketCapabilities {
     )]
     pub(crate) has_rxtime: bool,
 
-    /// Indicates if the socket has `UDP_GRO` enabled.
+    /// Indicates if the socket has `UDP_GRO` enabled, or on Windows,
+    /// `UDP_RECV_MAX_COALESCED_SIZE` set.
     #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
     pub(crate) has_gro: bool,
 
@@ -424,13 +434,15 @@ impl SocketCapabilities {
         b.finish()
     }
 
-    /// Detects the supported sockopts and returns indicators of which ones
-    /// are available.
+    /// Tries to enable all supported sockopts and returns indicators
+    /// of which settings were successfully applied.
     ///
     /// On Windows, this checks for UDP segmentation offload (USO) via
-    /// [`UDP_SEND_MSG_SIZE`](https://learn.microsoft.com/en-us/windows/win32/winsock/ipproto-udp-socket-options).
-    /// The segment size is passed with each send, so the socket is left
-    /// unchanged.
+    /// [`UDP_SEND_MSG_SIZE`](https://learn.microsoft.com/en-us/windows/win32/winsock/ipproto-udp-socket-options),
+    /// whose segment size is passed with each send, and enables UDP receive
+    /// offload (URO) by setting `UDP_RECV_MAX_COALESCED_SIZE`. Only
+    /// tokio-quiche's packet router splits the coalesced receives, so a socket
+    /// with URO must not be read any other way.
     #[cfg(windows)]
     pub fn apply_all_and_get_compatibility<S>(socket: &S) -> Self
     where
@@ -452,8 +464,11 @@ impl SocketCapabilities {
             )
         };
 
+        let uro = set_max_coalesced_size(socket, MAX_COALESCED_SIZE);
+
         Self {
             has_gso: uso == 0,
+            has_gro: uro.is_ok(),
             ..Default::default()
         }
     }
