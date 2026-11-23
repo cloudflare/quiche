@@ -63,6 +63,20 @@ mod linux_imports {
 #[cfg(target_os = "linux")]
 use linux_imports::*;
 
+#[cfg(windows)]
+mod windows_imports {
+    pub use std::mem;
+    pub use std::os::windows::io::AsRawSocket;
+    pub use std::os::windows::io::AsSocket;
+    pub use windows_sys::Win32::Networking::WinSock::getsockopt;
+    pub use windows_sys::Win32::Networking::WinSock::IPPROTO_UDP;
+    pub use windows_sys::Win32::Networking::WinSock::SOCKET;
+    pub use windows_sys::Win32::Networking::WinSock::UDP_SEND_MSG_SIZE;
+}
+
+#[cfg(windows)]
+use windows_imports::*;
+
 #[cfg(target_os = "linux")]
 #[derive(Clone)]
 struct IpMtuDiscoverProbe;
@@ -327,7 +341,8 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
 /// indicate which options were actually enabled.
 #[derive(Debug, Default)]
 pub struct SocketCapabilities {
-    /// Indicates if the socket has `UDP_SEGMENT` enabled.
+    /// Indicates if the socket has `UDP_SEGMENT` enabled, or on Windows,
+    /// supports `UDP_SEND_MSG_SIZE`.
     pub(crate) has_gso: bool,
 
     /// Indicates if the socket has `SO_RXQ_OVFL` set.
@@ -407,5 +422,39 @@ impl SocketCapabilities {
             let _ = b.ipv6_recvorigdstaddr();
         }
         b.finish()
+    }
+
+    /// Detects the supported sockopts and returns indicators of which ones
+    /// are available.
+    ///
+    /// On Windows, this checks for UDP segmentation offload (USO) via
+    /// [`UDP_SEND_MSG_SIZE`](https://learn.microsoft.com/en-us/windows/win32/winsock/ipproto-udp-socket-options).
+    /// The segment size is passed with each send, so the socket is left
+    /// unchanged.
+    #[cfg(windows)]
+    pub fn apply_all_and_get_compatibility<S>(socket: &S) -> Self
+    where
+        S: AsSocket,
+    {
+        let socket = socket.as_socket().as_raw_socket() as SOCKET;
+
+        let mut segment_size: u32 = 0;
+        let mut len = mem::size_of::<u32>() as i32;
+        // SAFETY: `segment_size` and `len` are live locals describing a
+        // 4-byte buffer.
+        let uso = unsafe {
+            getsockopt(
+                socket,
+                IPPROTO_UDP,
+                UDP_SEND_MSG_SIZE,
+                (&mut segment_size as *mut u32).cast(),
+                &mut len,
+            )
+        };
+
+        Self {
+            has_gso: uso == 0,
+            ..Default::default()
+        }
     }
 }

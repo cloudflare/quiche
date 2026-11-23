@@ -200,9 +200,12 @@ where
     let quic_sockets: Vec<QuicListener> = sockets
         .into_iter()
         .map(|s| {
-            #[cfg_attr(not(target_os = "linux"), expect(unused_mut))]
+            #[cfg_attr(
+                not(any(target_os = "linux", windows)),
+                expect(unused_mut)
+            )]
             let mut socket = s.try_into()?;
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             socket.apply_max_capabilities();
             Ok(socket)
         })

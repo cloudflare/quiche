@@ -75,4 +75,5 @@ src/
 - `perf-quic-listener-metrics` adds handshake timing instrumentation.
 - `tokio-task-metrics` adds schedule/poll duration histograms per spawned task.
 - Linux-only: `libc`/`nix` deps for signal handling and socket options.
+- Windows-only: `windows-sys` dep for Winsock socket options and control messages.
 - One client connection per socket — no multiplexing on client side.

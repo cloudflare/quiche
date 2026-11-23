@@ -53,8 +53,8 @@ pub struct Socket<Tx, Rx> {
     /// The [`SocketCapabilities`] to use for this socket.
     ///
     /// By default, [`Socket`]s are constructed with all capabilities
-    /// disabled. On Linux, you can use `apply_max_capabilities()` to (try
-    /// to) enable all supported capabilities.
+    /// disabled. On Linux and Windows, you can use `apply_max_capabilities()`
+    /// to (try to) enable all supported capabilities.
     pub capabilities: SocketCapabilities,
 }
 
@@ -107,12 +107,23 @@ where
         (send.as_raw_fd() == recv.as_raw_fd()).then_some(send)
     }
 
+    /// Checks whether both `send` and `recv` refer to the same underlying
+    /// UDP socket handle and returns a reference to that socket.
+    #[cfg(windows)]
+    pub fn as_udp_socket(&self) -> Option<&UdpSocket> {
+        use std::os::windows::io::AsRawSocket;
+
+        let send = self.send.as_udp_socket()?;
+        let recv = self.recv.as_udp_socket()?;
+        (send.as_raw_socket() == recv.as_raw_socket()).then_some(send)
+    }
+
     /// Tries to enable all sockopts supported by the crate for this socket.
     ///
     /// This does nothing unless `send` and `recv` refer to the same UDP socket
     /// FD. See `SocketCapabilities::apply_all_and_get_compatibility` for
     /// details.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     pub fn apply_max_capabilities(&mut self) {
         let Some(socket) = self.as_udp_socket() else {
             return;
