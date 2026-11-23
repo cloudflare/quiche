@@ -156,9 +156,17 @@ quiche_config *quiche_config_new(uint32_t version);
 int quiche_config_load_cert_chain_from_pem_file(quiche_config *config,
                                                 const char *path);
 
+// Configures the given DER-encoded certificate.
+int quiche_config_load_cert_from_der(quiche_config *config,
+                                     const uint8_t *cert, size_t cert_len);
+
 // Configures the given private key.
 int quiche_config_load_priv_key_from_pem_file(quiche_config *config,
                                               const char *path);
+
+// Configures the given DER-encoded PKCS#8 private key.
+int quiche_config_load_priv_key_from_der(quiche_config *config,
+                                         const uint8_t *key, size_t key_len);
 
 // Specifies a file where trusted CA certificates are stored for the purposes of certificate verification.
 int quiche_config_load_verify_locations_from_file(quiche_config *config,
