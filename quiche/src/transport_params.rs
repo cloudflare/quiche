@@ -220,6 +220,24 @@ impl Default for TransportParams {
 }
 
 impl TransportParams {
+    /// Reads an integer transport parameter value as a varint, rejecting an
+    /// empty value or any trailing bytes after the varint (RFC 9000 §16, §18.2).
+    fn decode_tp_varint(val: &mut octets::Octets) -> Result<u64> {
+        if val.cap() == 0 {
+            return Err(Error::InvalidTransportParam);
+        }
+
+        let v = val
+            .get_varint()
+            .map_err(|_| Error::InvalidTransportParam)?;
+
+        if val.cap() != 0 {
+            return Err(Error::InvalidTransportParam);
+        }
+
+        Ok(v)
+    }
+
     pub(crate) fn decode(
         buf: &[u8], is_server: bool, unknown_size: Option<usize>,
     ) -> Result<TransportParams> {
@@ -256,7 +274,7 @@ impl TransportParams {
                 },
 
                 0x0001 => {
-                    tp.max_idle_timeout = val.get_varint()?;
+                    tp.max_idle_timeout = Self::decode_tp_varint(&mut val)?;
                 },
 
                 0x0002 => {
@@ -273,7 +291,8 @@ impl TransportParams {
                 },
 
                 0x0003 => {
-                    tp.max_udp_payload_size = val.get_varint()?;
+                    tp.max_udp_payload_size =
+                        Self::decode_tp_varint(&mut val)?;
 
                     if tp.max_udp_payload_size < 1200 {
                         return Err(Error::InvalidTransportParam);
@@ -281,23 +300,26 @@ impl TransportParams {
                 },
 
                 0x0004 => {
-                    tp.initial_max_data = val.get_varint()?;
+                    tp.initial_max_data = Self::decode_tp_varint(&mut val)?;
                 },
 
                 0x0005 => {
-                    tp.initial_max_stream_data_bidi_local = val.get_varint()?;
+                    tp.initial_max_stream_data_bidi_local =
+                        Self::decode_tp_varint(&mut val)?;
                 },
 
                 0x0006 => {
-                    tp.initial_max_stream_data_bidi_remote = val.get_varint()?;
+                    tp.initial_max_stream_data_bidi_remote =
+                        Self::decode_tp_varint(&mut val)?;
                 },
 
                 0x0007 => {
-                    tp.initial_max_stream_data_uni = val.get_varint()?;
+                    tp.initial_max_stream_data_uni =
+                        Self::decode_tp_varint(&mut val)?;
                 },
 
                 0x0008 => {
-                    let max = val.get_varint()?;
+                    let max = Self::decode_tp_varint(&mut val)?;
 
                     if max > MAX_STREAM_ID {
                         return Err(Error::InvalidTransportParam);
@@ -307,7 +329,7 @@ impl TransportParams {
                 },
 
                 0x0009 => {
-                    let max = val.get_varint()?;
+                    let max = Self::decode_tp_varint(&mut val)?;
 
                     if max > MAX_STREAM_ID {
                         return Err(Error::InvalidTransportParam);
@@ -317,7 +339,8 @@ impl TransportParams {
                 },
 
                 0x000a => {
-                    let ack_delay_exponent = val.get_varint()?;
+                    let ack_delay_exponent =
+                        Self::decode_tp_varint(&mut val)?;
 
                     if ack_delay_exponent > MAX_ACK_DELAY_EXPONENT {
                         return Err(Error::InvalidTransportParam);
@@ -327,7 +350,7 @@ impl TransportParams {
                 },
 
                 0x000b => {
-                    let max_ack_delay = val.get_varint()?;
+                    let max_ack_delay = Self::decode_tp_varint(&mut val)?;
 
                     if max_ack_delay >= 2_u64.pow(14) {
                         return Err(Error::InvalidTransportParam);
@@ -349,7 +372,7 @@ impl TransportParams {
                 },
 
                 0x000e => {
-                    let limit = val.get_varint()?;
+                    let limit = Self::decode_tp_varint(&mut val)?;
 
                     if limit < 2 {
                         return Err(Error::InvalidTransportParam);
@@ -371,7 +394,8 @@ impl TransportParams {
                 },
 
                 0x0020 => {
-                    tp.max_datagram_frame_size = Some(val.get_varint()?);
+                    tp.max_datagram_frame_size =
+                        Some(Self::decode_tp_varint(&mut val)?);
                 },
 
                 // Track unknown transport parameters specially.
