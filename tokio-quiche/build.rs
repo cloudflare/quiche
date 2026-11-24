@@ -13,4 +13,13 @@ fn main() {
     if std::env::var("DEP_BORINGSSL_VERSION_MAJOR").ok().as_deref() == Some("5") {
         println!("cargo:rustc-cfg=boring_v5");
     }
+
+    // Emit `cfg(apple_fast)` for a macOS target built with the
+    // `fast-apple-datapath` feature.
+    println!("cargo::rustc-check-cfg=cfg(apple_fast)");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") &&
+        std::env::var_os("CARGO_FEATURE_FAST_APPLE_DATAPATH").is_some()
+    {
+        println!("cargo:rustc-cfg=apple_fast");
+    }
 }

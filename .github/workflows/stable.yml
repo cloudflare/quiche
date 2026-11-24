@@ -116,6 +116,9 @@ jobs:
       - name: Run cargo test
         run: cargo test --verbose --all-targets ${{ env.DEFAULT_OPTIONS }}
 
+      - name: Run tokio-quiche fast Apple datapath tests
+        run: cargo test --verbose -p tokio-quiche --lib --features fast-apple-datapath macos
+
       - name: Build C examples
         run: |
           brew install libev uthash

@@ -53,8 +53,9 @@ pub struct Socket<Tx, Rx> {
     /// The [`SocketCapabilities`] to use for this socket.
     ///
     /// By default, [`Socket`]s are constructed with all capabilities
-    /// disabled. On Linux, you can use `apply_max_capabilities()` to (try
-    /// to) enable all supported capabilities.
+    /// disabled. On Linux, and on macOS with the `fast-apple-datapath`
+    /// feature, you can use `apply_max_capabilities()` to (try to) enable all
+    /// supported capabilities.
     pub capabilities: SocketCapabilities,
 }
 
@@ -112,7 +113,7 @@ where
     /// This does nothing unless `send` and `recv` refer to the same UDP socket
     /// FD. See `SocketCapabilities::apply_all_and_get_compatibility` for
     /// details.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", apple_fast))]
     pub fn apply_max_capabilities(&mut self) {
         let Some(socket) = self.as_udp_socket() else {
             return;

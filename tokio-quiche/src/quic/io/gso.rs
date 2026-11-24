@@ -48,6 +48,17 @@ mod linux_imports {
 #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 use self::linux_imports::*;
 
+#[cfg(all(apple_fast, not(feature = "fuzzing")))]
+mod macos_imports {
+    pub(super) use crate::socket::macos;
+    pub(super) use std::io::ErrorKind;
+    pub(super) use std::os::fd::AsFd;
+    pub(super) use tokio::io::Interest;
+}
+
+#[cfg(all(apple_fast, not(feature = "fuzzing")))]
+use self::macos_imports::*;
+
 // Maximum number of packets can be sent in UDP GSO.
 pub(crate) const UDP_MAX_SEGMENT_COUNT: usize = 64;
 
@@ -194,7 +205,51 @@ pub async fn send_to(
     }
 }
 
-#[cfg(any(not(target_os = "linux"), feature = "fuzzing"))]
+/// Sends `send_buf` on the connected `socket` as datagrams of `segment_size`
+/// bytes, batched with `sendmsg_x`.
+#[cfg(all(apple_fast, not(feature = "fuzzing")))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn send_to(
+    socket: &tokio::net::UdpSocket, _to: SocketAddr, _from: Option<SocketAddr>,
+    send_buf: &[u8], segment_size: Option<usize>, _tx_time: Option<Instant>,
+    _dscp: Option<Dscp>, would_block_metric: Counter,
+    send_to_wouldblock_duration_s: TimeHistogram,
+) -> io::Result<usize> {
+    let segment_size = segment_size
+        .filter(|&size| size > 0)
+        .unwrap_or(send_buf.len());
+
+    let mut sendmsg_retry_timer = None;
+    let mut sent = 0;
+    while sent < send_buf.len() {
+        let rest = &send_buf[sent..];
+
+        // Must use [`try_io`] so tokio can properly clear its readyness flag
+        let res = socket.try_io(Interest::WRITABLE, || {
+            macos::send_batch(socket.as_fd(), rest, segment_size)
+        });
+
+        match res {
+            Ok(0) => break,
+            Ok(dgrams) => sent += rest.len().min(dgrams * segment_size),
+            // Wait for the socket to become writable and try again
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                if sendmsg_retry_timer.is_none() {
+                    sendmsg_retry_timer =
+                        Some(send_to_wouldblock_duration_s.start_timer());
+                }
+                would_block_metric.inc();
+                socket.writable().await?
+            },
+            Err(_) if sent > 0 => break,
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(sent)
+}
+
+#[cfg(any(not(any(target_os = "linux", apple_fast)), feature = "fuzzing"))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, _from: Option<SocketAddr>,
@@ -455,5 +510,70 @@ pub(crate) mod test {
             now_timespec.tv_nsec as u128;
 
         assert_eq!(ref_elapsed, raw_elapsed);
+    }
+}
+
+#[cfg(all(apple_fast, test, not(feature = "fuzzing")))]
+mod macos_test {
+    use super::*;
+    use crate::metrics::labels::QuicWriteError;
+    use crate::metrics::DefaultMetrics;
+    use crate::metrics::Metrics;
+    use crate::socket::SocketCapabilities;
+    use tokio::net::UdpSocket;
+    use tokio::time::timeout;
+    use tokio::time::Duration;
+
+    const SEGMENT_SIZE: usize = 1000;
+
+    #[tokio::test]
+    async fn sendmsg_x_sends_every_segment_in_order() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
+        let to = receiver.local_addr().expect("local addr");
+        let unconnected = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
+        let sender = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
+        sender.connect(to).await.expect("connect");
+
+        assert!(
+            !SocketCapabilities::apply_all_and_get_compatibility(&unconnected)
+                .has_gso
+        );
+        assert!(
+            SocketCapabilities::apply_all_and_get_compatibility(&sender).has_gso
+        );
+
+        // One lone datagram, as a single-packet flush passes it, then more
+        // than one `sendmsg_x` batch ending in a shorter datagram.
+        for (len, segment_size) in [
+            (SEGMENT_SIZE / 2, SEGMENT_SIZE / 2),
+            (70 * SEGMENT_SIZE - SEGMENT_SIZE / 2, SEGMENT_SIZE),
+        ] {
+            let buf: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+            let metrics = DefaultMetrics;
+            let sent = send_to(
+                &sender,
+                to,
+                None,
+                &buf,
+                Some(segment_size),
+                None,
+                None,
+                metrics.write_errors(QuicWriteError::WouldBlock),
+                metrics.send_to_wouldblock_duration_s(),
+            )
+            .await
+            .expect("send_to");
+            assert_eq!(sent, buf.len());
+
+            let mut dgram = [0u8; 2048];
+            for expected in buf.chunks(segment_size) {
+                let len =
+                    timeout(Duration::from_secs(2), receiver.recv(&mut dgram))
+                        .await
+                        .expect("timed out waiting for UDP segment")
+                        .expect("recv");
+                assert_eq!(&dgram[..len], expected);
+            }
+        }
     }
 }

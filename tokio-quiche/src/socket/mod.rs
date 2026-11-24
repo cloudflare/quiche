@@ -29,6 +29,8 @@
 mod capabilities;
 mod connected;
 mod listener;
+#[cfg(apple_fast)]
+pub(crate) mod macos;
 
 pub use self::capabilities::SocketCapabilities;
 #[cfg(target_os = "linux")]
