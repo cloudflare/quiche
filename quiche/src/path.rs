@@ -250,6 +250,11 @@ pub struct Path {
     /// to be validated.
     migrating: bool,
 
+    /// Whether the peer migrated away from this path. The path remains a
+    /// fallback until the migration completes, and is then released so that
+    /// it can be evicted.
+    migrated_away: bool,
+
     /// Whether or not we should force eliciting of an ACK (e.g. via PING frame)
     pub needs_ack_eliciting: bool,
 }
@@ -320,6 +325,7 @@ impl Path {
             challenge_requested: false,
             failure_notified: false,
             migrating: false,
+            migrated_away: false,
             needs_ack_eliciting: false,
         }
     }
@@ -359,14 +365,34 @@ impl Path {
     /// Returns whether the path is unused.
     #[inline]
     fn unused(&self) -> bool {
-        // FIXME: we should check that there is nothing in the sent queue.
-        !self.active() && self.active_dcid_seq.is_none()
+        // Frames scheduled for retransmission stay in the recovery state of the
+        // path that sent them until the next packet is sent, so keep the path
+        // until then to avoid dropping them.
+        //
+        // FIXME: we should also check that there is nothing in the sent queue.
+        !self.active() &&
+            self.active_dcid_seq.is_none() &&
+            !self
+                .recovery
+                .has_lost_frames(crate::packet::Epoch::Application)
     }
 
     /// Returns whether the path requires sending a probing packet.
     #[inline]
     pub fn probing_required(&self) -> bool {
         !self.received_challenges.is_empty() || self.validation_requested()
+    }
+
+    /// Returns whether the path has received challenges to respond to.
+    #[inline]
+    pub fn has_received_challenges(&self) -> bool {
+        !self.received_challenges.is_empty()
+    }
+
+    /// Returns whether the peer migrated away from this path.
+    #[inline]
+    pub fn migrated_away(&self) -> bool {
+        self.migrated_away
     }
 
     /// Promotes the path to the provided state only if the new state is greater
@@ -399,6 +425,12 @@ impl Path {
     #[inline]
     pub fn request_validation(&mut self) {
         self.challenge_requested = true;
+    }
+
+    /// Discards the challenges in flight and requests a new one.
+    pub fn restart_validation(&mut self) {
+        self.in_flight_challenges.clear();
+        self.request_validation();
     }
 
     /// Returns whether a validation is requested.
@@ -486,7 +518,11 @@ impl Path {
         false
     }
 
-    fn on_failed_validation(&mut self) {
+    fn on_failed_validation(&mut self, is_server: bool) {
+        // On a server, the connection falls back to another path when the
+        // active one fails. Release it like a replaced active path, as it can
+        // share a DCID that is retired when the path it replaced is released.
+        self.migrated_away |= is_server && self.active;
         self.state = PathState::Failed;
         self.active = false;
     }
@@ -542,7 +578,7 @@ impl Path {
             if self.probing_lost >= crate::MAX_PROBING_TIMEOUTS ||
                 (is_server && self.max_send_bytes < crate::MIN_PROBING_SIZE)
             {
-                self.on_failed_validation();
+                self.on_failed_validation(is_server);
             } else {
                 self.request_validation();
             }
@@ -876,7 +912,9 @@ impl PathMap {
     }
 
     /// Handles incoming PATH_RESPONSE data.
-    pub fn on_response_received(&mut self, data: [u8; 8]) -> Result<()> {
+    ///
+    /// Returns whether the response completes a migration to the active path.
+    pub fn on_response_received(&mut self, data: [u8; 8]) -> Result<bool> {
         let active_pid = self.get_active_path_id()?;
 
         let challenge_pending =
@@ -899,10 +937,13 @@ impl PathMap {
                     self.notify_event(PathEvent::PeerMigrated(
                         local_addr, peer_addr,
                     ));
+
+                    return Ok(true);
                 }
             }
         }
-        Ok(())
+
+        Ok(false)
     }
 
     /// Sets the path with identifier 'path_id' to be active.
@@ -920,10 +961,16 @@ impl PathMap {
 
         if let Ok(old_active_path) = self.get_active_mut() {
             old_active_path.active = false;
+
+            // On a server, replacing the active path means that the peer
+            // migrated away from it. It remains a fallback until the new path
+            // is validated.
+            old_active_path.migrated_away = is_server;
         }
 
         let new_active_path = self.get_mut(path_id)?;
         new_active_path.active = true;
+        new_active_path.migrated_away = false;
 
         if is_server {
             if new_active_path.validated() {
