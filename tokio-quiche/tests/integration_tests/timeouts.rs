@@ -45,7 +45,10 @@ use h3i::quiche::{
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tokio_quiche::http3::driver::H3ConnectionError;
+use tokio_quiche::quic::AddrValidationTokenManager;
 use tokio_quiche::quic::ConnectionHook;
+use tokio_quiche::quic::RETRY_TOKEN_SECRET_LEN;
+use tokio_quiche::settings::RetryTokenSecret;
 use tokio_quiche::settings::TlsCertificatePaths;
 use url::Url;
 
@@ -132,8 +135,13 @@ async fn test_handshake_timeout_with_one_client_flight() {
     let hook = TestConnectionHook::new();
 
     const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(1);
+    const RETRY_TOKEN_KEY: [u8; RETRY_TOKEN_SECRET_LEN] =
+        [42; RETRY_TOKEN_SECRET_LEN];
+
     let mut quic_settings = QuicSettings::default();
     quic_settings.handshake_timeout = Some(HANDSHAKE_TIMEOUT);
+    quic_settings.retry_token_secret =
+        Some(RetryTokenSecret::new(RETRY_TOKEN_KEY));
 
     let (url, _) = start_server_with_settings(
         quic_settings,
@@ -175,6 +183,13 @@ async fn test_handshake_timeout_with_one_client_flight() {
     let (write, _) = quiche_conn.send(&mut out).expect("initial send failed");
     socket.send(&out[..write]).await.unwrap();
 
+    // The server binds the Retry token to the DCID of this first Initial
+    let original_dcid =
+        quiche::Header::from_slice(&mut out[..write], quiche::MAX_CONN_ID_LEN)
+            .expect("failed to parse first Initial")
+            .dcid
+            .to_vec();
+
     // Receive Retry packet
     let (len, from) = socket.recv_from(&mut out).await.unwrap();
     let recv_info = quiche::RecvInfo {
@@ -182,6 +197,25 @@ async fn test_handshake_timeout_with_one_client_flight() {
         to: socket.local_addr().unwrap(),
     };
     let _ = quiche_conn.recv(&mut out[..len], recv_info);
+
+    // Parse the retry token
+    let retry_token = {
+        let retry_hdr =
+            quiche::Header::from_slice(&mut out[..len], quiche::MAX_CONN_ID_LEN)
+                .expect("failed to parse Retry packet");
+
+        assert_eq!(retry_hdr.ty, quiche::Type::Retry);
+
+        retry_hdr.token.expect("Retry packet should carry a token")
+    };
+
+    // An independent manager with the configured secret must accept the token
+    assert_eq!(
+        AddrValidationTokenManager::new(RETRY_TOKEN_KEY)
+            .validate_and_extract_original_dcid(&retry_token, local_addr)
+            .expect("Retry token should validate with the configured secret"),
+        quiche::ConnectionId::from_ref(&original_dcid)
+    );
 
     // Send second Initial packet, which will spawn the TQ Handshake IOW
     let (written, _) = quiche_conn.send(&mut out).unwrap();
