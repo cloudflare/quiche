@@ -358,8 +358,8 @@ pub struct SocketCapabilities {
     )]
     pub(crate) has_rxtime: bool,
 
-    /// Indicates if the socket has `UDP_GRO` enabled.
-    #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
+    /// Indicates if the socket has `UDP_GRO` enabled, or on macOS, can batch
+    /// receives with `recvmsg_x`.
     pub(crate) has_gro: bool,
 
     /// Indicates if the socket has `IP_PKTINFO` set.
@@ -424,8 +424,9 @@ impl SocketCapabilities {
     /// Detects the supported capabilities and returns indicators of which
     /// ones are available.
     ///
-    /// On macOS, a connected socket can batch sends with `sendmsg_x` if the
-    /// system provides it. The socket is left unchanged.
+    /// On macOS, a connected socket can batch sends with `sendmsg_x` and
+    /// receives with `recvmsg_x` if the system provides them. The socket is
+    /// left unchanged.
     #[cfg(apple_fast)]
     pub fn apply_all_and_get_compatibility<S>(socket: &S) -> Self
     where
@@ -435,6 +436,7 @@ impl SocketCapabilities {
 
         Self {
             has_gso: connected && macos::can_send_batches(),
+            has_gro: connected && macos::can_receive_batches(),
             ..Default::default()
         }
     }

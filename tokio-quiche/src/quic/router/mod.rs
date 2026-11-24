@@ -26,6 +26,8 @@
 
 pub(crate) mod acceptor;
 pub(crate) mod connector;
+#[cfg(apple_fast)]
+mod macos;
 
 use super::connection::ConnectionMap;
 use super::connection::HandshakeInfo;
@@ -182,6 +184,9 @@ where
     #[cfg(target_os = "linux")]
     buf: Vec<u8>,
 
+    #[cfg(apple_fast)]
+    batch_receiver: Option<macos::BatchReceiver>,
+
     // We keep the metrics in here, to avoid cloning them each packet
     #[cfg(target_os = "linux")]
     metrics_handshake_time_seconds: TimeHistogram,
@@ -203,6 +208,12 @@ where
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let (accept_sink, accept_stream) = mpsc::channel(config.listen_backlog);
         let (conn_map_cmd_tx, conn_map_cmd_rx) = mpsc::unbounded_channel();
+
+        #[cfg(apple_fast)]
+        let batch_receiver = socket_rx
+            .as_udp_socket()
+            .filter(|_| config.has_gro)
+            .and_then(macos::BatchReceiver::new);
 
         (
             InboundPacketRouter {
@@ -239,6 +250,8 @@ where
 
                 #[cfg(target_os = "linux")]
                 buf: Vec::new(),
+                #[cfg(apple_fast)]
+                batch_receiver,
                 #[cfg(target_os = "linux")]
                 metrics_handshake_time_seconds: metrics.handshake_time_seconds(labels::QuicHandshakeStage::QueueWaiting),
                 #[cfg(target_os = "linux")]
@@ -448,9 +461,33 @@ where
     fn poll_recv_and_rx_time(
         &mut self, cx: &mut Context<'_>,
     ) -> Poll<io::Result<PollRecvData>> {
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", apple_fast)))]
         {
             self.poll_recv_from(cx)
+        }
+
+        #[cfg(apple_fast)]
+        loop {
+            use tokio::io::Interest;
+
+            let (Some(udp_socket), Some(receiver)) =
+                (self.socket_rx.as_udp_socket(), self.batch_receiver.as_mut())
+            else {
+                return self.poll_recv_from(cx);
+            };
+
+            if let Some(run) = receiver.next_run() {
+                return Poll::Ready(Ok(run));
+            }
+
+            match udp_socket
+                .try_io(Interest::READABLE, || receiver.recv(udp_socket))
+            {
+                Ok(()) => {},
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock =>
+                    ready!(udp_socket.poll_recv_ready(cx))?,
+                Err(e) => return Poll::Ready(Err(e)),
+            }
         }
 
         #[cfg(target_os = "linux")]
@@ -1210,7 +1247,8 @@ mod tests {
         }
     }
 
-    struct NoopInitialHandler;
+    /// An [`InitialPacketHandler`] that accepts no connections.
+    pub(super) struct NoopInitialHandler;
     impl InitialPacketHandler for NoopInitialHandler {
         fn handle_initials(
             &mut self, _incoming: Incoming, _hdr: Header<'static>,

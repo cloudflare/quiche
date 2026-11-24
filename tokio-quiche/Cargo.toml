@@ -44,10 +44,10 @@ capture_keylogs = []
 # Enable scheduling & poll duration histograms for tokio tasks.
 tokio-task-metrics = []
 
-# Batch UDP sends on macOS with `sendmsg_x` once a socket opts in through
-# `Socket::apply_max_capabilities()`. `sendmsg_x` is a private Apple system
-# call whose interface may change between macOS releases, and the App Store
-# only allows public APIs.
+# Batch UDP sends and receives on macOS with `sendmsg_x` and `recvmsg_x`
+# once a socket opts in through `Socket::apply_max_capabilities()`. Both are
+# private Apple system calls whose interface may change between macOS
+# releases, and the App Store only allows public APIs.
 fast-apple-datapath = []
 
 # Enable gzip compression for QLOG output files. Forwards to the
