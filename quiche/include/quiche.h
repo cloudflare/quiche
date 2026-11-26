@@ -271,6 +271,20 @@ void quiche_config_enable_pacing(quiche_config *config, bool v);
 void quiche_config_set_enable_cubic_idle_restart_fix(quiche_config *config,
                                                      bool v);
 
+enum quiche_rate_limited_increase {
+    // The congestion window is not increased while rate-limited (default).
+    QUICHE_RATE_LIMITED_INCREASE_DISABLED = 0,
+    // Rate-Limited Increase is applied in traditional Slow Start only (not in
+    // HyStart++ Conservative Slow Start or congestion avoidance).
+    QUICHE_RATE_LIMITED_INCREASE_SLOW_START = 1,
+};
+
+// Configures how the CUBIC and Reno congestion controllers use Rate-Limited
+// Increase (draft-ietf-ccwg-ratelimited-increase) while the sender is
+// rate-limited.
+void quiche_config_set_rate_limited_increase(
+    quiche_config *config, enum quiche_rate_limited_increase mode);
+
 // Deprecated: this is now always enabled and this function is a no-op.
 void quiche_config_set_use_initial_max_data_as_flow_control_win(
     quiche_config *config, bool v);
