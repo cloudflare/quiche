@@ -142,6 +142,10 @@ impl DynamicTable {
         self.capacity
     }
 
+    pub(super) fn max_capacity(&self) -> usize {
+        self.max_capacity
+    }
+
     /// Returns the entry with the given absolute index, unless it was evicted
     /// or hasn't been inserted yet (RFC 9204, Section 3.2.4).
     pub(crate) fn get_by_absolute_index(
