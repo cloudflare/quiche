@@ -12967,13 +12967,52 @@ fn send_ack_eliciting_causes_ping(
     // First establish a connection
     let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
     assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
 
     // Queue a PING frame
     pipe.server.send_ack_eliciting().unwrap();
 
-    // Make sure ping is sent
+    // Leave cwnd for the packet overhead, but not for the minimum payload.
+    let crypto_overhead = pipe.server.crypto_ctx[packet::Epoch::Application]
+        .crypto_overhead()
+        .unwrap();
+    let overhead = 1 + pipe.client.source_id().len() + 1 + crypto_overhead;
+    let active_pid = pipe.server.paths.get_active_path_id().unwrap();
+    let path = pipe.server.paths.get(active_pid).unwrap();
+    let cwnd_available = path.recovery.cwnd_available();
+    let pkt_num = pipe.server.next_pkt_num;
+    pipe.server.next_pkt_num += 1;
+    let sent_pkt = test_utils::helper_packet_sent(
+        pkt_num,
+        Instant::now(),
+        cwnd_available - overhead - PAYLOAD_MIN_LEN + 1,
+    );
+    let handshake_status = pipe.server.handshake_status();
+    pipe.server
+        .on_packet_sent(
+            active_pid,
+            sent_pkt,
+            packet::Epoch::Application,
+            handshake_status,
+            Instant::now(),
+        )
+        .unwrap();
+
+    // Make sure ping is not sent when it can't be padded
     let mut buf = [0; 1500];
-    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    assert_eq!(pipe.server.send(&mut buf), Err(Error::Done));
+
+    // Make sure ping is sent once the packet is acknowledged
+    let mut ranges = ranges::RangeSet::default();
+    ranges.insert(pkt_num..pkt_num + 1);
+    let frames = [frame::Frame::ACK {
+        ack_delay: 0,
+        ranges,
+        ecn_counts: None,
+    }];
+    let len = pipe
+        .send_pkt_to_server(Type::Short, &frames, &mut buf)
+        .unwrap();
 
     let frames =
         test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
