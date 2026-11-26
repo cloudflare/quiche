@@ -959,6 +959,38 @@ pub extern "C" fn quiche_conn_send_on_path(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_conn_next_release_time(
+    conn: &Connection, out: &mut timespec, can_burst: &mut bool,
+) -> bool {
+    let release = match conn.get_next_release_time() {
+        Some(v) => v,
+
+        None => {
+            *can_burst = false;
+            return false;
+        },
+    };
+
+    *can_burst = release.can_burst();
+
+    match release.time(Instant::now()) {
+        Some(time) => {
+            std_time_to_c(&time, out);
+            true
+        },
+
+        None => false,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_conn_max_release_into_future_as_nanos(
+    conn: &Connection,
+) -> u64 {
+    conn.max_release_into_future().as_nanos() as u64
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_stream_recv(
     conn: &mut Connection, stream_id: u64, out: *mut u8, out_len: size_t,
     fin: &mut bool, out_error_code: &mut u64,
@@ -2467,6 +2499,208 @@ mod tests {
         ));
 
         quiche_connection_id_iter_free(iter);
+    }
+
+    fn pacing_config(
+        cc_algorithm: CongestionControlAlgorithm, pacing: bool,
+    ) -> Config {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_initial_max_data(1_000_000);
+        config.set_initial_max_stream_data_bidi_local(1_000_000);
+        config.set_initial_max_stream_data_bidi_remote(1_000_000);
+        config.set_initial_max_streams_bidi(3);
+        config.set_cc_algorithm(cc_algorithm);
+        config.enable_pacing(pacing);
+
+        config
+    }
+
+    fn pacing_pipe(
+        cc_algorithm: CongestionControlAlgorithm, pacing: bool,
+    ) -> test_utils::Pipe {
+        // Pace the client at 1 Mbps, so that its full-sized packets are
+        // released about 10ms apart from each other. This is not done for the
+        // server, as BBR2 also caps the congestion window to the max pacing
+        // rate times the RTT, which on the in-memory pipe can be too small
+        // for the server to complete the handshake.
+        let mut client_config = pacing_config(cc_algorithm, pacing);
+        client_config.set_max_pacing_rate(1);
+
+        let mut server_config = pacing_config(cc_algorithm, pacing);
+
+        let mut pipe = test_utils::Pipe::with_client_and_server_config(
+            &mut client_config,
+            &mut server_config,
+        )
+        .unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        pipe
+    }
+
+    /// Sends as many packets as the congestion window allows, without
+    /// delivering them to the peer.
+    fn send_burst(conn: &mut Connection) {
+        assert!(conn.stream_send(0, &[0; 100_000], false).unwrap() > 0);
+
+        let mut buf = [0; 1500];
+
+        loop {
+            match conn.send(&mut buf) {
+                Ok(_) => (),
+
+                Err(Error::Done) => break,
+
+                Err(e) => panic!("send failed: {e:?}"),
+            }
+        }
+    }
+
+    // quiche_send_info.at and the release time are not supported on these
+    // platforms yet, so only check the values elsewhere.
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "windows"
+    )))]
+    fn timespec_to_duration(ts: &timespec) -> Duration {
+        Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
+    }
+
+    /// Returns the current time of the clock used by `Instant`.
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "windows"
+    )))]
+    fn clock_now() -> Duration {
+        let mut ts = timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+
+        assert_eq!(
+            unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) },
+            0
+        );
+
+        timespec_to_duration(&ts)
+    }
+
+    #[test]
+    fn next_release_time_bbr2() {
+        let mut pipe =
+            pacing_pipe(CongestionControlAlgorithm::Bbr2Gcongestion, true);
+
+        let mut out = timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut can_burst = false;
+
+        // No application data has been sent yet, so the next packet can be
+        // sent immediately.
+        assert!(!quiche_conn_next_release_time(
+            &pipe.client,
+            &mut out,
+            &mut can_burst
+        ));
+        assert!(can_burst);
+        assert_eq!((out.tv_sec, out.tv_nsec), (0, 0));
+
+        // Once the initial burst is used up, the following packets are paced.
+        send_burst(&mut pipe.client);
+
+        let release = pipe.client.get_next_release_time().unwrap();
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "windows"
+        )))]
+        let before = clock_now();
+
+        assert!(quiche_conn_next_release_time(
+            &pipe.client,
+            &mut out,
+            &mut can_burst
+        ));
+        assert_eq!(can_burst, release.can_burst());
+
+        // The release time is in the future, by a few times the 10ms it takes
+        // to release a full-sized packet.
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "windows"
+        )))]
+        {
+            let out_time = timespec_to_duration(&out);
+            assert!(out_time > before);
+            assert!(out_time < before + Duration::from_secs(1));
+        }
+    }
+
+    #[test]
+    fn next_release_time_bbr2_no_pacing() {
+        let mut pipe =
+            pacing_pipe(CongestionControlAlgorithm::Bbr2Gcongestion, false);
+
+        send_burst(&mut pipe.client);
+
+        let mut out = timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut can_burst = false;
+
+        assert!(!quiche_conn_next_release_time(
+            &pipe.client,
+            &mut out,
+            &mut can_burst
+        ));
+        assert!(can_burst);
+        assert_eq!((out.tv_sec, out.tv_nsec), (0, 0));
+    }
+
+    #[test]
+    fn next_release_time_cubic() {
+        let mut pipe = pacing_pipe(CongestionControlAlgorithm::CUBIC, true);
+
+        send_burst(&mut pipe.client);
+
+        let mut out = timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        let mut can_burst = true;
+
+        assert!(!quiche_conn_next_release_time(
+            &pipe.client,
+            &mut out,
+            &mut can_burst
+        ));
+        assert!(!can_burst);
+        assert_eq!((out.tv_sec, out.tv_nsec), (0, 0));
+    }
+
+    #[test]
+    fn max_release_into_future() {
+        let pipe = pacing_pipe(CongestionControlAlgorithm::Bbr2Gcongestion, true);
+
+        let max = quiche_conn_max_release_into_future_as_nanos(&pipe.client);
+        assert_eq!(max, pipe.client.max_release_into_future().as_nanos() as u64);
+        assert!((1_000_000..=5_000_000).contains(&max));
     }
 
     #[cfg(not(windows))]
