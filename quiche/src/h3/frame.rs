@@ -120,7 +120,7 @@ impl Frame {
             },
 
             CANCEL_PUSH_FRAME_TYPE_ID => Frame::CancelPush {
-                push_id: b.get_varint()?,
+                push_id: parse_single_varint(payload_length, &mut b)?,
             },
 
             SETTINGS_FRAME_TYPE_ID =>
@@ -130,11 +130,11 @@ impl Frame {
                 parse_push_promise(payload_length, &mut b)?,
 
             GOAWAY_FRAME_TYPE_ID => Frame::GoAway {
-                id: b.get_varint()?,
+                id: parse_single_varint(payload_length, &mut b)?,
             },
 
             MAX_PUSH_FRAME_TYPE_ID => Frame::MaxPushId {
-                push_id: b.get_varint()?,
+                push_id: parse_single_varint(payload_length, &mut b)?,
             },
 
             PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID |
@@ -641,6 +641,21 @@ fn parse_settings_frame(
         raw: Some(raw),
         additional_settings,
     })
+}
+
+/// Parses the payload of a frame that carries a single varint, making sure the
+/// varint covers the whole payload.
+fn parse_single_varint(
+    payload_length: u64, b: &mut octets::Octets,
+) -> Result<u64> {
+    let before = b.off();
+    let v = b.get_varint()?;
+
+    if (b.off() - before) as u64 != payload_length {
+        return Err(super::Error::FrameError);
+    }
+
+    Ok(v)
 }
 
 fn parse_push_promise(
@@ -1298,6 +1313,23 @@ mod tests {
             .unwrap(),
             frame
         );
+    }
+
+    #[test]
+    fn single_varint_frames_reject_trailing_bytes() {
+        // The payload is a 1-byte varint followed by two extra bytes.
+        let d = [0x05, 0xaa, 0xbb];
+
+        for frame_type in [
+            CANCEL_PUSH_FRAME_TYPE_ID,
+            GOAWAY_FRAME_TYPE_ID,
+            MAX_PUSH_FRAME_TYPE_ID,
+        ] {
+            assert_eq!(
+                Frame::from_bytes(frame_type, d.len() as u64, &d),
+                Err(crate::h3::Error::FrameError)
+            );
+        }
     }
 
     #[test]
