@@ -33,7 +33,7 @@ default = ["boringssl-boring-crate"]
 # picks the version based on the lockfile and downstream constraints;
 # `build.rs` detects which major version was selected at compile time
 # (via `DEP_BORINGSSL_VERSION_MAJOR` from `boring-sys` >= 5.2) and
-# emits a `cfg(boring_v5)` flag for the 5.x case. 4.x is the assumed
+# emits a `cfg(boring_v4)` flag for the 4.x case. 5.x is the assumed
 # default. The two majors differ in their default TLS curve list (5.x
 # advertises post-quantum key shares) and in their Rust API for raw
 # public keys; see `tokio-quiche/src/settings/config.rs` for the
