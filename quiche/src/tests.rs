@@ -7737,7 +7737,7 @@ fn validate_peer_sent_ack_range_for_multi_path(
     );
     assert_eq!(
         p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
-        by_boring!(b4: 5, b5: 6)
+        by_boring!(b4: 6, b5: 7)
     );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
@@ -7785,7 +7785,7 @@ fn validate_peer_sent_ack_range_for_multi_path(
     );
     assert_eq!(
         p2_recovery.get_largest_acked_on_epoch(epoch).unwrap(),
-        by_boring!(b4: 5, b5: 6)
+        by_boring!(b4: 7, b5: 8)
     );
     assert_eq!(p2_recovery.sent_packets_len(epoch), 0);
 
@@ -14725,4 +14725,42 @@ fn server_qlog() {
     } else {
         panic!("expected Qlog event");
     }
+}
+
+/// Frames and stream data lost on the old path are retransmitted after a
+/// migration, although ACKs then only cover packets sent on the new path.
+#[rstest]
+fn retransmit_after_migration(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    // More packets than PTO probes resend.
+    const LOST_DATA_PACKETS: usize = 5;
+
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_active_connection_id_limit(4);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 2);
+
+    assert_eq!(pipe.server.stream_send(5, b"a", false), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Stream data and a RESET_STREAM are lost.
+    for _ in 0..LOST_DATA_PACKETS {
+        assert_eq!(pipe.server.stream_send(1, b"a", false), Ok(1));
+        let _ = test_utils::emit_flight(&mut pipe.server);
+    }
+    pipe.server.stream_shutdown(5, Shutdown::Write, 42).unwrap();
+    let _ = test_utils::emit_flight(&mut pipe.server);
+
+    let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+    pipe.client.migrate_source(client_addr_2).unwrap();
+    pipe.client.send_ack_eliciting().unwrap();
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut buf = [0; LOST_DATA_PACKETS + 1];
+    assert_eq!(
+        pipe.client.stream_recv(1, &mut buf),
+        Ok((LOST_DATA_PACKETS, false))
+    );
+    assert_eq!(pipe.client.stats().reset_stream_count_remote, 1);
 }
