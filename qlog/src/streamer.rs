@@ -90,12 +90,16 @@ pub enum StreamerState {
     Finished,
 }
 
+/// A filter on the qlog wire name of events, e.g. `"quic:packet_sent"`.
+pub type EventNameFilter = Box<dyn Fn(&str) -> bool + Send + Sync>;
+
 pub struct QlogStreamer {
     start_time: std::time::Instant,
     writer: Box<dyn std::io::Write + Send + Sync>,
     qlog: QlogSeq,
     state: StreamerState,
     log_level: EventImportance,
+    name_filter: Option<EventNameFilter>,
     time_precision: EventTimePrecision,
 }
 
@@ -130,8 +134,20 @@ impl QlogStreamer {
             qlog,
             state: StreamerState::Initial,
             log_level,
+            name_filter: None,
             time_precision,
         }
+    }
+
+    /// Only logs events whose qlog wire name passes `name_filter`, on top of
+    /// the log level. Applies to an application's own events as well.
+    pub fn set_name_filter(&mut self, name_filter: EventNameFilter) {
+        self.name_filter = Some(name_filter);
+    }
+
+    /// Returns true if `name_filter` admits the given event name.
+    fn filter_name(&self, name: &str) -> bool {
+        self.name_filter.as_ref().is_none_or(|f| f(name))
     }
 
     /// Starts qlog streaming serialization.
@@ -221,7 +237,9 @@ impl QlogStreamer {
             return Err(Error::InvalidState);
         }
 
-        if !event.importance().is_contained_in(&self.log_level) {
+        if !event.importance().is_contained_in(&self.log_level) ||
+            !self.filter_name(event.name())
+        {
             return Err(Error::Done);
         }
 
@@ -319,7 +337,9 @@ impl QlogStreamer {
         }
 
         let ty = EventType::from(&event_data);
-        if !EventImportance::from(ty).is_contained_in(&self.log_level) {
+        if !EventImportance::from(ty).is_contained_in(&self.log_level) ||
+            !self.filter_name(event_data.name())
+        {
             return Err(Error::Done);
         }
 
@@ -359,7 +379,9 @@ impl QlogStreamer {
             return Err(Error::InvalidState);
         }
 
-        if !event.importance().is_contained_in(&self.log_level) {
+        if !event.importance().is_contained_in(&self.log_level) ||
+            !self.filter_name(event.name())
+        {
             return Err(Error::Done);
         }
 
@@ -568,6 +590,81 @@ mod tests {
         let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
 
         pretty_assertions::assert_eq!(log_string, written_string);
+    }
+
+    #[test]
+    fn stream_with_name_filter() {
+        let writer = Box::new(std::io::Cursor::new(Vec::new()));
+
+        let mut s = streamer::QlogStreamer::new(
+            None,
+            None,
+            std::time::Instant::now(),
+            make_trace_seq(),
+            EventImportance::Extra,
+            EventTimePrecision::NanoSeconds,
+            writer,
+        );
+
+        let logged_json_event = "jsonevent:logged".to_string();
+        s.set_name_filter(Box::new(move |name| {
+            name == logged_json_event || name == "quic:packet_sent"
+        }));
+
+        assert!(matches!(s.start_log(), Ok(())));
+
+        let json_event = |name: &str| events::JsonEvent {
+            time: 0.0,
+            importance: events::EventImportance::Core,
+            name: name.into(),
+            data: json!({}),
+        };
+        let packet_sent = EventData::QuicPacketSent(quic::PacketSent {
+            header: make_pkt_hdr(quic::PacketType::Initial),
+            ..Default::default()
+        });
+        let mtu_updated = EventData::QuicMtuUpdated(quic::MtuUpdated {
+            old: None,
+            new: 1200,
+            done: None,
+        });
+
+        assert!(matches!(
+            s.add_event(json_event("jsonevent:logged")),
+            Ok(())
+        ));
+        assert!(matches!(
+            s.add_event(json_event("jsonevent:dropped")),
+            Err(Error::Done)
+        ));
+        assert!(matches!(s.add_event_data_now(packet_sent.clone()), Ok(())));
+        assert!(matches!(
+            s.add_event_data_now(mtu_updated.clone()),
+            Err(Error::Done)
+        ));
+        assert!(matches!(
+            s.add_event(Event::with_time(0.0, mtu_updated)),
+            Err(Error::Done)
+        ));
+        assert!(matches!(s.finish_log(), Ok(())));
+
+        let r = s.writer();
+        #[allow(clippy::borrowed_box)]
+        let w: &Box<std::io::Cursor<Vec<u8>>> = unsafe { std::mem::transmute(r) };
+        let written_string = std::str::from_utf8(w.as_ref().get_ref()).unwrap();
+
+        let logged_names: Vec<String> = written_string
+            .split('\u{1e}')
+            .filter_map(|record| {
+                serde_json::from_str::<serde_json::Value>(record).ok()
+            })
+            .filter_map(|record| Some(record.get("name")?.as_str()?.to_string()))
+            .collect();
+        assert_eq!(logged_names, ["jsonevent:logged", "quic:packet_sent"]);
+
+        // The name used for filtering is the serialized one.
+        let serialized = serde_json::to_value(&packet_sent).unwrap();
+        assert_eq!(serialized["name"], packet_sent.name());
     }
 
     #[test]
