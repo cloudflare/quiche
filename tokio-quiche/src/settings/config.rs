@@ -52,6 +52,8 @@ pub(crate) struct Config {
     pub qlog_dir: Option<String>,
     pub qlog_compression: QlogCompression,
     pub has_gso: bool,
+    #[cfg_attr(not(apple_fast), expect(dead_code))]
+    pub has_gro: bool,
     pub pacing_offload: bool,
     pub enable_expensive_packet_count_metrics: bool,
     pub keylog_file: Option<File>,
@@ -91,6 +93,7 @@ impl Config {
 
         let SocketCapabilities {
             has_gso,
+            has_gro,
             has_txtime: pacing_offload,
             has_ippktinfo,
             has_ipv6pktinfo,
@@ -107,6 +110,7 @@ impl Config {
             qlog_dir: quic_settings.qlog_dir.clone(),
             qlog_compression: quic_settings.qlog_compression,
             has_gso,
+            has_gro,
             pacing_offload,
             enable_expensive_packet_count_metrics: quic_settings
                 .enable_expensive_packet_count_metrics,

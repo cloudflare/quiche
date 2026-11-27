@@ -28,6 +28,7 @@ router/
   mod.rs                      # InboundPacketRouter: Future, demux by DCID, ConnectionMapCommand
   acceptor.rs                 # ConnectionAcceptor: server-side InitialPacketHandler (RETRY flow)
   connector.rs                # ClientConnector: client-side InitialPacketHandler (handshake FSM)
+  macos.rs                    # macOS recvmsg_x BatchReceiver (fast-apple-datapath): runs split like GRO
 ```
 
 ## WHERE TO LOOK

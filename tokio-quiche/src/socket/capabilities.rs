@@ -63,6 +63,15 @@ mod linux_imports {
 #[cfg(target_os = "linux")]
 use linux_imports::*;
 
+#[cfg(apple_fast)]
+mod macos_imports {
+    pub(super) use crate::socket::macos;
+    pub(super) use std::os::fd::AsFd;
+}
+
+#[cfg(apple_fast)]
+use macos_imports::*;
+
 #[cfg(target_os = "linux")]
 #[derive(Clone)]
 struct IpMtuDiscoverProbe;
@@ -324,10 +333,13 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
 ///
 /// As a shortcut, you may call `apply_all_and_get_compatibility` to apply the
 /// maxmimum set of capabilities supported by this crate. The result will
-/// indicate which options were actually enabled.
+/// indicate which options were actually enabled. On macOS, with the
+/// `fast-apple-datapath` feature, it only detects batched UDP system calls
+/// and leaves the socket unchanged.
 #[derive(Debug, Default)]
 pub struct SocketCapabilities {
-    /// Indicates if the socket has `UDP_SEGMENT` enabled.
+    /// Indicates if the socket has `UDP_SEGMENT` enabled, or on macOS, can
+    /// batch sends with `sendmsg_x`.
     pub(crate) has_gso: bool,
 
     /// Indicates if the socket has `SO_RXQ_OVFL` set.
@@ -346,8 +358,8 @@ pub struct SocketCapabilities {
     )]
     pub(crate) has_rxtime: bool,
 
-    /// Indicates if the socket has `UDP_GRO` enabled.
-    #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
+    /// Indicates if the socket has `UDP_GRO` enabled, or on macOS, can batch
+    /// receives with `recvmsg_x`.
     pub(crate) has_gro: bool,
 
     /// Indicates if the socket has `IP_PKTINFO` set.
@@ -407,5 +419,25 @@ impl SocketCapabilities {
             let _ = b.ipv6_recvorigdstaddr();
         }
         b.finish()
+    }
+
+    /// Detects the supported capabilities and returns indicators of which
+    /// ones are available.
+    ///
+    /// On macOS, a connected socket can batch sends with `sendmsg_x` and
+    /// receives with `recvmsg_x` if the system provides them. The socket is
+    /// left unchanged.
+    #[cfg(apple_fast)]
+    pub fn apply_all_and_get_compatibility<S>(socket: &S) -> Self
+    where
+        S: AsFd,
+    {
+        let connected = macos::is_connected(socket.as_fd());
+
+        Self {
+            has_gso: connected && macos::can_send_batches(),
+            has_gro: connected && macos::can_receive_batches(),
+            ..Default::default()
+        }
     }
 }

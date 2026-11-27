@@ -75,4 +75,6 @@ src/
 - `perf-quic-listener-metrics` adds handshake timing instrumentation.
 - `tokio-task-metrics` adds schedule/poll duration histograms per spawned task.
 - Linux-only: `libc`/`nix` deps for signal handling and socket options.
+- macOS-only: `libc` dep for batched UDP system calls (`socket/macos.rs`),
+  compiled only with the `fast-apple-datapath` feature.
 - One client connection per socket — no multiplexing on client side.
