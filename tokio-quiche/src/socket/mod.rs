@@ -29,6 +29,8 @@
 mod capabilities;
 mod connected;
 mod listener;
+#[cfg(windows)]
+pub(crate) mod windows;
 
 pub use self::capabilities::SocketCapabilities;
 #[cfg(target_os = "linux")]

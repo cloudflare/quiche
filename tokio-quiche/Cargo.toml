@@ -129,3 +129,9 @@ url = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
 nix = { workspace = true, features = ["signal"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Networking_WinSock",
+  "Win32_System_IO",
+] }

@@ -59,15 +59,15 @@ pub struct QuicListener {
     /// The [`SocketCapabilities`] to use for this socket.
     ///
     /// By default, [`QuicListener`]s are constructed with all capabilities
-    /// disabled. On Linux, you can use `apply_max_capabilities()` to (try
-    /// to) enable all supported capabilities.
+    /// disabled. On Linux and Windows, you can use `apply_max_capabilities()`
+    /// to (try to) enable all supported capabilities.
     pub capabilities: SocketCapabilities,
 }
 
 impl QuicListener {
     /// Tries to enable all sockopts supported by the crate for this socket.
     /// See `SocketCapabilities::apply_all_and_get_compatibility` for details.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     pub fn apply_max_capabilities(&mut self) {
         let capabilities =
             SocketCapabilities::apply_all_and_get_compatibility(&self.socket);

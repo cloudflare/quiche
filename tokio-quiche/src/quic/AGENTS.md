@@ -28,6 +28,7 @@ router/
   mod.rs                      # InboundPacketRouter: Future, demux by DCID, ConnectionMapCommand
   acceptor.rs                 # ConnectionAcceptor: server-side InitialPacketHandler (RETRY flow)
   connector.rs                # ClientConnector: client-side InitialPacketHandler (handshake FSM)
+  uro.rs                      # Windows UDP receive offload: WSARecvMsg receive, coalesced-size parsing
 ```
 
 ## WHERE TO LOOK
@@ -64,4 +65,4 @@ router/
 - `ConnectionMap` uses `CidOwned::Optimized([u64; 3])` for v1 CIDs (<=20 bytes) to avoid heap allocation on lookup.
 - `InboundPacketRouter` implements `Future` directly (not async fn) -- polled as a spawned task.
 - `short_dcid()` fast-path extracts DCID from short header packets without full `Header::from_slice`.
-- Router tests are `#[cfg(all(test, unix))]` in `router/mod.rs` -- not Windows-compatible.
+- Router tests are `#[cfg(all(test, unix))]` in `router/mod.rs` -- not Windows-compatible. Windows router tests live in `router/uro.rs`.

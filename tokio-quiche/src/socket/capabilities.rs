@@ -63,6 +63,29 @@ mod linux_imports {
 #[cfg(target_os = "linux")]
 use linux_imports::*;
 
+#[cfg(windows)]
+mod windows_imports {
+    pub(super) use crate::socket::windows::set_max_coalesced_size;
+    pub use std::mem;
+    pub use std::os::windows::io::AsRawSocket;
+    pub use std::os::windows::io::AsSocket;
+    pub use windows_sys::Win32::Networking::WinSock::getsockopt;
+    pub use windows_sys::Win32::Networking::WinSock::IPPROTO_UDP;
+    pub use windows_sys::Win32::Networking::WinSock::SOCKET;
+    pub use windows_sys::Win32::Networking::WinSock::UDP_SEND_MSG_SIZE;
+}
+
+#[cfg(windows)]
+use windows_imports::*;
+
+/// Largest coalesced receive a socket opted into UDP receive offload (URO)
+/// asks Windows for: the largest UDP payload, which is what msquic asks for.
+/// A receive buffer of
+/// [`BufFactory::MAX_BUF_SIZE`](crate::buf_factory::BufFactory::MAX_BUF_SIZE)
+/// holds it.
+#[cfg(windows)]
+const MAX_COALESCED_SIZE: u32 = u16::MAX as u32 - 8;
+
 #[cfg(target_os = "linux")]
 #[derive(Clone)]
 struct IpMtuDiscoverProbe;
@@ -327,7 +350,8 @@ impl<'s> SocketCapabilitiesBuilder<'s> {
 /// indicate which options were actually enabled.
 #[derive(Debug, Default)]
 pub struct SocketCapabilities {
-    /// Indicates if the socket has `UDP_SEGMENT` enabled.
+    /// Indicates if the socket has `UDP_SEGMENT` enabled, or on Windows,
+    /// supports `UDP_SEND_MSG_SIZE`.
     pub(crate) has_gso: bool,
 
     /// Indicates if the socket has `SO_RXQ_OVFL` set.
@@ -346,7 +370,8 @@ pub struct SocketCapabilities {
     )]
     pub(crate) has_rxtime: bool,
 
-    /// Indicates if the socket has `UDP_GRO` enabled.
+    /// Indicates if the socket has `UDP_GRO` enabled, or on Windows,
+    /// `UDP_RECV_MAX_COALESCED_SIZE` set.
     #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
     pub(crate) has_gro: bool,
 
@@ -407,5 +432,44 @@ impl SocketCapabilities {
             let _ = b.ipv6_recvorigdstaddr();
         }
         b.finish()
+    }
+
+    /// Tries to enable all supported sockopts and returns indicators
+    /// of which settings were successfully applied.
+    ///
+    /// On Windows, this checks for UDP segmentation offload (USO) via
+    /// [`UDP_SEND_MSG_SIZE`](https://learn.microsoft.com/en-us/windows/win32/winsock/ipproto-udp-socket-options),
+    /// whose segment size is passed with each send, and enables UDP receive
+    /// offload (URO) by setting `UDP_RECV_MAX_COALESCED_SIZE`. Only
+    /// tokio-quiche's packet router splits the coalesced receives, so a socket
+    /// with URO must not be read any other way.
+    #[cfg(windows)]
+    pub fn apply_all_and_get_compatibility<S>(socket: &S) -> Self
+    where
+        S: AsSocket,
+    {
+        let socket = socket.as_socket().as_raw_socket() as SOCKET;
+
+        let mut segment_size: u32 = 0;
+        let mut len = mem::size_of::<u32>() as i32;
+        // SAFETY: `segment_size` and `len` are live locals describing a
+        // 4-byte buffer.
+        let uso = unsafe {
+            getsockopt(
+                socket,
+                IPPROTO_UDP,
+                UDP_SEND_MSG_SIZE,
+                (&mut segment_size as *mut u32).cast(),
+                &mut len,
+            )
+        };
+
+        let uro = set_max_coalesced_size(socket, MAX_COALESCED_SIZE);
+
+        Self {
+            has_gso: uso == 0,
+            has_gro: uro.is_ok(),
+            ..Default::default()
+        }
     }
 }

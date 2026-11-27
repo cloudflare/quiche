@@ -48,6 +48,37 @@ mod linux_imports {
 #[cfg(all(target_os = "linux", not(feature = "fuzzing")))]
 use self::linux_imports::*;
 
+#[cfg(all(windows, not(feature = "fuzzing")))]
+mod windows_imports {
+    pub(super) use crate::socket::windows::wsa_cmsg_len;
+    pub(super) use crate::socket::windows::wsa_cmsg_space;
+    pub(super) use std::io::ErrorKind;
+    pub(super) use std::mem;
+    pub(super) use std::os::windows::io::AsRawSocket;
+    pub(super) use std::ptr;
+    pub(super) use tokio::io::Interest;
+    pub(super) use windows_sys::Win32::Networking::WinSock::WSASendMsg;
+    pub(super) use windows_sys::Win32::Networking::WinSock::AF_INET;
+    pub(super) use windows_sys::Win32::Networking::WinSock::AF_INET6;
+    pub(super) use windows_sys::Win32::Networking::WinSock::CMSGHDR;
+    pub(super) use windows_sys::Win32::Networking::WinSock::IN6_ADDR;
+    pub(super) use windows_sys::Win32::Networking::WinSock::IN6_ADDR_0;
+    pub(super) use windows_sys::Win32::Networking::WinSock::IN_ADDR;
+    pub(super) use windows_sys::Win32::Networking::WinSock::IN_ADDR_0;
+    pub(super) use windows_sys::Win32::Networking::WinSock::IPPROTO_UDP;
+    pub(super) use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN;
+    pub(super) use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN6;
+    pub(super) use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN6_0;
+    pub(super) use windows_sys::Win32::Networking::WinSock::SOCKADDR_INET;
+    pub(super) use windows_sys::Win32::Networking::WinSock::SOCKET;
+    pub(super) use windows_sys::Win32::Networking::WinSock::UDP_SEND_MSG_SIZE;
+    pub(super) use windows_sys::Win32::Networking::WinSock::WSABUF;
+    pub(super) use windows_sys::Win32::Networking::WinSock::WSAMSG;
+}
+
+#[cfg(all(windows, not(feature = "fuzzing")))]
+use self::windows_imports::*;
+
 // Maximum number of packets can be sent in UDP GSO.
 pub(crate) const UDP_MAX_SEGMENT_COUNT: usize = 64;
 
@@ -194,7 +225,152 @@ pub async fn send_to(
     }
 }
 
-#[cfg(any(not(target_os = "linux"), feature = "fuzzing"))]
+/// Sends `send_buf` as datagrams of `segment_size` bytes using UDP
+/// segmentation offload (USO), with a `UDP_SEND_MSG_SIZE` control message.
+#[cfg(all(windows, not(feature = "fuzzing")))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn send_to(
+    socket: &tokio::net::UdpSocket, to: SocketAddr, _from: Option<SocketAddr>,
+    send_buf: &[u8], segment_size: Option<usize>, _tx_time: Option<Instant>,
+    _dscp: Option<Dscp>, would_block_metric: Counter,
+    send_to_wouldblock_duration_s: TimeHistogram,
+) -> io::Result<usize> {
+    let Some(segment_size) =
+        segment_size.filter(|&size| size > 0 && size < send_buf.len())
+    else {
+        return socket.send_to(send_buf, to).await;
+    };
+
+    let mut sendmsg_retry_timer = None;
+    loop {
+        // Must use [`try_io`] so tokio can properly clear its readyness flag
+        let res = socket.try_io(Interest::WRITABLE, || {
+            send_segmented(socket, to, send_buf, segment_size)
+        });
+
+        match res {
+            // Wait for the socket to become writable and try again
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                if sendmsg_retry_timer.is_none() {
+                    sendmsg_retry_timer =
+                        Some(send_to_wouldblock_duration_s.start_timer());
+                }
+                would_block_metric.inc();
+                socket.writable().await?
+            },
+            res => return res,
+        }
+    }
+}
+
+/// A `UDP_SEND_MSG_SIZE` control message, laid out as `WSA_CMSG_SPACE`
+/// requires.
+#[cfg(all(windows, not(feature = "fuzzing")))]
+#[repr(C)]
+struct SegmentSizeCmsg {
+    hdr: CMSGHDR,
+    segment_size: u32,
+}
+
+#[cfg(all(windows, not(feature = "fuzzing")))]
+const _: () = assert!(
+    mem::offset_of!(SegmentSizeCmsg, segment_size) == wsa_cmsg_len(0) &&
+        mem::size_of::<SegmentSizeCmsg>() ==
+            wsa_cmsg_space(mem::size_of::<u32>())
+);
+
+#[cfg(all(windows, not(feature = "fuzzing")))]
+fn send_segmented(
+    socket: &tokio::net::UdpSocket, to: SocketAddr, send_buf: &[u8],
+    segment_size: usize,
+) -> io::Result<usize> {
+    let (mut addr, addr_len) = to_sockaddr(to);
+    let mut data = WSABUF {
+        len: send_buf.len() as u32,
+        buf: send_buf.as_ptr().cast_mut(),
+    };
+    let mut cmsg = SegmentSizeCmsg {
+        hdr: CMSGHDR {
+            cmsg_len: wsa_cmsg_len(mem::size_of::<u32>()),
+            cmsg_level: IPPROTO_UDP,
+            cmsg_type: UDP_SEND_MSG_SIZE,
+        },
+        segment_size: segment_size as u32,
+    };
+    let msg = WSAMSG {
+        name: (&mut addr as *mut SOCKADDR_INET).cast(),
+        namelen: addr_len,
+        lpBuffers: &mut data,
+        dwBufferCount: 1,
+        Control: WSABUF {
+            len: mem::size_of::<SegmentSizeCmsg>() as u32,
+            buf: (&mut cmsg as *mut SegmentSizeCmsg).cast(),
+        },
+        dwFlags: 0,
+    };
+
+    let mut sent = 0;
+    // SAFETY: `msg` points to `send_buf` and to locals, all valid for the
+    // lengths given and outliving this call, which completes synchronously
+    // because no OVERLAPPED is passed. Winsock does not write through the
+    // data buffer of a send.
+    let rc = unsafe {
+        WSASendMsg(
+            socket.as_raw_socket() as SOCKET,
+            &msg,
+            0,
+            &mut sent,
+            ptr::null_mut(),
+            None,
+        )
+    };
+
+    match rc {
+        0 => Ok(sent as usize),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
+
+#[cfg(all(windows, not(feature = "fuzzing")))]
+fn to_sockaddr(addr: SocketAddr) -> (SOCKADDR_INET, i32) {
+    match addr {
+        SocketAddr::V4(addr) => (
+            SOCKADDR_INET {
+                Ipv4: SOCKADDR_IN {
+                    sin_family: AF_INET,
+                    sin_port: addr.port().to_be(),
+                    sin_addr: IN_ADDR {
+                        S_un: IN_ADDR_0 {
+                            S_addr: u32::from_ne_bytes(addr.ip().octets()),
+                        },
+                    },
+                    sin_zero: [0; 8],
+                },
+            },
+            mem::size_of::<SOCKADDR_IN>() as i32,
+        ),
+        SocketAddr::V6(addr) => (
+            SOCKADDR_INET {
+                Ipv6: SOCKADDR_IN6 {
+                    sin6_family: AF_INET6,
+                    sin6_port: addr.port().to_be(),
+                    sin6_flowinfo: addr.flowinfo(),
+                    sin6_addr: IN6_ADDR {
+                        u: IN6_ADDR_0 {
+                            Byte: addr.ip().octets(),
+                        },
+                    },
+                    Anonymous: SOCKADDR_IN6_0 {
+                        sin6_scope_id: addr.scope_id(),
+                    },
+                },
+            },
+            mem::size_of::<SOCKADDR_IN6>() as i32,
+        ),
+    }
+}
+
+#[cfg(any(not(any(target_os = "linux", windows)), feature = "fuzzing"))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_to(
     socket: &tokio::net::UdpSocket, to: SocketAddr, _from: Option<SocketAddr>,
@@ -455,5 +631,62 @@ pub(crate) mod test {
             now_timespec.tv_nsec as u128;
 
         assert_eq!(ref_elapsed, raw_elapsed);
+    }
+}
+
+#[cfg(all(windows, test, not(feature = "fuzzing")))]
+mod windows_test {
+    use super::*;
+    use crate::metrics::labels::QuicWriteError;
+    use crate::metrics::DefaultMetrics;
+    use crate::metrics::Metrics;
+    use crate::socket::SocketCapabilities;
+    use tokio::net::UdpSocket;
+    use tokio::time::timeout;
+    use tokio::time::Duration;
+
+    #[tokio::test]
+    async fn uso_splits_batch_into_segments() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let to = receiver.local_addr().unwrap();
+        let unconnected = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let connected = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        connected.connect(to).await.unwrap();
+
+        let buf: Vec<u8> = (0..2900).map(|i| i as u8).collect();
+        let metrics = DefaultMetrics;
+        for sender in [unconnected, connected] {
+            assert!(
+                SocketCapabilities::apply_all_and_get_compatibility(&sender)
+                    .has_gso
+            );
+
+            let sent = send_to(
+                &sender,
+                to,
+                None,
+                &buf,
+                Some(1200),
+                None,
+                None,
+                metrics.write_errors(QuicWriteError::WouldBlock),
+                metrics.send_to_wouldblock_duration_s(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(sent, buf.len());
+
+            let mut dgram = [0u8; 2048];
+            for expected in buf.chunks(1200) {
+                let (len, _) = timeout(
+                    Duration::from_secs(2),
+                    receiver.recv_from(&mut dgram),
+                )
+                .await
+                .expect("timed out waiting for UDP segment")
+                .unwrap();
+                assert_eq!(&dgram[..len], expected);
+            }
+        }
     }
 }
