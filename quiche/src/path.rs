@@ -474,8 +474,12 @@ impl Path {
 
         if self.state == PathState::ValidatingMTU {
             if self.max_challenge_size >= crate::MIN_CLIENT_INITIAL_LEN {
-                // Path MTU is sufficient for QUIC traffic.
+                // Path MTU is sufficient for QUIC traffic; clear any leftover
+                // pre-validation challenges and pending re-probe requests.
                 self.promote_to(PathState::Validated);
+                self.in_flight_challenges.clear();
+                self.last_probe_lost_time = None;
+                self.challenge_requested = false;
                 return true;
             }
 
@@ -1503,5 +1507,117 @@ mod tests {
         );
 
         // There will never be a response for fourth probe...
+    }
+
+    #[test]
+    fn validation_clears_leftover_in_flight_challenges() {
+        let client_addr = "127.0.0.1:1234".parse().unwrap();
+        let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+        let server_addr = "127.0.0.1:4321".parse().unwrap();
+
+        let config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let recovery_config = RecoveryConfig::from_config(&config);
+
+        let initial_path = Path::new(
+            client_addr,
+            server_addr,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            true,
+            None,
+        );
+        let mut path_mgr = PathMap::new(initial_path, 2, false);
+
+        let mut probed_path = Path::new(
+            client_addr_2,
+            server_addr,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            false,
+            None,
+        );
+        probed_path.active_scid_seq = Some(1);
+        probed_path.active_dcid_seq = Some(1);
+        let pid = path_mgr.insert_path(probed_path, false).unwrap();
+
+        let t0 = Instant::now();
+        let c0 = [0xaa; 8];
+        path_mgr.get_mut(pid).unwrap().add_challenge_sent(
+            c0,
+            MIN_CLIENT_INITIAL_LEN,
+            t0,
+        );
+        path_mgr.get_mut(pid).unwrap().on_loss_detection_timeout(
+            HandshakeStatus::default(),
+            t0 + Duration::from_millis(10),
+            false,
+            "",
+        );
+        assert_eq!(path_mgr.get(pid).unwrap().probing_lost, 1);
+        assert!(path_mgr.get(pid).unwrap().last_probe_lost_time.is_some());
+        assert!(path_mgr.get(pid).unwrap().validation_requested());
+
+        // Send two concurrent re-probes (c1 unanswered, c2 answered) plus an
+        // unflushed validation request right before PATH_RESPONSE(c2) arrives.
+        let c1 = [0xbb; 8];
+        let c2 = [0xcc; 8];
+        let t1 = t0 + Duration::from_millis(250);
+        let t2 = t0 + Duration::from_millis(750);
+        path_mgr.get_mut(pid).unwrap().add_challenge_sent(
+            c1,
+            MIN_CLIENT_INITIAL_LEN,
+            t1,
+        );
+        path_mgr.get_mut(pid).unwrap().add_challenge_sent(
+            c2,
+            MIN_CLIENT_INITIAL_LEN,
+            t2,
+        );
+        path_mgr.get_mut(pid).unwrap().request_validation();
+        assert_eq!(path_mgr.get(pid).unwrap().in_flight_challenges.len(), 2);
+        assert!(path_mgr.get(pid).unwrap().validation_requested());
+
+        path_mgr.on_response_received(c2).unwrap();
+        path_mgr.set_active_path(pid).unwrap();
+        assert_eq!(
+            path_mgr.pop_event(),
+            Some(PathEvent::Validated(client_addr_2, server_addr))
+        );
+
+        let p = path_mgr.get(pid).unwrap();
+        assert!(p.validated());
+        assert!(p.active());
+        assert!(p.in_flight_challenges.is_empty());
+        assert_eq!(p.probing_lost, 0);
+        assert!(p.last_probe_lost_time.is_none());
+        assert!(!p.validation_requested());
+        assert!(!p.probing_required());
+
+        // Subsequent PTOs on client (MAX_PROBING_TIMEOUTS) and server
+        // (with exhausted max_send_bytes = 0) must not demote the active path.
+        for step in 1..=crate::MAX_PROBING_TIMEOUTS {
+            let pto_time = t2 + Duration::from_secs(step as u64);
+            path_mgr.get_mut(pid).unwrap().on_loss_detection_timeout(
+                HandshakeStatus::default(),
+                pto_time,
+                false,
+                "",
+            );
+        }
+        path_mgr.get_mut(pid).unwrap().max_send_bytes = 0;
+        path_mgr.get_mut(pid).unwrap().on_loss_detection_timeout(
+            HandshakeStatus::default(),
+            t2 + Duration::from_secs(10),
+            true,
+            "",
+        );
+        path_mgr.notify_failed_validations();
+
+        let p = path_mgr.get(pid).unwrap();
+        assert!(p.validated());
+        assert!(p.active());
+        assert_eq!(p.probing_lost, 0);
+        assert!(!p.validation_requested());
+        assert_eq!(path_mgr.pop_event(), None);
     }
 }
