@@ -725,8 +725,7 @@ pub struct ExData<'a> {
 
     pub max_outstanding_sent_packets: Option<std::num::NonZeroUsize>,
 
-    /// PMTUD configuration: (enable, max_probes)
-    pub pmtud: Option<(bool, u8)>,
+    pub pmtud: Option<crate::pmtud::PmtudParams>,
 
     pub is_server: bool,
 }
