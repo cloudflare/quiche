@@ -120,7 +120,7 @@ fn assert_roundtrip(path: &Path) {
     let header = reader.qlog.clone();
     let events: Vec<Event> = (&mut reader).collect();
 
-    assert_eq!(header.serialization_format, "JSON-SEQ");
+    assert_eq!(header.serialization_format, "application/qlog+json-seq");
     assert!(!events.is_empty(), "expected at least one qlog event");
 }
 
