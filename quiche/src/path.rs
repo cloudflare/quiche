@@ -489,6 +489,7 @@ impl Path {
     fn on_failed_validation(&mut self) {
         self.state = PathState::Failed;
         self.active = false;
+        self.verified_peer_address = false;
     }
 
     #[inline]
