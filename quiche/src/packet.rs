@@ -888,7 +888,7 @@ impl PktNumSpace {
     pub fn new() -> PktNumSpace {
         PktNumSpace {
             largest_rx_pkt_num: 0,
-            largest_rx_pkt_time: Instant::now(),
+            largest_rx_pkt_time: crate::clock::now(),
             largest_rx_non_probing_pkt_num: 0,
             largest_tx_pkt_num: None,
             recv_pkt_need_ack: ranges::RangeSet::new(crate::MAX_ACK_RANGES),

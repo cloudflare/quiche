@@ -95,7 +95,7 @@ pub(super) struct Cycle {
 
 impl Default for Cycle {
     fn default() -> Self {
-        let now = Instant::now();
+        let now = crate::clock::now();
 
         Cycle {
             start_time: now,
