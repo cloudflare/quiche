@@ -163,7 +163,14 @@ impl<'a> QlogSeqReader<'a> {
         reader: &mut (dyn std::io::BufRead + Send + Sync),
     ) -> Option<Vec<u8>> {
         let mut buf = Vec::<u8>::new();
-        let size = reader.read_until(b'', &mut buf).unwrap();
+        let size = match reader.read_until(b'', &mut buf) {
+            Ok(size) => size,
+
+            // An I/O error (e.g. a corrupt or truncated compressed stream)
+            // ends the input. Keep whatever was read before the error; the
+            // next call returns `None`.
+            Err(_) => buf.len(),
+        };
         if size <= 1 {
             return None;
         }
