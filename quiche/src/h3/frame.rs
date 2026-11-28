@@ -183,8 +183,37 @@ impl Frame {
                 h3_datagram,
                 grease,
                 additional_settings,
-                ..
+                raw,
             } => {
+                // When the frame carries the settings it was parsed from (or
+                // was explicitly constructed with the exact settings to
+                // emit, like h3i's qlog replayer), serialize them verbatim.
+                //
+                // Re-synthesizing from the typed fields would not round-trip:
+                // the h3_datagram setting is emitted under both identifiers
+                // for interoperability, so a frame parsed with a single
+                // H3_DATAGRAM setting grows when re-serialized, and can grow
+                // past MAX_SETTINGS_PAYLOAD_SIZE, making the frame unparseable
+                // by from_bytes().
+                if let Some(raw) = raw {
+                    let mut len = 0;
+
+                    for (identifier, value) in raw {
+                        len += octets::varint_len(*identifier);
+                        len += octets::varint_len(*value);
+                    }
+
+                    b.put_varint(SETTINGS_FRAME_TYPE_ID)?;
+                    b.put_varint(len as u64)?;
+
+                    for (identifier, value) in raw {
+                        b.put_varint(*identifier)?;
+                        b.put_varint(*value)?;
+                    }
+
+                    return Ok(before - b.cap());
+                }
+
                 let mut len = 0;
 
                 if let Some(val) = max_field_section_size {
@@ -1023,6 +1052,122 @@ mod tests {
             .unwrap(),
             frame
         );
+    }
+
+    #[test]
+    /// A parsed SETTINGS frame must round-trip through to_bytes() without
+    /// growing past MAX_SETTINGS_PAYLOAD_SIZE (see issue #2819).
+    fn settings_round_trip_max_payload() {
+        // One H3_DATAGRAM setting (0x33, 1 byte identifier) plus 127
+        // unknown 2-byte settings: exactly MAX_SETTINGS_PAYLOAD_SIZE.
+        let mut payload = vec![SETTINGS_H3_DATAGRAM as u8, 0x01];
+        for _ in 0..127 {
+            payload.push(0x21);
+            payload.push(0x00);
+        }
+        assert_eq!(payload.len(), MAX_SETTINGS_PAYLOAD_SIZE);
+
+        let frame = Frame::from_bytes(
+            SETTINGS_FRAME_TYPE_ID,
+            payload.len() as u64,
+            &payload,
+        )
+        .unwrap();
+
+        let mut d = [0u8; 4096];
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        // Parse the serialized frame back, without assuming the length of
+        // the frame header.
+        let mut b = octets::Octets::with_slice(&d[..wire_len]);
+        let frame_type = b.get_varint().unwrap();
+        let frame_payload_len = b.get_varint().unwrap();
+        let frame_header_len = b.off();
+
+        assert_eq!(frame_type, SETTINGS_FRAME_TYPE_ID);
+
+        // The serialized payload must not exceed the maximum.
+        assert!(frame_payload_len as usize <= MAX_SETTINGS_PAYLOAD_SIZE);
+
+        // And it must still be parseable.
+        let reparsed = Frame::from_bytes(
+            frame_type,
+            frame_payload_len,
+            &d[frame_header_len..wire_len],
+        )
+        .unwrap();
+        assert_eq!(reparsed, frame);
+    }
+
+    #[test]
+    /// A SETTINGS frame parsed with a single H3_DATAGRAM identifier must
+    /// re-serialize with the same identifier, not both datagram codepoints.
+    fn settings_round_trip_preserves_datagram_identifier() {
+        let payload = vec![SETTINGS_H3_DATAGRAM as u8, 0x01];
+
+        let frame = Frame::from_bytes(
+            SETTINGS_FRAME_TYPE_ID,
+            payload.len() as u64,
+            &payload,
+        )
+        .unwrap();
+
+        let mut d = [0u8; 4096];
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        let mut b = octets::Octets::with_slice(&d[..wire_len]);
+        let frame_type = b.get_varint().unwrap();
+        let frame_payload_len = b.get_varint().unwrap();
+        let frame_header_len = b.off();
+
+        assert_eq!(frame_type, SETTINGS_FRAME_TYPE_ID);
+
+        // The same two bytes it was parsed from.
+        assert_eq!(frame_payload_len as usize, payload.len());
+        assert_eq!(&d[frame_header_len..wire_len], &payload[..]);
+    }
+
+    #[test]
+    /// Frames constructed without raw settings keep emitting both datagram
+    /// identifiers for interoperability.
+    fn settings_synthesized_datagram_still_dual_emits() {
+        let frame = Frame::Settings {
+            max_field_section_size: None,
+            qpack_max_table_capacity: None,
+            qpack_blocked_streams: None,
+            connect_protocol_enabled: None,
+            h3_datagram: Some(1),
+            grease: None,
+            raw: None,
+            additional_settings: None,
+        };
+
+        let mut d = [0u8; 4096];
+        let wire_len = {
+            let mut b = octets::OctetsMut::with_slice(&mut d);
+            frame.to_bytes(&mut b).unwrap()
+        };
+
+        let mut b = octets::Octets::with_slice(&d[..wire_len]);
+        let frame_type = b.get_varint().unwrap();
+        let frame_payload_len = b.get_varint().unwrap();
+        let frame_header_len = b.off();
+
+        assert_eq!(frame_type, SETTINGS_FRAME_TYPE_ID);
+
+        // Both datagram codepoints, varint-encoded:
+        // SETTINGS_H3_DATAGRAM_00 (0x276 -> 0x42 0x76), 1,
+        // SETTINGS_H3_DATAGRAM (0x33), 1.
+        let expected = [0x42, 0x76, 0x01, 0x33, 0x01];
+
+        assert_eq!(frame_payload_len as usize, expected.len());
+        assert_eq!(&d[frame_header_len..wire_len], &expected[..]);
     }
 
     #[test]
