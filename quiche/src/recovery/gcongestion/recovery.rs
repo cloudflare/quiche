@@ -102,6 +102,9 @@ struct RecoveryEpoch {
     sent_packets: VecDeque<SentPacket>,
 
     loss_probes: usize,
+    // Rotate PTO retransmissions across unacknowledged packets so that a
+    // newer CRYPTO range isn't starved by copies of an older range.
+    last_pto_probed_pkt_num: Option<u64>,
     pkts_in_flight: usize,
 
     acked_frames: VecDeque<frame::Frame>,
@@ -165,6 +168,7 @@ impl RecoveryEpoch {
         self.time_of_last_ack_eliciting_packet = None;
         self.loss_time = None;
         self.loss_probes = 0;
+        self.last_pto_probed_pkt_num = None;
         self.pkts_in_flight = 0;
 
         unacked_bytes
@@ -875,6 +879,7 @@ impl RecoveryOps for GRecovery {
             &mut self.recovery_stats,
         );
 
+        self.epochs[epoch].last_pto_probed_pkt_num = None;
         self.pto_count = 0;
         self.lost_count += lost_packets;
 
@@ -956,37 +961,39 @@ impl RecoveryOps for GRecovery {
             usize::MAX
         };
 
-        // Skip packets that have already been acked or lost, and packets
-        // that don't contain either CRYPTO or STREAM frames and only return as
-        // many packets as the number of probe packets that will be sent.
-        let unacked_frames = epoch
+        // Continue from the last packet selected for a PTO instead of
+        // repeatedly starting at the oldest unacknowledged packet. This
+        // eventually reaches later handshake fragments even if old packets
+        // and their retransmissions contain identical CRYPTO ranges.
+        let last_probed = epoch.last_pto_probed_pkt_num;
+        let unacked = epoch
             .sent_packets
             .iter()
             .take(sent_packets_iter_limit)
-            .filter_map(|p| {
-                if let SentStatus::Sent {
-                    has_data: true,
-                    frames,
-                    ..
-                } = &p.status
-                {
-                    Some(frames)
-                } else {
-                    None
-                }
-            })
-            .take(epoch.loss_probes)
-            .flatten()
-            .filter(|f| !matches!(f, frame::Frame::DatagramHeader { .. }));
+            .filter(|p| {
+                matches!(&p.status, SentStatus::Sent { has_data: true, .. })
+            });
+        let after = unacked
+            .clone()
+            .filter(|p| last_probed.is_none_or(|last| p.pkt_num > last));
+        let wrap =
+            unacked.filter(|p| last_probed.is_some_and(|last| p.pkt_num <= last));
 
-        // Retransmit the frames from the oldest sent packets on PTO. However
-        // the packets are not actually declared lost (so there is no effect to
-        // congestion control), we just reschedule the data they carried.
-        //
-        // This will also trigger sending an ACK and retransmitting frames like
-        // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
-        // to CRYPTO and STREAM, if the original packet carried them.
-        epoch.lost_frames_pto.extend(unacked_frames.cloned());
+        // PTO does not declare packets lost or affect congestion control.
+        // Retransmit their frames in packet-number order, wrapping as needed.
+        for unacked in after.chain(wrap).take(epoch.loss_probes) {
+            if let SentStatus::Sent { frames, .. } = &unacked.status {
+                epoch.lost_frames_pto.extend(
+                    frames
+                        .iter()
+                        .filter(|f| {
+                            !matches!(f, frame::Frame::DatagramHeader { .. })
+                        })
+                        .cloned(),
+                );
+                epoch.last_pto_probed_pkt_num = Some(unacked.pkt_num);
+            }
+        }
 
         self.pacer
             .on_retransmission_timeout(epoch.has_lost_frames());

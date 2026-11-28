@@ -85,6 +85,9 @@ struct RecoveryEpoch {
     sent_packets: VecDeque<Sent>,
 
     loss_probes: usize,
+    // Rotate PTO retransmissions across unacknowledged packets so that a
+    // newer CRYPTO range isn't starved by copies of an older range.
+    last_pto_probed_pkt_num: Option<u64>,
     in_flight_count: usize,
 
     acked_frames: Vec<frame::Frame>,
@@ -737,6 +740,7 @@ impl RecoveryOps for LegacyRecovery {
 
         self.bytes_in_flight.saturating_subtract(acked_bytes, now);
 
+        self.epochs[epoch].last_pto_probed_pkt_num = None;
         self.pto_count = 0;
 
         self.set_loss_detection_timer(handshake_status, now);
@@ -804,7 +808,11 @@ impl RecoveryOps for LegacyRecovery {
             usize::MAX
         };
 
-        let unacked_iter = epoch
+        // Continue after the last probed packet, wrapping at the end of
+        // the unacknowledged set. This eventually retransmits later CRYPTO
+        // ranges even if older packets contain duplicates of the same data.
+        let last_probed = epoch.last_pto_probed_pkt_num;
+        let unacked = epoch
             .sent_packets
             .iter()
             .take(sent_packets_iter_limit)
@@ -812,20 +820,17 @@ impl RecoveryOps for LegacyRecovery {
             // that don't contain either CRYPTO or STREAM frames.
             .filter(|p| {
                 p.has_data && p.time_acked.is_none() && p.time_lost.is_none()
-            })
-            // Only return as many packets as the number of probe packets that
-            // will be sent.
-            .take(epoch.loss_probes);
+            });
+        let after = unacked
+            .clone()
+            .filter(|p| last_probed.is_none_or(|last| p.pkt_num > last));
+        let wrap =
+            unacked.filter(|p| last_probed.is_some_and(|last| p.pkt_num <= last));
 
-        // Retransmit the frames from the oldest sent packets on PTO. However
-        // the packets are not actually declared lost (so there is no effect to
-        // congestion control), we just reschedule the data they carried.
-        //
-        // This will also trigger sending an ACK and retransmitting frames like
-        // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
-        // to CRYPTO and STREAM, if the original packet carried them.
-        for unacked in unacked_iter {
+        // PTO does not declare packets lost or affect congestion control.
+        for unacked in after.chain(wrap).take(epoch.loss_probes) {
             epoch.lost_frames_pto.extend_from_slice(&unacked.frames);
+            epoch.last_pto_probed_pkt_num = Some(unacked.pkt_num);
         }
 
         self.set_loss_detection_timer(handshake_status, now);
@@ -860,6 +865,7 @@ impl RecoveryOps for LegacyRecovery {
         epoch.time_of_last_ack_eliciting_packet = None;
         epoch.loss_time = None;
         epoch.loss_probes = 0;
+        epoch.last_pto_probed_pkt_num = None;
         epoch.in_flight_count = 0;
 
         // Discarding a packet number space is forward progress, so the PTO

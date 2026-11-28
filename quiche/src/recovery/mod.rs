@@ -3252,6 +3252,74 @@ mod tests {
         assert_eq!(r.lost_count(), 0);
     }
 
+    // Two copies of the first ClientHello fragment must not prevent PTO from
+    // retransmitting a later outstanding fragment.
+    #[rstest]
+    fn pto_retransmits_later_unacked_crypto(
+        #[values("reno", "cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    ) {
+        let mut cfg = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        assert_eq!(cfg.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+        let mut r = Recovery::new(&cfg);
+        let mut now = Instant::now();
+
+        for (pkt_num, off) in [0, 0, 1133].into_iter().enumerate() {
+            let p = Sent {
+                pkt_num: pkt_num as u64,
+                frames: smallvec![frame::Frame::Crypto {
+                    data: RangeBuf::from(b"crypto-fragment", off, false),
+                }],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1200,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: true,
+                is_pmtud_probe: false,
+            };
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Initial,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        // First PTO retries the oldest Initial packet.
+        now = r.loss_detection_timer().unwrap();
+        r.on_loss_detection_timeout(HandshakeStatus::default(), now, "");
+        let first = r.next_lost_frame(packet::Epoch::Initial).unwrap();
+        assert!(
+            matches!(first, frame::Frame::Crypto { data } if data.off() == 0)
+        );
+        assert!(r.next_lost_frame(packet::Epoch::Initial).is_none());
+
+        // Second PTO must reach offset 1133 even if two oldest packets
+        // carried the identical offset-0 range and no ACK arrived.
+        now = r.loss_detection_timer().unwrap();
+        r.on_loss_detection_timeout(HandshakeStatus::default(), now, "");
+        let mut offsets = Vec::new();
+        while let Some(frame::Frame::Crypto { data }) =
+            r.next_lost_frame(packet::Epoch::Initial)
+        {
+            offsets.push(data.off());
+        }
+        assert_eq!(offsets.len(), 2);
+        assert!(
+            offsets.contains(&1133),
+            "PTO repeated the old fragment and starved later CRYPTO data: {offsets:?}"
+        );
+        assert_eq!(r.lost_count(), 0);
+    }
+
     // Test that send_on_path after PTO timeout properly sends retransmissions
     // and doesn't mark packets as lost (lost_count should remain 0).
     #[rstest]
